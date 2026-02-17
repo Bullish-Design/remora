@@ -374,7 +374,6 @@ return results
    - `remora`
 
 2. **Package Structure**: Single package or monorepo?
-   - Single: `pip install remora` (includes coordinator + specialized agents)
    - Monorepo: Core + plugins for each agent type
 
 3. **Agent Distribution**: How are specialized agents deployed?
@@ -383,14 +382,10 @@ return results
    - User-configurable paths?
 
 4. **Result Format**: How should results be presented?
-   - JSON for programmatic use?
-   - Rich terminal UI for interactive use?
-   - HTML reports?
+   - JSON for programmatic use
 
 5. **Testing Strategy**: How do we test the meta-agent pattern?
-   - Mock Cairn orchestrator?
-   - Integration tests with real Cairn?
-   - Separate unit tests for each layer?
+   - Integration tests with real Cairn
 
 ## Success Metrics
 
@@ -422,7 +417,3 @@ For MVP to be successful, we should be able to:
 5. Build coordinator agent skeleton
 6. Wire everything together with Cairn
 7. Create basic CLI and test end-to-end
-
----
-
-**Questions? Feedback? Ready to start building?**
