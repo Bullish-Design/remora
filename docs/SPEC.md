@@ -344,7 +344,7 @@ queries:
 agents_dir: agents/
 
 server:
-  base_url: "http://function-gemma-server:8000/v1"
+  base_url: "http://remora-server:8000/v1"
   api_key: "EMPTY"
   timeout: 120
   default_adapter: "google/functiongemma-270m-it"
@@ -387,7 +387,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pathlib import Path
 
 class ServerConfig(BaseModel):
-    base_url: str = "http://function-gemma-server:8000/v1"
+    base_url: str = "http://remora-server:8000/v1"
     api_key: str = "EMPTY"
     timeout: int = 120
     default_adapter: str = "google/functiongemma-270m-it"

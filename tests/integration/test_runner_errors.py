@@ -12,7 +12,7 @@ from remora.errors import AGENT_002, AGENT_003
 from remora.runner import AgentError, FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
 
-DEFAULT_SERVER_URL = "http://function-gemma-server:8000/v1"
+DEFAULT_SERVER_URL = "http://remora-server:8000/v1"
 FIXTURE = Path("tests/fixtures/integration_target.py")
 
 

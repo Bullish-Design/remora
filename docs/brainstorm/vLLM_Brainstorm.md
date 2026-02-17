@@ -144,7 +144,7 @@ services:
   tailscale:
     image: tailscale/tailscale:latest
     container_name: tailscale-vllm
-    hostname: function-gemma-server # This will be the device name in Tailscale
+    hostname: remora-server # This will be the device name in Tailscale
     environment:
       - TS_AUTHKEY=tskey-auth-YOUR_KEY_HERE # Replace with your Auth Key
       - TS_STATE_DIR=/var/lib/tailscale
@@ -192,7 +192,7 @@ volumes:
 
 4. Usage
 
-Once running, the container will join your Tailnet. You can find its IP in your Tailscale dashboard (or ping function-gemma-server).
+Once running, the container will join your Tailnet. You can find its IP in your Tailscale dashboard (or ping remora-server).
 
 You can now send OpenAI-compatible async requests from anywhere on your Tailscale network:
 Python
@@ -200,7 +200,7 @@ Python
 import openai
 
 client = openai.AsyncOpenAI(
-    base_url="http://function-gemma-server:8000/v1",
+    base_url="http://remora-server:8000/v1",
     api_key="EMPTY"
 )
 

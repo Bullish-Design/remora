@@ -78,7 +78,7 @@ uv run test_connection.py
 Expected output:
 
 ```
-Connecting to vLLM at http://function-gemma-server:8000/v1...
+Connecting to vLLM at http://remora-server:8000/v1...
 SUCCESS: Connection successful.
 ```
 
@@ -87,7 +87,7 @@ SUCCESS: Connection successful.
 Serve the shared agent YAML files from the server:
 
 ```bash
-curl http://function-gemma-server:8001/agents/lint/lint_subagent.yaml
+curl http://remora-server:8001/agents/lint/lint_subagent.yaml
 ```
 
 ## Adapter Hot-Loading (Optional)
@@ -103,7 +103,7 @@ python adapter_manager.py --name lint --path /models/adapters/lint
 Use the Tailscale sidecar to pull and redeploy:
 
 ```bash
-ssh root@function-gemma-server
+ssh root@remora-server
 ./update.sh
 ```
 

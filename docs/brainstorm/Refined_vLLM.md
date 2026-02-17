@@ -31,7 +31,7 @@ To ensure stability on Windows and accessibility across a local network, the sys
 * **Environment:** **WSL2** (Windows Subsystem for Linux) provides the Linux kernel and NVIDIA GPU pass-through required for vLLM.
 * **Containerization:** **Docker Desktop** manages the lifecycle of the inference server.
 * **Networking (Tailscale Sidecar):** * A Tailscale container acts as a "network gateway" for the vLLM container.
-* The vLLM container uses `network_mode: service:tailscale`, appearing as a unique node (e.g., `function-gemma-server`) on the Tailscale mesh VPN.
+* The vLLM container uses `network_mode: service:tailscale`, appearing as a unique node (e.g., `remora-server`) on the Tailscale mesh VPN.
 * This bypasses Windows host-firewall issues and provides secure, encrypted access from any device on the network.
 
 
@@ -64,7 +64,7 @@ The vLLM server will be launched with the following optimized flags for the Func
 ### 6. Workflow Summary
 
 1. **Fine-Tuning:** Users create LoRA adapters locally using libraries like `peft`.
-2. **Request:** An async client sends a request to `http://function-gemma-server:8000/v1/chat/completions`.
+2. **Request:** An async client sends a request to `http://remora-server:8000/v1/chat/completions`.
 3. **Routing:** The `model` parameter in the API call specifies which adapter (e.g., `sql-adapter`) to use.
 4. **Inference:** vLLM dynamically applies the adapter weights to the base model in the current batch and returns the result.
 
@@ -93,7 +93,7 @@ services:
   tailscale:
     image: tailscale/tailscale:latest
     container_name: tailscale-vllm
-    hostname: function-gemma-server
+    hostname: remora-server
     environment:
       # TODO: Replace with your actual Tailscale Auth Key
       - TS_AUTHKEY=tskey-auth-YOUR_KEY_HERE 
@@ -201,7 +201,7 @@ import asyncio
 from openai import AsyncOpenAI
 
 # Pointing to the Tailscale hostname we defined in the compose file
-SERVER_URL = "http://function-gemma-server:8000/v1"
+SERVER_URL = "http://remora-server:8000/v1"
 MODEL_NAME = "google/function-gemma-3-270m"
 
 async def test_base_model():
@@ -305,7 +305,7 @@ services:
       context: .
       dockerfile: Dockerfile.tailscale # Use our new custom image
     container_name: tailscale-vllm
-    hostname: function-gemma-server
+    hostname: remora-server
     environment:
       - TS_AUTHKEY=tskey-auth-YOUR_KEY_HERE
       - TS_STATE_DIR=/var/lib/tailscale
@@ -360,7 +360,7 @@ Once you boot this up via Windows Docker Desktop that *one final time*, you neve
 3. **Deploy via Terminal:**
 ```bash
 # SSH directly into the Tailscale container (Tailscale handles the keys!)
-ssh root@function-gemma-server
+ssh root@remora-server
 
 # Run your update script
 ./update.sh

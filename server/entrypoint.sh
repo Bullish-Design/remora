@@ -9,7 +9,7 @@ set -e
 #
 # The server exposes the OpenAI-compatible API on port 8000.
 # Reach it from any Tailscale-connected machine via:
-#   http://function-gemma-server:8000/v1
+#   http://remora-server:8000/v1
 #
 # --max-num-seqs 256   : allow up to 256 concurrent sequences (safe for 270M)
 # --enable-prefix-caching : cache shared system-prompt prefixes across requests

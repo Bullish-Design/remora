@@ -4,7 +4,7 @@ set -e
 # One-command redeploy script.
 #
 # Run this after SSH-ing into the Tailscale sidecar:
-#   ssh root@function-gemma-server
+#   ssh root@remora-server
 #   ./update.sh
 #
 # It pulls the latest server/ changes from Git, rebuilds the vLLM container,

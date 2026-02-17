@@ -96,7 +96,7 @@ In `server/Dockerfile.tailscale`, base on `tailscale/tailscale:latest`, install
 
 Create the two-service stack:
 
-- `tailscale` service with hostname `function-gemma-server`
+- `tailscale` service with hostname `remora-server`
 - `vllm-server` that shares the Tailscale network namespace
 
 Use the volume mounts and environment variables described in the refactor plan.
@@ -137,7 +137,7 @@ Create `server/entrypoint.sh` with:
 **What to implement**
 
 Create `server/test_connection.py` as a PEP 723 script using `openai.AsyncOpenAI`
-that hits `http://function-gemma-server:8000/v1`.
+that hits `http://remora-server:8000/v1`.
 
 **Verification**
 
@@ -146,7 +146,7 @@ that hits `http://function-gemma-server:8000/v1`.
 
 > **Tip for juniors:** This test runs from Linux. It assumes your Linux machine
 > is connected to the same Tailscale network and can resolve
-> `function-gemma-server`.
+> `remora-server`.
 
 ## Step 7 — Add the update script
 
@@ -158,11 +158,11 @@ logs. This is meant to be run after SSH-ing into the Tailscale container.
 **Verification**
 
 - **Linux Dev Machine (recommended):**
-  - `ssh root@function-gemma-server`
+  - `ssh root@remora-server`
   - `./update.sh`
 
 - **Windows Host (PowerShell):**
-  - `ssh root@function-gemma-server`
+  - `ssh root@remora-server`
   - `./update.sh`
 
 Confirm:
@@ -189,10 +189,10 @@ Recommended approach:
 **Verification**
 
 - **Linux Dev Machine (client test):**
-  - `curl http://function-gemma-server:8001/agents/lint/lint_subagent.yaml`
+  - `curl http://remora-server:8001/agents/lint/lint_subagent.yaml`
 
 - **Windows Host (PowerShell):**
-  - `Invoke-WebRequest http://function-gemma-server:8001/agents/lint/lint_subagent.yaml`
+  - `Invoke-WebRequest http://remora-server:8001/agents/lint/lint_subagent.yaml`
 
 Confirm the response matches the source YAML file.
 
@@ -239,7 +239,7 @@ Confirm the server can be started, updated, and used by a client.
   - `uv run server/test_connection.py`
 
 - **Linux Dev Machine (or Windows Host if preferred):**
-  - `ssh root@function-gemma-server ./update.sh`
+  - `ssh root@remora-server ./update.sh`
 
 - **Linux Dev Machine:**
   - Verify a new adapter can be hot-loaded without restarting the stack.

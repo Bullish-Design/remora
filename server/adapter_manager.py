@@ -10,7 +10,7 @@ import sys
 import urllib.error
 import urllib.request
 
-DEFAULT_SERVER_URL = "http://function-gemma-server:8000/v1"
+DEFAULT_SERVER_URL = "http://remora-server:8000/v1"
 
 
 def build_url(base_url: str) -> str:

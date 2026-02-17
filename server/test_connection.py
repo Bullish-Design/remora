@@ -18,7 +18,7 @@ import os
 
 from openai import AsyncOpenAI
 
-SERVER_URL = os.environ.get("SERVER_URL", "http://function-gemma-server:8000/v1")
+SERVER_URL = os.environ.get("SERVER_URL", "http://remora-server:8000/v1")
 MODEL_NAME = os.environ.get("MODEL_NAME", "google/functiongemma-270m-it")
 
 

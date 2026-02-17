@@ -123,7 +123,7 @@ def _make_node() -> CSTNode:
 
 def _make_server_config() -> ServerConfig:
     return ServerConfig(
-        base_url="http://function-gemma-server:8000/v1",
+        base_url="http://remora-server:8000/v1",
         api_key="EMPTY",
         timeout=30,
         default_adapter="google/functiongemma-270m-it",

@@ -5,14 +5,14 @@ services:
       dockerfile: Dockerfile.tailscale
     container_name: tailscale-vllm
     # This hostname becomes the Tailscale node name and the DNS name you use
-    # to reach the server: http://function-gemma-server:8000/v1
-    hostname: ${TS_HOSTNAME:-function-gemma-server}
+    # to reach the server: http://remora-server:8000/v1
+    hostname: ${TS_HOSTNAME:-remora-server}
     env_file:
       - .env
     environment:
       - TS_AUTHKEY=${TS_AUTHKEY}
       - TS_STATE_DIR=${TS_STATE_DIR:-/var/lib/tailscale}
-      # Enables `ssh root@function-gemma-server` without managing SSH keys
+      # Enables `ssh root@remora-server` without managing SSH keys
       - TS_SSH=${TS_SSH:-true}
     volumes:
       - tailscale-data:/var/lib/tailscale

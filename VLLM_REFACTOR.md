@@ -77,7 +77,7 @@ CLI → Coordinator → FunctionGemmaRunner
 ```
 User's machine (client)              Tailscale network
 ──────────────────────────           ─────────────────────────────────────────
-CLI → Coordinator                    function-gemma-server:8000
+CLI → Coordinator                    remora-server:8000
         └─ FunctionGemmaRunner            │
                │                          ├─ vLLM (OpenAI-compatible API)
                ├─ openai.AsyncOpenAI ────►│   ├─ base model (FunctionGemma 270M)
@@ -114,7 +114,7 @@ to be the adapter name passed to vLLM rather than an `llm`-plugin model string.
 
 ```python
 class ServerConfig(BaseModel):
-    base_url: str = "http://function-gemma-server:8000/v1"
+    base_url: str = "http://remora-server:8000/v1"
     api_key: str = "EMPTY"
     timeout: int = 120
     default_adapter: str = "google/functiongemma-270m-it"
@@ -295,7 +295,7 @@ agents_dir: "agents"
 
 # vLLM server on your Tailscale network
 server:
-  base_url: "http://function-gemma-server:8000/v1"
+  base_url: "http://remora-server:8000/v1"
   api_key: "EMPTY"
   timeout: 120
   default_adapter: "google/functiongemma-270m-it"
@@ -452,7 +452,7 @@ wants to run a development-only local setup without the server.
 - `server/` directory committed to the repo with Dockerfile, Dockerfile.tailscale,
   docker-compose.yml, entrypoint.sh, update.sh
 - Base model (`google/functiongemma-270m-it`) downloading and loading successfully
-- Server reachable at `http://function-gemma-server:8000/v1`
+- Server reachable at `http://remora-server:8000/v1`
 
 **Verification:**
 - `uv run server/test_connection.py` prints success message
@@ -516,7 +516,7 @@ services:
       context: .
       dockerfile: Dockerfile.tailscale
     container_name: tailscale-vllm
-    hostname: function-gemma-server
+    hostname: remora-server
     environment:
       - TS_AUTHKEY=tskey-auth-YOUR_KEY_HERE
       - TS_STATE_DIR=/var/lib/tailscale
@@ -597,7 +597,7 @@ Run this after SSH-ing into the Tailscale sidecar to pull and redeploy.
 ```bash
 #!/bin/bash
 # update.sh — run from inside the tailscale container via:
-#   ssh root@function-gemma-server
+#   ssh root@remora-server
 #   ./update.sh
 
 echo "Pulling latest changes from Git..."
@@ -626,7 +626,7 @@ with `uv run server/test_connection.py` — no virtualenv needed.
 import asyncio
 from openai import AsyncOpenAI
 
-SERVER_URL = "http://function-gemma-server:8000/v1"
+SERVER_URL = "http://remora-server:8000/v1"
 MODEL_NAME = "google/functiongemma-270m-it"
 
 
@@ -719,7 +719,7 @@ running for the first time.
 4. **First boot** — `docker compose up -d --build`; how to watch the model
    download via `docker logs -f vllm-gemma`
 5. **Verification** — `uv run server/test_connection.py`
-6. **Subsequent deploys** — SSH into `function-gemma-server`, run `./update.sh`
+6. **Subsequent deploys** — SSH into `remora-server`, run `./update.sh`
 7. **Enabling LoRA adapters** — uncomment the multi-LoRA flags in
    `entrypoint.sh`; where to place adapter directories; how to reference
    adapters from `remora.yaml`
@@ -943,5 +943,5 @@ Use this checklist to track implementation progress.
 - [ ] `docker compose up -d --build` succeeds in `server/`
 - [ ] `docker logs -f vllm-gemma` shows model fully loaded
 - [ ] `uv run server/test_connection.py` returns success from dev machine
-- [ ] `ssh root@function-gemma-server ./update.sh` completes without error
+- [ ] `ssh root@remora-server ./update.sh` completes without error
 - [ ] `remora analyze <path>` succeeds against a Python file in the repo

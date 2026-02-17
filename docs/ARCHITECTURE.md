@@ -154,7 +154,7 @@ The coordinator no longer needs to be a Cairn `.pym` script. The `FunctionGemmaR
 
 #### Server Architecture (vLLM + Tailscale)
 
-Inference runs in a Docker Compose stack where a vLLM container shares the network namespace of a Tailscale sidecar. The sidecar publishes the hostname `function-gemma-server` on the private mesh, while the vLLM API serves requests at `http://function-gemma-server:8000/v1`. Model weights and LoRA adapters stay on the server's disks; the Remora client is a thin HTTP caller.
+Inference runs in a Docker Compose stack where a vLLM container shares the network namespace of a Tailscale sidecar. The sidecar publishes the hostname `remora-server` on the private mesh, while the vLLM API serves requests at `http://remora-server:8000/v1`. Model weights and LoRA adapters stay on the server's disks; the Remora client is a thin HTTP caller.
 
 ---
 
@@ -620,7 +620,7 @@ queries:
 agents_dir: agents/   # Root of the agents/ directory
 
 server:
-  base_url: "http://function-gemma-server:8000/v1"
+  base_url: "http://remora-server:8000/v1"
   api_key: "EMPTY"
   timeout: 120
   default_adapter: "google/functiongemma-270m-it"

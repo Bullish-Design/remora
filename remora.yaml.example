@@ -12,7 +12,7 @@ agents_dir: agents
 
 # vLLM server on your Tailscale network
 server:
-  base_url: "http://function-gemma-server:8000/v1"
+  base_url: "http://remora-server:8000/v1"
   api_key: "EMPTY"
   timeout: 120
   default_adapter: "google/functiongemma-270m-it"

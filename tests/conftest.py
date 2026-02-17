@@ -11,7 +11,7 @@ import urllib.request
 
 import pytest
 
-SERVER_URL = os.environ.get("REMORA_SERVER_URL", "http://function-gemma-server:8000/v1")
+SERVER_URL = os.environ.get("REMORA_SERVER_URL", "http://remora-server:8000/v1")
 
 
 def _server_available(base_url: str) -> bool:
