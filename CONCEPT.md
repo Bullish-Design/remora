@@ -1,4 +1,4 @@
-# CST Agent Sandbox (Working Title)
+# Remora Concept
 
 ## Purpose
 
@@ -176,16 +176,16 @@ Each agent writes to its own overlay. User can:
 
 ```bash
 # Analyze entire project
-cst-agent analyze src/ --operations lint,test,docstring
+remora analyze src/ --operations lint,test,docstring
 
 # Analyze specific file
-cst-agent analyze src/utils.py --operations lint
+remora analyze src/utils.py --operations lint
 
 # Analyze and auto-accept linting
-cst-agent analyze src/ --operations lint --auto-accept
+remora analyze src/ --operations lint --auto-accept
 
 # Watch mode (reactive)
-cst-agent watch src/ --operations lint,docstring
+remora watch src/ --operations lint,docstring
 ```
 
 ### Programmatic API
@@ -220,7 +220,7 @@ await analyzer.retry(node="calculate", operation=Operations.TEST,
 ### Configuration File
 
 ```yaml
-# cst-agent.yaml
+# remora.yaml
 root_dirs:
   - src/
   - lib/
@@ -371,10 +371,10 @@ return results
 ## Open Questions
 
 1. **Naming**: What should we call this library?
-   - `cst-agent`? `pycairn`? `node-sandbox`? `code-sage`?
+   - `remora`
 
 2. **Package Structure**: Single package or monorepo?
-   - Single: `pip install cst-agent` (includes coordinator + specialized agents)
+   - Single: `pip install remora` (includes coordinator + specialized agents)
    - Monorepo: Core + plugins for each agent type
 
 3. **Agent Distribution**: How are specialized agents deployed?
