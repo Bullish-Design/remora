@@ -1,0 +1,252 @@
+# Ollama Setup Guide
+
+Remora uses the stock FunctionGemma model (`functiongemma-4b-it`, 270M parameters) via Ollama, accessed through the Python `llm` library. This guide covers two deployment scenarios:
+
+- **Local** — Ollama runs on the same NixOS machine as Remora
+- **Remote** — Ollama runs in a Windows Docker container, reachable over your Tailscale network
+
+---
+
+## Model: `functiongemma-4b-it`
+
+FunctionGemma is Google's 270M-parameter model purpose-built for structured tool calling. At ~288MB quantized, it runs on a single CPU core with no GPU requirement. Remora uses it as the backend for all subagents (lint, test, docstring, sample_data).
+
+Ollama model name: `functiongemma-4b-it`
+Remora model ID: `ollama/functiongemma-4b-it`
+
+---
+
+## Option A: Local NixOS
+
+### 1. Install Ollama
+
+Add Ollama to your NixOS configuration:
+
+```nix
+# /etc/nixos/configuration.nix  (or your flake equivalent)
+services.ollama = {
+  enable = true;
+  # host = "0.0.0.0";  # uncomment if you want to expose on the network
+};
+```
+
+Apply the configuration:
+
+```bash
+sudo nixos-rebuild switch
+```
+
+Alternatively, install Ollama imperatively for the current user session:
+
+```bash
+nix-shell -p ollama
+# or, with flakes:
+nix run nixpkgs#ollama -- serve
+```
+
+Verify the service is running:
+
+```bash
+systemctl status ollama        # if using NixOS services
+# or
+curl http://localhost:11434/api/tags
+```
+
+### 2. Pull the FunctionGemma model
+
+```bash
+ollama pull functiongemma-4b-it
+```
+
+Verify it was pulled:
+
+```bash
+ollama list
+# functiongemma-4b-it should appear in the output
+```
+
+### 3. Quick smoke test
+
+```bash
+ollama run functiongemma-4b-it "Call the greet tool with name=world"
+```
+
+### 4. Install the `llm` Ollama plugin
+
+After installing and activating your Remora Python environment:
+
+```bash
+llm install llm-ollama
+```
+
+Verify the model is reachable through `llm`:
+
+```bash
+llm -m ollama/functiongemma-4b-it "Say hello"
+```
+
+### 5. Remora config
+
+No changes needed — `ollama/functiongemma-4b-it` is the default. Your `remora.yaml` can omit `model_id` entirely, or be explicit:
+
+```yaml
+model_id: "ollama/functiongemma-4b-it"
+```
+
+Ollama is expected at `http://localhost:11434` (the default). No additional configuration is required for local mode.
+
+---
+
+## Option B: Remote Windows Docker Container (Tailscale)
+
+This setup runs the Ollama Docker container on a Windows machine and accesses it from your NixOS dev machine over Tailscale.
+
+### On the Windows machine
+
+#### 1. Install Docker Desktop
+
+Download and install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/).
+
+#### 2. Run the Ollama Docker container
+
+Open PowerShell and run:
+
+```powershell
+docker run -d `
+  --name ollama `
+  -p 11434:11434 `
+  -v ollama-data:/root/.ollama `
+  ollama/ollama
+```
+
+This starts Ollama listening on port 11434, with model data persisted in a Docker volume.
+
+#### 3. Pull the FunctionGemma model inside the container
+
+```powershell
+docker exec ollama ollama pull functiongemma-4b-it
+```
+
+Verify:
+
+```powershell
+docker exec ollama ollama list
+```
+
+#### 4. Configure Windows Firewall
+
+Allow inbound TCP on port 11434 so Tailscale peers can reach the container:
+
+```powershell
+New-NetFirewallRule `
+  -DisplayName "Ollama Tailscale" `
+  -Direction Inbound `
+  -Protocol TCP `
+  -LocalPort 11434 `
+  -Action Allow
+```
+
+#### 5. Find the Windows machine's Tailscale IP
+
+In PowerShell:
+
+```powershell
+tailscale ip -4
+# Example output: 100.x.y.z
+```
+
+Note this IP — you will use it in the next section.
+
+#### 6. Verify from the Windows machine
+
+```powershell
+curl http://localhost:11434/api/tags
+```
+
+### On the NixOS dev machine
+
+#### 7. Verify Tailscale connectivity
+
+```bash
+curl http://<TAILSCALE_IP>:11434/api/tags
+# Should return a JSON list of available models
+```
+
+#### 8. Configure the `llm` Ollama plugin to use the remote host
+
+The `llm-ollama` plugin reads the `OLLAMA_HOST` environment variable:
+
+```bash
+export OLLAMA_HOST=http://<TAILSCALE_IP>:11434
+```
+
+Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, or your devenv shell config) so it persists:
+
+```bash
+# ~/.bashrc or ~/.zshrc
+export OLLAMA_HOST=http://<TAILSCALE_IP>:11434
+```
+
+#### 9. Verify the model is reachable through `llm`
+
+```bash
+llm -m ollama/functiongemma-4b-it "Say hello"
+```
+
+#### 10. Remora config for remote Ollama
+
+Add the `OLLAMA_HOST` environment variable to your shell before running `remora`, or set it in your `devenv.nix`:
+
+```nix
+# devenv.nix
+env.OLLAMA_HOST = "http://<TAILSCALE_IP>:11434";
+```
+
+Your `remora.yaml` stays the same — `ollama/functiongemma-4b-it` works regardless of where Ollama is running, as long as `OLLAMA_HOST` points at the right machine.
+
+```yaml
+model_id: "ollama/functiongemma-4b-it"
+```
+
+---
+
+## Verifying the full Remora integration
+
+Once Ollama is running (locally or remotely) and `llm-ollama` is installed, verify everything is wired correctly:
+
+```bash
+# Check that Remora can see the model
+remora list-agents
+
+# Expected output (table format):
+# Agent       | YAML            | YAML     | Model                        | Available
+# ----------- | --------------- | -------- | ---------------------------- | ----------
+# lint        | agents/lint/... | ✓ found  | ollama/functiongemma-4b-it   | ✓ ready
+# test        | agents/test/... | ✓ found  | ollama/functiongemma-4b-it   | ✓ ready
+# docstring   | agents/doc../.. | ✓ found  | ollama/functiongemma-4b-it   | ✓ ready
+```
+
+If any agent shows `✗ unavailable`, check:
+
+1. Ollama is running (`curl $OLLAMA_HOST/api/tags` or `curl http://localhost:11434/api/tags`)
+2. The model was pulled (`ollama list` on the machine running Ollama)
+3. `OLLAMA_HOST` is set correctly for the remote case
+4. `llm-ollama` is installed (`llm plugins` should list `llm-ollama`)
+
+---
+
+## Quick reference
+
+| Scenario | Ollama URL | Set env var? |
+|---|---|---|
+| Local NixOS | `http://localhost:11434` | No (default) |
+| Remote Windows/Docker via Tailscale | `http://<TAILSCALE_IP>:11434` | `OLLAMA_HOST=http://<TAILSCALE_IP>:11434` |
+
+| Command | Purpose |
+|---|---|
+| `ollama pull functiongemma-4b-it` | Download the model |
+| `ollama list` | List available models |
+| `llm install llm-ollama` | Install the llm Ollama plugin |
+| `llm -m ollama/functiongemma-4b-it "hello"` | Verify model is reachable via llm |
+| `remora list-agents` | Verify Remora can reach the model |
+| `curl $OLLAMA_HOST/api/tags` | Check Ollama API is responding |
