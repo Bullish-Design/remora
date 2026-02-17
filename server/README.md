@@ -31,6 +31,18 @@ Connecting to vLLM at http://function-gemma-server:8000/v1...
 SUCCESS: Connection successful.
 ```
 
+## Agents Definitions
+
+```bash
+curl http://function-gemma-server:8001/agents/lint/lint_subagent.yaml
+```
+
+## Hot-load Adapters
+
+```bash
+python server/adapter_manager.py --name lint --path /models/adapters/lint
+```
+
 ## Redeploy
 
 ```bash

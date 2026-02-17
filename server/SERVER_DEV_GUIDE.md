@@ -181,17 +181,18 @@ Confirm:
 Add a small HTTP server that serves the `agents/` directory to clients.
 Recommended approach:
 
-- Create `server/agents_server.py` using FastAPI or Flask.
+- Create `server/agents_server.py` using FastAPI.
+- Add `server/Dockerfile.agents` to run `uvicorn` on port `8001`.
 - Serve `/agents/<path>` from a mounted `agents/` directory.
-- Add a `docker-compose.yml` service (or include in `vllm-server`) to run this.
+- Add a `docker-compose.yml` service (`agents-server`) sharing the Tailscale network.
 
 **Verification**
 
 - **Linux Dev Machine (client test):**
-  - `curl http://function-gemma-server:8000/agents/lint/lint_subagent.yaml`
+  - `curl http://function-gemma-server:8001/agents/lint/lint_subagent.yaml`
 
 - **Windows Host (PowerShell):**
-  - `Invoke-WebRequest http://function-gemma-server:8000/agents/lint/lint_subagent.yaml`
+  - `Invoke-WebRequest http://function-gemma-server:8001/agents/lint/lint_subagent.yaml`
 
 Confirm the response matches the source YAML file.
 
@@ -204,7 +205,7 @@ Confirm the response matches the source YAML file.
 
 Add a management script to load LoRA adapters at runtime using vLLM’s API.
 
-- Create `server/server.py` (or `server/adapter_manager.py`).
+- Create `server/adapter_manager.py`.
 - Add a command that calls `POST /v1/load_lora_adapter` with:
   - `lora_name` (adapter name)
   - `lora_path` (path on the server)
@@ -215,7 +216,8 @@ Add a management script to load LoRA adapters at runtime using vLLM’s API.
   - Place a test adapter directory on the server (or a stub adapter).
 
 - **Linux Dev Machine:**
-  - Run the management command to load it.
+  - Run the management command to load it:
+    - `python server/adapter_manager.py --name <adapter name> --path /models/adapters/<adapter name>`
   - `uv run server/test_connection.py --model <adapter name>`
 
 > **Tip for juniors:** The adapter files must exist on the Windows host’s

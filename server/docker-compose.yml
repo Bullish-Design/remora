@@ -6,13 +6,14 @@ services:
     container_name: tailscale-vllm
     # This hostname becomes the Tailscale node name and the DNS name you use
     # to reach the server: http://function-gemma-server:8000/v1
-    hostname: function-gemma-server
+    hostname: ${TS_HOSTNAME:-function-gemma-server}
+    env_file:
+      - .env
     environment:
-      # Generate a reusable auth key at: https://login.tailscale.com/admin/settings/keys
-      - TS_AUTHKEY=tskey-auth-YOUR_KEY_HERE
-      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_STATE_DIR=${TS_STATE_DIR:-/var/lib/tailscale}
       # Enables `ssh root@function-gemma-server` without managing SSH keys
-      - TS_SSH=true
+      - TS_SSH=${TS_SSH:-true}
     volumes:
       - tailscale-data:/var/lib/tailscale
       - /dev/net/tun:/dev/net/tun
@@ -23,6 +24,22 @@ services:
     cap_add:
       - net_admin
       - sys_module
+    restart: unless-stopped
+
+  agents-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.agents
+    container_name: agents-server
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    env_file:
+      - .env
+    environment:
+      - AGENTS_DIR=${AGENTS_DIR:-/app/agents}
+    volumes:
+      - ${AGENTS_DIR:-../agents}:/app/agents:ro
     restart: unless-stopped
 
   vllm-server:
@@ -36,26 +53,28 @@ services:
     network_mode: service:tailscale
     depends_on:
       - tailscale
+    env_file:
+      - .env
     environment:
       # Required if the model is gated on Hugging Face
-      - HUGGING_FACE_HUB_TOKEN=hf_YOUR_TOKEN_HERE
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
       # Redirect all downloads and cache to a mounted SSD, not the container layer
-      - VLLM_CACHE_ROOT=/models/cache
-      - HF_HOME=/models/cache
+      - VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-/models/cache}
+      - HF_HOME=${HF_HOME:-/models/cache}
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              count: ${VLLM_GPU_COUNT:-1}
               capabilities: [gpu]
     volumes:
       # Adjust these paths to match your actual SSD drive letters.
       # WSL2 exposes Windows drives under /mnt/ (D: drive → /mnt/d/)
       # Put the base model on your fastest NVMe; adapters can go on any SSD.
-      - /mnt/d/AI_Models/base:/models/base
-      - /mnt/e/AI_Models/adapters:/models/adapters
-      - /mnt/d/AI_Models/cache:/models/cache
+      - ${VLLM_BASE_MODEL_PATH}:/models/base
+      - ${VLLM_ADAPTERS_PATH}:/models/adapters
+      - ${VLLM_CACHE_PATH}:/models/cache
     # Prevents shared-memory exhaustion errors in vLLM
     ipc: host
     restart: unless-stopped
