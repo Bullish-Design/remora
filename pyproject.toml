@@ -1,8 +1,8 @@
 [project]
-name = "template-py"
+name = "remora"
 version = "0.1.0"
-description = "A Python project template with modern tooling."
-readme = "README.md"
+description = "Local code analysis and enhancement with FunctionGemma subagents."
+readme = "docs/CONCEPT.md"
 requires-python = ">=3.13"
 license = { text = "MIT" }
 
@@ -11,8 +11,17 @@ authors = [
 ]
 
 dependencies = [
-  "pydantic>=2.12.5",
+  "typer[all]>=0.12",
+  "rich>=13",
+  "pydantic>=2",
+  "pyyaml>=6",
+  "jinja2>=3",
+  "watchfiles>=0.21",
+  # pydantree and cairn added as local or VCS dependencies
 ]
+
+[project.scripts]
+remora = "remora.cli:app"
 
 [project.optional-dependencies]
 dev = [
@@ -31,16 +40,15 @@ requires = ["hatchling>=1.18"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# Tell hatch which package to ship (your code lives in src/template_py)
-packages = ["src/template_py"]
+packages = ["remora"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-  "src",
-  "README.md",
-#  "SPEC.md",
-#  "docs",
-  "tests",
+  "remora",
+  "agents",
+  "training",
+  "docs",
+  "CONTRIBUTING.md",
   "pyproject.toml",
 ]
 
@@ -48,12 +56,12 @@ include = [
 # Keep the default behavior; this section is here so you can extend it later if needed.
 
 [tool.pytest.ini_options]
-addopts = "-q --cov=embeddify --cov-report=term-missing"
+addopts = "-q --cov=remora --cov-report=term-missing"
 testpaths = ["tests"]
 
 [tool.mypy]
 python_version = "3.13"
-packages = ["src/template_py"]
+packages = ["remora"]
 strict = true
 warn_unused_ignores = true
 warn_redundant_casts = true
@@ -66,7 +74,7 @@ no_implicit_optional = true
 [tool.ruff]
 line-length = 120
 target-version = "py313"
-src = ["src"]
+src = ["remora"]
 
 [tool.ruff.lint]
 select = [
@@ -82,4 +90,3 @@ ignore = []
 quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
-
