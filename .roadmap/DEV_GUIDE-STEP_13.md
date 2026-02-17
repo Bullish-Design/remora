@@ -1,19 +1,19 @@
 # DEV GUIDE STEP 13: End-to-End Runner Integration Test
 
 ## Goal
-Validate the full pipeline — `FunctionGemmaRunner` → tool scripts → Cairn workspace → `AgentResult` — using the stock FunctionGemma model via Ollama against a controlled Python fixture file.
+Validate the full pipeline — `FunctionGemmaRunner` → tool scripts → Cairn workspace → `AgentResult` — using the stock FunctionGemma model served by vLLM against a controlled Python fixture file.
 
 ## Why This Matters
-Steps 5–12 were built and tested with mocks or in isolation. This step is the first time everything runs together with a real model call. It validates that FunctionGemma produces tool calls that correctly dispatch to the `.pym` scripts, that the workspace accumulates changes, and that the final `AgentResult` reflects actual work done in the sandbox. Any mismatch between the system prompt format and the stock model's output format surfaces here.
+Steps 5–12 were built and tested with mocks or in isolation. This step is the first time everything runs together with a real model call over the vLLM server. It validates that FunctionGemma produces tool calls that correctly dispatch to the `.pym` scripts, that the workspace accumulates changes, and that the final `AgentResult` reflects actual work done in the sandbox. Any mismatch between the system prompt format and the stock model's output format surfaces here.
 
 ## Implementation Checklist
 - Create `tests/fixtures/integration_target.py` — a small Python file with controlled defects: known lint issues, one undocumented function, one untested function, one function worth generating sample data for.
 - Write `tests/integration/test_runner_lint.py` — runs the lint `FunctionGemmaRunner` on the fixture and asserts the result.
 - Write `tests/integration/test_runner_docstring.py` — runs the docstring `FunctionGemmaRunner` on the fixture and asserts the result.
 - Write `tests/integration/test_runner_test.py` — runs the test `FunctionGemmaRunner` on the fixture and asserts the result.
-- Mark all integration tests with `@pytest.mark.integration` (requires Ollama + FunctionGemma model).
-- Add `pytest -m "not integration"` as the default test command for CI; integration tests run separately when Ollama is available.
-- Add `tests/conftest.py` with a session-scoped fixture that skips integration tests when the model is unreachable.
+- Mark all integration tests with `@pytest.mark.integration` (requires vLLM server + FunctionGemma base model).
+- Add `pytest -m "not integration"` as the default test command for CI; integration tests run separately when vLLM is available.
+- Add `tests/conftest.py` with a session-scoped fixture that skips integration tests when the server is unreachable.
 
 ## Suggested File Targets
 - `tests/fixtures/integration_target.py`
@@ -46,28 +46,28 @@ def parse_config(path):
 
 This gives the lint agent real fixable issues, the docstring agent two undocumented functions, and the test agent two functions to write tests for.
 
-## conftest.py — Skip When Model Unavailable
+## conftest.py — Skip When Server Unavailable
 
 ```python
 # tests/conftest.py
 import pytest
-import llm
+import httpx
+from remora.config import ServerConfig
 
-def _model_available(model_id: str) -> bool:
+SERVER = ServerConfig()
+
+def _server_available() -> bool:
     try:
-        llm.get_model(model_id)
-        # Do a cheap ping to verify Ollama is actually running
-        import httpx
-        httpx.get("http://localhost:11434/api/tags", timeout=2)
-        return True
+        response = httpx.get(f"{SERVER.base_url}/models", timeout=2)
+        response.raise_for_status()
+        model_ids = {item["id"] for item in response.json().get("data", [])}
+        return SERVER.default_adapter in model_ids
     except Exception:
         return False
 
-MODEL_ID = "ollama/functiongemma-4b-it"
-
 def pytest_collection_modifyitems(items):
-    if not _model_available(MODEL_ID):
-        skip = pytest.mark.skip(reason=f"Ollama model {MODEL_ID!r} not available")
+    if not _server_available():
+        skip = pytest.mark.skip(reason=f"vLLM server not reachable at {SERVER.base_url}")
         for item in items:
             if item.get_closest_marker("integration"):
                 item.add_marker(skip)
@@ -79,6 +79,7 @@ def pytest_collection_modifyitems(items):
 # tests/integration/test_runner_lint.py
 import pytest
 from pathlib import Path
+from remora.config import ServerConfig
 from remora.runner import FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
 from remora.discovery import CSTNode
@@ -106,6 +107,8 @@ async def test_lint_runner_fixes_issues(cairn_client):
         node=node,
         workspace_id="lint-test_lint_001",
         cairn_client=cairn_client,
+        server_config=ServerConfig(),
+        adapter_name=None,
     )
     result = await runner.run()
 
@@ -145,5 +148,5 @@ async def test_lint_runner_fixes_issues(cairn_client):
 - **Integration test:** Lint runner on fixture produces `status=success` and fixes at least one known issue.
 - **Integration test:** Test runner on fixture writes a test file to workspace.
 - **Integration test:** Docstring runner on fixture adds docstrings to undocumented functions.
-- **Integration test (error case):** Runner initialised with an unavailable model ID returns `AGENT_002`, does not crash other runners.
+- **Integration test (error case):** Runner initialized with an unavailable adapter name returns `AGENT_002`, does not crash other runners.
 - **Integration test (turn limit):** Runner with `max_turns=1` on a multi-step task returns `status=failed` with `AGENT_003`.

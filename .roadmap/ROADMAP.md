@@ -111,7 +111,7 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 **Goal:** Implement the core tool calling loop.
 
 **Deliverables:**
-- `run()` method: calls model via `llm` conversation API, parses tool calls, dispatches tools, appends results
+- `run()` method: calls model via `AsyncOpenAI.chat.completions.create`, parses tool calls, dispatches tools, appends results
 - `_dispatch_tool()`: runs context providers (if any), executes `.pym` tool via Cairn
 - Terminal detection: `submit_result` tool call exits loop and returns `AgentResult`
 - Turn limit enforcement with `AGENT_003` error on overflow
@@ -319,8 +319,8 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 
 **Deliverables:**
 - Acceptance test suite covering all six scenarios below
-- Uses the real FunctionGemma model via Ollama (not mocks) for integration validation
-- Tests skip gracefully when Ollama is not available
+- Uses the real FunctionGemma model via vLLM (not mocks) for integration validation
+- Tests skip gracefully when the vLLM server is not available
 
 **Verification Scenarios:**
 1. Point at Python file → lint runner identifies and fixes style issues → accept → changes in stable workspace
@@ -332,4 +332,4 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 
 ## MVP Exit Criteria
 
-The MVP is complete when milestones 1–17 pass their verification checks and the six acceptance scenarios pass against a sample Python project using the stock FunctionGemma model via Ollama.
+The MVP is complete when milestones 1–17 pass their verification checks and the six acceptance scenarios pass against a sample Python project using the stock FunctionGemma model via vLLM.

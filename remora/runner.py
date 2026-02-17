@@ -54,6 +54,7 @@ class FunctionGemmaRunner:
     cairn_client: CairnClient
     server_config: ServerConfig
     adapter_name: str | None = None
+    http_client: AsyncOpenAI | None = None
     messages: list[ChatCompletionMessageParam] = field(init=False)
     turn_count: int = field(init=False)
     _http_client: AsyncOpenAI = field(init=False)
@@ -62,7 +63,7 @@ class FunctionGemmaRunner:
     _model_target: str = field(init=False)
 
     def __post_init__(self) -> None:
-        self._http_client = AsyncOpenAI(
+        self._http_client = self.http_client or AsyncOpenAI(
             base_url=self.server_config.base_url,
             api_key=self.server_config.api_key,
             timeout=self.server_config.timeout,

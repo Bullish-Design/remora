@@ -4,13 +4,13 @@
 Deliver the complete end-to-end CLI experience: `analyze`, `watch`, `config`, and `list-agents` commands, all wired to the real analysis pipeline. Add reactive watch mode with debouncing.
 
 ## Why This Matters
-The CLI is the only interface most users will interact with. It must wire every layer together (config → discovery → coordinator → runners → results → accept/reject) and handle the user's intent cleanly. `list-agents` is particularly important for transparency: users need to see which subagent definitions are loaded and whether the configured model is reachable.
+The CLI is the only interface most users will interact with. It must wire every layer together (config → discovery → coordinator → runners → results → accept/reject) and handle the user's intent cleanly. `list-agents` is particularly important for transparency: users need to see which subagent definitions are loaded and whether the configured adapter is available on the vLLM server.
 
 ## Implementation Checklist
 - Wire `remora analyze <paths>` to the full pipeline: load config → discover nodes → run coordinator → display results.
 - Wire `remora watch <paths>` to file watching loop with debounce.
 - Wire `remora config [-f yaml|json]` to load and display merged configuration.
-- Wire `remora list-agents [-f table|json]` to scan `agents_dir`, show subagent YAML status, and check model availability via `llm`.
+- Wire `remora list-agents [-f table|json]` to scan `agents_dir`, show subagent YAML status, and check adapter availability via vLLM.
 - Set correct exit codes: `0` success, `1` partial failure (some ops failed), `2` total failure, `3` config error.
 - Implement debounced watch mode using `watchfiles`.
 
@@ -48,7 +48,7 @@ def analyze(
 
 ## list-agents Command
 
-`list-agents` scans the configured `agents_dir` for subagent YAML files and checks whether the configured model is reachable via `llm`:
+`list-agents` scans the configured `agents_dir` for subagent YAML files and checks whether the configured adapter is available on the vLLM server:
 
 ```python
 @app.command(name="list-agents")
@@ -57,20 +57,18 @@ def list_agents(
     config: Optional[Path] = typer.Option(None),
 ) -> None:
     cfg = load_config(config)
-
-    # Check model reachability once for all agents (they share a model_id)
-    model_reachable = _check_model(cfg.model_id)
+    available_models = _fetch_models(cfg.server)
 
     agents = []
     for op_name, op_config in cfg.operations.items():
         yaml_path = cfg.agents_dir / op_config.subagent
-        model_id = op_config.model_id or cfg.model_id
+        adapter_name = op_config.model_id or cfg.server.default_adapter
         agents.append({
             "name": op_name,
             "yaml": str(yaml_path),
             "yaml_exists": yaml_path.exists(),
-            "model_id": model_id,
-            "model_available": _check_model(model_id),
+            "adapter": adapter_name,
+            "model_available": adapter_name in available_models,
         })
 
     if format == "json":
@@ -79,31 +77,34 @@ def list_agents(
         # Rich table with status indicators
         ...
 
-def _check_model(model_id: str) -> bool:
-    """Return True if the model is registered and Ollama is reachable."""
+def _fetch_models(server: ServerConfig) -> set[str]:
+    """Return model IDs from the vLLM server; empty set on failure."""
     try:
-        import llm, httpx
-        llm.get_model(model_id)
-        httpx.get("http://localhost:11434/api/tags", timeout=2)
-        return True
+        from openai import OpenAI
+        client = OpenAI(
+            base_url=server.base_url,
+            api_key=server.api_key,
+            timeout=server.timeout,
+        )
+        return {model.id for model in client.models.list().data}
     except Exception:
-        return False
+        return set()
 ```
 
 ## list-agents Output (table format)
 
 ```
 ┌──────────────┬──────────────────────────────────────┬────────────┬──────────────────────────────┬────────────┐
-│ Agent        │ YAML                                 │ YAML       │ Model                        │ Available  │
+│ Agent        │ YAML                                 │ YAML       │ Adapter                      │ Available  │
 ├──────────────┼──────────────────────────────────────┼────────────┼──────────────────────────────┼────────────┤
-│ lint         │ agents/lint/lint_subagent.yaml        │ ✓ found    │ ollama/functiongemma-4b-it   │ ✓ ready    │
-│ test         │ agents/test/test_subagent.yaml        │ ✓ found    │ ollama/functiongemma-4b-it   │ ✓ ready    │
-│ docstring    │ agents/docstring/docstring_subagent.. │ ✓ found    │ ollama/functiongemma-4b-it   │ ✓ ready    │
-│ sample_data  │ agents/sample_data/sample_data_sub.. │ ✗ missing  │ ollama/functiongemma-4b-it   │ ✓ ready    │
+│ lint         │ agents/lint/lint_subagent.yaml        │ ✓ found    │ lint                         │ ✓ ready    │
+│ test         │ agents/test/test_subagent.yaml        │ ✓ found    │ test                         │ ✓ ready    │
+│ docstring    │ agents/docstring/docstring_subagent.. │ ✓ found    │ docstring                    │ ✓ ready    │
+│ sample_data  │ agents/sample_data/sample_data_sub.. │ ✗ missing  │ sample_data                  │ ✓ ready    │
 └──────────────┴──────────────────────────────────────┴────────────┴──────────────────────────────┴────────────┘
 ```
 
-Model availability is a single Ollama connectivity check — if Ollama is not running or the model is not pulled, all agents show "✗ unavailable".
+Model availability is a single vLLM connectivity check — if the server is not reachable, all agents show "✗ unavailable".
 
 ## Watch Mode
 
@@ -165,4 +166,5 @@ async def _debounced(coro_fn, delay: float):
 - **Unit test:** Watch mode debounce: two rapid file changes result in only one analysis run.
 - **Unit test:** `--format json` produces valid JSON output.
 - **Unit test:** Correct exit codes for all-success, partial-fail, and config-error cases.
-- **Unit test:** `_check_model()` returns `False` when Ollama is not reachable (mock the HTTP call).
+- **Unit test:** `_fetch_models()` returns empty set when vLLM is not reachable.
+

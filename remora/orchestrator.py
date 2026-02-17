@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+from remora.client import build_client
 from remora.config import RemoraConfig
 from remora.discovery import CSTNode
 from remora.results import AgentResult, NodeResult
@@ -15,6 +16,7 @@ class Coordinator:
     def __init__(self, config: RemoraConfig, cairn_client: CairnClient) -> None:
         self.config = config
         self.cairn_client = cairn_client
+        self._http_client = build_client(config.server)
         self._semaphore = asyncio.Semaphore(config.runner.max_concurrent_runners)
 
     async def process_node(self, node: CSTNode, operations: list[str]) -> NodeResult:
@@ -35,6 +37,7 @@ class Coordinator:
                     cairn_client=self.cairn_client,
                     server_config=self.config.server,
                     adapter_name=op_config.model_id,
+                    http_client=self._http_client,
                 )
             except Exception as exc:
                 errors.append({"operation": operation, "phase": "init", "error": str(exc)})

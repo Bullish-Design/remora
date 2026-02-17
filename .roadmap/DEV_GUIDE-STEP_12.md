@@ -1,55 +1,51 @@
-# DEV GUIDE STEP 12: Runner Adaptation for `llm` Library
+# DEV GUIDE STEP 12: Runner Adaptation for `openai` HTTP Client
 
 ## Goal
-Replace the `llama-cpp-python` / GGUF model loading approach in `FunctionGemmaRunner` with the `llm` Python library, calling the stock FunctionGemma model via Ollama. This eliminates the training pipeline entirely — the stock model is used as-is.
+Replace the `llm`/Ollama integration in `FunctionGemmaRunner` with the OpenAI-compatible HTTP client for the vLLM server, keeping the multi-turn tool loop intact while moving inference to the Tailscale-hosted server.
 
 ## Why This Matters
-The `llama-cpp-python` path required domain-specific fine-tuned GGUF files to exist before any runner could work. By switching to the `llm` library with Ollama, the runner can operate immediately with the stock FunctionGemma model. This unblocks end-to-end testing without any model training.
+vLLM centralizes inference, handles batching, and removes the need for local model weights. The client becomes a thin HTTP caller, unlocking true concurrency while keeping tool execution local.
 
 ## Implementation Checklist
-- Update `pyproject.toml`: replace `llama-cpp-python` with `llm` and `llm-ollama`.
-- Remove the `ModelCache` singleton (`remora/model_cache.py` or equivalent).
-- Rewrite `FunctionGemmaRunner.__init__` to acquire a model handle via `llm.get_model()`.
-- Rewrite the multi-turn loop in `FunctionGemmaRunner.run()` to use the `llm` conversation API.
-- Implement tool schema injection: pass tool definitions to the model via the `llm` library's tool API or by encoding them in the system prompt.
-- Implement tool call parsing: extract tool calls from the model response and dispatch them.
-- Update `SubagentDefinition` loading — remove the `model` path field (GGUF path); replace with a `model_id` string (Ollama model name, e.g. `"ollama/functiongemma-4b-it"`).
-- Update `AGENT_002` error: change from "GGUF file not found" to "model not available in Ollama".
-- Update config: `RemoraConfig` should have a top-level `model_id` defaulting to `"ollama/functiongemma-4b-it"`.
+- Update `pyproject.toml`: remove `llm` and `llm-ollama`; add `openai>=1.0`.
+- Add `ServerConfig` to `RemoraConfig`; remove the top-level `model_id`.
+- Treat `OperationConfig.model_id` as an adapter override (e.g. `"lint"`) and fall back to `server.default_adapter`.
+- Remove the `ModelCache` singleton and any `llm` imports/shims.
+- Add `remora/client.py` (shared `AsyncOpenAI` client builder) and pass it or `ServerConfig` into runners.
+- Rewrite `FunctionGemmaRunner` to use `AsyncOpenAI.chat.completions.create`.
+- Update `AGENT_002` to report vLLM server unreachability.
+- Keep `_parse_tool_calls()` and tool schema injection logic unchanged.
 
 ## Suggested File Targets
 - `pyproject.toml`
+- `remora/config.py`
 - `remora/runner.py`
-- `remora/models.py` (update config schemas)
-- `remora/subagent.py` (remove GGUF path field)
-- Delete `remora/model_cache.py` (no longer needed)
+- `remora/client.py`
+- `remora/orchestrator.py`
+- `remora/subagent.py`
+- `remora/errors.py`
 
 ## Dependency Changes
 
 ```toml
-# pyproject.toml — remove llama-cpp-python, add llm ecosystem
+# pyproject.toml — remove llm ecosystem, add OpenAI client
 dependencies = [
     "typer",
     "rich",
     "pydantic",
     "pydantree",
     "cairn",
-    "llm>=0.19",
-    "llm-ollama>=0.9",
+    "openai>=1.0",
     "jinja2",
     "watchfiles",
 ]
 ```
 
-Install the Ollama plugin after install:
-```bash
-llm install llm-ollama
-```
-
-## Updated Runner Initialisation
+## Updated Runner Initialization
 
 ```python
-import llm
+from openai import AsyncOpenAI
+from remora.config import ServerConfig
 
 class FunctionGemmaRunner:
     def __init__(
@@ -58,49 +54,34 @@ class FunctionGemmaRunner:
         node: CSTNode,
         workspace_id: str,
         cairn_client: CairnClient,
-        model_id: str = "ollama/functiongemma-4b-it",
+        server_config: ServerConfig,
+        adapter_name: str | None = None,
     ):
         self.definition = definition
         self.node = node
         self.workspace_id = workspace_id
         self.cairn = cairn_client
-        try:
-            self.model = llm.get_model(model_id)
-        except llm.UnknownModelError as e:
-            raise RemoraError("AGENT_002", f"Model not available: {model_id}") from e
+        self.server_config = server_config
+        self.adapter_name = adapter_name
+        self._model_target = adapter_name or server_config.default_adapter
+        self._http_client = AsyncOpenAI(
+            base_url=server_config.base_url,
+            api_key=server_config.api_key,
+            timeout=server_config.timeout,
+        )
 ```
 
-No model caching is needed — `llm.get_model()` is lightweight and Ollama handles the actual model lifecycle.
-
-## Multi-Turn Loop with `llm`
+## Multi-Turn Loop with vLLM
 
 ```python
-async def run(self) -> AgentResult:
-    system_prompt = self._build_system_prompt()  # includes tool schemas as JSON
-    initial_message = self._render_node_context()
-
-    conversation = self.model.conversation(system=system_prompt)
-    response = conversation.prompt(initial_message)
-
-    for turn in range(self.max_turns):
-        tool_calls = self._parse_tool_calls(response.text())
-
-        if not tool_calls:
-            # Model returned plain text with no tool call — treat as AGENT_003
-            raise RemoraError("AGENT_003", "Model stopped without calling submit_result")
-
-        for call in tool_calls:
-            if call["name"] == "submit_result":
-                return AgentResult(
-                    status="success",
-                    **call["arguments"],
-                )
-            tool_result = await self._dispatch_tool(call)
-            response = conversation.prompt(
-                f"Tool result for {call['name']}: {json.dumps(tool_result)}"
-            )
-
-    raise RemoraError("AGENT_003", f"Turn limit {self.max_turns} exceeded")
+async def _call_model(self) -> str:
+    response = await self._http_client.chat.completions.create(
+        model=self._model_target,
+        messages=self.messages,
+        max_tokens=512,
+        temperature=0.1,
+    )
+    return response.choices[0].message.content or ""
 ```
 
 ## Tool Schema Injection
@@ -117,8 +98,6 @@ def _build_system_prompt(self) -> str:
         f"{self.definition.system_prompt}"
     )
 ```
-
-If `llm-ollama` exposes a native tools API (check with `llm.get_model(...).can_use_tools`), prefer that over schema-in-prompt injection.
 
 ## Tool Call Parsing
 
@@ -153,38 +132,38 @@ Adjust this parser as you observe actual FunctionGemma output format. Log raw re
 ## Config Update
 
 ```python
+class ServerConfig(BaseModel):
+    base_url: str = "http://function-gemma-server:8000/v1"
+    api_key: str = "EMPTY"
+    timeout: int = 120
+    default_adapter: str = "google/functiongemma-270m-it"
+
 class RemoraConfig(BaseModel):
     agents_dir: Path = Path("agents")
-    model_id: str = "ollama/functiongemma-4b-it"  # replaces per-agent GGUF paths
+    server: ServerConfig = ServerConfig()
     runner: RunnerConfig = RunnerConfig()
     operations: dict[str, OperationConfig] = {}
 
 class OperationConfig(BaseModel):
     subagent: str  # path to YAML relative to agents_dir
     # model_id can be overridden per-operation if needed
-    model_id: str | None = None
+    model_id: str | None = None  # LoRA adapter name override
 ```
 
-## Ollama Setup (Developer Prerequisite)
+## vLLM Server Prerequisite
 
-This step assumes Ollama is installed and the FunctionGemma model is pulled:
+This step assumes the vLLM server is reachable on your Tailscale network:
 
 ```bash
-# Install Ollama: https://ollama.com
-ollama pull functiongemma-4b-it   # verify exact model name on Ollama Hub
-```
-
-Verify the model is reachable:
-```bash
-llm -m ollama/functiongemma-4b-it "Say hello"
+uv run server/test_connection.py
 ```
 
 Document this in `README.md` as a setup prerequisite.
 
 ## Testing Overview
-- **Unit test:** `FunctionGemmaRunner` raises `AGENT_002` when given an unavailable model ID.
+- **Unit test:** `FunctionGemmaRunner` raises `AGENT_002` when the vLLM server is unreachable.
 - **Unit test:** `_build_system_prompt()` includes the tool schema JSON.
 - **Unit test:** `_parse_tool_calls()` correctly extracts tool calls from various FunctionGemma output formats (wrapped in ```json```, raw JSON, multiple calls).
 - **Unit test:** Multi-turn loop dispatches tools and returns `AgentResult` on `submit_result`.
 - **Unit test:** Loop raises `AGENT_003` when turn limit is hit.
-- **Smoke test:** `llm -m ollama/functiongemma-4b-it "Call the greet tool with name=world"` returns a parseable tool call response.
+- **Smoke test:** `uv run server/test_connection.py` returns a successful response.

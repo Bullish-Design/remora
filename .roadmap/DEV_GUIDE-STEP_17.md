@@ -1,16 +1,16 @@
 # DEV GUIDE STEP 17: MVP Acceptance Tests
 
 ## Goal
-Write and execute the full acceptance test suite that validates the MVP success criteria end-to-end using the stock FunctionGemma model via Ollama against a sample Python project.
+Write and execute the full acceptance test suite that validates the MVP success criteria end-to-end using the stock FunctionGemma model served by vLLM against a sample Python project.
 
 ## Why This Matters
-This is the final gate before declaring the MVP complete. Unlike unit tests (which mock the model) and integration tests (which test individual runners), acceptance tests run the full system — CLI, discovery, coordinator, real model calls, Cairn workspaces, accept/reject — exactly as a real user would use it. All six scenarios must pass on a machine with Ollama running and the FunctionGemma model pulled.
+This is the final gate before declaring the MVP complete. Unlike unit tests (which mock the model) and integration tests (which test individual runners), acceptance tests run the full system — CLI, discovery, coordinator, real model calls, Cairn workspaces, accept/reject — exactly as a real user would use it. All six scenarios must pass on a machine that can reach the vLLM server with the FunctionGemma base model loaded.
 
 ## Implementation Checklist
 - Create `tests/acceptance/sample_project/` — a small, self-contained Python project with deliberate defects.
 - Write acceptance tests for all six scenarios (see below).
 - Mark acceptance tests with `@pytest.mark.acceptance`.
-- Add `tests/acceptance/conftest.py` with fixtures that skip all acceptance tests if Ollama is not reachable or the model is not available.
+- Add `tests/acceptance/conftest.py` with fixtures that skip all acceptance tests if the vLLM server is not reachable.
 - Acceptance tests must be idempotent: each test creates fresh Cairn workspaces and cleans up after itself.
 - Document how to run the acceptance suite: `pytest -m acceptance tests/acceptance/`.
 
@@ -28,7 +28,7 @@ This is the final gate before declaring the MVP complete. Unlike unit tests (whi
 
 ```
 tests/acceptance/sample_project/
-├── remora.yaml                   # Project-specific config pointing at the Ollama model
+├── remora.yaml                   # Project-specific config pointing at the vLLM server
 ├── src/
 │   ├── calculator.py             # Functions with lint issues, no docstrings, no tests
 │   ├── formatter.py              # Functions with missing type hints and docstrings
@@ -42,23 +42,24 @@ tests/acceptance/sample_project/
 ```python
 # tests/acceptance/conftest.py
 import pytest
-import llm
 import httpx
+from remora.config import ServerConfig
 
-MODEL_ID = "ollama/functiongemma-4b-it"
+SERVER = ServerConfig()
 
-def _model_available() -> bool:
+def _server_available() -> bool:
     try:
-        llm.get_model(MODEL_ID)
-        httpx.get("http://localhost:11434/api/tags", timeout=2)
-        return True
+        response = httpx.get(f"{SERVER.base_url}/models", timeout=2)
+        response.raise_for_status()
+        model_ids = {item["id"] for item in response.json().get("data", [])}
+        return SERVER.default_adapter in model_ids
     except Exception:
         return False
 
 def pytest_collection_modifyitems(items):
-    if not _model_available():
+    if not _server_available():
         skip = pytest.mark.skip(
-            reason=f"Ollama model {MODEL_ID!r} not available — run `ollama pull functiongemma-4b-it`"
+            reason=f"vLLM server not reachable at {SERVER.base_url}"
         )
         for item in items:
             if "acceptance" in item.keywords:
@@ -94,7 +95,7 @@ def pytest_collection_modifyitems(items):
 5. All successful results have non-empty `changed_files`
 
 ### Scenario 5: Error Isolation
-1. Configure one operation to use a non-existent model ID (e.g., `"ollama/nonexistent-model"`)
+1. Configure one operation to use a non-existent adapter name (e.g., `"missing-adapter"`)
 2. Run `remora analyze src/ --operations lint,docstring`
 3. Verify the broken operation shows `status=failed` with `AGENT_002`
 4. Verify the working operation completes successfully (failure does not block siblings)
@@ -118,8 +119,9 @@ def pytest_collection_modifyitems(items):
 ## MVP Exit Criteria
 
 The MVP is complete when:
-- All 6 acceptance scenarios pass on a machine with Ollama running and FunctionGemma pulled
+- All 6 acceptance scenarios pass on a machine that can reach the vLLM server with the base model loaded
 - Unit tests for steps 1–16 all pass (no model required)
-- Integration tests for steps 13–16 pass (Ollama required)
+- Integration tests for steps 13–16 pass (vLLM required)
 - `remora analyze tests/acceptance/sample_project/src/ --operations lint,docstring,test` exits with code 0
-- `remora list-agents` shows all configured agents with their YAML status and model availability
+- `remora list-agents` shows all configured agents with their YAML status and adapter availability
+
