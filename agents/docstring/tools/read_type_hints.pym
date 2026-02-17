@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from pathlib import Path
+import ast
+import json
+import os
+from typing import Any
+
+
+def _workspace_root() -> Path:
+    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
+    return Path(workspace) if workspace else Path.cwd()
+
+
+def _resolve_target_file() -> Path | None:
+    workspace_root = _workspace_root()
+    env_path = os.getenv("REMORA_TARGET_FILE")
+    if env_path:
+        path = Path(env_path)
+        return path if path.is_absolute() else workspace_root / path
+
+    hint_path = workspace_root / ".remora" / "target_file"
+    if hint_path.exists():
+        raw = hint_path.read_text(encoding="utf-8").strip()
+        if raw:
+            path = Path(raw)
+            return path if path.is_absolute() else workspace_root / path
+
+    return None
+
+
+def _load_node_text() -> str:
+    env_text = os.getenv("REMORA_NODE_TEXT")
+    if env_text:
+        return env_text
+
+    workspace_root = _workspace_root()
+    hint_path = workspace_root / ".remora" / "node_text"
+    if hint_path.exists():
+        return hint_path.read_text(encoding="utf-8")
+
+    target = _resolve_target_file()
+    if target and target.exists():
+        return target.read_text(encoding="utf-8")
+
+    raise FileNotFoundError("Node text not found for type hint inspection.")
+
+
+def _annotation_to_str(node: ast.AST | None) -> str | None:
+    if node is None:
+        return None
+    try:
+        return ast.unparse(node)
+    except Exception:
+        return None
+
+
+def _iter_function(module: ast.Module) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    for node in module.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return node
+    return None
+
+
+def _collect_parameters(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[dict[str, str]]:
+    args = func.args
+    params: list[dict[str, str]] = []
+
+    def maybe_add(arg: ast.arg | None) -> None:
+        if arg is None:
+            return
+        annotation = _annotation_to_str(arg.annotation)
+        if annotation is None:
+            return
+        params.append({"name": arg.arg, "annotation": annotation})
+
+    for arg in list(args.posonlyargs) + list(args.args):
+        maybe_add(arg)
+
+    maybe_add(args.vararg)
+
+    for arg in args.kwonlyargs:
+        maybe_add(arg)
+
+    maybe_add(args.kwarg)
+    return params
+
+
+def run(_: dict[str, Any]) -> dict[str, Any]:
+    try:
+        source = _load_node_text()
+        module = ast.parse(source)
+        func = _iter_function(module)
+        if func is None:
+            raise ValueError("No function definition found in node text.")
+
+        parameters = _collect_parameters(func)
+        return_annotation = _annotation_to_str(func.returns)
+        has_annotations = bool(parameters or return_annotation)
+        return {
+            "parameters": parameters,
+            "return_annotation": return_annotation,
+            "has_annotations": has_annotations,
+        }
+    except Exception as exc:  # noqa: BLE001 - tool scripts must never raise
+        return {"error": str(exc)}
+
+
+if __name__ == "__main__":
+    payload = json.loads(os.environ.get("REMORA_INPUT", "{}"))
+    print(json.dumps(run(payload)))

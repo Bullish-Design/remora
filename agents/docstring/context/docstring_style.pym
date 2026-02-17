@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+from pathlib import Path
+import os
+import yaml
+
+
+DEFAULT_STYLE = "google"
+ALLOWED_STYLES = {"google", "numpy", "sphinx"}
+
+
+def _workspace_root() -> Path:
+    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
+    return Path(workspace) if workspace else Path.cwd()
+
+
+def _read_style_from_config(path: Path) -> str | None:
+    try:
+        content = path.read_text(encoding="utf-8")
+        data = yaml.safe_load(content)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    operations = data.get("operations")
+    if not isinstance(operations, dict):
+        return None
+    docstring_config = operations.get("docstring")
+    if not isinstance(docstring_config, dict):
+        return None
+    style = docstring_config.get("style")
+    if isinstance(style, str):
+        return style
+    return None
+
+
+def run(_: dict[str, object] | None = None) -> str:
+    try:
+        workspace_root = _workspace_root()
+        config_path = workspace_root / "remora.yaml"
+        if config_path.exists():
+            style = _read_style_from_config(config_path)
+            if style in ALLOWED_STYLES:
+                return style
+        return DEFAULT_STYLE
+    except Exception:
+        return DEFAULT_STYLE
+
+
+if __name__ == "__main__":
+    print(run())

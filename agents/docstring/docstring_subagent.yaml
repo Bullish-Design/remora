@@ -1,0 +1,80 @@
+name: docstring_agent
+model: agents/docstring/models/docstring_functiongemma_q8.gguf
+max_turns: 15
+
+initial_context:
+  system_prompt: |
+    You are a Python docstring specialist. Always read the existing docstring
+    first. If the current docstring is adequate, submit the result with
+    action=skipped. Otherwise, add or update the docstring to match the exact
+    style provided by the docstring_style context provider. Use type hints to
+    populate Args/Returns sections accurately. Keep descriptions concise and
+    to one sentence per parameter when possible.
+
+    Style rules:
+    - Google: use Args:, Returns:, Raises: sections.
+    - NumPy: use Parameters and Returns sections with dashed underlines.
+    - Sphinx: use :param name: and :returns: fields.
+  node_context: |
+    Code to document:
+    ```python
+    {{ node_text }}
+    ```
+
+tools:
+  - name: read_current_docstring
+    pym: agents/docstring/tools/read_current_docstring.pym
+    description: Read the existing docstring from the current node, if any.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties: {}
+
+  - name: read_type_hints
+    pym: agents/docstring/tools/read_type_hints.pym
+    description: Extract parameter and return type annotations from the node.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties: {}
+
+  - name: write_docstring
+    pym: agents/docstring/tools/write_docstring.pym
+    description: Insert or replace the docstring in the source file.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        docstring:
+          type: string
+        style:
+          type: string
+      required:
+        - docstring
+        - style
+    context_providers:
+      - agents/docstring/context/docstring_style.pym
+
+  - name: submit_result
+    pym: agents/docstring/tools/submit.pym
+    description: Submit the final docstring result and end the task.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        summary:
+          type: string
+        action:
+          type: string
+          enum:
+            - added
+            - updated
+            - skipped
+        changed_files:
+          type: array
+          items:
+            type: string
+      required:
+        - summary
+        - action
+        - changed_files
