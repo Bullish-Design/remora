@@ -17,7 +17,8 @@ set -e
 
 python3 -m vllm.entrypoints.openai.api_server \
     --model google/functiongemma-270m-it \
-    --max-num-seqs 256 \
+    --max-num-seqs 32 \
+    --max-model-len 32768 \
     --enable-prefix-caching
 
     # -------------------------------------------------------------------------
