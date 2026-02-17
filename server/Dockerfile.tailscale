@@ -1,0 +1,7 @@
+FROM tailscale/tailscale:latest
+
+# Add git and Docker CLI so we can SSH in and redeploy without touching Windows.
+RUN apk update && \
+    apk add --no-cache git docker-cli docker-cli-compose bash
+
+WORKDIR /app
