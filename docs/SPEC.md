@@ -333,140 +333,89 @@ class OperationStatus(str, Enum):
 ### 3.1 `remora.yaml` Schema
 
 ```yaml
-# Root directories to analyze
 root_dirs:
   - src/
   - lib/
 
-# Query types to extract
 queries:
   - function_def
   - class_def
-  - file
 
-# Operation configurations
+agents_dir: agents/
+
+server:
+  base_url: "http://function-gemma-server:8000/v1"
+  api_key: "EMPTY"
+  timeout: 120
+  default_adapter: "google/functiongemma-270m-it"
+
 operations:
   lint:
     enabled: true
     auto_accept: true  # Still requires user confirmation
-    tools:
-      - ruff
-      - pylint
-    ruff_config: pyproject.toml  # Optional: custom tool config
+    subagent: lint/lint_subagent.yaml
+    # model_id: "lint"  # Optional adapter name
 
   test:
     enabled: true
     auto_accept: false
-    framework: pytest  # pytest | unittest
-    coverage: true
-    min_coverage: 80
+    subagent: test/test_subagent.yaml
 
   docstring:
     enabled: true
     auto_accept: false
-    style: google  # google | numpy | sphinx
-    include_types: true
-    include_examples: true
+    subagent: docstring/docstring_subagent.yaml
+    style: google
 
   sample_data:
     enabled: false
-    format: json  # json | yaml
-    num_samples: 5
+    subagent: sample_data/sample_data_subagent.yaml
 
-# Context scope (MVP: only "node" supported)
-context_scope: node
+runner:
+  max_turns: 20
+  max_concurrent_runners: 16
+  timeout: 300
 
-# Agent configurations
-agents:
-  # Optional: override agent paths
-  paths:
-    lint: /custom/path/to/lint_agent.pym
-    test: /custom/path/to/test_agent.pym
-
-# Cairn configurations
 cairn:
-  max_concurrent_agents: 10
-  timeout: 120  # seconds
-  workspace_dir: .agentfs  # Optional: custom workspace directory
-
-# File watching (for watch mode)
-watch:
-  debounce: 500  # milliseconds
-  ignore_patterns:
-    - "*.pyc"
-    - "__pycache__"
-    - ".git"
+  timeout: 120
 ```
 
 ### 3.2 Configuration Validation (Pydantic Schema)
 
 ```python
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field
 from pathlib import Path
-from typing import Literal
 
-class LintConfig(BaseModel):
-    enabled: bool = True
-    auto_accept: bool = True
-    tools: list[str] = Field(default_factory=lambda: ["ruff"])
-    ruff_config: Path | None = None
+class ServerConfig(BaseModel):
+    base_url: str = "http://function-gemma-server:8000/v1"
+    api_key: str = "EMPTY"
+    timeout: int = 120
+    default_adapter: str = "google/functiongemma-270m-it"
 
-class TestConfig(BaseModel):
+class RunnerConfig(BaseModel):
+    max_turns: int = 20
+    max_concurrent_runners: int = 16
+    timeout: int = 300
+
+class OperationConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     enabled: bool = True
     auto_accept: bool = False
-    framework: Literal["pytest", "unittest"] = "pytest"
-    coverage: bool = True
-    min_coverage: int = Field(default=80, ge=0, le=100)
-
-class DocstringConfig(BaseModel):
-    enabled: bool = True
-    auto_accept: bool = False
-    style: Literal["google", "numpy", "sphinx"] = "google"
-    include_types: bool = True
-    include_examples: bool = True
-
-class SampleDataConfig(BaseModel):
-    enabled: bool = False
-    format: Literal["json", "yaml"] = "json"
-    num_samples: int = Field(default=5, ge=1)
-
-class OperationsConfig(BaseModel):
-    lint: LintConfig = Field(default_factory=LintConfig)
-    test: TestConfig = Field(default_factory=TestConfig)
-    docstring: DocstringConfig = Field(default_factory=DocstringConfig)
-    sample_data: SampleDataConfig = Field(default_factory=SampleDataConfig)
-
-class AgentsConfig(BaseModel):
-    paths: dict[str, Path] = Field(default_factory=dict)
+    subagent: str
+    model_id: str | None = None  # LoRA adapter name override
 
 class CairnConfig(BaseModel):
-    max_concurrent_agents: int = Field(default=10, ge=1)
-    timeout: int = Field(default=120, ge=1)
-    workspace_dir: Path = Field(default=Path(".agentfs"))
-
-class WatchConfig(BaseModel):
-    debounce: int = Field(default=500, ge=0)
-    ignore_patterns: list[str] = Field(default_factory=lambda: [
-        "*.pyc", "__pycache__", ".git"
-    ])
+    timeout: int = 120
 
 class RemoraConfig(BaseModel):
-    root_dirs: list[Path]
-    queries: list[Literal["function_def", "class_def", "file"]] = Field(
-        default_factory=lambda: ["function_def", "class_def", "file"]
-    )
-    operations: OperationsConfig = Field(default_factory=OperationsConfig)
-    context_scope: Literal["node"] = "node"
-    agents: AgentsConfig = Field(default_factory=AgentsConfig)
+    root_dirs: list[Path] = Field(default_factory=lambda: [Path(".")])
+    queries: list[str] = Field(default_factory=lambda: ["function_def", "class_def"])
+    agents_dir: Path = Path("agents")
+    server: ServerConfig = Field(default_factory=ServerConfig)
+    operations: dict[str, OperationConfig] = Field(default_factory=dict)
+    runner: RunnerConfig = Field(default_factory=RunnerConfig)
     cairn: CairnConfig = Field(default_factory=CairnConfig)
-    watch: WatchConfig = Field(default_factory=WatchConfig)
-
-    @validator("root_dirs")
-    def validate_root_dirs(cls, v):
-        for path in v:
-            if not path.exists():
-                raise ValueError(f"Root directory does not exist: {path}")
-        return v
 ```
 
 ## 4. Data Schemas
@@ -929,7 +878,14 @@ num_samples: int = Input("num_samples")
 | `CONFIG_005` | Invalid operation name | Unknown operation in config |
 | `CONFIG_006` | Invalid query name | Unknown query type in config |
 
-### 7.2 Discovery Errors (Exit Code 1)
+### 7.2 Server Errors (Exit Code 1)
+
+| Code | Message | Cause |
+|------|---------|-------|
+| `SERVER_001` | vLLM server not reachable at startup | DNS failure or Tailscale connection offline |
+| `SERVER_002` | Adapter not found on vLLM server | Requested LoRA adapter missing or misnamed |
+
+### 7.3 Discovery Errors (Exit Code 1)
 
 | Code | Message | Cause |
 |------|---------|-------|
@@ -938,18 +894,18 @@ num_samples: int = Input("num_samples")
 | `DISC_003` | Source file parse error | Syntax error in Python file |
 | `DISC_004` | No nodes discovered | No nodes matched queries |
 
-### 7.3 Agent Errors (Exit Code 1)
+### 7.4 Agent Errors (Exit Code 1)
 
 | Code | Message | Cause |
 |------|---------|-------|
 | `AGENT_001` | Failed to spawn coordinator | Cairn unavailable or error |
-| `AGENT_002` | Coordinator timeout | Coordinator exceeded timeout |
+| `AGENT_002` | vLLM server not reachable or adapter not found | vLLM base URL unavailable or adapter name invalid |
 | `AGENT_003` | Failed to spawn specialized agent | Agent script not found or invalid |
 | `AGENT_004` | Specialized agent timeout | Agent exceeded timeout |
 | `AGENT_005` | Agent execution error | Runtime error in agent |
 | `AGENT_006` | Invalid agent output | Agent returned invalid schema |
 
-### 7.4 Workspace Errors (Exit Code 1)
+### 7.5 Workspace Errors (Exit Code 1)
 
 | Code | Message | Cause |
 |------|---------|-------|
@@ -1193,6 +1149,10 @@ agents:
 ```bash
 remora analyze src/ --operations custom_operation
 ```
+
+### 9.4 Custom LoRA Adapters
+
+Register LoRA adapters with the vLLM server and reference them via `operations.<name>.model_id` in `remora.yaml`. This replaces the old workflow of installing custom `llm` plugins for new models.
 
 ## 10. Testing Specifications
 

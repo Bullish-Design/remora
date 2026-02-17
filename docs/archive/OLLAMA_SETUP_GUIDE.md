@@ -1,4 +1,5 @@
-# Ollama Setup Guide
+# [ARCHIVED] Ollama Setup Guide
+This guide applied to the pre-vLLM version of remora. See docs/SERVER_SETUP.md for the current setup procedure.
 
 Remora uses the stock FunctionGemma model (`functiongemma:270m`, 270M parameters) via Ollama, accessed through the Python `llm` library. This guide covers two deployment scenarios:
 

@@ -1,8 +1,24 @@
 # Remora MVP Roadmap
 
-This roadmap breaks the MVP into discrete, testable, and verifiable steps. The architecture is built around **FunctionGemma subagents** — the stock FunctionGemma model accessed via the `llm` Python library and Ollama, driving code analysis through a multi-turn tool calling loop.
+This roadmap breaks the MVP into discrete, testable, and verifiable steps. The architecture is built around **FunctionGemma subagents** — the stock FunctionGemma model served from vLLM over Tailscale, driving code analysis through a multi-turn tool calling loop.
 
 Each milestone has a clear deliverable and verification criteria. Steps 1–4 establish infrastructure; Steps 5–7 build the FunctionGemmaRunner and subagent definitions; Steps 8–11 implement tool scripts for each domain; Steps 12–13 wire the runner to the stock model and validate it end-to-end; Steps 14–17 deliver the user-facing experience.
+
+---
+
+## 0. vLLM Server Setup
+
+**Goal:** Get the vLLM inference server running and reachable over Tailscale.
+
+**Deliverables:**
+- `server/` directory committed to the repo with Dockerfile, Dockerfile.tailscale, docker-compose.yml, entrypoint.sh, update.sh
+- Base model (`google/functiongemma-270m-it`) downloading and loading successfully
+- Server reachable at `http://function-gemma-server:8000/v1`
+
+**Verification:**
+- `uv run server/test_connection.py` prints success message
+- `docker logs -f vllm-gemma` shows model fully loaded
+- Server hostname resolves from a second Tailscale-connected machine
 
 ---
 
@@ -12,13 +28,13 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 
 **Deliverables:**
 - `remora/` package with core modules wired
-- `pyproject.toml` with all dependencies (typer, rich, pydantic, pydantree, cairn, llm, llm-ollama, jinja2, watchfiles)
+- `pyproject.toml` with all dependencies (typer, rich, pydantic, pydantree, cairn, openai, jinja2, watchfiles)
 - CLI entrypoint exposing `analyze`, `watch`, `config`, `list-agents`
 
 **Verification:**
 - `python -m remora --help` lists all CLI commands
 - `remora --help` works after install
-- `python -c "import llm; llm.get_model('ollama/functiongemma-4b-it')"` succeeds when Ollama is running
+- `uv run server/test_connection.py` succeeds when the vLLM server is running
 
 ---
 
@@ -27,13 +43,13 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 **Goal:** Define and load all configuration with CLI overrides.
 
 **Deliverables:**
-- `RemoraConfig` Pydantic schema including `RunnerConfig` (max_turns, max_concurrent_runners, timeout) and `model_id`
+- `RemoraConfig` Pydantic schema including `ServerConfig` and `RunnerConfig` (max_turns, max_concurrent_runners, timeout)
 - YAML loader with CLI override merging
-- `OperationConfig` with `subagent` path field and optional `model_id` override
+- `OperationConfig` with `subagent` path field and optional `model_id` adapter override
 - Validation errors mapped to `CONFIG_00x` exit codes
 
 **Verification:**
-- `remora config -f yaml` shows merged defaults including runner settings and model_id
+- `remora config -f yaml` shows merged defaults including server settings and default_adapter
 - Invalid config returns exit code `3` and error `CONFIG_003`
 - Missing `agents_dir` returns `CONFIG_004`
 
@@ -75,18 +91,18 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 
 ## 5. FunctionGemmaRunner — Model Loading + Context
 
-**Goal:** Implement the runner's initialization: acquire a model handle via `llm` and build initial messages.
+**Goal:** Implement the runner's initialization: build an AsyncOpenAI client and initial messages.
 
 **Deliverables:**
-- `FunctionGemmaRunner` class with `SubagentDefinition`, `CSTNode`, `workspace_id`, `cairn_client`, `model_id`
+- `FunctionGemmaRunner` class with `SubagentDefinition`, `CSTNode`, `workspace_id`, `cairn_client`, `server_config`, optional adapter name
 - `_build_initial_messages()` — renders system prompt (including tool schemas) + node context into initial message list
-- `AGENT_002` error when model is not available via `llm`
+- `AGENT_002` error when the vLLM server cannot be reached
 
 **Verification:**
-- Runner initializes without error when Ollama is running with FunctionGemma pulled
-- `llm.get_model(model_id)` raises `UnknownModelError` for an invalid model ID → captured as `AGENT_002`
+- Runner initializes without error when the vLLM server is reachable
+- `AsyncOpenAI` connection errors are captured as `AGENT_002`
 - Initial message list has correct system prompt with tool schemas and rendered node text
-- Unavailable model returns `AGENT_002` without crashing other runners
+- Unreachable server returns `AGENT_002` without crashing other runners
 
 ---
 
@@ -205,23 +221,23 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 
 ---
 
-## 12. Runner Adaptation for `llm` Library
+## 12. Runner Adaptation for `openai` HTTP Client
 
-**Goal:** Replace `llama-cpp-python` / GGUF loading with the `llm` Python library, calling the stock FunctionGemma model via Ollama.
+**Goal:** Replace the `llm` integration with the OpenAI HTTP client for vLLM.
 
 **Deliverables:**
-- Updated `pyproject.toml` with `llm>=0.19` and `llm-ollama>=0.9` replacing `llama-cpp-python`
-- `FunctionGemmaRunner` rewritten to use `llm.get_model()` and `model.conversation()`
+- Updated `pyproject.toml` with `openai>=1.0`; removed `llm` and `llm-ollama`
+- `FunctionGemmaRunner` rewritten to use `AsyncOpenAI` and `chat.completions.create`
 - Tool schema injection into system prompt; tool call parser for FunctionGemma output format
-- `AGENT_002` updated to report model unavailability (Ollama not running or model not pulled)
-- `model_id` config field on `RemoraConfig` (default: `"ollama/functiongemma-4b-it"`)
+- `AGENT_002` updated to report vLLM server unreachability
+- `model_id` now represents a LoRA adapter name in `OperationConfig`
 - `ModelCache` singleton removed
 
 **Verification:**
-- `FunctionGemmaRunner` raises `AGENT_002` for an unknown model ID
+- `FunctionGemmaRunner` raises `AGENT_002` when the vLLM server is unreachable
 - `_parse_tool_calls()` correctly extracts tool calls from FunctionGemma JSON output
 - Multi-turn loop dispatches tools and returns `AgentResult` on `submit_result`
-- `llm -m ollama/functiongemma-4b-it "Say hello"` succeeds (developer smoke test)
+- `uv run server/test_connection.py` succeeds (developer smoke test)
 
 ---
 
@@ -232,7 +248,7 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 **Deliverables:**
 - Integration test fixture: a small Python file with known lint issues, undocumented functions, and no tests
 - Integration tests for lint, test, and docstring runners against the fixture
-- `tests/conftest.py` that skips integration tests when Ollama is not reachable
+- `tests/conftest.py` that skips integration tests when the vLLM server is not reachable
 - `@pytest.mark.integration` marker; `pytest -m "not integration"` is the default CI command
 
 **Verification:**

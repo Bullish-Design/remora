@@ -2,13 +2,13 @@
 
 ## System Overview
 
-Remora is a code analysis and enhancement system built around **custom-trained FunctionGemma subagents** — tiny locally-running language models that reason about code in a multi-turn tool calling loop. Each specialized operation (lint, test, docstring, sample_data) is handled by a domain-fine-tuned 270M parameter model that runs entirely on the developer's machine with no network dependency.
+Remora is a code analysis and enhancement system built around **custom-trained FunctionGemma subagents** served from a vLLM inference server on your Tailscale network. Each specialized operation (lint, test, docstring, sample_data) targets a LoRA adapter on the shared FunctionGemma base model, while the client runs the multi-turn tool-calling loop locally.
 
-The system layers three established components — **Pydantree** for CST node extraction, **Cairn** for sandboxed tool execution, and **llama-cpp-python** for local model inference — under a new orchestration layer that coordinates the FunctionGemma runner loop.
+The system layers three established components — **Pydantree** for CST node extraction, **Cairn** for sandboxed tool execution, and the **OpenAI Python SDK** for HTTP inference — under a new orchestration layer that coordinates the FunctionGemma runner loop.
 
 ### Core Principles
 
-1. **Local-First Execution**: All inference runs locally via GGUF models; no API keys or data egress
+1. **Server-Local Inference**: All inference runs on hardware you own, reachable only over Tailscale
 2. **Multi-Turn Reasoning**: Each subagent iterates through tool calls until it decides the task is complete
 3. **Node-Level Isolation**: Each CST node is processed independently with its own workspace set
 4. **Workspace Sandboxing**: All tool execution happens in isolated Cairn copy-on-write workspaces
@@ -41,7 +41,7 @@ The system layers three established components — **Pydantree** for CST node ex
 │  ┌─────────────────────────────────────────────────────────┐│
 │  │ FunctionGemmaRunner (one per operation per node)        ││
 │  │  - Loads subagent YAML definition                       ││
-│  │  - Initializes GGUF model via llama-cpp-python          ││
+│  │  - Initializes HTTP client via OpenAI SDK               ││
 │  │  - Builds initial context from CSTNode                  ││
 │  │  - Runs multi-turn tool calling loop                    ││
 │  │  - Dispatches tool calls + context providers            ││
@@ -84,12 +84,13 @@ class RemoraConfig(BaseModel):
     queries: list[str]           # function_def, class_def, file
     operations: dict[str, OperationConfig]
     agents_dir: Path             # Root of agents/ directory
+    server: ServerConfig
     cairn: CairnConfig
     runner: RunnerConfig         # FunctionGemmaRunner settings
 
 class RunnerConfig(BaseModel):
     max_turns: int = 20          # Per-run turn limit
-    max_concurrent_runners: int = 4
+    max_concurrent_runners: int = 16
     timeout: int = 300           # Seconds per runner
 ```
 
@@ -151,6 +152,10 @@ async def process_node(node: CSTNode, operations: list[str]) -> NodeResult:
 
 The coordinator no longer needs to be a Cairn `.pym` script. The `FunctionGemmaRunner` handles the Cairn workspace for its own tool calls.
 
+#### Server Architecture (vLLM + Tailscale)
+
+Inference runs in a Docker Compose stack where a vLLM container shares the network namespace of a Tailscale sidecar. The sidecar publishes the hostname `function-gemma-server` on the private mesh, while the vLLM API serves requests at `http://function-gemma-server:8000/v1`. Model weights and LoRA adapters stay on the server's disks; the Remora client is a thin HTTP caller.
+
 ---
 
 ### 3. FunctionGemma Runner Layer
@@ -167,13 +172,16 @@ class FunctionGemmaRunner:
     node: CSTNode
     workspace_id: str
     cairn_client: CairnClient
+    server_config: ServerConfig
+    adapter_name: str | None = None
 
     def __post_init__(self):
-        self.model = Llama(
-            model_path=str(self.definition.model_path),
-            n_ctx=4096,
-            n_threads=2,
+        self.client = AsyncOpenAI(
+            base_url=self.server_config.base_url,
+            api_key=self.server_config.api_key,
+            timeout=self.server_config.timeout,
         )
+        self.model_target = self.adapter_name or self.server_config.default_adapter
         self.messages: list[dict] = []
         self.turn_count: int = 0
 ```
@@ -184,32 +192,31 @@ async def run(self) -> AgentResult:
     self._build_initial_messages()
 
     while self.turn_count < self.definition.max_turns:
-        response = self.model.create_chat_completion(
+        response = await self.client.chat.completions.create(
+            model=self.model_target,
             messages=self.messages,
-            tools=self.definition.tool_schemas,
-            tool_choice="auto",
+            max_tokens=512,
+            temperature=0.1,
         )
 
-        choice = response["choices"][0]
-        self.messages.append(choice["message"])
+        content = response.choices[0].message.content or ""
+        self.messages.append({"role": "assistant", "content": content})
         self.turn_count += 1
 
-        if choice["finish_reason"] == "stop":
-            # Model produced plain text — task complete
+        tool_calls = self._parse_tool_calls(content)
+        for tc in tool_calls:
+            result = await self._dispatch_tool(tc)
+            self.messages.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": json.dumps(result),
+            })
+
+            if tc["function"]["name"] == "submit_result":
+                return AgentResult(**result)
+
+        if not tool_calls:
             return self._extract_result()
-
-        if choice["finish_reason"] == "tool_calls":
-            tool_calls = choice["message"]["tool_calls"]
-            for tc in tool_calls:
-                result = await self._dispatch_tool(tc)
-                self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": json.dumps(result),
-                })
-
-                if tc["function"]["name"] == "submit_result":
-                    return AgentResult(**result)
 
     raise RunnerTurnLimitError(self.definition.name, self.turn_count)
 ```
@@ -341,7 +348,7 @@ class SubagentDefinition(BaseModel):
 
     @property
     def tool_schemas(self) -> list[dict]:
-        """Build OpenAI-style tool schema list for llama.cpp."""
+        """Build OpenAI-style tool schema list for tool calls."""
         return [
             {
                 "type": "function",
@@ -516,7 +523,7 @@ Each training example is a full conversation:
 
 5. FunctionGemmaRunner (one per operation per node):
    a. Load subagent YAML definition
-   b. Initialize GGUF model via llama-cpp-python
+   b. Initialize AsyncOpenAI client for vLLM
    c. Build initial messages from system_prompt + node.text
    d. Multi-turn loop:
       - Model produces tool_calls
@@ -540,7 +547,7 @@ Each training example is a full conversation:
 ### Node-Level Concurrency
 
 ```python
-# All nodes processed in parallel, up to max_concurrent_runners
+# All nodes processed in parallel, tool calls bounded by max_concurrent_runners
 semaphore = asyncio.Semaphore(config.runner.max_concurrent_runners)
 
 async def process_with_limit(node):
@@ -563,20 +570,11 @@ results = await asyncio.gather(*[
 ], return_exceptions=True)
 ```
 
-### Model Loading Strategy
+vLLM handles inference-side concurrency with continuous batching; the client semaphore only limits local tool execution and workspace churn.
 
-To avoid loading each 288MB model multiple times, runners cache loaded `Llama` instances by model path:
+### Server-Side Batching
 
-```python
-class ModelCache:
-    _instances: dict[str, Llama] = {}
-
-    @classmethod
-    def get(cls, model_path: str) -> Llama:
-        if model_path not in cls._instances:
-            cls._instances[model_path] = Llama(model_path=model_path, ...)
-        return cls._instances[model_path]
-```
+vLLM keeps the base model and LoRA adapters loaded server-side and continuously batches incoming requests. The client does not cache model weights; it only limits concurrent tool execution while inference requests are handled asynchronously by the server.
 
 ---
 
@@ -586,7 +584,7 @@ class ModelCache:
 |---|---|---|
 | Node discovery failure (bad query) | Skip node, log `DISC_002` | Warning for affected file |
 | Subagent YAML invalid | Skip operation, log `AGENT_001` | Error shown for operation |
-| GGUF model not found | Skip operation, log `AGENT_002` | Error shown for operation |
+| vLLM server not reachable | Skip operation, log `AGENT_002` | Error shown for operation |
 | Runner turn limit hit | Mark operation failed, log `AGENT_003` | Partial result returned |
 | `.pym` tool execution error | Tool returns error dict; model decides to retry or submit | Included in agent result |
 | Workspace merge conflict | Rollback, preserve workspace | User prompted to resolve manually |
@@ -621,11 +619,18 @@ queries:
 
 agents_dir: agents/   # Root of the agents/ directory
 
+server:
+  base_url: "http://function-gemma-server:8000/v1"
+  api_key: "EMPTY"
+  timeout: 120
+  default_adapter: "google/functiongemma-270m-it"
+
 operations:
   lint:
     enabled: true
     auto_accept: false
     subagent: lint/lint_subagent.yaml   # Relative to agents_dir
+    # model_id: "lint"  # Optional adapter override
 
   test:
     enabled: true
@@ -642,7 +647,7 @@ operations:
 
 runner:
   max_turns: 20
-  max_concurrent_runners: 4
+  max_concurrent_runners: 16
   timeout: 300
 
 cairn:
@@ -669,14 +674,15 @@ cairn:
 | Application | File Watching | watchfiles |
 | Orchestration | Node Discovery | Pydantree + Tree-sitter |
 | Orchestration | Async Runtime | AsyncIO |
-| Runner | Model Inference | llama-cpp-python |
-| Runner | Model Format | GGUF (Q8 quantization) |
+| Runner | HTTP Client | OpenAI Python SDK |
+| Server | Model Inference | vLLM (OpenAI-compatible API) |
+| Server | Networking | Docker + Tailscale |
 | Runner | Template Rendering | Jinja2 |
 | Execution | Sandboxed Tool Scripts | Cairn (.pym) |
 | Execution | Workspace Isolation | Cairn Copy-on-Write |
 | Training | Base Model | FunctionGemma 270M (Google) |
 | Training | Fine-tuning | Unsloth / HuggingFace PEFT |
-| Training | Quantization | llama.cpp gguf conversion |
+| Training | Adapter Format | LoRA adapters |
 
 ---
 
