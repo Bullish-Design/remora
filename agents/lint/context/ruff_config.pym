@@ -1,0 +1,50 @@
+from __future__ import annotations
+
+from pathlib import Path
+import os
+
+
+def _workspace_root() -> Path:
+    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
+    return Path(workspace) if workspace else Path.cwd()
+
+
+def _extract_tool_section(content: str, section: str) -> str:
+    lines = content.splitlines()
+    start_index = None
+    header = f"[{section}]"
+    for idx, line in enumerate(lines):
+        if line.strip() == header:
+            start_index = idx
+            break
+    if start_index is None:
+        return ""
+
+    collected = [lines[start_index]]
+    for line in lines[start_index + 1 :]:
+        if line.startswith("[") and line.strip().endswith("]"):
+            break
+        collected.append(line)
+    return "\n".join(collected).strip()
+
+
+def run(_: dict[str, object] | None = None) -> str:
+    try:
+        workspace_root = _workspace_root()
+        ruff_toml = workspace_root / "ruff.toml"
+        if ruff_toml.exists():
+            return ruff_toml.read_text(encoding="utf-8")
+
+        pyproject = workspace_root / "pyproject.toml"
+        if pyproject.exists():
+            content = pyproject.read_text(encoding="utf-8")
+            section = _extract_tool_section(content, "tool.ruff")
+            return section
+
+        return ""
+    except Exception:
+        return ""
+
+
+if __name__ == "__main__":
+    print(run())

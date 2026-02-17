@@ -1,0 +1,74 @@
+name: lint_agent
+model: agents/lint/models/lint_functiongemma_q8.gguf
+max_turns: 15
+
+initial_context:
+  system_prompt: |
+    You are a Python linting specialist. Analyze the provided code, apply safe
+    auto-fixes, and report issues requiring manual attention. Be conservative:
+    only apply fixes that are guaranteed to preserve semantics.
+  node_context: |
+    Code to analyze:
+    ```python
+    {{ node_text }}
+    ```
+
+tools:
+  - name: run_linter
+    pym: agents/lint/tools/run_linter.pym
+    description: Run the linter and return a list of issues with line numbers.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        check_only:
+          type: boolean
+          description: If true, report issues without applying fixes.
+    context_providers:
+      - agents/lint/context/ruff_config.pym
+
+  - name: apply_fix
+    pym: agents/lint/tools/apply_fix.pym
+    description: Apply a fix for a specific lint issue code.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        issue_code:
+          type: string
+        line_number:
+          type: integer
+      required:
+        - issue_code
+        - line_number
+
+  - name: read_current_file
+    pym: agents/lint/tools/read_file.pym
+    description: Read the current state of the file being analyzed.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties: {}
+
+  - name: submit_result
+    pym: agents/lint/tools/submit.pym
+    description: Submit the final linting results and end the task.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        summary:
+          type: string
+        issues_fixed:
+          type: integer
+        issues_remaining:
+          type: integer
+        changed_files:
+          type: array
+          items:
+            type: string
+      required:
+        - summary
+        - issues_fixed
+        - issues_remaining
+        - changed_files

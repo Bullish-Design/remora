@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+from pathlib import Path
+import json
+import os
+import subprocess
+from typing import Any
+
+
+def _workspace_root() -> Path:
+    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
+    return Path(workspace) if workspace else Path.cwd()
+
+
+def _resolve_target_file() -> Path:
+    workspace_root = _workspace_root()
+    env_path = os.getenv("REMORA_TARGET_FILE")
+    if env_path:
+        path = Path(env_path)
+        return path if path.is_absolute() else workspace_root / path
+
+    hint_path = workspace_root / ".remora" / "target_file"
+    if hint_path.exists():
+        raw = hint_path.read_text(encoding="utf-8").strip()
+        if raw:
+            path = Path(raw)
+            return path if path.is_absolute() else workspace_root / path
+
+    raise FileNotFoundError("Target file not found for linting.")
+
+
+def _run_command(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def _parse_ruff_output(raw: str) -> list[dict[str, Any]]:
+    if not raw:
+        return []
+    data = json.loads(raw)
+    if not isinstance(data, list):
+        raise ValueError("Ruff JSON output must be a list.")
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _format_issue(issue: dict[str, Any]) -> dict[str, Any]:
+    location = issue.get("location") or {}
+    fix = issue.get("fix")
+    fixable = bool(fix and fix.get("applicability") != "unfixable")
+    return {
+        "code": str(issue.get("code", "")),
+        "line": int(location.get("row", 0) or 0),
+        "col": int(location.get("column", 0) or 0),
+        "message": str(issue.get("message", "")),
+        "fixable": fixable,
+    }
+
+
+def run(inputs: dict[str, Any]) -> dict[str, Any]:
+    try:
+        check_only = bool(inputs.get("check_only", False))
+        target_file = _resolve_target_file()
+        cmd = ["ruff", "check", "--output-format", "json"]
+        if not check_only:
+            cmd.append("--fix")
+        cmd.append(str(target_file))
+
+        completed = _run_command(cmd)
+        if completed.returncode not in {0, 1}:
+            return {"error": completed.stderr.strip() or f"ruff exit code {completed.returncode}"}
+
+        issues_raw = _parse_ruff_output(completed.stdout)
+        issues = [_format_issue(issue) for issue in issues_raw]
+        fixable_count = sum(1 for issue in issues if issue.get("fixable"))
+        return {"issues": issues, "total": len(issues), "fixable_count": fixable_count}
+    except Exception as exc:  # noqa: BLE001 - tool scripts must never raise
+        return {"error": str(exc)}
+
+
+if __name__ == "__main__":
+    payload = json.loads(os.environ.get("REMORA_INPUT", "{}"))
+    print(json.dumps(run(payload)))
