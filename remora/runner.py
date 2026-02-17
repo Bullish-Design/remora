@@ -4,28 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-import asyncio
 import json
 import re
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
+
+from remora.config import ServerConfig
 from remora.discovery import CSTNode
 from remora.errors import AGENT_002, AGENT_003
 from remora.results import AgentResult
 from remora.subagent import SubagentDefinition
-
-try:
-    import llm  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover - optional dependency in tests
-
-    class _MissingLLM:
-        class UnknownModelError(Exception):
-            """Fallback error when llm is missing."""
-
-        def get_model(self, *_: Any, **__: Any) -> Any:
-            raise RuntimeError("llm is required to load models.")
-
-    llm = _MissingLLM()  # type: ignore[assignment]
 
 
 class CairnClient(Protocol):
@@ -62,38 +52,30 @@ class FunctionGemmaRunner:
     node: CSTNode
     workspace_id: str
     cairn_client: CairnClient
-    model_id: str | None = None
-    model: Any = field(init=False)
-    messages: list[dict[str, Any]] = field(init=False)
+    server_config: ServerConfig
+    adapter_name: str | None = None
+    messages: list[ChatCompletionMessageParam] = field(init=False)
     turn_count: int = field(init=False)
+    _http_client: AsyncOpenAI = field(init=False)
     _system_prompt: str = field(init=False)
     _initial_message: str = field(init=False)
-    _use_native_tools: bool = field(init=False)
+    _model_target: str = field(init=False)
 
     def __post_init__(self) -> None:
-        resolved_model_id = self.model_id or self.definition.model_id or "ollama/functiongemma-4b-it"
-        self.model_id = resolved_model_id
-        try:
-            self.model = llm.get_model(resolved_model_id)
-        except llm.UnknownModelError as exc:
-            raise AgentError(
-                node_id=self.node.node_id,
-                operation=self.definition.name,
-                phase="model_load",
-                error_code=AGENT_002,
-                message=f"Model not available in Ollama: {self.model_id}",
-            ) from exc
-        self._use_native_tools = bool(getattr(self.model, "can_use_tools", False))
+        self._http_client = AsyncOpenAI(
+            base_url=self.server_config.base_url,
+            api_key=self.server_config.api_key,
+            timeout=self.server_config.timeout,
+        )
+        self._model_target = self.adapter_name or self.server_config.default_adapter
         self.messages = []
         self.turn_count = 0
         self._system_prompt = self._build_system_prompt()
         self._initial_message = self.definition.initial_context.render(self.node)
-        self.messages.append({"role": "system", "content": self._system_prompt})
-        self.messages.append({"role": "user", "content": self._initial_message})
+        self.messages.append(cast(ChatCompletionMessageParam, {"role": "system", "content": self._system_prompt}))
+        self.messages.append(cast(ChatCompletionMessageParam, {"role": "user", "content": self._initial_message}))
 
     def _build_system_prompt(self) -> str:
-        if self._use_native_tools:
-            return self.definition.initial_context.system_prompt
         tool_schema_block = json.dumps(self.definition.tool_schemas, indent=2)
         return (
             "You have access to the following tools:\n"
@@ -104,13 +86,11 @@ class FunctionGemmaRunner:
         )
 
     async def run(self) -> AgentResult:
-        conversation = self._start_conversation()
-        response = await self._prompt(conversation, self._initial_message)
-        response_text = self._response_text(response)
+        response_text = await self._call_model(phase="model_load")
 
         while self.turn_count < self.definition.max_turns:
             self.turn_count += 1
-            self.messages.append({"role": "assistant", "content": response_text})
+            self.messages.append(cast(ChatCompletionMessageParam, {"role": "assistant", "content": response_text}))
             tool_calls = self._parse_tool_calls(response_text)
             if not tool_calls:
                 raise AgentError(
@@ -127,14 +107,12 @@ class FunctionGemmaRunner:
                 tool_result = await self._dispatch_tool(tool_call)
                 tool_payload = json.dumps(tool_result)
                 self.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": str(tool_call.get("id", "")),
-                        "content": tool_payload,
-                    }
+                    cast(
+                        ChatCompletionMessageParam,
+                        {"role": "user", "content": f"Tool result for {name}: {tool_payload}"},
+                    )
                 )
-                response = await self._prompt(conversation, f"Tool result for {name}: {tool_payload}")
-                response_text = self._response_text(response)
+                response_text = await self._call_model(phase="loop")
 
         raise AgentError(
             node_id=self.node.node_id,
@@ -144,22 +122,23 @@ class FunctionGemmaRunner:
             message=f"Turn limit {self.definition.max_turns} exceeded",
         )
 
-    def _start_conversation(self) -> Any:
-        kwargs: dict[str, Any] = {"system": self._system_prompt}
-        if self._use_native_tools:
-            kwargs["tools"] = self.definition.tool_schemas
-        return self.model.conversation(**kwargs)
-
-    async def _prompt(self, conversation: Any, message: str) -> Any:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, conversation.prompt, message)
-
-    @staticmethod
-    def _response_text(response: Any) -> str:
-        text_attr = getattr(response, "text", None)
-        if callable(text_attr):
-            return str(text_attr())
-        return str(response)
+    async def _call_model(self, *, phase: Literal["model_load", "loop"]) -> str:
+        try:
+            response = await self._http_client.chat.completions.create(
+                model=self._model_target,
+                messages=cast(list[ChatCompletionMessageParam], self.messages),
+                max_tokens=512,
+                temperature=0.1,
+            )
+        except (APIConnectionError, APITimeoutError) as exc:
+            raise AgentError(
+                node_id=self.node.node_id,
+                operation=self.definition.name,
+                phase=phase,
+                error_code=AGENT_002,
+                message=f"Cannot reach vLLM server at {self.server_config.base_url}",
+            ) from exc
+        return response.choices[0].message.content or ""
 
     def _build_submit_result(self, arguments: Any) -> AgentResult:
         payload: Any = arguments
@@ -231,10 +210,13 @@ class FunctionGemmaRunner:
         for provider_path in tool_def.context_providers:
             context = await self.cairn_client.run_pym(provider_path, self.workspace_id, inputs={})
             self.messages.append(
-                {
-                    "role": "user",
-                    "content": f"[Context] {context}",
-                }
+                cast(
+                    ChatCompletionMessageParam,
+                    {
+                        "role": "user",
+                        "content": f"[Context] {context}",
+                    },
+                )
             )
 
         return await self.cairn_client.run_pym(tool_def.pym, self.workspace_id, inputs=args)

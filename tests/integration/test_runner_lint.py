@@ -5,11 +5,16 @@ from pathlib import Path
 
 import pytest
 
+from remora.config import ServerConfig
 from remora.discovery import CSTNode
 from remora.runner import FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
 
 FIXTURE = Path("tests/fixtures/integration_target.py")
+
+
+def _server_config() -> ServerConfig:
+    return ServerConfig()
 
 
 def _load_fixture() -> str:
@@ -36,6 +41,7 @@ def test_lint_runner_fixes_issues(cairn_client_factory) -> None:
         node=node,
         workspace_id="lint-lint_001",
         cairn_client=cairn_client,
+        server_config=_server_config(),
     )
 
     result = asyncio.run(runner.run())

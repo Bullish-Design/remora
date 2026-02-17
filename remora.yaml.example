@@ -10,11 +10,21 @@ queries:
 
 agents_dir: agents
 
+# vLLM server on your Tailscale network
+server:
+  base_url: "http://function-gemma-server:8000/v1"
+  api_key: "EMPTY"
+  timeout: 120
+  default_adapter: "google/functiongemma-270m-it"
+
 operations:
   lint:
     enabled: true
     auto_accept: false
     subagent: lint/lint_subagent.yaml
+    # model_id here is the LoRA adapter name on the server
+    # omit to use server.default_adapter
+    # model_id: "lint"
 
   test:
     enabled: true
@@ -34,7 +44,7 @@ operations:
 
 runner:
   max_turns: 20
-  max_concurrent_runners: 4
+  max_concurrent_runners: 16
   timeout: 300
 
 cairn:

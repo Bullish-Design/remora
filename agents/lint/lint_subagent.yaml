@@ -1,5 +1,4 @@
 name: lint_agent
-model_id: ollama/functiongemma-4b-it
 max_turns: 15
 
 initial_context:

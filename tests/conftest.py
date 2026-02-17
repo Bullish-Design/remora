@@ -11,22 +11,12 @@ import urllib.request
 
 import pytest
 
-MODEL_ID = "ollama/functiongemma-4b-it"
+SERVER_URL = os.environ.get("REMORA_SERVER_URL", "http://function-gemma-server:8000/v1")
 
 
-def _model_available(model_id: str) -> bool:
+def _server_available(base_url: str) -> bool:
     try:
-        import llm
-    except Exception:
-        return False
-
-    try:
-        llm.get_model(model_id)
-    except Exception:
-        return False
-
-    try:
-        with urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2) as response:
+        with urllib.request.urlopen(f"{base_url}/models", timeout=2) as response:
             return response.status == 200
     except Exception:
         return False
@@ -118,8 +108,8 @@ def cairn_client_factory(integration_workspace: tuple[Path, Path]):
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    if not _model_available(MODEL_ID):
-        skip = pytest.mark.skip(reason=f"Ollama model {MODEL_ID!r} not available")
+    if not _server_available(SERVER_URL):
+        skip = pytest.mark.skip(reason=f"vLLM server not reachable at {SERVER_URL}")
         for item in items:
             if item.get_closest_marker("integration"):
                 item.add_marker(skip)

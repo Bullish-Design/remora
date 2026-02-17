@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import socket
 import warnings
+from urllib.parse import urlparse
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,9 +22,16 @@ class ConfigError(RuntimeError):
         self.code = code
 
 
+class ServerConfig(BaseModel):
+    base_url: str = "http://function-gemma-server:8000/v1"
+    api_key: str = "EMPTY"
+    timeout: int = 120
+    default_adapter: str = "google/functiongemma-270m-it"
+
+
 class RunnerConfig(BaseModel):
     max_turns: int = 20
-    max_concurrent_runners: int = 4
+    max_concurrent_runners: int = 16
     timeout: int = 300
 
 
@@ -57,7 +66,7 @@ class RemoraConfig(BaseModel):
     root_dirs: list[Path] = Field(default_factory=lambda: [Path(".")])
     queries: list[str] = Field(default_factory=lambda: ["function_def", "class_def"])
     agents_dir: Path = Path("agents")
-    model_id: str = "ollama/functiongemma-4b-it"
+    server: ServerConfig = Field(default_factory=ServerConfig)
     operations: dict[str, OperationConfig] = Field(default_factory=_default_operations)
     runner: RunnerConfig = Field(default_factory=RunnerConfig)
     cairn: CairnConfig = Field(default_factory=CairnConfig)
@@ -75,6 +84,7 @@ def load_config(config_path: Path | None = None, overrides: dict[str, Any] | Non
     config = _resolve_agents_dir(config, base_dir)
     _ensure_agents_dir(config.agents_dir)
     _warn_missing_subagents(config)
+    _warn_unreachable_server(config.server)
     return config
 
 
@@ -137,3 +147,17 @@ def _warn_missing_subagents(config: RemoraConfig) -> None:
                 f"Subagent definition missing: {subagent_path}",
                 stacklevel=2,
             )
+
+
+def _warn_unreachable_server(server: ServerConfig) -> None:
+    parsed = urlparse(server.base_url)
+    hostname = parsed.hostname
+    if not hostname:
+        return
+    try:
+        socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        warnings.warn(
+            f"vLLM server hostname not reachable: {server.base_url}",
+            stacklevel=2,
+        )

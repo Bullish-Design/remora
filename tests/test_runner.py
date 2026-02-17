@@ -1,60 +1,71 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 import asyncio
 import json
 
 import pytest
 
+from remora.config import ServerConfig
 from remora.discovery import CSTNode
 from remora.errors import AGENT_002, AGENT_003
 from remora.runner import AgentError, FunctionGemmaRunner
 from remora.subagent import InitialContext, SubagentDefinition, ToolDefinition
 
 
-class FakeResponse:
-    def __init__(self, text: str) -> None:
-        self._text = text
-
-    def text(self) -> str:
-        return self._text
+class FakeCompletionMessage:
+    def __init__(self, content: str) -> None:
+        self.content = content
 
 
-class FakeConversation:
-    def __init__(self, responses: list[str]) -> None:
+class FakeCompletionChoice:
+    def __init__(self, content: str) -> None:
+        self.message = FakeCompletionMessage(content)
+
+
+class FakeCompletionResponse:
+    def __init__(self, content: str) -> None:
+        self.choices = [FakeCompletionChoice(content)]
+
+
+class FakeChatCompletions:
+    def __init__(self, responses: list[str], *, error: Exception | None = None) -> None:
         self.responses = responses
-        self.prompts: list[str] = []
+        self.error = error
+        self.calls: list[dict[str, Any]] = []
 
-    def prompt(self, message: str) -> FakeResponse:
-        self.prompts.append(message)
+    async def create(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+        temperature: float,
+    ) -> FakeCompletionResponse:
+        self.calls.append({"model": model, "messages": messages})
+        if self.error:
+            raise self.error
         if not self.responses:
-            raise AssertionError("No responses queued for FakeConversation")
-        return FakeResponse(self.responses.pop(0))
+            raise AssertionError("No responses queued for FakeChatCompletions")
+        return FakeCompletionResponse(self.responses.pop(0))
 
 
-class FakeModel:
-    def __init__(self, responses: list[str], *, can_use_tools: bool = False) -> None:
-        self.responses = responses
-        self.can_use_tools = can_use_tools
-        self.conversation_calls: list[dict[str, Any]] = []
-
-    def conversation(self, **kwargs: Any) -> FakeConversation:
-        self.conversation_calls.append(kwargs)
-        return FakeConversation(self.responses)
-
-
-class FakeLLMModule:
-    class UnknownModelError(Exception):
-        pass
-
-    def __init__(self) -> None:
-        self.models: dict[str, FakeModel] = {}
-
-    def get_model(self, model_id: str) -> FakeModel:
-        if model_id not in self.models:
-            raise FakeLLMModule.UnknownModelError(model_id)
-        return self.models[model_id]
+class FakeAsyncOpenAI:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        timeout: int,
+        responses: list[str] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.base_url = base_url
+        self.api_key = api_key
+        self.timeout = timeout
+        self.chat = SimpleNamespace(completions=FakeChatCompletions(responses or [], error=error))
 
 
 class FakeCairnClient:
@@ -89,7 +100,6 @@ def _make_definition(
         ]
     return SubagentDefinition(
         name="lint_agent",
-        model_id="ollama/functiongemma-4b-it",
         max_turns=max_turns,
         initial_context=InitialContext(
             system_prompt="You are a lint agent.",
@@ -111,14 +121,39 @@ def _make_node() -> CSTNode:
     )
 
 
+def _make_server_config() -> ServerConfig:
+    return ServerConfig(
+        base_url="http://function-gemma-server:8000/v1",
+        api_key="EMPTY",
+        timeout=30,
+        default_adapter="google/functiongemma-270m-it",
+    )
+
+
 def _tool_call_text(name: str, arguments: dict[str, Any]) -> str:
     return json.dumps({"name": name, "arguments": arguments})
 
 
+def _patch_openai(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    responses: list[str] | None = None,
+    error: Exception | None = None,
+) -> None:
+    def _factory(*_: Any, **kwargs: Any) -> FakeAsyncOpenAI:
+        return FakeAsyncOpenAI(
+            base_url=kwargs["base_url"],
+            api_key=kwargs["api_key"],
+            timeout=kwargs["timeout"],
+            responses=list(responses or []),
+            error=error,
+        )
+
+    monkeypatch.setattr("remora.runner.AsyncOpenAI", _factory)
+
+
 def test_runner_initializes_model_and_messages(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_llm = FakeLLMModule()
-    fake_llm.models["ollama/functiongemma-4b-it"] = FakeModel([_tool_call_text("submit_result", {})])
-    monkeypatch.setattr("remora.runner.llm", fake_llm)
+    _patch_openai(monkeypatch, responses=[_tool_call_text("submit_result", {})])
 
     definition = _make_definition()
     node = _make_node()
@@ -128,30 +163,37 @@ def test_runner_initializes_model_and_messages(monkeypatch: pytest.MonkeyPatch) 
         node=node,
         workspace_id="ws-1",
         cairn_client=FakeCairnClient(),
+        server_config=_make_server_config(),
     )
 
-    assert runner.messages[0]["role"] == "system"
-    assert "You have access to the following tools" in runner.messages[0]["content"]
-    assert runner.messages[1]["role"] == "user"
-    assert "node hello function" in runner.messages[1]["content"]
+    system_message = cast(dict[str, Any], runner.messages[0])
+    user_message = cast(dict[str, Any], runner.messages[1])
+    assert system_message["role"] == "system"
+    assert "You have access to the following tools" in str(system_message.get("content", ""))
+    assert user_message["role"] == "user"
+    assert "node hello function" in str(user_message.get("content", ""))
     assert runner.turn_count == 0
 
 
 def test_missing_model_id_raises_agent_002(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_llm = FakeLLMModule()
-    monkeypatch.setattr("remora.runner.llm", fake_llm)
+    class FakeConnectionError(Exception):
+        pass
+
+    monkeypatch.setattr("remora.runner.APIConnectionError", FakeConnectionError)
+    _patch_openai(monkeypatch, error=FakeConnectionError("boom"))
 
     definition = _make_definition()
     node = _make_node()
+    runner = FunctionGemmaRunner(
+        definition=definition,
+        node=node,
+        workspace_id="ws-1",
+        cairn_client=FakeCairnClient(),
+        server_config=_make_server_config(),
+    )
 
     with pytest.raises(AgentError) as excinfo:
-        FunctionGemmaRunner(
-            definition=definition,
-            node=node,
-            workspace_id="ws-1",
-            cairn_client=FakeCairnClient(),
-            model_id="ollama/missing-model",
-        )
+        asyncio.run(runner.run())
 
     error = excinfo.value
     assert error.error_code == AGENT_002
@@ -161,15 +203,14 @@ def test_missing_model_id_raises_agent_002(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_parse_tool_calls_handles_json_variants(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_llm = FakeLLMModule()
-    fake_llm.models["ollama/functiongemma-4b-it"] = FakeModel([_tool_call_text("submit_result", {})])
-    monkeypatch.setattr("remora.runner.llm", fake_llm)
+    _patch_openai(monkeypatch, responses=[_tool_call_text("submit_result", {})])
 
     runner = FunctionGemmaRunner(
         definition=_make_definition(),
         node=_make_node(),
         workspace_id="ws-1",
         cairn_client=FakeCairnClient(),
+        server_config=_make_server_config(),
     )
 
     raw = _tool_call_text("inspect", {"value": "a"})
@@ -182,15 +223,22 @@ def test_parse_tool_calls_handles_json_variants(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_run_returns_submit_result_on_first_turn(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_llm = FakeLLMModule()
-    fake_llm.models["ollama/functiongemma-4b-it"] = FakeModel(
-        [_tool_call_text("submit_result", {"summary": "Done", "changed_files": ["src/example.py"], "details": {}})]
+    _patch_openai(
+        monkeypatch,
+        responses=[
+            _tool_call_text("submit_result", {"summary": "Done", "changed_files": ["src/example.py"], "details": {}})
+        ],
     )
-    monkeypatch.setattr("remora.runner.llm", fake_llm)
 
     definition = _make_definition()
     node = _make_node()
-    runner = FunctionGemmaRunner(definition=definition, node=node, workspace_id="ws-1", cairn_client=FakeCairnClient())
+    runner = FunctionGemmaRunner(
+        definition=definition,
+        node=node,
+        workspace_id="ws-1",
+        cairn_client=FakeCairnClient(),
+        server_config=_make_server_config(),
+    )
 
     result = asyncio.run(runner.run())
 
@@ -207,9 +255,7 @@ def test_run_handles_multiple_tool_turns_then_submit(monkeypatch: pytest.MonkeyP
         _tool_call_text("inspect", {"value": "b"}),
         _tool_call_text("submit_result", {"summary": "Done", "changed_files": [], "details": {"calls": 2}}),
     ]
-    fake_llm = FakeLLMModule()
-    fake_llm.models["ollama/functiongemma-4b-it"] = FakeModel(responses)
-    monkeypatch.setattr("remora.runner.llm", fake_llm)
+    _patch_openai(monkeypatch, responses=responses)
 
     tool_def = ToolDefinition(
         name="inspect",
@@ -229,7 +275,13 @@ def test_run_handles_multiple_tool_turns_then_submit(monkeypatch: pytest.MonkeyP
     definition = _make_definition(tools=[tool_def, submit_def])
     node = _make_node()
     cairn = FakeCairnClient({Path("inspect.pym"): {"ok": True}})
-    runner = FunctionGemmaRunner(definition=definition, node=node, workspace_id="ws-1", cairn_client=cairn)
+    runner = FunctionGemmaRunner(
+        definition=definition,
+        node=node,
+        workspace_id="ws-1",
+        cairn_client=cairn,
+        server_config=_make_server_config(),
+    )
 
     result = asyncio.run(runner.run())
 
@@ -244,9 +296,7 @@ def test_run_respects_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
         _tool_call_text("inspect", {}),
         _tool_call_text("inspect", {}),
     ]
-    fake_llm = FakeLLMModule()
-    fake_llm.models["ollama/functiongemma-4b-it"] = FakeModel(responses)
-    monkeypatch.setattr("remora.runner.llm", fake_llm)
+    _patch_openai(monkeypatch, responses=responses)
 
     tool_def = ToolDefinition(
         name="inspect",
@@ -259,7 +309,13 @@ def test_run_respects_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     definition = _make_definition(tools=[tool_def], max_turns=2)
     node = _make_node()
     cairn = FakeCairnClient({Path("inspect.pym"): {"ok": True}})
-    runner = FunctionGemmaRunner(definition=definition, node=node, workspace_id="ws-1", cairn_client=cairn)
+    runner = FunctionGemmaRunner(
+        definition=definition,
+        node=node,
+        workspace_id="ws-1",
+        cairn_client=cairn,
+        server_config=_make_server_config(),
+    )
 
     with pytest.raises(AgentError) as excinfo:
         asyncio.run(runner.run())
@@ -272,9 +328,7 @@ def test_context_providers_injected_before_tool_dispatch(monkeypatch: pytest.Mon
         _tool_call_text("inspect", {}),
         _tool_call_text("submit_result", {"summary": "Done", "changed_files": []}),
     ]
-    fake_llm = FakeLLMModule()
-    fake_llm.models["ollama/functiongemma-4b-it"] = FakeModel(responses)
-    monkeypatch.setattr("remora.runner.llm", fake_llm)
+    _patch_openai(monkeypatch, responses=responses)
 
     tool_def = ToolDefinition(
         name="inspect",
@@ -300,15 +354,21 @@ def test_context_providers_injected_before_tool_dispatch(monkeypatch: pytest.Mon
             Path("inspect.pym"): {"ok": True},
         }
     )
-    runner = FunctionGemmaRunner(definition=definition, node=node, workspace_id="ws-1", cairn_client=cairn)
+    runner = FunctionGemmaRunner(
+        definition=definition,
+        node=node,
+        workspace_id="ws-1",
+        cairn_client=cairn,
+        server_config=_make_server_config(),
+    )
 
     result = asyncio.run(runner.run())
 
     assert result.status == "success"
     assert [call[0] for call in cairn.calls][:3] == [Path("ctx-1.pym"), Path("ctx-2.pym"), Path("inspect.pym")]
-    context_messages = [
-        message["content"]
-        for message in runner.messages
-        if message.get("role") == "user" and str(message.get("content", "")).startswith("[Context]")
-    ]
+    context_messages: list[str] = []
+    for message in runner.messages:
+        message_data = cast(dict[str, Any], message)
+        if message_data.get("role") == "user" and str(message_data.get("content", "")).startswith("[Context]"):
+            context_messages.append(str(message_data.get("content", "")))
     assert context_messages == ["[Context] {'ctx': 'one'}", "[Context] {'ctx': 'two'}"]

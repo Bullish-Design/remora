@@ -57,7 +57,6 @@ def _write_subagent_yaml(agents_dir: Path, *, include_submit: bool = True) -> Pa
         yaml.safe_dump(
             {
                 "name": "lint_agent",
-                "model_id": "ollama/functiongemma-4b-it",
                 "max_turns": 12,
                 "initial_context": {
                     "system_prompt": "You are a lint agent.",
@@ -77,7 +76,7 @@ def test_load_subagent_definition_resolves_paths(tmp_path: Path) -> None:
     definition = load_subagent_definition(subagent_path, agents_dir)
 
     assert definition.name == "lint_agent"
-    assert definition.model_id == "ollama/functiongemma-4b-it"
+    assert definition.model_id is None
     assert len(definition.tools) == 2
     assert definition.tools_by_name["run_tool"].pym == (agents_dir / "lint/tools/run_tool.pym").resolve()
     assert definition.tools_by_name["run_tool"].context_providers == [
