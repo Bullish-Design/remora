@@ -2,418 +2,332 @@
 
 ## Purpose
 
-A library that combines **Pydantree** (CST node extraction) with **Cairn** (sandboxed agent orchestration) to automatically analyze and enhance Python code at the node level.
+A library that combines **Pydantree** (CST node extraction) with **Cairn** (sandboxed execution) and **custom-trained FunctionGemma subagents** to automatically analyze and enhance Python code at the node level — entirely locally, with no API dependencies.
 
-Each CST node (file, class, function) gets its own isolated agent sandbox that can:
-- Run linting and static analysis
-- Generate unit tests
-- Create docstrings and documentation
-- Generate sample/fixture data
-- Perform other code quality operations
+Each CST node (file, class, function) is processed by a domain-specific FunctionGemma model that reasons about its task in a multi-turn tool calling loop, decides which tools to invoke, inspects the results, and iterates until done — all inside an isolated Cairn workspace.
 
-## Core Concept
+## The Core Idea
+
+Traditional code analysis tools run static, deterministic pipelines: lint the file, write the output, done. This works for simple cases but falls apart when the task requires multi-step reasoning:
+
+- A generated test fails because a fixture is missing — should the agent try another approach or report the failure?
+- A lint issue can only be fixed by understanding broader context than just the node
+- A docstring needs to reference the style used in sibling functions
+
+Remora's answer is to give each specialized agent a small language model that can **observe, reason, and iterate**. The model examines the situation, calls a tool, inspects the result, and decides what to do next — all within the same isolated workspace.
+
+## Architecture
+
+### Four-Layer Design
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Application Layer                                       │
+│  - CLI interface (analyze, watch, config, list-agents)   │
+│  - Configuration management                              │
+│  - Reactive file watching                                │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│  Orchestration Layer                                     │
+│  - Node discovery (Pydantree + Tree-sitter queries)      │
+│  - Coordinator: routes nodes to FunctionGemma runners    │
+│  - Result aggregation and presentation                   │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│  FunctionGemma Runner Layer (new)                        │
+│  - Loads subagent YAML definition                        │
+│  - Builds initial context from CSTNode                   │
+│  - Runs multi-turn tool calling loop                     │
+│  - Dispatches tool calls → .pym scripts via Cairn        │
+└─────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────┐
+│  Execution Layer (Cairn)                                 │
+│  - Individual tool .pym scripts per subagent             │
+│  - Copy-on-write sandboxed execution                     │
+│  - Human review gate: accept / reject / retry            │
+└─────────────────────────────────────────────────────────┘
+```
+
+## FunctionGemma Subagents
+
+### What They Are
+
+Each specialized agent in Remora is a **fine-tuned FunctionGemma model** paired with a YAML definition file that describes its tool catalog and initial context. The base model is Google's FunctionGemma — a 270M parameter model purpose-built for structured tool calling. Remora fine-tunes a separate model checkpoint for each agent domain (lint, test, docstring, sample data), giving each model deep specialization in its task.
+
+At ~288MB per model (Q8 GGUF quantization), the entire agent fleet fits in under 1.5GB and runs on a single CPU with no API keys, no network calls, and no data leaving the machine.
+
+### The Multi-Turn Loop
+
+Instead of a monolithic script that runs once, each FunctionGemma subagent runs in a **multi-turn tool calling loop**:
+
+```
+1. Build initial messages (system prompt + CST node context)
+2. Call model with tool catalog → model responds with tool_calls or text
+3. If tool_calls:
+   a. For each tool call:
+      - Run any per-tool context providers (inject into messages)
+      - Execute the tool's .pym script in the Cairn workspace
+      - Append tool result to messages
+   b. Go to step 2
+4. If no tool_calls (or submit_result called): task complete
+```
+
+The model can call tools in sequence, read their outputs, decide whether to try again or proceed differently, and ultimately call `submit_result` when it determines the task is done.
+
+### Subagent Definition Format
+
+Each subagent is described by a YAML file that specifies:
+
+1. **The model** — path to the fine-tuned GGUF checkpoint for this domain
+2. **Initial context** — system prompt and node context template (injected once at spawn)
+3. **Tool catalog** — 4–8 coarse-grained tools, each backed by a `.pym` script
+4. **Per-tool context providers** — optional `.pym` scripts that inject domain-specific context at the moment a tool is invoked
+
+```yaml
+# agents/lint/lint_subagent.yaml
+name: lint_agent
+model: agents/lint/models/lint_functiongemma_q8.gguf
+
+initial_context:
+  system_prompt: |
+    You are a Python linting specialist. Analyze the provided code,
+    apply safe auto-fixes, and report issues requiring manual attention.
+  node_context: |
+    Code to analyze:
+    ```python
+    {{ node_text }}
+    ```
+
+tools:
+  - name: run_linter
+    pym: agents/lint/tools/run_linter.pym
+    description: Run the linter and return a list of issues with line numbers.
+    parameters: { ... }
+    context_providers:
+      - agents/lint/context/ruff_config.pym
+
+  - name: apply_fix
+    pym: agents/lint/tools/apply_fix.pym
+    description: Apply a fix for a specific lint issue code.
+    parameters: { ... }
+
+  - name: read_current_file
+    pym: agents/lint/tools/read_file.pym
+    description: Read the current state of the file being analyzed.
+    parameters: { ... }
+
+  - name: submit_result
+    pym: agents/lint/tools/submit.pym
+    description: Submit results and end the task.
+    parameters: { ... }
+```
+
+### Agent Layout on Disk
+
+```
+agents/
+├── lint/
+│   ├── lint_subagent.yaml
+│   ├── models/
+│   │   └── lint_functiongemma_q8.gguf     # ~288MB, domain fine-tuned
+│   ├── tools/
+│   │   ├── run_linter.pym
+│   │   ├── apply_fix.pym
+│   │   ├── read_file.pym
+│   │   └── submit.pym
+│   └── context/
+│       └── ruff_config.pym                # Per-tool context provider
+├── test/
+│   ├── test_subagent.yaml
+│   ├── models/
+│   │   └── test_functiongemma_q8.gguf
+│   └── tools/ ...
+├── docstring/
+│   └── ...
+└── sample_data/
+    └── ...
+```
+
+## Data Flow
+
+### Node Processing Pipeline
 
 ```
 Python Source Code
     ↓
 [Pydantree] Extract CST nodes via Tree-sitter queries
     ↓
-[Coordinator Agent] Spawn specialized agents for each node
+[Coordinator] Route each node to relevant FunctionGemma runners
     ↓
-[Specialized Agents] Each runs in isolated Cairn sandbox
-    ├── Linting Agent
-    ├── Test Generator Agent
-    ├── Docstring Agent
-    └── Sample Data Agent
+[FunctionGemmaRunner × N] Each subagent runs multi-turn tool calling loop
+    ├── lint runner     → run_linter.pym, apply_fix.pym
+    ├── test runner     → analyze_signature.pym, write_test_file.pym, run_tests.pym
+    ├── docstring runner→ read_docstring.pym, write_docstring.pym
+    └── sample_data runner → analyze_signature.pym, write_fixture_file.pym
     ↓
-[Cairn Overlays] Each agent writes to its own workspace
+[Cairn Workspaces] Each runner writes to its own isolated workspace
     ↓
-[Human Review] User accepts/rejects/merges changes
-```
-
-## Architecture
-
-### Three-Layer Design
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Application Layer                                       │
-│  - CLI interface                                         │
-│  - Configuration management                              │
-│  - Reactive file watching                                │
-│  - On-demand triggering                                  │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│  Orchestration Layer                                     │
-│  - Node discovery (Pydantree queries)                    │
-│  - Coordinator agent (meta-agent pattern)                │
-│  - Task routing to specialized agents                    │
-│  - Context provision (minimal for MVP)                   │
-└─────────────────────────────────────────────────────────┘
-                          ↓
-┌─────────────────────────────────────────────────────────┐
-│  Execution Layer (Cairn)                                 │
-│  - Specialized agent definitions (.pym scripts)          │
-│  - Sandboxed execution                                   │
-│  - Copy-on-write workspaces                              │
-│  - Result collection and merging                         │
-└─────────────────────────────────────────────────────────┘
-```
-
-## Key Components
-
-### 1. Node Discovery Engine
-- Uses Pydantree with custom `.scm` Tree-sitter queries
-- Identifies files, classes, and functions
-- Extracts node metadata (name, location, text)
-- Runtime query evaluation (no pre-generation needed)
-
-**Queries:**
-- `function_def.scm` - All function definitions
-- `class_def.scm` - All class definitions
-- `file.scm` - Python file-level structure
-
-### 2. Coordinator Agent
-- Meta-agent that manages specialized agents
-- Receives CST node from discovery engine
-- Determines which operations to run (lint, test, docstring, etc.)
-- Spawns specialized agents via Cairn orchestrator
-- Collects and aggregates results
-
-**Responsibilities:**
-- Task decomposition (one node → many specialized tasks)
-- Agent lifecycle management
-- Result aggregation
-- Error handling and retry logic
-
-### 3. Specialized Agents
-Each is a separate `.pym` script with focused responsibility:
-
-**`lint_agent.pym`**
-- Runs linters (ruff, pylint, etc.) on node
-- Suggests fixes
-- Can auto-apply fixes to sandbox workspace
-
-**`test_generator_agent.pym`**
-- Generates unit tests for functions/classes
-- Creates test file in appropriate location
-- Includes imports and fixtures
-
-**`docstring_agent.pym`**
-- Generates or improves docstrings
-- Follows configured style (Google, NumPy, Sphinx)
-- Injects directly into source code
-
-**`sample_data_agent.pym`**
-- Generates example data/fixtures
-- Creates JSON/YAML fixture files
-- Useful for documentation and testing
-
-### 4. Context Provider
-Simple interface for providing code context to agents:
-
-```python
-class ContextProvider:
-    async def get_context(self, node: CSTNode) -> str:
-        """For MVP: returns just the node's text (Option A)"""
-        return node.text
-```
-
-Future: Can be extended to file-level or smart context.
-
-### 5. Result Aggregator
-- Collects outputs from all specialized agents
-- Organizes by node and operation type
-- Provides unified interface for review
-- Handles workspace merging via Cairn
-
-## Data Flow
-
-### Node Processing Pipeline
-
-```python
-# 1. Discovery
-nodes = await discover_nodes("src/", queries=["function_def", "class_def"])
-
-# 2. For each node, spawn coordinator
-for node in nodes:
-    coordinator_agent = await spawn_coordinator(node)
-
-    # 3. Coordinator spawns specialized agents
-    tasks = coordinator_agent.decompose(node, operations=["lint", "docstring", "test"])
-
-    # 4. Each specialized agent runs in Cairn sandbox
-    results = await asyncio.gather(*[
-        cairn.spawn_agent(task) for task in tasks
-    ])
-
-    # 5. Results live in separate Cairn workspaces
-    # User reviews and accepts/rejects via Cairn workflow
+[Human Review] User accepts / rejects / retries per operation or per node
 ```
 
 ### Workspace Isolation
 
 ```
 .agentfs/
-├── stable.db                          # Original codebase
+├── stable.db                          # Original codebase (never touched during runs)
 ├── coordinator-{node-id}.db           # Coordinator workspace
-└── specialized-{operation}-{node}.db  # Each specialized agent's workspace
-    ├── lint-function-calculate.db
-    ├── test-function-calculate.db
-    └── docstring-function-calculate.db
+├── lint-{node-id}.db                  # All lint tool writes land here
+├── test-{node-id}.db                  # All test tool writes land here
+├── docstring-{node-id}.db             # All docstring tool writes land here
+└── sample_data-{node-id}.db           # All sample_data tool writes land here
 ```
 
-Each agent writes to its own overlay. User can:
-- Accept all changes from one agent type (e.g., all linting)
-- Accept specific nodes (e.g., just tests for `calculate()`)
-- Reject and retry with different config
-- Manually merge conflicts
+## Key Components
 
-## Usage Examples
+### 1. Node Discovery Engine
 
-### CLI - On-Demand
+Uses Pydantree with custom Tree-sitter `.scm` queries to extract CST nodes:
+- `function_def.scm` — all function definitions
+- `class_def.scm` — all class definitions
+- `file.scm` — file-level structure
 
-```bash
-# Analyze entire project
-remora analyze src/ --operations lint,test,docstring
+Returns `CSTNode` objects with name, location, source text, and a unique node ID.
 
-# Analyze specific file
-remora analyze src/utils.py --operations lint
+### 2. Coordinator
 
-# Analyze and auto-accept linting
-remora analyze src/ --operations lint --auto-accept
-
-# Watch mode (reactive)
-remora watch src/ --operations lint,docstring
-```
-
-### Programmatic API
+Receives a `CSTNode` and the list of configured operations, then for each operation spawns a `FunctionGemmaRunner` with the appropriate subagent YAML. The coordinator does not need to know the internals of any subagent — it only receives back the standard result contract:
 
 ```python
-from cst_agent import CSTAnalyzer, Operations
-
-analyzer = CSTAnalyzer(
-    root_dir="src/",
-    queries=["function_def", "class_def"],
-    operations=[Operations.LINT, Operations.TEST, Operations.DOCSTRING]
-)
-
-# Run analysis
-results = await analyzer.analyze()
-
-# Review results
-for node, agent_results in results.items():
-    print(f"{node.name}:")
-    for op, result in agent_results.items():
-        print(f"  {op}: {result.status}")
-
-# Accept specific changes
-await analyzer.accept(node="calculate", operation=Operations.LINT)
-
-# Reject and retry with different config
-await analyzer.reject(node="calculate", operation=Operations.TEST)
-await analyzer.retry(node="calculate", operation=Operations.TEST,
-                     config={"framework": "pytest"})
+{
+    "status": "success" | "failed" | "skipped",
+    "workspace_id": str,
+    "changed_files": list[str],
+    "summary": str,
+    "details": dict,
+    "error": str | None
+}
 ```
 
-### Configuration File
+### 3. FunctionGemmaRunner
 
-```yaml
-# remora.yaml
-root_dirs:
-  - src/
-  - lib/
+The central new component. Responsibilities:
 
-queries:
-  - function_def
-  - class_def
+- Load and validate the subagent YAML definition
+- Initialize the GGUF model via llama.cpp
+- Build the initial message list from the system prompt and rendered node context
+- Run the multi-turn tool calling loop until `submit_result` or turn limit
+- For each tool call: execute per-tool context providers, dispatch the `.pym` tool, append the result
+- Return the final structured result to the coordinator
 
-operations:
-  lint:
-    enabled: true
-    auto_accept: true
-    tools:
-      - ruff
-      - pylint
+### 4. Tool Scripts
 
-  test:
-    enabled: true
-    auto_accept: false
-    framework: pytest
+Each subagent has 4–8 coarse-grained `.pym` tools. Tools are distinct from each other along two axes:
+- **Read vs. mutate** — reading tools inspect the workspace; mutating tools modify it
+- **Domain specificity** — tools correspond to meaningful steps in the workflow, not low-level primitives
 
-  docstring:
-    enabled: true
-    auto_accept: false
-    style: google
+The `submit_result` tool is always the terminal action and is always present in every subagent.
 
-  sample_data:
-    enabled: false
+### 5. Context Providers
 
-context_scope: node  # MVP: minimal context
+Optional `.pym` scripts attached to specific tools. A context provider runs immediately before the tool is dispatched and injects domain-specific information into the conversation. For example, the lint agent's `apply_fix` tool has a `ruff_config.pym` provider that reads the project's `ruff.toml` and injects it as context at the moment the model is deciding which fix to apply.
 
-cairn:
-  max_concurrent_agents: 10
-  timeout: 120
+This keeps the initial context minimal and focused — domain context enters the conversation exactly when it is relevant.
+
+### 6. Result Aggregator
+
+Collects `NodeResult` objects from all coordinators and presents them in table, JSON, or interactive format. Manages the accept/reject/retry workflow via Cairn workspace operations.
+
+## Local Execution Model
+
+FunctionGemma subagents are designed to run entirely offline:
+
+| Property | Value |
+|---|---|
+| Model format | GGUF (quantized) |
+| Model size | ~288MB per subagent (Q8) |
+| Inference speed | ~125 tokens/sec on single CPU core |
+| Runtime | llama.cpp (via llama-cpp-python) |
+| Network dependency | None |
+| API keys | None |
+| Data egress | None |
+
+Multiple subagent models run simultaneously (one per operation), matching the coordinator's existing concurrency model.
+
+## Fine-Tuning
+
+Each subagent uses a separately fine-tuned checkpoint of the FunctionGemma base model. Fine-tuning is performed on synthetic training examples in the `training/` directory:
+
+```
+training/
+├── lint/
+│   ├── generate_examples.py     # Script to produce training examples
+│   ├── examples/                # Generated JSONL training data
+│   └── fine_tune.py             # Fine-tuning script
+├── test/
+├── docstring/
+└── sample_data/
 ```
 
-## Meta-Agent Pattern
+Training examples follow the multi-turn tool calling conversation format. A training example consists of a starting context (node + system prompt), a sequence of tool calls and results, and a terminal `submit_result` call.
 
-The coordinator uses a two-tier architecture:
-
-```
-User Request
-    ↓
-[Coordinator Agent] (spawned by Cairn)
-    ├─→ [Lint Agent] (spawned by coordinator)
-    ├─→ [Test Agent] (spawned by coordinator)
-    ├─→ [Docstring Agent] (spawned by coordinator)
-    └─→ [Sample Data Agent] (spawned by coordinator)
-    ↓
-[Results aggregated by coordinator]
-    ↓
-[Coordinator submits to Cairn]
-```
-
-**coordinator.pym** (simplified):
-```python
-from grail import Input, external
-
-# Inputs
-node_text = Input("node_text")
-node_name = Input("node_name")
-operations = Input("operations")  # ["lint", "test", "docstring"]
-
-# External functions
-@external
-async def spawn_agent(agent_type: str, inputs: dict) -> str:
-    """Spawn a specialized agent and return agent_id"""
-
-@external
-async def wait_for_agent(agent_id: str) -> dict:
-    """Wait for agent completion and get results"""
-
-# Coordinator logic
-results = {}
-agent_ids = []
-
-for op in operations:
-    agent_id = await spawn_agent(
-        agent_type=f"{op}_agent",
-        inputs={"node_text": node_text, "node_name": node_name}
-    )
-    agent_ids.append((op, agent_id))
-
-# Gather results
-for op, agent_id in agent_ids:
-    results[op] = await wait_for_agent(agent_id)
-
-# Submit aggregated results
-await submit_result(
-    summary=f"Processed {node_name} with {len(operations)} operations",
-    changed_files=flatten(r["changed_files"] for r in results.values())
-)
-
-return results
-```
+The fine-tuning pipeline outputs a GGUF file for each domain that is placed at the path referenced in the subagent YAML.
 
 ## MVP Scope
 
 ### Phase 1: Core Infrastructure
-- [x] Understand Cairn architecture
-- [x] Understand Pydantree architecture
-- [ ] Set up project structure
-- [ ] Implement node discovery with Pydantree
-- [ ] Create basic coordinator agent
-- [ ] Implement one specialized agent (linting)
+- [ ] Project structure, CLI entrypoint, dependencies
+- [ ] Configuration system (Pydantic, YAML, CLI overrides)
+- [ ] Node discovery with Pydantree
 
-### Phase 2: Multi-Agent System
-- [ ] Implement remaining specialized agents (test, docstring, sample_data)
-- [ ] Build result aggregation system
-- [ ] Create basic CLI
-- [ ] Add configuration file support
+### Phase 2: FunctionGemma Runner
+- [ ] Subagent YAML definition parser
+- [ ] FunctionGemmaRunner: model loading via llama-cpp-python
+- [ ] Multi-turn tool calling loop
+- [ ] Per-tool context provider dispatch
 
-### Phase 3: User Experience
-- [ ] Add watch mode (reactive)
-- [ ] Implement auto-accept logic
-- [ ] Build review interface
-- [ ] Add logging and progress reporting
+### Phase 3: Subagent Tool Scripts
+- [ ] Tool scripts for lint subagent
+- [ ] Tool scripts for test subagent
+- [ ] Tool scripts for docstring subagent
+- [ ] Tool scripts for sample_data subagent
 
-### Phase 4: Polish
-- [ ] Documentation
-- [ ] Examples and tutorials
-- [ ] Performance optimization
-- [ ] Error handling refinement
+### Phase 4: Training Pipeline
+- [ ] Training data generation scripts (per domain)
+- [ ] Fine-tuning pipeline for FunctionGemma base model
+- [ ] GGUF conversion and packaging
 
-## Future Enhancements
-
-### After MVP
-- **Smarter Context**: Upgrade to file-level or dependency-aware context
-- **Custom Agents**: Allow users to define their own specialized agents
-- **Agent Communication**: Let agents share insights (e.g., test agent uses lint results)
-- **Incremental Analysis**: Only re-analyze changed nodes
-- **Result Caching**: Cache agent results for unchanged nodes
-- **Parallel Execution**: Leverage Cairn's concurrency for faster processing
-- **IDE Integration**: VS Code extension for inline results
-- **Git Integration**: Auto-run on pre-commit hooks
-- **LLM Agents**: Specialized agents that use LLMs for complex operations
-
-## Technology Stack
-
-- **Pydantree**: CST node extraction and query runtime
-- **Cairn**: Agent orchestration and sandbox execution
-- **Tree-sitter**: Parsing and query matching
-- **Pydantic**: Configuration and data validation
-- **Typer**: CLI framework
-- **Rich**: Terminal output formatting
-- **AsyncIO**: Concurrent agent execution
-
-## Open Questions
-
-1. **Naming**: What should we call this library?
-   - `remora`
-
-2. **Package Structure**: Single package or monorepo?
-   - Monorepo: Core + plugins for each agent type
-
-3. **Agent Distribution**: How are specialized agents deployed?
-   - Bundled `.pym` files in package?
-   - Registry (like Cairn's registry provider)?
-   - User-configurable paths?
-
-4. **Result Format**: How should results be presented?
-   - JSON for programmatic use
-
-5. **Testing Strategy**: How do we test the meta-agent pattern?
-   - Integration tests with real Cairn
+### Phase 5: Integration
+- [ ] Coordinator integration (spawns FunctionGemmaRunner per operation)
+- [ ] Results aggregation, formatting, accept/reject/retry
+- [ ] CLI commands and watch mode
+- [ ] End-to-end acceptance tests
 
 ## Success Metrics
 
-For MVP to be successful, we should be able to:
+The MVP is successful when:
 
-✅ Point at a Python file and automatically:
-  - Lint it and get actionable suggestions
-  - Generate basic unit tests
-  - Add/improve docstrings
+- Point at a Python file → each subagent model runs locally, reasons about the code, and produces: lint fixes, generated tests, improved docstrings
+- Review and accept/reject changes per operation or per node via Cairn workspaces
+- Zero network calls during analysis — models, tools, and context providers all run locally
+- Multiple nodes processed concurrently
+- Watch mode re-triggers subagents on file changes
 
-✅ Review results in isolated workspaces before merging
+## Technology Stack
 
-✅ Accept/reject changes per operation or per node
-
-✅ Run in both on-demand and watch modes
-
-✅ Handle multiple files/nodes concurrently
-
-✅ Provide clear, actionable feedback to users
-
----
-
-## Next Steps
-
-1. Decide on library name
-2. Set up project structure (pyproject.toml, src/, tests/)
-3. Implement Pydantree integration (node discovery)
-4. Create first specialized agent (linting) as proof of concept
-5. Build coordinator agent skeleton
-6. Wire everything together with Cairn
-7. Create basic CLI and test end-to-end
+| Layer | Component | Technology |
+|---|---|---|
+| Application | CLI | Typer |
+| Application | Config | Pydantic |
+| Application | Terminal UI | Rich |
+| Application | File Watching | watchfiles |
+| Orchestration | Node Discovery | Pydantree + Tree-sitter |
+| Orchestration | Async Runtime | AsyncIO |
+| Execution | Model Inference | llama-cpp-python |
+| Execution | Model Format | GGUF (Q8) |
+| Execution | Sandbox | Cairn (.pym scripts) |
+| Execution | Workspace Isolation | Cairn Copy-on-Write |
+| Training | Fine-tuning | Unsloth / HuggingFace PEFT |
+| Training | Base Model | FunctionGemma (270M) |
