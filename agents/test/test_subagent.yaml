@@ -1,0 +1,87 @@
+name: test_agent
+model: agents/test/models/test_functiongemma_q8.gguf
+max_turns: 20
+
+initial_context:
+  system_prompt: |
+    You are a Python testing specialist. Analyze the function signature before
+    writing any tests. Check for existing tests to avoid duplication. Write
+    tests that cover normal cases, edge cases (empty, zero, None), and expected
+    exceptions. After writing tests, always run them and fix any failures before
+    submitting.
+  node_context: |
+    Target file: {{ file_path }}
+    Node: {{ node_name }} ({{ node_type }})
+    ```python
+    {{ node_text }}
+    ```
+
+tools:
+  - name: analyze_signature
+    pym: agents/test/tools/analyze_signature.pym
+    description: Extract the function signature, including types and defaults.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties: {}
+
+  - name: read_existing_tests
+    pym: agents/test/tools/read_existing_tests.pym
+    description: Read any existing test file for this module.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties: {}
+
+  - name: write_test_file
+    pym: agents/test/tools/write_test_file.pym
+    description: Write generated tests to the appropriate test file.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        content:
+          type: string
+        path:
+          type: string
+      required:
+        - content
+        - path
+    context_providers:
+      - agents/test/context/pytest_config.pym
+
+  - name: run_tests
+    pym: agents/test/tools/run_tests.pym
+    description: Run pytest for the generated tests and report results.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        path:
+          type: string
+          description: Optional test file path to run.
+    context_providers:
+      - agents/test/context/pytest_config.pym
+
+  - name: submit_result
+    pym: agents/test/tools/submit.pym
+    description: Submit the final test generation results and end the task.
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        summary:
+          type: string
+        tests_generated:
+          type: integer
+        tests_passing:
+          type: integer
+        changed_files:
+          type: array
+          items:
+            type: string
+      required:
+        - summary
+        - tests_generated
+        - tests_passing
+        - changed_files

@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+from pathlib import Path
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from typing import Any
+import xml.etree.ElementTree as ET
+
+
+def _workspace_root() -> Path:
+    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
+    return Path(workspace) if workspace else Path.cwd()
+
+
+def _resolve_target_file() -> Path:
+    workspace_root = _workspace_root()
+    env_path = os.getenv("REMORA_TARGET_FILE")
+    if env_path:
+        path = Path(env_path)
+        return path if path.is_absolute() else workspace_root / path
+
+    hint_path = workspace_root / ".remora" / "target_file"
+    if hint_path.exists():
+        raw = hint_path.read_text(encoding="utf-8").strip()
+        if raw:
+            path = Path(raw)
+            return path if path.is_absolute() else workspace_root / path
+
+    raise FileNotFoundError("Target file not found for tests.")
+
+
+def _default_test_path(target_file: Path) -> Path:
+    workspace_root = _workspace_root()
+    module_name = target_file.stem
+    return workspace_root / "tests" / f"test_{module_name}.py"
+
+
+def _resolve_test_path(inputs: dict[str, Any]) -> Path:
+    if inputs.get("path"):
+        path = Path(str(inputs["path"]))
+        return path if path.is_absolute() else _workspace_root() / path
+    target_file = _resolve_target_file()
+    return _default_test_path(target_file)
+
+
+def _run_pytest(test_path: Path, junit_path: Path) -> subprocess.CompletedProcess[str]:
+    cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-warnings",
+        f"--junitxml={junit_path}",
+        str(test_path),
+    ]
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=str(_workspace_root()),
+        timeout=30,
+        check=False,
+    )
+
+
+def _parse_junit(path: Path) -> dict[str, Any]:
+    tree = ET.parse(path)
+    root = tree.getroot()
+    suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
+    totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+    failures: list[dict[str, str]] = []
+
+    for suite in suites:
+        totals["tests"] += int(suite.attrib.get("tests", 0) or 0)
+        totals["failures"] += int(suite.attrib.get("failures", 0) or 0)
+        totals["errors"] += int(suite.attrib.get("errors", 0) or 0)
+        totals["skipped"] += int(suite.attrib.get("skipped", 0) or 0)
+
+        for case in suite.iter("testcase"):
+            test_name = case.attrib.get("name", "")
+            classname = case.attrib.get("classname")
+            full_name = f"{classname}::{test_name}" if classname else test_name
+            failure_node = case.find("failure")
+            error_node = case.find("error")
+            detail_node = failure_node if failure_node is not None else error_node
+            if detail_node is None:
+                continue
+            message = (detail_node.attrib.get("message") or detail_node.text or "").strip()
+            failures.append({"test": full_name, "message": message})
+
+    passed = totals["tests"] - totals["failures"] - totals["errors"] - totals["skipped"]
+    return {
+        "passed": max(passed, 0),
+        "failed": totals["failures"],
+        "errors": totals["errors"],
+        "failures": failures,
+    }
+
+
+def run(inputs: dict[str, Any]) -> dict[str, Any]:
+    try:
+        test_path = _resolve_test_path(inputs)
+        if not test_path.exists():
+            raise FileNotFoundError(f"Test file not found: {test_path}")
+        workspace_root = _workspace_root()
+        with tempfile.NamedTemporaryFile(
+            prefix="pytest_report_",
+            suffix=".xml",
+            dir=str(workspace_root),
+            delete=False,
+        ) as handle:
+            junit_path = Path(handle.name)
+
+        completed = _run_pytest(test_path, junit_path)
+        if not junit_path.exists():
+            raise RuntimeError(completed.stderr.strip() or "Pytest report not generated.")
+
+        result = _parse_junit(junit_path)
+        if completed.returncode not in {0, 1}:
+            result["errors"] = max(result.get("errors", 0), 1)
+            result["failures"].append(
+                {
+                    "test": "pytest",
+                    "message": completed.stderr.strip() or "Pytest failed to run.",
+                }
+            )
+        return result
+    except Exception as exc:  # noqa: BLE001 - tool scripts must never raise
+        return {"error": str(exc), "passed": 0, "failed": 0, "errors": 1, "failures": []}
+
+
+if __name__ == "__main__":
+    payload = json.loads(os.environ.get("REMORA_INPUT", "{}"))
+    print(json.dumps(run(payload)))

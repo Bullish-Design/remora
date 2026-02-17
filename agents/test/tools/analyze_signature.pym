@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+from pathlib import Path
+import ast
+import json
+import os
+from typing import Any
+
+
+def _workspace_root() -> Path:
+    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
+    return Path(workspace) if workspace else Path.cwd()
+
+
+def _resolve_target_file() -> Path | None:
+    workspace_root = _workspace_root()
+    env_path = os.getenv("REMORA_TARGET_FILE")
+    if env_path:
+        path = Path(env_path)
+        return path if path.is_absolute() else workspace_root / path
+
+    hint_path = workspace_root / ".remora" / "target_file"
+    if hint_path.exists():
+        raw = hint_path.read_text(encoding="utf-8").strip()
+        if raw:
+            path = Path(raw)
+            return path if path.is_absolute() else workspace_root / path
+
+    return None
+
+
+def _load_node_text() -> str:
+    env_text = os.getenv("REMORA_NODE_TEXT")
+    if env_text:
+        return env_text
+
+    workspace_root = _workspace_root()
+    hint_path = workspace_root / ".remora" / "node_text"
+    if hint_path.exists():
+        return hint_path.read_text(encoding="utf-8")
+
+    target = _resolve_target_file()
+    if target and target.exists():
+        return target.read_text(encoding="utf-8")
+
+    raise FileNotFoundError("Node text not found for signature analysis.")
+
+
+def _annotation_to_str(node: ast.AST | None) -> str | None:
+    if node is None:
+        return None
+    try:
+        return ast.unparse(node)
+    except Exception:
+        return None
+
+
+def _default_value(node: ast.AST | None) -> Any:
+    if node is None:
+        return None
+    try:
+        return ast.literal_eval(node)
+    except Exception:
+        try:
+            return ast.unparse(node)
+        except Exception:
+            return None
+
+
+def _iter_functions(module: ast.Module) -> list[ast.AST]:
+    return [node for node in module.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+
+def _build_parameters(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[dict[str, Any]]:
+    args = func.args
+    params: list[dict[str, Any]] = []
+    positional = list(args.posonlyargs) + list(args.args)
+    defaults = list(args.defaults)
+    defaults_start = len(positional) - len(defaults)
+
+    for index, arg in enumerate(positional):
+        default_node = defaults[index - defaults_start] if index >= defaults_start else None
+        params.append(
+            {
+                "name": arg.arg,
+                "type": _annotation_to_str(arg.annotation),
+                "default": _default_value(default_node),
+            }
+        )
+
+    if args.vararg:
+        params.append(
+            {
+                "name": args.vararg.arg,
+                "type": _annotation_to_str(args.vararg.annotation),
+                "default": None,
+            }
+        )
+
+    for arg, default_node in zip(args.kwonlyargs, args.kw_defaults):
+        params.append(
+            {
+                "name": arg.arg,
+                "type": _annotation_to_str(arg.annotation),
+                "default": _default_value(default_node),
+            }
+        )
+
+    if args.kwarg:
+        params.append(
+            {
+                "name": args.kwarg.arg,
+                "type": _annotation_to_str(args.kwarg.annotation),
+                "default": None,
+            }
+        )
+
+    return params
+
+
+def run(_: dict[str, Any]) -> dict[str, Any]:
+    try:
+        source = _load_node_text()
+        module = ast.parse(source)
+        functions = _iter_functions(module)
+        if not functions:
+            raise ValueError("No function definition found in node text.")
+
+        func = functions[0]
+        is_async = isinstance(func, ast.AsyncFunctionDef)
+        return {
+            "function_name": func.name,
+            "parameters": _build_parameters(func),
+            "return_type": _annotation_to_str(func.returns),
+            "is_async": is_async,
+        }
+    except Exception as exc:  # noqa: BLE001 - tool scripts must never raise
+        return {"error": str(exc)}
+
+
+if __name__ == "__main__":
+    payload = json.loads(os.environ.get("REMORA_INPUT", "{}"))
+    print(json.dumps(run(payload)))
