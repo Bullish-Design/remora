@@ -1,8 +1,8 @@
 # Remora MVP Roadmap
 
-This roadmap breaks the MVP into discrete, testable, and verifiable steps. The architecture is built around **custom-trained FunctionGemma subagents** — fine-tuned 270M parameter models that run locally and drive code analysis through a multi-turn tool calling loop.
+This roadmap breaks the MVP into discrete, testable, and verifiable steps. The architecture is built around **FunctionGemma subagents** — the stock FunctionGemma model accessed via the `llm` Python library and Ollama, driving code analysis through a multi-turn tool calling loop.
 
-Each milestone has a clear deliverable and verification criteria. Steps 1–4 establish infrastructure; Steps 5–7 build the FunctionGemma runner and subagent definitions; Steps 8–11 implement tool scripts for each domain; Steps 12–14 build and integrate the training pipeline; Steps 15–18 wire everything together and deliver the end-user experience.
+Each milestone has a clear deliverable and verification criteria. Steps 1–4 establish infrastructure; Steps 5–7 build the FunctionGemmaRunner and subagent definitions; Steps 8–11 implement tool scripts for each domain; Steps 12–13 wire the runner to the stock model and validate it end-to-end; Steps 14–17 deliver the user-facing experience.
 
 ---
 
@@ -12,13 +12,13 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 
 **Deliverables:**
 - `remora/` package with core modules wired
-- `pyproject.toml` with all dependencies (typer, rich, pydantic, pydantree, cairn, llama-cpp-python, jinja2, watchfiles)
+- `pyproject.toml` with all dependencies (typer, rich, pydantic, pydantree, cairn, llm, llm-ollama, jinja2, watchfiles)
 - CLI entrypoint exposing `analyze`, `watch`, `config`, `list-agents`
 
 **Verification:**
 - `python -m remora --help` lists all CLI commands
 - `remora --help` works after install
-- `python -c "from llama_cpp import Llama"` succeeds
+- `python -c "import llm; llm.get_model('ollama/functiongemma-4b-it')"` succeeds when Ollama is running
 
 ---
 
@@ -27,13 +27,13 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 **Goal:** Define and load all configuration with CLI overrides.
 
 **Deliverables:**
-- `RemoraConfig` Pydantic schema including `RunnerConfig` (max_turns, max_concurrent_runners, timeout)
+- `RemoraConfig` Pydantic schema including `RunnerConfig` (max_turns, max_concurrent_runners, timeout) and `model_id`
 - YAML loader with CLI override merging
-- `OperationConfig` with `subagent` path field replacing old monolithic agent paths
+- `OperationConfig` with `subagent` path field and optional `model_id` override
 - Validation errors mapped to `CONFIG_00x` exit codes
 
 **Verification:**
-- `remora config -f yaml` shows merged defaults including runner settings
+- `remora config -f yaml` shows merged defaults including runner settings and model_id
 - Invalid config returns exit code `3` and error `CONFIG_003`
 - Missing `agents_dir` returns `CONFIG_004`
 
@@ -61,7 +61,7 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 
 **Deliverables:**
 - `SubagentDefinition`, `ToolDefinition`, `InitialContext` Pydantic models
-- YAML loader that validates structure and resolves `pym`/`model` paths relative to `agents_dir`
+- YAML loader that validates structure and resolves `pym` paths relative to `agents_dir`
 - `SubagentDefinition.tool_schemas` property returns OpenAI-compatible tool list
 - Jinja2 template rendering for `node_context` (`{{ node_text }}`, `{{ node_name }}`, etc.)
 
@@ -75,19 +75,18 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 
 ## 5. FunctionGemmaRunner — Model Loading + Context
 
-**Goal:** Implement the runner's initialization: load the GGUF model and build initial messages.
+**Goal:** Implement the runner's initialization: acquire a model handle via `llm` and build initial messages.
 
 **Deliverables:**
-- `FunctionGemmaRunner` class with `SubagentDefinition`, `CSTNode`, `workspace_id`, `cairn_client`
-- `ModelCache` singleton to avoid reloading 288MB models between runs
-- `_build_initial_messages()` — renders system prompt + node context into initial message list
-- `AGENT_002` error when GGUF file not found at definition's model path
+- `FunctionGemmaRunner` class with `SubagentDefinition`, `CSTNode`, `workspace_id`, `cairn_client`, `model_id`
+- `_build_initial_messages()` — renders system prompt (including tool schemas) + node context into initial message list
+- `AGENT_002` error when model is not available via `llm`
 
 **Verification:**
-- Runner initializes without error when given a valid GGUF path
-- `ModelCache.get(path)` returns same `Llama` instance on second call
-- Initial message list has correct `system` + `user` roles and rendered node text
-- Missing GGUF returns `AGENT_002` without crashing other runners
+- Runner initializes without error when Ollama is running with FunctionGemma pulled
+- `llm.get_model(model_id)` raises `UnknownModelError` for an invalid model ID → captured as `AGENT_002`
+- Initial message list has correct system prompt with tool schemas and rendered node text
+- Unavailable model returns `AGENT_002` without crashing other runners
 
 ---
 
@@ -96,7 +95,7 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 **Goal:** Implement the core tool calling loop.
 
 **Deliverables:**
-- `run()` method: calls model, parses `tool_calls` or `stop`, dispatches tools, appends results
+- `run()` method: calls model via `llm` conversation API, parses tool calls, dispatches tools, appends results
 - `_dispatch_tool()`: runs context providers (if any), executes `.pym` tool via Cairn
 - Terminal detection: `submit_result` tool call exits loop and returns `AgentResult`
 - Turn limit enforcement with `AGENT_003` error on overflow
@@ -206,54 +205,35 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 
 ---
 
-## 12. Training Data Generation
+## 12. Runner Adaptation for `llm` Library
 
-**Goal:** Build scripts that generate synthetic multi-turn training examples for each domain.
+**Goal:** Replace `llama-cpp-python` / GGUF loading with the `llm` Python library, calling the stock FunctionGemma model via Ollama.
 
 **Deliverables:**
-- `training/shared/conversation_schema.py` — Pydantic models for the training conversation format
-- `training/lint/generate_examples.py` — generates N lint training conversations from Python fixtures
-- `training/test/generate_examples.py` — generates N test generation training conversations
-- `training/docstring/generate_examples.py` — generates N docstring training conversations
-- `training/sample_data/generate_examples.py` — generates N sample data training conversations
-- JSONL outputs in `training/{domain}/examples/`
+- Updated `pyproject.toml` with `llm>=0.19` and `llm-ollama>=0.9` replacing `llama-cpp-python`
+- `FunctionGemmaRunner` rewritten to use `llm.get_model()` and `model.conversation()`
+- Tool schema injection into system prompt; tool call parser for FunctionGemma output format
+- `AGENT_002` updated to report model unavailability (Ollama not running or model not pulled)
+- `model_id` config field on `RemoraConfig` (default: `"ollama/functiongemma-4b-it"`)
+- `ModelCache` singleton removed
 
 **Verification:**
-- Each generator produces valid JSONL with correct conversation structure
-- Every conversation ends with a `submit_result` tool call
-- Tool call arguments in training data match the YAML schemas for each domain
-- Generation scripts accept `--count N` to control example count
+- `FunctionGemmaRunner` raises `AGENT_002` for an unknown model ID
+- `_parse_tool_calls()` correctly extracts tool calls from FunctionGemma JSON output
+- Multi-turn loop dispatches tools and returns `AgentResult` on `submit_result`
+- `llm -m ollama/functiongemma-4b-it "Say hello"` succeeds (developer smoke test)
 
 ---
 
-## 13. Fine-Tuning Pipeline + GGUF Export
+## 13. End-to-End Runner Integration Test
 
-**Goal:** Fine-tune the FunctionGemma base model for each domain and export GGUF files.
-
-**Deliverables:**
-- `training/shared/base_model.py` — downloads/caches FunctionGemma base model
-- `training/{domain}/fine_tune.py` — LoRA fine-tuning script using Unsloth/PEFT
-- `training/shared/gguf_export.py` — converts fine-tuned checkpoint to Q8 GGUF
-- GGUF output placed at `agents/{domain}/models/{domain}_functiongemma_q8.gguf`
-- `training/Makefile` with targets: `generate`, `train-{domain}`, `export-{domain}`, `train-all`
-
-**Verification:**
-- `make train-lint` produces a GGUF file at the expected path
-- GGUF file loads successfully via `llama-cpp-python` (no crash on init)
-- Exported model responds to a sample tool call prompt with valid tool call JSON
-- File sizes are ~288MB ± 10% (Q8 quantization of 270M params)
-
----
-
-## 14. End-to-End Runner Integration Test
-
-**Goal:** Validate the full `FunctionGemmaRunner` → tool scripts → result pipeline with real GGUF models.
+**Goal:** Validate the full `FunctionGemmaRunner` → tool scripts → Cairn workspace → `AgentResult` pipeline with the real stock FunctionGemma model.
 
 **Deliverables:**
 - Integration test fixture: a small Python file with known lint issues, undocumented functions, and no tests
-- Integration test: run lint, test, and docstring runners against fixture; verify `AgentResult` outputs
-- Verify each runner produces `status=success` and non-empty `changed_files`
-- Verify workspace diffs are non-empty and correspond to expected changes
+- Integration tests for lint, test, and docstring runners against the fixture
+- `tests/conftest.py` that skips integration tests when Ollama is not reachable
+- `@pytest.mark.integration` marker; `pytest -m "not integration"` is the default CI command
 
 **Verification:**
 - Lint runner fixes at least one known issue in fixture file
@@ -263,7 +243,7 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 
 ---
 
-## 15. Results Aggregation + Formatting
+## 14. Results Aggregation + Formatting
 
 **Goal:** Provide consistent user-facing results from all runners.
 
@@ -281,7 +261,7 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 
 ---
 
-## 16. Accept / Reject / Retry Workflow
+## 15. Accept / Reject / Retry Workflow
 
 **Goal:** Expose change control for per-operation workspaces.
 
@@ -298,41 +278,42 @@ Each milestone has a clear deliverable and verification criteria. Steps 1–4 es
 
 ---
 
-## 17. CLI + Watch Mode
+## 16. CLI + Watch Mode
 
 **Goal:** Deliver end-to-end CLI experience including reactive watch mode.
 
 **Deliverables:**
 - `remora analyze <paths>` — full pipeline with all configured operations
 - `remora watch <paths>` — debounced re-analysis on file changes
-- `remora list-agents` — lists available subagent definitions with GGUF status
+- `remora list-agents` — lists available subagent definitions with model availability status
 - `remora config -f yaml` — displays merged configuration
 - Exit codes aligned with spec
 
 **Verification:**
 - `remora analyze src/fixture.py` returns valid output and correct exit code
-- `remora list-agents -f json` shows all four subagents with model path and status
+- `remora list-agents -f json` shows all subagents with YAML status and model availability
 - Touching a `.py` file in watch mode triggers re-analysis for that file only
 - Debounce prevents rapid duplicate runs within the configured window
 
 ---
 
-## 18. MVP Acceptance Tests
+## 17. MVP Acceptance Tests
 
 **Goal:** Validate the MVP success criteria end-to-end on a sample Python project.
 
 **Deliverables:**
 - Acceptance test suite covering all six scenarios below
-- Uses real GGUF models (not mocks) for integration validation
+- Uses the real FunctionGemma model via Ollama (not mocks) for integration validation
+- Tests skip gracefully when Ollama is not available
 
 **Verification Scenarios:**
 1. Point at Python file → lint runner identifies and fixes style issues → accept → changes in stable workspace
 2. Point at undocumented function → docstring runner injects docstring → accept → docstring in source
 3. Point at function → test runner generates pytest file → accept → test file exists in stable workspace
 4. Process file with 5+ functions → all run concurrently → results returned for all nodes
-5. Deliberately break one runner (invalid GGUF path) → other runners complete successfully
+5. Deliberately break one runner (invalid model ID) → other runners complete successfully
 6. Watch mode → save a Python file → re-analysis runs automatically for that file
 
 ## MVP Exit Criteria
 
-The MVP is complete when milestones 1–18 pass their verification checks and the six acceptance scenarios pass against a sample Python project using real fine-tuned GGUF models.
+The MVP is complete when milestones 1–17 pass their verification checks and the six acceptance scenarios pass against a sample Python project using the stock FunctionGemma model via Ollama.

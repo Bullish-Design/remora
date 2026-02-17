@@ -1,134 +1,100 @@
-# DEV GUIDE STEP 15: Results Aggregation + Formatting
+# DEV GUIDE STEP 15: Accept / Reject / Retry Workflow
 
 ## Goal
-Build the result aggregation models and output formatters that present analysis results to the user — table, JSON, and interactive review mode.
+Implement the workspace change control methods on `RemoraAnalyzer`: `accept`, `reject`, and `retry`. These let users act on individual operation results without touching workspaces for operations they haven't reviewed yet.
 
 ## Why This Matters
-The runner layer produces raw `AgentResult` and `NodeResult` objects. Users need to see these in a form that lets them quickly understand what happened and decide what to accept. The formatters are the last mile between the agent system and the human reviewing its output.
+The accept/reject/retry workflow is the human authority gate. Every change the FunctionGemma model produces is staged in an isolated Cairn workspace; nothing reaches the stable codebase until the user explicitly accepts it. This step wires the result layer to Cairn's merge/discard APIs and provides the `retry` path for re-running a specific operation with modified configuration.
 
 ## Implementation Checklist
-- Implement `AnalysisResults` model (top-level container for all `NodeResult` objects).
-- Implement `TableFormatter` — renders a node × operation grid using Rich tables.
-- Implement `JSONFormatter` — renders the full `AnalysisResults` as indented JSON.
-- Implement `InteractiveFormatter` — step-through prompts for accept/reject per operation.
-- Implement `ResultPresenter` orchestrator that picks the right formatter based on `--format` flag.
-- Add failure summaries: when an operation fails, show the error message and suggest a retry command.
+- Implement `RemoraAnalyzer` class with `accept`, `reject`, and `retry` methods.
+- `accept(node_id, operation)` — calls Cairn to merge the operation's workspace into stable.
+- `reject(node_id, operation)` — calls Cairn to discard the operation's workspace; stable is unchanged.
+- `retry(node_id, operation, config_override)` — discards the existing workspace, re-runs the `FunctionGemmaRunner` for that operation with config_override applied, stores new workspace.
+- Track workspace state: PENDING → ACCEPTED | REJECTED | RETRYING.
+- Expose `bulk_accept(operations=None)` and `bulk_reject(operations=None)` for batch operations.
 
 ## Suggested File Targets
-- `remora/results.py` (models + formatters)
-- `remora/models.py` (update `AnalysisResults`)
+- `remora/analyzer.py`
 
-## AnalysisResults Model
+## RemoraAnalyzer Interface
 
 ```python
-class AnalysisResults(BaseModel):
-    nodes: list[NodeResult]
-    total_nodes: int
-    successful_operations: int
-    failed_operations: int
-    skipped_operations: int
+class RemoraAnalyzer:
+    def __init__(self, config: RemoraConfig, cairn_client: CairnClient):
+        self.config = config
+        self.cairn = cairn_client
+        self._results: AnalysisResults | None = None
 
-    @classmethod
-    def from_node_results(cls, results: list[NodeResult]) -> "AnalysisResults":
-        successful = sum(
-            1 for nr in results
-            for ar in nr.operations.values()
-            if ar.status == "success"
-        )
-        failed = sum(
-            1 for nr in results
-            for ar in nr.operations.values()
-            if ar.status == "failed"
-        )
-        skipped = sum(
-            1 for nr in results
-            for ar in nr.operations.values()
-            if ar.status == "skipped"
-        )
-        return cls(
-            nodes=results,
-            total_nodes=len(results),
-            successful_operations=successful,
-            failed_operations=failed,
-            skipped_operations=skipped,
-        )
+    async def analyze(self, paths: list[Path]) -> AnalysisResults:
+        """Run full analysis pipeline on given paths."""
+        ...
+
+    async def accept(self, node_id: str, operation: str) -> None:
+        """Merge operation workspace into stable workspace."""
+        workspace_id = self._get_workspace_id(node_id, operation)
+        await self.cairn.merge(workspace_id)
+
+    async def reject(self, node_id: str, operation: str) -> None:
+        """Discard operation workspace; stable unchanged."""
+        workspace_id = self._get_workspace_id(node_id, operation)
+        await self.cairn.discard(workspace_id)
+
+    async def retry(
+        self,
+        node_id: str,
+        operation: str,
+        config_override: dict | None = None,
+    ) -> AgentResult:
+        """Discard existing workspace and re-run the operation."""
+        await self.reject(node_id, operation)
+        node = self._get_node(node_id)
+        op_config = self._build_op_config(operation, config_override or {})
+        runner = self._build_runner(node, operation, op_config)
+        result = await runner.run()
+        self._update_result(node_id, operation, result)
+        return result
+
+    async def bulk_accept(
+        self,
+        node_id: str | None = None,
+        operations: list[str] | None = None,
+    ) -> None:
+        """Accept all pending workspaces matching the given filters."""
+        ...
+
+    async def bulk_reject(
+        self,
+        node_id: str | None = None,
+        operations: list[str] | None = None,
+    ) -> None:
+        """Reject all pending workspaces matching the given filters."""
+        ...
 ```
 
-## Table Formatter Output
+## Workspace State Tracking
 
-```
-┌──────────────────────────────┬──────────┬──────────┬─────────────┐
-│ Node                         │ lint     │ test     │ docstring   │
-├──────────────────────────────┼──────────┼──────────┼─────────────┤
-│ src/utils.py::calculate      │ ✓ (3 fx) │ ✓ (5 t)  │ ✓ added     │
-│ src/utils.py::format_string  │ ✓ (0 fx) │ ✓ (2 t)  │ ✗ failed    │
-│ src/models.py::User          │ ✓ (1 fx) │ ─ skip   │ ✓ updated   │
-└──────────────────────────────┴──────────┴──────────┴─────────────┘
-Summary: 3 nodes, 7/9 operations succeeded, 1 failed, 1 skipped
-```
+```python
+from enum import Enum
 
-Status symbols:
-- `✓` — success (with brief detail from `summary`)
-- `✗` — failed (show error code)
-- `─` — skipped
-
-## JSON Formatter Output
-
-```json
-{
-  "total_nodes": 3,
-  "successful_operations": 7,
-  "failed_operations": 1,
-  "skipped_operations": 1,
-  "nodes": [
-    {
-      "node_id": "abc123",
-      "node_name": "calculate",
-      "file_path": "src/utils.py",
-      "operations": {
-        "lint": {
-          "status": "success",
-          "workspace_id": "lint-abc123",
-          "changed_files": ["src/utils.py"],
-          "summary": "Fixed 3 issues",
-          "details": {"issues_fixed": 3, "issues_remaining": 0},
-          "error": null
-        }
-      },
-      "errors": []
-    }
-  ]
-}
+class WorkspaceState(Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    RETRYING = "retrying"
 ```
 
-## Interactive Formatter
-
-The interactive formatter prompts per operation for each node:
-
-```
-src/utils.py::calculate
-
-  lint:  Fixed 3 issues (E225, F401, W291) → src/utils.py
-  [a]ccept  [r]eject  [s]kip  [d]iff  [?]help  > _
-```
-
-Commands:
-- `a` — accept (calls `RemoraAnalyzer.accept()`)
-- `r` — reject (calls `RemoraAnalyzer.reject()`)
-- `s` — skip for now (leave workspace pending)
-- `d` — show workspace diff before deciding
-- `q` — quit interactive mode
+Track state in a simple dict keyed by `(node_id, operation)`. State must persist across `retry` calls. After `accept` or `reject`, state transitions to ACCEPTED or REJECTED and further accept/reject calls on the same workspace are no-ops with a warning.
 
 ## Implementation Notes
-- The `TableFormatter` uses Rich's `Table` class. Use color coding: green for success, red for failed, grey for skipped.
-- The `InteractiveFormatter` should show the workspace diff inline when `d` is pressed (call Cairn's diff API).
-- Both `TableFormatter` and `JSONFormatter` should work non-interactively (no stdin required) for piping output to files.
-- `ResultPresenter` chooses formatter based on `--format` flag values: `table` (default), `json`, `interactive`.
+- `config_override` in `retry` is applied by merging the override dict into the operation's `OperationConfig`. This lets the user change settings like `max_turns`, `style`, or any domain-specific parameter without editing the config file.
+- Cairn's merge API may fail if there are conflicts with the stable workspace (e.g., another accept already modified the same file). Handle this gracefully: log the conflict, leave both workspaces intact, and surface an error message to the user.
+- `bulk_accept(operations=["lint"])` should accept all lint workspaces across all nodes. This is the primary path for operations with `auto_accept=true` in config.
 
 ## Testing Overview
-- **Unit test:** `AnalysisResults.from_node_results()` correctly counts success/failed/skipped across nodes.
-- **Unit test:** `TableFormatter` output contains all node names and operation names.
-- **Unit test:** `JSONFormatter` output is valid JSON that validates against the schema.
-- **Unit test:** Failed operations appear with error indicators in table output.
-- **Unit test:** Skipped operations show the skip symbol.
-- **Integration test:** `remora analyze --format json src/fixture.py` produces parseable JSON output.
+- **Unit test (mocked Cairn):** `accept()` calls `cairn.merge()` with correct workspace ID.
+- **Unit test (mocked Cairn):** `reject()` calls `cairn.discard()` with correct workspace ID.
+- **Unit test:** `retry()` calls `reject()` then spawns a new runner with the overridden config.
+- **Unit test:** `retry()` with `{"max_turns": 30}` passes `max_turns=30` to the new runner.
+- **Unit test:** Calling `accept()` on an already-accepted workspace is a no-op with a warning (not an error).
+- **Unit test:** `bulk_accept(operations=["lint"])` accepts all lint workspaces and no others.

@@ -1,120 +1,134 @@
-# DEV GUIDE STEP 14: End-to-End Runner Integration Test
+# DEV GUIDE STEP 14: Results Aggregation + Formatting
 
 ## Goal
-Validate the full pipeline — `FunctionGemmaRunner` → tool scripts → Cairn workspace → `AgentResult` — using real GGUF models against a controlled Python fixture file.
+Build the result aggregation models and output formatters that present analysis results to the user — table, JSON, and interactive review mode.
 
 ## Why This Matters
-Steps 5–13 were built and tested with mocks or in isolation. This step is the first time everything runs together with real models. It validates that the GGUF model produces tool calls that correctly dispatch to the `.pym` scripts, that the workspace accumulates changes, and that the final `AgentResult` reflects actual work done in the sandbox. Any mismatch between training data assumptions and runtime behavior surfaces here.
+The runner layer produces raw `AgentResult` and `NodeResult` objects. Users need to see these in a form that lets them quickly understand what happened and decide what to accept. The formatters are the last mile between the agent system and the human reviewing its output.
 
 ## Implementation Checklist
-- Create `tests/fixtures/integration_target.py` — a small Python file with controlled defects: known lint issues, one undocumented function, one untested function, one function worth generating sample data for.
-- Write `tests/integration/test_runner_lint.py` — runs the lint `FunctionGemmaRunner` on the fixture and asserts the result.
-- Write `tests/integration/test_runner_test.py` — runs the test `FunctionGemmaRunner` on the fixture and asserts the result.
-- Write `tests/integration/test_runner_docstring.py` — runs the docstring `FunctionGemmaRunner` on the fixture and asserts the result.
-- Mark all integration tests with `@pytest.mark.integration` (requires real GGUF files).
-- Add `pytest -m "not integration"` as the default test command for CI; integration tests run separately.
+- Implement `AnalysisResults` model (top-level container for all `NodeResult` objects).
+- Implement `TableFormatter` — renders a node × operation grid using Rich tables.
+- Implement `JSONFormatter` — renders the full `AnalysisResults` as indented JSON.
+- Implement `InteractiveFormatter` — step-through prompts for accept/reject per operation.
+- Implement `ResultPresenter` orchestrator that picks the right formatter based on `--format` flag.
+- Add failure summaries: when an operation fails, show the error message and suggest a retry command.
 
 ## Suggested File Targets
-- `tests/fixtures/integration_target.py`
-- `tests/integration/test_runner_lint.py`
-- `tests/integration/test_runner_test.py`
-- `tests/integration/test_runner_docstring.py`
-- `tests/conftest.py` (skip integration tests if GGUF files are absent)
+- `remora/results.py` (models + formatters)
+- `remora/models.py` (update `AnalysisResults`)
 
-## integration_target.py Design
+## AnalysisResults Model
 
 ```python
-# tests/fixtures/integration_target.py
-# This file is intentionally imperfect for integration testing.
+class AnalysisResults(BaseModel):
+    nodes: list[NodeResult]
+    total_nodes: int
+    successful_operations: int
+    failed_operations: int
+    skipped_operations: int
 
-import os,sys  # F401: os unused; also missing space after comma (E231)
-
-def calculate_discount(price:float, rate:float=0.1)->float:
-    # E231: missing whitespace after ':' and '->'
-    return price * (1 - rate)
-
-def format_currency(amount,symbol="$"):
-    # No type hints, no docstring
-    return f"{symbol}{amount:.2f}"
-
-def parse_config(path):
-    # No type hints, no docstring
-    with open(path) as f:
-        return f.read()
+    @classmethod
+    def from_node_results(cls, results: list[NodeResult]) -> "AnalysisResults":
+        successful = sum(
+            1 for nr in results
+            for ar in nr.operations.values()
+            if ar.status == "success"
+        )
+        failed = sum(
+            1 for nr in results
+            for ar in nr.operations.values()
+            if ar.status == "failed"
+        )
+        skipped = sum(
+            1 for nr in results
+            for ar in nr.operations.values()
+            if ar.status == "skipped"
+        )
+        return cls(
+            nodes=results,
+            total_nodes=len(results),
+            successful_operations=successful,
+            failed_operations=failed,
+            skipped_operations=skipped,
+        )
 ```
 
-This gives the lint agent real fixable issues, the docstring agent two undocumented functions, and the test agent two functions to write tests for.
+## Table Formatter Output
 
-## Integration Test Pattern
-
-```python
-# tests/integration/test_runner_lint.py
-import pytest
-from pathlib import Path
-from remora.runner import FunctionGemmaRunner
-from remora.subagent import load_subagent_definition
-from remora.discovery import CSTNode
-
-GGUF_PATH = Path("agents/lint/models/lint_functiongemma_q8.gguf")
-
-@pytest.mark.integration
-@pytest.mark.skipif(not GGUF_PATH.exists(), reason="GGUF not found")
-async def test_lint_runner_fixes_issues():
-    node = CSTNode(
-        node_id="test_lint_001",
-        node_type="file",
-        name="integration_target",
-        file_path=Path("tests/fixtures/integration_target.py"),
-        start_byte=0,
-        end_byte=...,  # fill from file
-        text=GGUF_PATH.read_text(),  # fill from file
-    )
-    definition = load_subagent_definition(
-        Path("agents/lint/lint_subagent.yaml"),
-        agents_dir=Path("agents"),
-    )
-    runner = FunctionGemmaRunner(
-        definition=definition,
-        node=node,
-        workspace_id="lint-test_lint_001",
-        cairn_client=...,  # real Cairn client
-    )
-    result = await runner.run()
-
-    assert result.status == "success"
-    assert len(result.changed_files) > 0
-    assert result.issues_fixed > 0  # in details
+```
+┌──────────────────────────────┬──────────┬──────────┬─────────────┐
+│ Node                         │ lint     │ test     │ docstring   │
+├──────────────────────────────┼──────────┼──────────┼─────────────┤
+│ src/utils.py::calculate      │ ✓ (3 fx) │ ✓ (5 t)  │ ✓ added     │
+│ src/utils.py::format_string  │ ✓ (0 fx) │ ✓ (2 t)  │ ✗ failed    │
+│ src/models.py::User          │ ✓ (1 fx) │ ─ skip   │ ✓ updated   │
+└──────────────────────────────┴──────────┴──────────┴─────────────┘
+Summary: 3 nodes, 7/9 operations succeeded, 1 failed, 1 skipped
 ```
 
-## Assertions per Runner
+Status symbols:
+- `✓` — success (with brief detail from `summary`)
+- `✗` — failed (show error code)
+- `─` — skipped
 
-**Lint runner:**
-- `result.status == "success"`
-- `result.changed_files` is non-empty
-- `result.details["issues_fixed"] >= 1`
-- Workspace diff shows actual file changes
+## JSON Formatter Output
 
-**Test runner:**
-- `result.status == "success"`
-- `result.changed_files` contains a test file path
-- Workspace contains a valid Python test file
-- Test file imports the target module
+```json
+{
+  "total_nodes": 3,
+  "successful_operations": 7,
+  "failed_operations": 1,
+  "skipped_operations": 1,
+  "nodes": [
+    {
+      "node_id": "abc123",
+      "node_name": "calculate",
+      "file_path": "src/utils.py",
+      "operations": {
+        "lint": {
+          "status": "success",
+          "workspace_id": "lint-abc123",
+          "changed_files": ["src/utils.py"],
+          "summary": "Fixed 3 issues",
+          "details": {"issues_fixed": 3, "issues_remaining": 0},
+          "error": null
+        }
+      },
+      "errors": []
+    }
+  ]
+}
+```
 
-**Docstring runner:**
-- `result.status == "success"`
-- `result.changed_files` contains the source file
-- Workspace diff shows inserted docstrings for both undocumented functions
-- Docstrings follow the configured style
+## Interactive Formatter
+
+The interactive formatter prompts per operation for each node:
+
+```
+src/utils.py::calculate
+
+  lint:  Fixed 3 issues (E225, F401, W291) → src/utils.py
+  [a]ccept  [r]eject  [s]kip  [d]iff  [?]help  > _
+```
+
+Commands:
+- `a` — accept (calls `RemoraAnalyzer.accept()`)
+- `r` — reject (calls `RemoraAnalyzer.reject()`)
+- `s` — skip for now (leave workspace pending)
+- `d` — show workspace diff before deciding
+- `q` — quit interactive mode
 
 ## Implementation Notes
-- Use a real Cairn client in integration tests, not a mock. The whole point of this step is to validate the full chain.
-- Set `max_turns=30` for integration tests — give the model more room to reason in a real (slower) inference environment.
-- Integration tests are expected to be slow (~30–120 seconds per runner on CPU). Do not include them in the default CI run.
-- If a runner returns `status="failed"` due to a model issue, inspect the full `messages` list from the runner (add a `debug` flag) to understand what the model produced.
+- The `TableFormatter` uses Rich's `Table` class. Use colour coding: green for success, red for failed, grey for skipped.
+- The `InteractiveFormatter` should show the workspace diff inline when `d` is pressed (call Cairn's diff API).
+- Both `TableFormatter` and `JSONFormatter` should work non-interactively (no stdin required) for piping output to files.
+- `ResultPresenter` chooses formatter based on `--format` flag values: `table` (default), `json`, `interactive`.
 
 ## Testing Overview
-- **Integration test:** Lint runner on fixture produces `status=success` and fixes at least one known issue.
-- **Integration test:** Test runner on fixture writes a test file to workspace.
-- **Integration test:** Docstring runner on fixture adds docstrings to undocumented functions.
-- **Integration test (error case):** Runner initialized with invalid GGUF path returns failed result, does not crash.
-- **Integration test (turn limit):** Runner with `max_turns=1` on a multi-step task returns `status=failed` with `AGENT_003`.
+- **Unit test:** `AnalysisResults.from_node_results()` correctly counts success/failed/skipped across nodes.
+- **Unit test:** `TableFormatter` output contains all node names and operation names.
+- **Unit test:** `JSONFormatter` output is valid JSON that validates against the schema.
+- **Unit test:** Failed operations appear with error indicators in table output.
+- **Unit test:** Skipped operations show the skip symbol.
+- **Integration test:** `remora analyze --format json src/fixture.py` produces parseable JSON output.

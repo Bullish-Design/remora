@@ -1,142 +1,149 @@
-# DEV GUIDE STEP 13: Fine-Tuning Pipeline + GGUF Export
+# DEV GUIDE STEP 13: End-to-End Runner Integration Test
 
 ## Goal
-Fine-tune the FunctionGemma base model for each domain using the training data from Step 12, then export each fine-tuned checkpoint to a Q8 GGUF file for use by the FunctionGemmaRunner.
+Validate the full pipeline — `FunctionGemmaRunner` → tool scripts → Cairn workspace → `AgentResult` — using the stock FunctionGemma model via Ollama against a controlled Python fixture file.
 
 ## Why This Matters
-This step produces the actual brain of each subagent. Without trained GGUF models, all runner infrastructure from Steps 4–11 runs in a degraded state (using the untrained base model). With trained models, the runner's multi-turn loop has a model that reliably produces correct tool calls for its domain.
+Steps 5–12 were built and tested with mocks or in isolation. This step is the first time everything runs together with a real model call. It validates that FunctionGemma produces tool calls that correctly dispatch to the `.pym` scripts, that the workspace accumulates changes, and that the final `AgentResult` reflects actual work done in the sandbox. Any mismatch between the system prompt format and the stock model's output format surfaces here.
 
 ## Implementation Checklist
-- Implement `training/shared/base_model.py` — downloads and caches the FunctionGemma base model from HuggingFace Hub.
-- For each domain, implement `training/{domain}/fine_tune.py` — LoRA fine-tuning using Unsloth (preferred) or HuggingFace PEFT.
-- Implement `training/shared/gguf_export.py` — converts a fine-tuned HuggingFace checkpoint to Q8 GGUF using llama.cpp's `convert_hf_to_gguf.py`.
-- Create `training/Makefile` with targets:
-  - `generate-{domain}` — run the example generator for a domain
-  - `generate-all` — generate all domains
-  - `train-{domain}` — fine-tune and export for a domain
-  - `train-all` — fine-tune and export all domains
-  - `eval-{domain}` — run evaluation on eval split
-- GGUF outputs go to `agents/{domain}/models/{domain}_functiongemma_q8.gguf`.
+- Create `tests/fixtures/integration_target.py` — a small Python file with controlled defects: known lint issues, one undocumented function, one untested function, one function worth generating sample data for.
+- Write `tests/integration/test_runner_lint.py` — runs the lint `FunctionGemmaRunner` on the fixture and asserts the result.
+- Write `tests/integration/test_runner_docstring.py` — runs the docstring `FunctionGemmaRunner` on the fixture and asserts the result.
+- Write `tests/integration/test_runner_test.py` — runs the test `FunctionGemmaRunner` on the fixture and asserts the result.
+- Mark all integration tests with `@pytest.mark.integration` (requires Ollama + FunctionGemma model).
+- Add `pytest -m "not integration"` as the default test command for CI; integration tests run separately when Ollama is available.
+- Add `tests/conftest.py` with a session-scoped fixture that skips integration tests when the model is unreachable.
 
 ## Suggested File Targets
-- `training/shared/base_model.py`
-- `training/shared/gguf_export.py`
-- `training/lint/fine_tune.py`
-- `training/test/fine_tune.py`
-- `training/docstring/fine_tune.py`
-- `training/sample_data/fine_tune.py`
-- `training/Makefile`
+- `tests/fixtures/integration_target.py`
+- `tests/integration/test_runner_lint.py`
+- `tests/integration/test_runner_test.py`
+- `tests/integration/test_runner_docstring.py`
+- `tests/conftest.py`
 
-## Fine-Tuning Configuration
+## integration_target.py Design
 
 ```python
-# training/lint/fine_tune.py (representative)
-from training.shared.base_model import load_base_model
+# tests/fixtures/integration_target.py
+# This file is intentionally imperfect for integration testing.
 
-model, tokenizer = load_base_model()
+import os,sys  # F401: os unused; also missing space after comma (E231)
 
-# LoRA config
-lora_config = LoraConfig(
-    r=16,
-    lora_alpha=32,
-    target_modules=["q_proj", "v_proj"],
-    lora_dropout=0.05,
-    bias="none",
-    task_type="CAUSAL_LM",
-)
+def calculate_discount(price:float, rate:float=0.1)->float:
+    # E231: missing whitespace after ':' and '->'
+    return price * (1 - rate)
 
-# Training arguments
-training_args = TrainingArguments(
-    output_dir="training/lint/checkpoints",
-    num_train_epochs=3,
-    per_device_train_batch_size=4,
-    gradient_accumulation_steps=4,
-    learning_rate=2e-4,
-    fp16=True,
-    save_strategy="epoch",
-    logging_steps=10,
-)
+def format_currency(amount, symbol="$"):
+    # No type hints, no docstring
+    return f"{symbol}{amount:.2f}"
 
-# Train on JSONL examples
-trainer = SFTTrainer(
-    model=model,
-    tokenizer=tokenizer,
-    train_dataset=load_jsonl("training/lint/examples/train.jsonl"),
-    eval_dataset=load_jsonl("training/lint/examples/eval.jsonl"),
-    args=training_args,
-    peft_config=lora_config,
-)
-trainer.train()
-trainer.save_model("training/lint/checkpoints/final")
+def parse_config(path):
+    # No type hints, no docstring
+    with open(path) as f:
+        return f.read()
 ```
 
-## GGUF Export
+This gives the lint agent real fixable issues, the docstring agent two undocumented functions, and the test agent two functions to write tests for.
+
+## conftest.py — Skip When Model Unavailable
 
 ```python
-# training/shared/gguf_export.py
-import subprocess
+# tests/conftest.py
+import pytest
+import llm
 
-def export_to_gguf(
-    checkpoint_dir: str,
-    output_path: str,
-    quantization: str = "q8_0",
-) -> None:
-    subprocess.run([
-        "python", "llama.cpp/convert_hf_to_gguf.py",
-        checkpoint_dir,
-        "--outfile", output_path,
-        "--outtype", quantization,
-    ], check=True)
+def _model_available(model_id: str) -> bool:
+    try:
+        llm.get_model(model_id)
+        # Do a cheap ping to verify Ollama is actually running
+        import httpx
+        httpx.get("http://localhost:11434/api/tags", timeout=2)
+        return True
+    except Exception:
+        return False
+
+MODEL_ID = "ollama/functiongemma-4b-it"
+
+def pytest_collection_modifyitems(items):
+    if not _model_available(MODEL_ID):
+        skip = pytest.mark.skip(reason=f"Ollama model {MODEL_ID!r} not available")
+        for item in items:
+            if item.get_closest_marker("integration"):
+                item.add_marker(skip)
 ```
 
-## Hardware Requirements
-- Fine-tuning requires a GPU with at least 16GB VRAM for the 270M parameter FunctionGemma model with LoRA (Unsloth reduces this significantly — can run on 8GB with Unsloth).
-- If no GPU is available, use a cloud instance (A10G or T4 is sufficient).
-- GGUF conversion can run on CPU and is fast (~1 minute per model).
-
-## base_model.py Notes
+## Integration Test Pattern
 
 ```python
-MODEL_ID = "google/functiongemma-4b"  # HuggingFace model ID
-# Note: verify actual model ID from HuggingFace Hub — use the correct FunctionGemma variant
+# tests/integration/test_runner_lint.py
+import pytest
+from pathlib import Path
+from remora.runner import FunctionGemmaRunner
+from remora.subagent import load_subagent_definition
+from remora.discovery import CSTNode
 
-def load_base_model() -> tuple[PreTrainedModel, PreTrainedTokenizer]:
-    # Cache to ~/.cache/huggingface by default
-    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype="auto")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-    return model, tokenizer
+FIXTURE = Path("tests/fixtures/integration_target.py")
+
+@pytest.mark.integration
+async def test_lint_runner_fixes_issues(cairn_client):
+    text = FIXTURE.read_text()
+    node = CSTNode(
+        node_id="test_lint_001",
+        node_type="file",
+        name="integration_target",
+        file_path=FIXTURE,
+        start_byte=0,
+        end_byte=len(text.encode()),
+        text=text,
+    )
+    definition = load_subagent_definition(
+        Path("agents/lint/lint_subagent.yaml"),
+        agents_dir=Path("agents"),
+    )
+    runner = FunctionGemmaRunner(
+        definition=definition,
+        node=node,
+        workspace_id="lint-test_lint_001",
+        cairn_client=cairn_client,
+    )
+    result = await runner.run()
+
+    assert result.status == "success"
+    assert len(result.changed_files) > 0
+    assert result.details.get("issues_fixed", 0) >= 1
 ```
 
-## Makefile
+## Assertions per Runner
 
-```makefile
-DOMAINS := lint test docstring sample_data
+**Lint runner:**
+- `result.status == "success"`
+- `result.changed_files` is non-empty
+- `result.details["issues_fixed"] >= 1`
+- Workspace diff shows actual file changes
 
-generate-%:
-	python training/$*/generate_examples.py --count 200
+**Test runner:**
+- `result.status == "success"`
+- `result.changed_files` contains a test file path
+- Workspace contains a valid Python test file
+- Test file imports the target module
 
-generate-all: $(addprefix generate-,$(DOMAINS))
-
-train-%:
-	python training/$*/fine_tune.py
-	python -c "from training.shared.gguf_export import export_to_gguf; \
-	    export_to_gguf('training/$*/checkpoints/final', 'agents/$*/models/$*_functiongemma_q8.gguf')"
-
-train-all: $(addprefix train-,$(DOMAINS))
-
-eval-%:
-	python training/$*/evaluate.py
-```
+**Docstring runner:**
+- `result.status == "success"`
+- `result.changed_files` contains the source file
+- Workspace diff shows inserted docstrings for both undocumented functions
+- Docstrings follow the configured style
 
 ## Implementation Notes
-- Use Unsloth if available — it reduces VRAM requirements and speeds up training significantly on consumer hardware.
-- The FunctionGemma model is already pre-trained for tool calling. Fine-tuning on domain-specific examples primarily teaches it the right tool sequencing for each domain, not how to call tools in general. This means fewer epochs and smaller datasets are needed than for general-purpose fine-tuning.
-- Merge LoRA weights before GGUF export: `model = model.merge_and_unload()`.
-- Run the GGUF through a quick smoke test after export (load it and call the model once) before considering the step complete.
+- Use a real Cairn client in integration tests — the whole point is to validate the full chain.
+- Set `max_turns=30` for integration tests to give the stock model more room. The stock model may require more turns than a fine-tuned model would.
+- Integration tests will be slow (30–120 seconds per runner depending on hardware). Do not include them in the default CI run.
+- If a runner returns `status="failed"`, inspect the full `messages` list from the conversation (add a `debug` flag to the runner) to see the raw model output. This helps calibrate the tool call parser.
+- The stock model may produce tool calls in varying formats. If the parser fails, update `_parse_tool_calls()` rather than the test assertions.
 
 ## Testing Overview
-- **Verification:** `make train-lint` completes without error and produces `agents/lint/models/lint_functiongemma_q8.gguf`.
-- **Verification:** GGUF file is loadable: `python -c "from llama_cpp import Llama; Llama('agents/lint/models/lint_functiongemma_q8.gguf'); print('ok')"`.
-- **Verification:** Loaded model responds to a sample lint tool call prompt with valid JSON tool call (not garbage).
-- **Verification:** GGUF file size is in the expected range (~250–320MB for Q8 of 270M params).
-- **Verification:** `make train-all` produces all four GGUF files.
+- **Integration test:** Lint runner on fixture produces `status=success` and fixes at least one known issue.
+- **Integration test:** Test runner on fixture writes a test file to workspace.
+- **Integration test:** Docstring runner on fixture adds docstrings to undocumented functions.
+- **Integration test (error case):** Runner initialised with an unavailable model ID returns `AGENT_002`, does not crash other runners.
+- **Integration test (turn limit):** Runner with `max_turns=1` on a multi-step task returns `status=failed` with `AGENT_003`.
