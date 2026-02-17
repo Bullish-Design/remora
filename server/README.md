@@ -1,6 +1,6 @@
 # Remora Inference Server
 
-vLLM running `google/function-gemma-3-270m` in Docker, exposed to your
+vLLM running `google/functiongemma-270m-it` in Docker, exposed to your
 Tailscale network via a sidecar container.
 
 ## Prerequisites

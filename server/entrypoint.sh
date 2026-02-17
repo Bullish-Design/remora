@@ -16,7 +16,7 @@ set -e
 #                           (major throughput win for remora's repeated tool schemas)
 
 python3 -m vllm.entrypoints.openai.api_server \
-    --model google/function-gemma-3-270m \
+    --model google/functiongemma-270m-it \
     --max-num-seqs 256 \
     --enable-prefix-caching
 

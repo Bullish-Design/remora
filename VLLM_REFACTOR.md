@@ -38,7 +38,7 @@ scheduling primitives to keep the GPU fully saturated.
 
 ### What changes
 
-We replace Ollama with a self-hosted vLLM server running `google/function-gemma-3-270m`
+We replace Ollama with a self-hosted vLLM server running `google/functiongemma-270m-it`
 with Multi-LoRA support. The server lives in a Docker container on the user's
 Windows/Linux machine and is reachable from any device on their Tailscale
 network. The remora client library becomes a thin HTTP client talking to the
@@ -117,7 +117,7 @@ class ServerConfig(BaseModel):
     base_url: str = "http://function-gemma-server:8000/v1"
     api_key: str = "EMPTY"
     timeout: int = 120
-    default_adapter: str = "google/function-gemma-3-270m"
+    default_adapter: str = "google/functiongemma-270m-it"
 ```
 
 `RemoraConfig`:
@@ -298,7 +298,7 @@ server:
   base_url: "http://function-gemma-server:8000/v1"
   api_key: "EMPTY"
   timeout: 120
-  default_adapter: "google/function-gemma-3-270m"
+  default_adapter: "google/functiongemma-270m-it"
 
 operations:
   lint:
@@ -451,7 +451,7 @@ wants to run a development-only local setup without the server.
 **Deliverables:**
 - `server/` directory committed to the repo with Dockerfile, Dockerfile.tailscale,
   docker-compose.yml, entrypoint.sh, update.sh
-- Base model (`google/function-gemma-3-270m`) downloading and loading successfully
+- Base model (`google/functiongemma-270m-it`) downloading and loading successfully
 - Server reachable at `http://function-gemma-server:8000/v1`
 
 **Verification:**
@@ -573,7 +573,7 @@ volumes:
 # Uncomment the Multi-LoRA section once your fine-tuned adapters are trained.
 
 python3 -m vllm.entrypoints.openai.api_server \
-    --model google/function-gemma-3-270m \
+    --model google/functiongemma-270m-it \
     --max-num-seqs 256 \
     --enable-prefix-caching
 
@@ -627,7 +627,7 @@ import asyncio
 from openai import AsyncOpenAI
 
 SERVER_URL = "http://function-gemma-server:8000/v1"
-MODEL_NAME = "google/function-gemma-3-270m"
+MODEL_NAME = "google/functiongemma-270m-it"
 
 
 async def test_base_model() -> None:
