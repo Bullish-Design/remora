@@ -1,0 +1,6 @@
+"""Error codes for Remora."""
+
+CONFIG_003 = "CONFIG_003"
+CONFIG_004 = "CONFIG_004"
+DISC_001 = "DISC_001"
+DISC_002 = "DISC_002"

@@ -1,0 +1,41 @@
+# Remora configuration example
+# Copy to remora.yaml and adjust as needed.
+
+root_dirs:
+  - .
+
+queries:
+  - function_def
+  - class_def
+
+agents_dir: agents
+
+operations:
+  lint:
+    enabled: true
+    auto_accept: false
+    subagent: lint/lint_subagent.yaml
+
+  test:
+    enabled: true
+    auto_accept: false
+    subagent: test/test_subagent.yaml
+
+  docstring:
+    enabled: true
+    auto_accept: false
+    subagent: docstring/docstring_subagent.yaml
+    style: google
+
+  sample_data:
+    enabled: false
+    auto_accept: false
+    subagent: sample_data/sample_data_subagent.yaml
+
+runner:
+  max_turns: 20
+  max_concurrent_runners: 4
+  timeout: 300
+
+cairn:
+  timeout: 120
