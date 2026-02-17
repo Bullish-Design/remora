@@ -1,0 +1,64 @@
+services:
+  tailscale:
+    build:
+      context: .
+      dockerfile: Dockerfile.tailscale
+    container_name: tailscale-vllm
+    # This hostname becomes the Tailscale node name and the DNS name you use
+    # to reach the server: http://function-gemma-server:8000/v1
+    hostname: function-gemma-server
+    environment:
+      # Generate a reusable auth key at: https://login.tailscale.com/admin/settings/keys
+      - TS_AUTHKEY=tskey-auth-YOUR_KEY_HERE
+      - TS_STATE_DIR=/var/lib/tailscale
+      # Enables `ssh root@function-gemma-server` without managing SSH keys
+      - TS_SSH=true
+    volumes:
+      - tailscale-data:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+      # Allows this container to restart the vllm-server container via Docker CLI
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mounts the project directory so `git pull` works inside the container
+      - .:/app
+    cap_add:
+      - net_admin
+      - sys_module
+    restart: unless-stopped
+
+  vllm-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vllm-gemma
+    # Shares the Tailscale container's network namespace.
+    # The vLLM API appears on the Tailscale node at port 8000 — no port
+    # forwarding through Windows required.
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    environment:
+      # Required if the model is gated on Hugging Face
+      - HUGGING_FACE_HUB_TOKEN=hf_YOUR_TOKEN_HERE
+      # Redirect all downloads and cache to a mounted SSD, not the container layer
+      - VLLM_CACHE_ROOT=/models/cache
+      - HF_HOME=/models/cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      # Adjust these paths to match your actual SSD drive letters.
+      # WSL2 exposes Windows drives under /mnt/ (D: drive → /mnt/d/)
+      # Put the base model on your fastest NVMe; adapters can go on any SSD.
+      - /mnt/d/AI_Models/base:/models/base
+      - /mnt/e/AI_Models/adapters:/models/adapters
+      - /mnt/d/AI_Models/cache:/models/cache
+    # Prevents shared-memory exhaustion errors in vLLM
+    ipc: host
+    restart: unless-stopped
+
+volumes:
+  tailscale-data:
