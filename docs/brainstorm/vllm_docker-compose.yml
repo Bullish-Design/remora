@@ -1,0 +1,34 @@
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: ts-vllm
+    hostname: gemma-engine
+    environment:
+      - TS_AUTHKEY=tskey-auth-YOUR_KEY_HERE
+      - TS_STATE_DIR=/var/lib/tailscale
+    volumes:
+      - ts-data:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+      - sys_module
+    restart: unless-stopped
+
+  vllm:
+    build: .
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ./models:/models
+    restart: unless-stopped
+
+volumes:
+  ts-data:

@@ -111,33 +111,37 @@ This setup runs the Ollama Docker container on a Windows machine and accesses it
 
 Download and install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/).
 
-#### 2. Run the Ollama Docker container
+#### 2. Create the Dockerfile
 
-Open PowerShell and run:
+Copy the quick start Dockerfile from this repo (`Dockerfile.ollama.quickstart`) to your Windows machine, or create a new file with the same contents in a working directory.
+
+#### 3. Build the Ollama image
+
+Open PowerShell in the directory with the Dockerfile and run:
+
+```powershell
+docker build -t remora-ollama -f Dockerfile.ollama.quickstart .
+```
+
+#### 4. Run the Ollama container
 
 ```powershell
 docker run -d `
   --name ollama `
   -p 11434:11434 `
   -v ollama-data:/root/.ollama `
-  ollama/ollama
+  remora-ollama
 ```
 
-This starts Ollama listening on port 11434, with model data persisted in a Docker volume.
+This starts Ollama listening on port 11434, with model data persisted in a Docker volume. The image already includes `functiongemma:270m`.
 
-#### 3. Pull the FunctionGemma model inside the container
-
-```powershell
-docker exec ollama ollama pull functiongemma:270m
-```
-
-Verify:
+#### 5. Verify the model inside the container
 
 ```powershell
 docker exec ollama ollama list
 ```
 
-#### 4. Configure Windows Firewall
+#### 6. Configure Windows Firewall
 
 Allow inbound TCP on port 11434 so Tailscale peers can reach the container:
 
@@ -150,7 +154,7 @@ New-NetFirewallRule `
   -Action Allow
 ```
 
-#### 5. Find the Windows machine's Tailscale IP
+#### 7. Find the Windows machine's Tailscale IP
 
 In PowerShell:
 
@@ -161,7 +165,7 @@ tailscale ip -4
 
 Note this IP — you will use it in the next section.
 
-#### 6. Verify from the Windows machine
+#### 8. Verify from the Windows machine
 
 ```powershell
 curl http://localhost:11434/api/tags
@@ -169,14 +173,14 @@ curl http://localhost:11434/api/tags
 
 ### On the NixOS dev machine
 
-#### 7. Verify Tailscale connectivity
+#### 9. Verify Tailscale connectivity
 
 ```bash
 curl http://<TAILSCALE_IP>:11434/api/tags
 # Should return a JSON list of available models
 ```
 
-#### 8. Configure the `llm` Ollama plugin to use the remote host
+#### 10. Configure the `llm` Ollama plugin to use the remote host
 
 The `llm-ollama` plugin reads the `OLLAMA_HOST` environment variable:
 
@@ -191,13 +195,13 @@ Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, or your devenv shell co
 export OLLAMA_HOST=http://<TAILSCALE_IP>:11434
 ```
 
-#### 9. Verify the model is reachable through `llm`
+#### 11. Verify the model is reachable through `llm`
 
 ```bash
 llm -m ollama/functiongemma:270m "Say hello"
 ```
 
-#### 10. Remora config for remote Ollama
+#### 12. Remora config for remote Ollama
 
 Add the `OLLAMA_HOST` environment variable to your shell before running `remora`, or set it in your `devenv.nix`:
 

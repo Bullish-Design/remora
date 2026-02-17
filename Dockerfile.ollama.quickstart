@@ -1,0 +1,8 @@
+FROM ollama/ollama:latest
+
+RUN /bin/ollama serve & \
+    sleep 2 && \
+    ollama pull functiongemma:270m && \
+    pkill ollama
+
+EXPOSE 11434

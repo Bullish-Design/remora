@@ -19,8 +19,16 @@ dependencies = [
   "watchfiles>=0.21",
   "llm>=0.19",
   "llm-ollama>=0.9",
+  "cairn",
+  "pydantree",
   # pydantree and cairn added as local or VCS dependencies
 ]
+
+[tool.uv.sources]
+fsdantic = { git = "https://github.com/Bullish-Design/fsdantic.git" }
+grail = { git = "https://github.com/Bullish-Design/grail.git" }
+cairn = { git = "https://github.com/Bullish-Design/cairn.git" }
+pydantree = { git = "https://github.com/Bullish-Design/pydantree.git" }
 
 [project.scripts]
 remora = "remora.cli:app"
@@ -55,11 +63,13 @@ include = [
 ]
 
 [tool.uv]
+prerelease = "allow"
 # Keep the default behavior; this section is here so you can extend it later if needed.
 
 [tool.pytest.ini_options]
-addopts = "-q --cov=remora --cov-report=term-missing"
+addopts = "-q --cov=remora --cov-report=term-missing -m \"not integration\""
 testpaths = ["tests"]
+markers = ["integration: requires Ollama FunctionGemma model"]
 
 [tool.mypy]
 python_version = "3.13"
