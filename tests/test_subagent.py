@@ -12,19 +12,15 @@ from remora.subagent import SubagentError, load_subagent_definition
 
 def _write_subagent_yaml(agents_dir: Path, *, include_submit: bool = True) -> Path:
     subagent_dir = agents_dir / "lint"
-    models_dir = subagent_dir / "models"
     tools_dir = subagent_dir / "tools"
     context_dir = subagent_dir / "context"
-    models_dir.mkdir(parents=True, exist_ok=True)
     tools_dir.mkdir(parents=True, exist_ok=True)
     context_dir.mkdir(parents=True, exist_ok=True)
 
-    model_path = models_dir / "lint.gguf"
     run_tool_path = tools_dir / "run_tool.pym"
     submit_path = tools_dir / "submit.pym"
     context_path = context_dir / "config.pym"
 
-    model_path.write_text("", encoding="utf-8")
     run_tool_path.write_text("", encoding="utf-8")
     submit_path.write_text("", encoding="utf-8")
     context_path.write_text("", encoding="utf-8")
@@ -61,7 +57,7 @@ def _write_subagent_yaml(agents_dir: Path, *, include_submit: bool = True) -> Pa
         yaml.safe_dump(
             {
                 "name": "lint_agent",
-                "model": "lint/models/lint.gguf",
+                "model_id": "ollama/functiongemma-4b-it",
                 "max_turns": 12,
                 "initial_context": {
                     "system_prompt": "You are a lint agent.",
@@ -81,7 +77,7 @@ def test_load_subagent_definition_resolves_paths(tmp_path: Path) -> None:
     definition = load_subagent_definition(subagent_path, agents_dir)
 
     assert definition.name == "lint_agent"
-    assert definition.model == (agents_dir / "lint/models/lint.gguf").resolve()
+    assert definition.model_id == "ollama/functiongemma-4b-it"
     assert len(definition.tools) == 2
     assert definition.tools_by_name["run_tool"].pym == (agents_dir / "lint/tools/run_tool.pym").resolve()
     assert definition.tools_by_name["run_tool"].context_providers == [

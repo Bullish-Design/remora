@@ -65,7 +65,7 @@ class InitialContext(BaseModel):
 
 class SubagentDefinition(BaseModel):
     name: str
-    model: Path
+    model_id: str | None = None
     max_turns: int = 20
     initial_context: InitialContext
     tools: list[ToolDefinition]
@@ -118,8 +118,6 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 def _resolve_paths(data: dict[str, Any], agents_dir: Path) -> dict[str, Any]:
     resolved: dict[str, Any] = dict(data)
-    if "model" in resolved:
-        resolved["model"] = resolve_path(agents_dir, resolved["model"])
     tools_data = []
     for tool in resolved.get("tools", []) or []:
         tool_copy = dict(tool)
@@ -143,8 +141,6 @@ def _validate_submit_result(definition: SubagentDefinition, path: Path) -> None:
 
 
 def _warn_missing_paths(definition: SubagentDefinition) -> None:
-    if not definition.model.exists():
-        warnings.warn(f"Model file not found: {definition.model}", stacklevel=2)
     for tool in definition.tools:
         if not tool.pym.exists():
             warnings.warn(f"Tool script not found: {tool.pym}", stacklevel=2)

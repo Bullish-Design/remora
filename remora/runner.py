@@ -5,9 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import asyncio
-from functools import partial
 import json
-import threading
+import re
 from typing import Any, Literal, Protocol
 
 from remora.discovery import CSTNode
@@ -16,12 +15,17 @@ from remora.results import AgentResult
 from remora.subagent import SubagentDefinition
 
 try:
-    from llama_cpp import Llama
+    import llm  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - optional dependency in tests
 
-    class Llama:  # type: ignore[no-redef]
-        def __init__(self, *_: Any, **__: Any) -> None:
-            raise RuntimeError("llama-cpp-python is required to load GGUF models.")
+    class _MissingLLM:
+        class UnknownModelError(Exception):
+            """Fallback error when llm is missing."""
+
+        def get_model(self, *_: Any, **__: Any) -> Any:
+            raise RuntimeError("llm is required to load models.")
+
+    llm = _MissingLLM()  # type: ignore[assignment]
 
 
 class CairnClient(Protocol):
@@ -52,136 +56,118 @@ class AgentError(RuntimeError):
         self.timestamp = timestamp or datetime.now(timezone.utc)
 
 
-class ModelCache:
-    _instances: dict[str, Llama] = {}
-    _lock = threading.Lock()
-
-    @classmethod
-    def get(cls, model_path: str, **kwargs: Any) -> Llama:
-        with cls._lock:
-            if model_path not in cls._instances:
-                cls._instances[model_path] = Llama(model_path=model_path, **kwargs)
-            return cls._instances[model_path]
-
-    @classmethod
-    def clear(cls) -> None:
-        """For testing: clear all cached instances."""
-        with cls._lock:
-            cls._instances.clear()
-
-
 @dataclass
 class FunctionGemmaRunner:
     definition: SubagentDefinition
     node: CSTNode
     workspace_id: str
     cairn_client: CairnClient
-    model: Llama = field(init=False)
+    model_id: str | None = None
+    model: Any = field(init=False)
     messages: list[dict[str, Any]] = field(init=False)
     turn_count: int = field(init=False)
+    _system_prompt: str = field(init=False)
+    _initial_message: str = field(init=False)
+    _use_native_tools: bool = field(init=False)
 
     def __post_init__(self) -> None:
-        if not self.definition.model.exists():
+        resolved_model_id = self.model_id or self.definition.model_id or "ollama/functiongemma-4b-it"
+        self.model_id = resolved_model_id
+        try:
+            self.model = llm.get_model(resolved_model_id)
+        except llm.UnknownModelError as exc:
             raise AgentError(
                 node_id=self.node.node_id,
                 operation=self.definition.name,
                 phase="model_load",
                 error_code=AGENT_002,
-                message=f"GGUF not found: {self.definition.model}",
-            )
-        self.model = ModelCache.get(
-            str(self.definition.model),
-            n_ctx=4096,
-            n_threads=2,
-            verbose=False,
-            n_gpu_layers=0,
-        )
+                message=f"Model not available in Ollama: {self.model_id}",
+            ) from exc
+        self._use_native_tools = bool(getattr(self.model, "can_use_tools", False))
         self.messages = []
         self.turn_count = 0
-        self._build_initial_messages()
+        self._system_prompt = self._build_system_prompt()
+        self._initial_message = self.definition.initial_context.render(self.node)
+        self.messages.append({"role": "system", "content": self._system_prompt})
+        self.messages.append({"role": "user", "content": self._initial_message})
 
-    def _build_initial_messages(self) -> None:
-        self.messages = [
-            {
-                "role": "system",
-                "content": self.definition.initial_context.system_prompt,
-            },
-            {
-                "role": "user",
-                "content": self.definition.initial_context.render(self.node),
-            },
-        ]
+    def _build_system_prompt(self) -> str:
+        if self._use_native_tools:
+            return self.definition.initial_context.system_prompt
+        tool_schema_block = json.dumps(self.definition.tool_schemas, indent=2)
+        return (
+            "You have access to the following tools:\n"
+            f"{tool_schema_block}\n\n"
+            "Call tools by responding with JSON in the format:\n"
+            '{"name": "<tool_name>", "arguments": { ... }}\n\n'
+            f"{self.definition.initial_context.system_prompt}"
+        )
 
     async def run(self) -> AgentResult:
+        conversation = self._start_conversation()
+        response = await self._prompt(conversation, self._initial_message)
+        response_text = self._response_text(response)
+
         while self.turn_count < self.definition.max_turns:
-            response = await self._call_model()
-            choice = response.get("choices", [{}])[0]
-            message = choice.get("message", {})
-            self.messages.append(message)
             self.turn_count += 1
-
-            finish_reason = choice.get("finish_reason")
-            if finish_reason == "stop":
-                summary = message.get("content", "") if isinstance(message, dict) else ""
-                return AgentResult(
-                    status="success",
-                    workspace_id=self.workspace_id,
-                    changed_files=[],
-                    summary=summary,
-                    details={},
-                    error=None,
+            self.messages.append({"role": "assistant", "content": response_text})
+            tool_calls = self._parse_tool_calls(response_text)
+            if not tool_calls:
+                raise AgentError(
+                    node_id=self.node.node_id,
+                    operation=self.definition.name,
+                    phase="loop",
+                    error_code=AGENT_003,
+                    message="Model stopped without calling submit_result",
                 )
+            for tool_call in tool_calls:
+                name = tool_call.get("name")
+                if name == "submit_result":
+                    return self._build_submit_result(tool_call.get("arguments"))
+                tool_result = await self._dispatch_tool(tool_call)
+                tool_payload = json.dumps(tool_result)
+                self.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": str(tool_call.get("id", "")),
+                        "content": tool_payload,
+                    }
+                )
+                response = await self._prompt(conversation, f"Tool result for {name}: {tool_payload}")
+                response_text = self._response_text(response)
 
-            if finish_reason == "tool_calls":
-                tool_calls = message.get("tool_calls", []) if isinstance(message, dict) else []
-                for tool_call in tool_calls:
-                    result = await self._dispatch_tool(tool_call)
-                    self.messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.get("id", ""),
-                            "content": json.dumps(result),
-                        }
-                    )
-                    if tool_call.get("function", {}).get("name") == "submit_result":
-                        arguments = tool_call.get("function", {}).get("arguments", "{}")
-                        return self._build_submit_result(arguments)
-                continue
-
-            summary = message.get("content", "") if isinstance(message, dict) else ""
-            return AgentResult(
-                status="success",
-                workspace_id=self.workspace_id,
-                changed_files=[],
-                summary=summary,
-                details={},
-                error=None,
-            )
-
-        return AgentResult(
-            status="failed",
-            workspace_id=self.workspace_id,
-            changed_files=[],
-            summary="",
-            details={},
-            error=f"{AGENT_003}: Turn limit ({self.definition.max_turns}) exceeded",
+        raise AgentError(
+            node_id=self.node.node_id,
+            operation=self.definition.name,
+            phase="loop",
+            error_code=AGENT_003,
+            message=f"Turn limit {self.definition.max_turns} exceeded",
         )
 
-    async def _call_model(self) -> dict[str, Any]:
+    def _start_conversation(self) -> Any:
+        kwargs: dict[str, Any] = {"system": self._system_prompt}
+        if self._use_native_tools:
+            kwargs["tools"] = self.definition.tool_schemas
+        return self.model.conversation(**kwargs)
+
+    async def _prompt(self, conversation: Any, message: str) -> Any:
         loop = asyncio.get_running_loop()
-        call = partial(
-            self.model.create_chat_completion,
-            messages=self.messages,
-            tools=self.definition.tool_schemas,
-            tool_choice="auto",
-        )
-        return await loop.run_in_executor(None, call)
+        return await loop.run_in_executor(None, conversation.prompt, message)
 
-    def _build_submit_result(self, arguments: str) -> AgentResult:
-        try:
-            payload = json.loads(arguments) if arguments else {}
-        except json.JSONDecodeError:
-            payload = {}
+    @staticmethod
+    def _response_text(response: Any) -> str:
+        text_attr = getattr(response, "text", None)
+        if callable(text_attr):
+            return str(text_attr())
+        return str(response)
+
+    def _build_submit_result(self, arguments: Any) -> AgentResult:
+        payload: Any = arguments
+        if isinstance(arguments, str):
+            try:
+                payload = json.loads(arguments) if arguments else {}
+            except json.JSONDecodeError:
+                payload = {}
         if not isinstance(payload, dict):
             payload = {}
         filtered = {
@@ -199,13 +185,43 @@ class FunctionGemmaRunner:
         }
         return AgentResult.model_validate(result_data)
 
+    def _parse_tool_calls(self, text: str) -> list[dict[str, Any]]:
+        if not text:
+            return []
+        json_blocks = re.findall(r"```json\s*(.*?)\s*```", text, re.DOTALL)
+        results: list[dict[str, Any]] = []
+        if json_blocks:
+            for block in json_blocks:
+                results.extend(self._coerce_tool_calls(block))
+            return results
+        results.extend(self._coerce_tool_calls(text))
+        return results
+
+    @staticmethod
+    def _coerce_tool_calls(payload: Any) -> list[dict[str, Any]]:
+        data: Any = payload
+        if isinstance(payload, str):
+            try:
+                data = json.loads(payload.strip())
+            except json.JSONDecodeError:
+                return []
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = [data]
+        else:
+            return []
+        return [item for item in items if isinstance(item, dict) and "name" in item]
+
     async def _dispatch_tool(self, tool_call: dict[str, Any]) -> dict[str, Any]:
-        name = tool_call.get("function", {}).get("name")
-        arguments = tool_call.get("function", {}).get("arguments", "{}")
-        try:
-            args = json.loads(arguments) if arguments else {}
-        except json.JSONDecodeError:
-            args = {}
+        name = tool_call.get("name")
+        arguments = tool_call.get("arguments", {})
+        args: Any = arguments
+        if isinstance(arguments, str):
+            try:
+                args = json.loads(arguments) if arguments else {}
+            except json.JSONDecodeError:
+                args = {}
         if not isinstance(args, dict):
             args = {}
         tool_def = self.definition.tools_by_name.get(str(name)) if name is not None else None

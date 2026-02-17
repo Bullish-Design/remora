@@ -32,6 +32,7 @@ class OperationConfig(BaseModel):
     enabled: bool = True
     auto_accept: bool = False
     subagent: str
+    model_id: str | None = None
 
 
 class CairnConfig(BaseModel):
@@ -56,6 +57,7 @@ class RemoraConfig(BaseModel):
     root_dirs: list[Path] = Field(default_factory=lambda: [Path(".")])
     queries: list[str] = Field(default_factory=lambda: ["function_def", "class_def"])
     agents_dir: Path = Path("agents")
+    model_id: str = "ollama/functiongemma-4b-it"
     operations: dict[str, OperationConfig] = Field(default_factory=_default_operations)
     runner: RunnerConfig = Field(default_factory=RunnerConfig)
     cairn: CairnConfig = Field(default_factory=CairnConfig)

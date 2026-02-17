@@ -1,5 +1,5 @@
 name: sample_data_agent
-model: agents/sample_data/models/sample_data_functiongemma_q8.gguf
+model_id: ollama/functiongemma-4b-it
 max_turns: 12
 
 initial_context:

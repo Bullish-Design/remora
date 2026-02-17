@@ -1,5 +1,5 @@
 name: test_agent
-model: agents/test/models/test_functiongemma_q8.gguf
+model_id: ollama/functiongemma-4b-it
 max_turns: 20
 
 initial_context:

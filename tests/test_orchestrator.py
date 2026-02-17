@@ -60,7 +60,14 @@ def test_process_node_returns_results(monkeypatch: pytest.MonkeyPatch, tmp_path:
         return SimpleNamespace(name=path.stem)
 
     class FakeRunner:
-        def __init__(self, definition: object, node: CSTNode, workspace_id: str, cairn_client: FakeCairnClient) -> None:
+        def __init__(
+            self,
+            definition: object,
+            node: CSTNode,
+            workspace_id: str,
+            cairn_client: FakeCairnClient,
+            model_id: str | None = None,
+        ) -> None:
             self.workspace_id = workspace_id
 
         async def run(self) -> AgentResult:
@@ -94,7 +101,14 @@ def test_process_node_respects_semaphore(monkeypatch: pytest.MonkeyPatch, tmp_pa
         return SimpleNamespace(name=path.stem)
 
     class FakeRunner:
-        def __init__(self, definition: object, node: CSTNode, workspace_id: str, cairn_client: FakeCairnClient) -> None:
+        def __init__(
+            self,
+            definition: object,
+            node: CSTNode,
+            workspace_id: str,
+            cairn_client: FakeCairnClient,
+            model_id: str | None = None,
+        ) -> None:
             self.workspace_id = workspace_id
 
         async def run(self) -> AgentResult:
@@ -132,7 +146,14 @@ def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch,
         return SimpleNamespace(name=path.stem)
 
     class FakeRunner:
-        def __init__(self, definition: object, node: CSTNode, workspace_id: str, cairn_client: FakeCairnClient) -> None:
+        def __init__(
+            self,
+            definition: object,
+            node: CSTNode,
+            workspace_id: str,
+            cairn_client: FakeCairnClient,
+            model_id: str | None = None,
+        ) -> None:
             self.workspace_id = workspace_id
 
         async def run(self) -> AgentResult:
@@ -168,7 +189,14 @@ def test_process_node_skips_disabled_operation(monkeypatch: pytest.MonkeyPatch, 
         return SimpleNamespace(name=path.stem)
 
     class FakeRunner:
-        def __init__(self, definition: object, node: CSTNode, workspace_id: str, cairn_client: FakeCairnClient) -> None:
+        def __init__(
+            self,
+            definition: object,
+            node: CSTNode,
+            workspace_id: str,
+            cairn_client: FakeCairnClient,
+            model_id: str | None = None,
+        ) -> None:
             self.workspace_id = workspace_id
 
         async def run(self) -> AgentResult:
@@ -199,7 +227,14 @@ def test_bad_subagent_path_records_init_error(monkeypatch: pytest.MonkeyPatch, t
         return SimpleNamespace(name=path.stem)
 
     class FakeRunner:
-        def __init__(self, definition: object, node: CSTNode, workspace_id: str, cairn_client: FakeCairnClient) -> None:
+        def __init__(
+            self,
+            definition: object,
+            node: CSTNode,
+            workspace_id: str,
+            cairn_client: FakeCairnClient,
+            model_id: str | None = None,
+        ) -> None:
             self.workspace_id = workspace_id
 
         async def run(self) -> AgentResult:

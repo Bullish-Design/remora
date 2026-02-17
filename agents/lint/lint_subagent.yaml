@@ -1,5 +1,5 @@
 name: lint_agent
-model: agents/lint/models/lint_functiongemma_q8.gguf
+model_id: ollama/functiongemma-4b-it
 max_turns: 15
 
 initial_context:

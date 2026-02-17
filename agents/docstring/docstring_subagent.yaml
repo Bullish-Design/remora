@@ -1,5 +1,5 @@
 name: docstring_agent
-model: agents/docstring/models/docstring_functiongemma_q8.gguf
+model_id: ollama/functiongemma-4b-it
 max_turns: 15
 
 initial_context:

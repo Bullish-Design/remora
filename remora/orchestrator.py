@@ -28,11 +28,14 @@ class Coordinator:
             definition_path = self.config.agents_dir / op_config.subagent
             try:
                 definition = load_subagent_definition(definition_path, agents_dir=self.config.agents_dir)
+                definition_model_id = getattr(definition, "model_id", None)
+                model_id = op_config.model_id or definition_model_id or self.config.model_id
                 runners[operation] = FunctionGemmaRunner(
                     definition=definition,
                     node=node,
                     workspace_id=f"{operation}-{node.node_id}",
                     cairn_client=self.cairn_client,
+                    model_id=model_id,
                 )
             except Exception as exc:
                 errors.append({"operation": operation, "phase": "init", "error": str(exc)})
