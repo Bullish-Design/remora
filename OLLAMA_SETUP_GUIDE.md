@@ -1,18 +1,22 @@
 # Ollama Setup Guide
 
-Remora uses the stock FunctionGemma model (`functiongemma-4b-it`, 270M parameters) via Ollama, accessed through the Python `llm` library. This guide covers two deployment scenarios:
+Remora uses the stock FunctionGemma model (`functiongemma:270m`, 270M parameters) via Ollama, accessed through the Python `llm` library. This guide covers two deployment scenarios:
 
 - **Local** — Ollama runs on the same NixOS machine as Remora
 - **Remote** — Ollama runs in a Windows Docker container, reachable over your Tailscale network
 
 ---
 
-## Model: `functiongemma-4b-it`
+## Model: `functiongemma:270m`
 
-FunctionGemma is Google's 270M-parameter model purpose-built for structured tool calling. At ~288MB quantized, it runs on a single CPU core with no GPU requirement. Remora uses it as the backend for all subagents (lint, test, docstring, sample_data).
+FunctionGemma is Google's 270M-parameter model purpose-built for structured tool calling. Built on the Gemma 3 270M architecture, it uses a different chat format optimized for function calling. At 301MB (Q8_0 quantized), it runs on a single CPU core with no GPU requirement. Remora uses it as the backend for all subagents (lint, test, docstring, sample_data).
 
-Ollama model name: `functiongemma-4b-it`
-Remora model ID: `ollama/functiongemma-4b-it`
+FunctionGemma is not intended for use as a direct dialogue model — it is designed for function calling tasks and performs best after fine-tuning on domain-specific data.
+
+Ollama model name: `functiongemma:270m`
+Remora model ID: `ollama/functiongemma:270m`
+
+> **Requires Ollama v0.13.5 or later.**
 
 ---
 
@@ -55,20 +59,20 @@ curl http://localhost:11434/api/tags
 ### 2. Pull the FunctionGemma model
 
 ```bash
-ollama pull functiongemma-4b-it
+ollama pull functiongemma:270m
 ```
 
 Verify it was pulled:
 
 ```bash
 ollama list
-# functiongemma-4b-it should appear in the output
+# functiongemma:270m should appear in the output
 ```
 
 ### 3. Quick smoke test
 
 ```bash
-ollama run functiongemma-4b-it "Call the greet tool with name=world"
+ollama run functiongemma:270m "Call the greet tool with name=world"
 ```
 
 ### 4. Install the `llm` Ollama plugin
@@ -82,15 +86,15 @@ llm install llm-ollama
 Verify the model is reachable through `llm`:
 
 ```bash
-llm -m ollama/functiongemma-4b-it "Say hello"
+llm -m ollama/functiongemma:270m "Say hello"
 ```
 
 ### 5. Remora config
 
-No changes needed — `ollama/functiongemma-4b-it` is the default. Your `remora.yaml` can omit `model_id` entirely, or be explicit:
+No changes needed — `ollama/functiongemma:270m` is the default. Your `remora.yaml` can omit `model_id` entirely, or be explicit:
 
 ```yaml
-model_id: "ollama/functiongemma-4b-it"
+model_id: "ollama/functiongemma:270m"
 ```
 
 Ollama is expected at `http://localhost:11434` (the default). No additional configuration is required for local mode.
@@ -124,7 +128,7 @@ This starts Ollama listening on port 11434, with model data persisted in a Docke
 #### 3. Pull the FunctionGemma model inside the container
 
 ```powershell
-docker exec ollama ollama pull functiongemma-4b-it
+docker exec ollama ollama pull functiongemma:270m
 ```
 
 Verify:
@@ -190,7 +194,7 @@ export OLLAMA_HOST=http://<TAILSCALE_IP>:11434
 #### 9. Verify the model is reachable through `llm`
 
 ```bash
-llm -m ollama/functiongemma-4b-it "Say hello"
+llm -m ollama/functiongemma:270m "Say hello"
 ```
 
 #### 10. Remora config for remote Ollama
@@ -202,10 +206,10 @@ Add the `OLLAMA_HOST` environment variable to your shell before running `remora`
 env.OLLAMA_HOST = "http://<TAILSCALE_IP>:11434";
 ```
 
-Your `remora.yaml` stays the same — `ollama/functiongemma-4b-it` works regardless of where Ollama is running, as long as `OLLAMA_HOST` points at the right machine.
+Your `remora.yaml` stays the same — `ollama/functiongemma:270m` works regardless of where Ollama is running, as long as `OLLAMA_HOST` points at the right machine.
 
 ```yaml
-model_id: "ollama/functiongemma-4b-it"
+model_id: "ollama/functiongemma:270m"
 ```
 
 ---
@@ -219,11 +223,11 @@ Once Ollama is running (locally or remotely) and `llm-ollama` is installed, veri
 remora list-agents
 
 # Expected output (table format):
-# Agent       | YAML            | YAML     | Model                        | Available
-# ----------- | --------------- | -------- | ---------------------------- | ----------
-# lint        | agents/lint/... | ✓ found  | ollama/functiongemma-4b-it   | ✓ ready
-# test        | agents/test/... | ✓ found  | ollama/functiongemma-4b-it   | ✓ ready
-# docstring   | agents/doc../.. | ✓ found  | ollama/functiongemma-4b-it   | ✓ ready
+# Agent       | YAML            | YAML     | Model                       | Available
+# ----------- | --------------- | -------- | --------------------------- | ----------
+# lint        | agents/lint/... | ✓ found  | ollama/functiongemma:270m   | ✓ ready
+# test        | agents/test/... | ✓ found  | ollama/functiongemma:270m   | ✓ ready
+# docstring   | agents/doc../.. | ✓ found  | ollama/functiongemma:270m   | ✓ ready
 ```
 
 If any agent shows `✗ unavailable`, check:
@@ -244,9 +248,9 @@ If any agent shows `✗ unavailable`, check:
 
 | Command | Purpose |
 |---|---|
-| `ollama pull functiongemma-4b-it` | Download the model |
+| `ollama pull functiongemma:270m` | Download the model |
 | `ollama list` | List available models |
 | `llm install llm-ollama` | Install the llm Ollama plugin |
-| `llm -m ollama/functiongemma-4b-it "hello"` | Verify model is reachable via llm |
+| `llm -m ollama/functiongemma:270m "hello"` | Verify model is reachable via llm |
 | `remora list-agents` | Verify Remora can reach the model |
 | `curl $OLLAMA_HOST/api/tags` | Check Ollama API is responding |
