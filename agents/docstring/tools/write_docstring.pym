@@ -130,11 +130,11 @@ try:
     replaced_existing = False
     if block:
         start, end = block
-        lines[start : end + 1] = docstring_lines
+        lines = lines[:start] + docstring_lines + lines[end + 1 :]
         replaced_existing = True
     else:
         insert_at = def_line_index + 1
-        lines[insert_at:insert_at] = docstring_lines
+        lines = lines[:insert_at] + docstring_lines + lines[insert_at:]
 
     updated_content = "\n".join(lines)
     if trailing_newline:

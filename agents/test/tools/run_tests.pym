@@ -56,7 +56,10 @@ def _read_attr(tag: str, key: str) -> int:
 
 
 def _parse_totals(xml: str) -> dict[str, int]:
-    totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+    tests_total = 0
+    failures_total = 0
+    errors_total = 0
+    skipped_total = 0
     index = 0
     while True:
         start = xml.find("<testsuite", index)
@@ -66,10 +69,17 @@ def _parse_totals(xml: str) -> dict[str, int]:
         if end == -1:
             break
         tag = xml[start:end]
-        for key in totals:
-            totals[key] += _read_attr(tag, key)
+        tests_total += _read_attr(tag, "tests")
+        failures_total += _read_attr(tag, "failures")
+        errors_total += _read_attr(tag, "errors")
+        skipped_total += _read_attr(tag, "skipped")
         index = end + 1
-    return totals
+    return {
+        "tests": tests_total,
+        "failures": failures_total,
+        "errors": errors_total,
+        "skipped": skipped_total,
+    }
 
 
 def _read_str_attr(tag: str, key: str) -> str:
@@ -131,11 +141,11 @@ try:
     test_path = path_input.strip() if path_input else None
     if not test_path:
         if not target_file:
-            raise FileNotFoundError("Target file not found for tests.")
+            raise ValueError("Target file not found for tests.")
         test_path = _default_test_path(target_file)
 
     if not await file_exists(path=test_path):
-        raise FileNotFoundError(f"Test file not found: {test_path}")
+        raise ValueError(f"Test file not found: {test_path}")
 
     report_path = ".remora/pytest_report.xml"
     command_args = [

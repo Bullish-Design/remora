@@ -72,7 +72,10 @@ prerelease = "allow"
 asyncio_mode = "auto"
 addopts = "-q --cov=remora --cov-report=term-missing -m \"not integration\""
 testpaths = ["tests"]
-markers = ["integration: requires vLLM FunctionGemma server"]
+markers = [
+  "integration: requires vLLM FunctionGemma server",
+  "grail_runtime: exercises Grail runtime execution",
+]
 
 [tool.mypy]
 python_version = "3.13"

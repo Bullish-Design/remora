@@ -1,0 +1,16 @@
+{
+  "file": "/home/andrew/Documents/Projects/remora/agents/test/tools/analyze_signature.pym",
+  "valid": true,
+  "errors": [],
+  "warnings": [],
+  "info": {
+    "externals_count": 2,
+    "inputs_count": 2,
+    "lines_of_code": 130,
+    "monty_features_used": [
+      "async_await",
+      "for_loop",
+      "list_comprehension"
+    ]
+  }
+}

@@ -1,4 +1,8 @@
-from grail import external
+from grail import Input, external
+
+noop: bool = Input("noop", default=False)
+
+_ = noop
 
 
 @external

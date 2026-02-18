@@ -1,129 +1,144 @@
 from __future__ import annotations
 
-from importlib.machinery import SourceFileLoader
-from importlib.util import module_from_spec, spec_from_file_location
-from pathlib import Path
 import json
+from pathlib import Path
 
 import pytest
 
+from tests.utils.grail_runtime import assert_artifacts, build_file_externals, run_script
 
-def _load_module(path: Path, name: str):
-    loader = SourceFileLoader(name, str(path))
-    spec = spec_from_file_location(name, path, loader=loader)
-    assert spec is not None
-    module = module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+pytestmark = pytest.mark.grail_runtime
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def test_sample_data_analyze_signature(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = _load_module(
-        _repo_root() / "agents/sample_data/tools/analyze_signature.pym",
-        "sample_data_analyze_signature",
-    )
-    monkeypatch.setenv(
-        "REMORA_NODE_TEXT",
-        "def total(price: float, quantity: int = 1) -> float:\n    return price * quantity\n",
+def _script_path(relative: str) -> Path:
+    return _repo_root() / relative
+
+
+def test_sample_data_analyze_signature(tmp_path: Path) -> None:
+    path = _script_path("agents/sample_data/tools/analyze_signature.pym")
+    externals = build_file_externals(tmp_path, include_write_file=False)
+    grail_dir = tmp_path / ".grail"
+
+    result = run_script(
+        path=path,
+        inputs={
+            "node_text_input": "def total(price: float, quantity: int = 1) -> float:\n    return price * quantity\n",
+            "target_file_input": None,
+        },
+        externals=externals,
+        grail_dir=grail_dir,
     )
 
-    result = module.run({})
-
+    assert_artifacts(grail_dir, "analyze_signature")
     assert result["function_name"] == "total"
     assert result["return_type"] == "float"
     assert result["parameters"][0] == {"name": "price", "type": "float", "default": None}
     assert result["parameters"][1] == {"name": "quantity", "type": "int", "default": 1}
 
 
-def test_write_fixture_file_creates_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    module = _load_module(
-        _repo_root() / "agents/sample_data/tools/write_fixture_file.pym",
-        "sample_data_write_fixture",
-    )
-    monkeypatch.setenv("REMORA_WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setenv(
-        "REMORA_NODE_TEXT",
-        "def total(price: float, quantity: int = 1) -> float:\n    return price * quantity\n",
-    )
+def test_write_fixture_file_creates_json(tmp_path: Path) -> None:
+    path = _script_path("agents/sample_data/tools/write_fixture_file.pym")
+    externals = build_file_externals(tmp_path)
+    grail_dir = tmp_path / ".grail"
 
-    result = module.run(
-        {
+    result = run_script(
+        path=path,
+        inputs={
             "fixtures": [
                 {"price": 9.99, "quantity": 2},
                 {"price": 0.0, "quantity": 1},
             ],
-            "format": "json",
-        }
+            "format_input": "json",
+            "node_text_input": "def total(price: float, quantity: int = 1) -> float:\n    return price * quantity\n",
+        },
+        externals=externals,
+        grail_dir=grail_dir,
     )
 
+    assert_artifacts(grail_dir, "write_fixture_file")
     assert result["success"] is True
     assert result["path"] == "fixtures/total_fixtures.json"
     content = (tmp_path / "fixtures" / "total_fixtures.json").read_text(encoding="utf-8")
     assert json.loads(content)[0]["price"] == 9.99
 
 
-def test_write_fixture_file_rejects_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    module = _load_module(
-        _repo_root() / "agents/sample_data/tools/write_fixture_file.pym",
-        "sample_data_write_fixture_empty",
+def test_write_fixture_file_rejects_empty(tmp_path: Path) -> None:
+    path = _script_path("agents/sample_data/tools/write_fixture_file.pym")
+    externals = build_file_externals(tmp_path)
+    grail_dir = tmp_path / ".grail"
+
+    result = run_script(
+        path=path,
+        inputs={"fixtures": [], "format_input": "json", "node_text_input": None},
+        externals=externals,
+        grail_dir=grail_dir,
     )
-    monkeypatch.setenv("REMORA_WORKSPACE_DIR", str(tmp_path))
 
-    result = module.run({"fixtures": []})
-
+    assert_artifacts(grail_dir, "write_fixture_file")
     assert result["success"] is False
     assert not (tmp_path / "fixtures").exists()
 
 
-def test_existing_fixtures_returns_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    module = _load_module(
-        _repo_root() / "agents/sample_data/context/existing_fixtures.pym",
-        "sample_data_existing_fixtures",
+def test_existing_fixtures_returns_empty(tmp_path: Path) -> None:
+    path = _script_path("agents/sample_data/context/existing_fixtures.pym")
+    externals = build_file_externals(
+        tmp_path,
+        include_read_file=False,
+        include_write_file=False,
+        include_list_dir=True,
     )
-    monkeypatch.setenv("REMORA_WORKSPACE_DIR", str(tmp_path))
+    grail_dir = tmp_path / ".grail"
 
-    assert module.run() == []
+    result = run_script(path=path, inputs={"noop": False}, externals=externals, grail_dir=grail_dir)
+
+    assert_artifacts(grail_dir, "existing_fixtures")
+    assert result == []
 
 
-def test_existing_fixtures_lists_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    module = _load_module(
-        _repo_root() / "agents/sample_data/context/existing_fixtures.pym",
-        "sample_data_existing_fixtures_list",
-    )
+def test_existing_fixtures_lists_files(tmp_path: Path) -> None:
+    path = _script_path("agents/sample_data/context/existing_fixtures.pym")
     fixtures_dir = tmp_path / "fixtures"
     fixtures_dir.mkdir()
     (fixtures_dir / "alpha_fixtures.json").write_text("[]", encoding="utf-8")
     (fixtures_dir / "beta_fixtures.json").write_text("[]", encoding="utf-8")
-    monkeypatch.setenv("REMORA_WORKSPACE_DIR", str(tmp_path))
+    externals = build_file_externals(
+        tmp_path,
+        include_read_file=False,
+        include_write_file=False,
+        include_list_dir=True,
+    )
+    grail_dir = tmp_path / ".grail"
 
-    result = module.run()
+    result = run_script(path=path, inputs={"noop": False}, externals=externals, grail_dir=grail_dir)
 
+    assert_artifacts(grail_dir, "existing_fixtures")
     assert result == [
         {"name": "alpha_fixtures.json", "path": "fixtures/alpha_fixtures.json"},
         {"name": "beta_fixtures.json", "path": "fixtures/beta_fixtures.json"},
     ]
 
 
-def test_submit_builds_agent_result(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = _load_module(
-        _repo_root() / "agents/sample_data/tools/submit.pym",
-        "sample_data_submit",
-    )
-    monkeypatch.setenv("REMORA_WORKSPACE_ID", "sample-123")
+def test_submit_builds_agent_result(tmp_path: Path) -> None:
+    path = _script_path("agents/sample_data/tools/submit.pym")
+    grail_dir = tmp_path / ".grail"
 
-    result = module.run(
-        {
+    result = run_script(
+        path=path,
+        inputs={
             "summary": "Generated fixtures",
             "fixtures_generated": 2,
             "changed_files": ["fixtures/total_fixtures.json"],
-        }
+            "workspace_id": "sample-123",
+        },
+        externals={},
+        grail_dir=grail_dir,
     )
 
+    assert_artifacts(grail_dir, "submit")
     assert result["status"] == "success"
     assert result["workspace_id"] == "sample-123"
     assert result["details"]["fixtures_generated"] == 2

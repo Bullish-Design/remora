@@ -1,0 +1,17 @@
+{
+  "file": "/home/andrew/Documents/Projects/remora/agents/lint/tools/run_linter.pym",
+  "valid": true,
+  "errors": [],
+  "warnings": [],
+  "info": {
+    "externals_count": 3,
+    "inputs_count": 2,
+    "lines_of_code": 166,
+    "monty_features_used": [
+      "async_await",
+      "f_string",
+      "for_loop",
+      "list_comprehension"
+    ]
+  }
+}

@@ -39,7 +39,7 @@ def _line_count(content: str) -> int:
 try:
     target_file = await _resolve_target_file()
     if not target_file:
-        raise FileNotFoundError("Target file not found for linting.")
+        raise ValueError("Target file not found for linting.")
     content = await read_file(path=target_file)
     result = {"content": content, "lines": _line_count(content)}
 except Exception as exc:

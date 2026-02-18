@@ -41,7 +41,7 @@ try:
     _ = node_text_input
     target_file = await _resolve_target_file()
     if not target_file:
-        raise FileNotFoundError("Target file not found for tests.")
+        raise ValueError("Target file not found for tests.")
     test_path = _default_test_path(target_file)
     if not await file_exists(path=test_path):
         result = {"content": "", "path": None}

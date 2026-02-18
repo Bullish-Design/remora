@@ -1,0 +1,16 @@
+{
+  "file": "/home/andrew/Documents/Projects/remora/agents/docstring/tools/read_type_hints.pym",
+  "valid": true,
+  "errors": [],
+  "warnings": [],
+  "info": {
+    "externals_count": 2,
+    "inputs_count": 2,
+    "lines_of_code": 94,
+    "monty_features_used": [
+      "async_await",
+      "for_loop",
+      "list_comprehension"
+    ]
+  }
+}

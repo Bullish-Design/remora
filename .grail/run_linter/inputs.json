@@ -1,0 +1,16 @@
+{
+  "inputs": [
+    {
+      "name": "check_only",
+      "type": "bool",
+      "required": false,
+      "default": false
+    },
+    {
+      "name": "target_file_input",
+      "type": "str | None",
+      "required": true,
+      "default": null
+    }
+  ]
+}

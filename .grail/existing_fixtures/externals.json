@@ -1,0 +1,30 @@
+{
+  "externals": [
+    {
+      "name": "list_dir",
+      "async": true,
+      "parameters": [
+        {
+          "name": "path",
+          "type": "str",
+          "default": "."
+        }
+      ],
+      "return_type": "list[str]",
+      "docstring": "List file names in a directory."
+    },
+    {
+      "name": "file_exists",
+      "async": true,
+      "parameters": [
+        {
+          "name": "path",
+          "type": "str",
+          "default": null
+        }
+      ],
+      "return_type": "bool",
+      "docstring": "Check if a file or directory exists."
+    }
+  ]
+}

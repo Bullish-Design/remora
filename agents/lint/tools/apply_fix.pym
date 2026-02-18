@@ -45,7 +45,7 @@ try:
     else:
         target_file = await _resolve_target_file()
         if not target_file:
-            raise FileNotFoundError("Target file not found for linting.")
+            raise ValueError("Target file not found for linting.")
 
         before = await read_file(path=target_file)
         command_args = ["check", "--fix", "--select", issue_code, target_file]

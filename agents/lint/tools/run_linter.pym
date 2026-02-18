@@ -141,7 +141,7 @@ def _format_issue(issue: str) -> dict[str, Any]:
 try:
     target_file = await _resolve_target_file()
     if not target_file:
-        raise FileNotFoundError("Target file not found for linting.")
+        raise ValueError("Target file not found for linting.")
 
     command_args = ["check", "--output-format", "json"]
     if not check_only:

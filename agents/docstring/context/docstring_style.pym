@@ -1,7 +1,11 @@
-from grail import external
+from grail import Input, external
 
 DEFAULT_STYLE = "google"
 ALLOWED_STYLES = {"google", "numpy", "sphinx"}
+
+noop: bool = Input("noop", default=False)
+
+_ = noop
 
 
 @external
