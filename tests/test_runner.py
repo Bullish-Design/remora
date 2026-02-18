@@ -8,30 +8,60 @@ import json
 
 import pytest
 
-from remora.config import ServerConfig
+from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode
 from remora.errors import AGENT_002, AGENT_003
 from remora.runner import AgentError, FunctionGemmaRunner
 from remora.subagent import InitialContext, SubagentDefinition, ToolDefinition
 
 
+class FakeToolCallFunction:
+    def __init__(self, name: str, arguments: str) -> None:
+        self.name = name
+        self.arguments = arguments
+
+
+class FakeToolCall:
+    def __init__(self, *, name: str, arguments: str, call_id: str = "call-1") -> None:
+        self.id = call_id
+        self.type = "function"
+        self.function = FakeToolCallFunction(name, arguments)
+
+
 class FakeCompletionMessage:
-    def __init__(self, content: str) -> None:
+    def __init__(self, *, content: str | None = None, tool_calls: list[FakeToolCall] | None = None) -> None:
         self.content = content
+        self.tool_calls = tool_calls
+
+    def model_dump(self, *, exclude_none: bool = False) -> dict[str, Any]:
+        tool_calls = None
+        if self.tool_calls is not None:
+            tool_calls = [
+                {
+                    "id": call.id,
+                    "type": call.type,
+                    "function": {"name": call.function.name, "arguments": call.function.arguments},
+                }
+                for call in self.tool_calls
+            ]
+        data: dict[str, Any] = {"role": "assistant", "content": self.content, "tool_calls": tool_calls}
+        if exclude_none:
+            return {key: value for key, value in data.items() if value is not None}
+        return data
 
 
 class FakeCompletionChoice:
-    def __init__(self, content: str) -> None:
-        self.message = FakeCompletionMessage(content)
+    def __init__(self, message: FakeCompletionMessage) -> None:
+        self.message = message
 
 
 class FakeCompletionResponse:
-    def __init__(self, content: str) -> None:
-        self.choices = [FakeCompletionChoice(content)]
+    def __init__(self, message: FakeCompletionMessage) -> None:
+        self.choices = [FakeCompletionChoice(message)]
 
 
 class FakeChatCompletions:
-    def __init__(self, responses: list[str], *, error: Exception | None = None) -> None:
+    def __init__(self, responses: list[FakeCompletionMessage], *, error: Exception | None = None) -> None:
         self.responses = responses
         self.error = error
         self.calls: list[dict[str, Any]] = []
@@ -41,10 +71,19 @@ class FakeChatCompletions:
         *,
         model: str,
         messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
         max_tokens: int,
         temperature: float,
     ) -> FakeCompletionResponse:
-        self.calls.append({"model": model, "messages": messages})
+        self.calls.append(
+            {
+                "model": model,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": tool_choice,
+            }
+        )
         if self.error:
             raise self.error
         if not self.responses:
@@ -59,7 +98,7 @@ class FakeAsyncOpenAI:
         base_url: str,
         api_key: str,
         timeout: int,
-        responses: list[str] | None = None,
+        responses: list[FakeCompletionMessage] | None = None,
         error: Exception | None = None,
     ) -> None:
         self.base_url = base_url
@@ -130,14 +169,18 @@ def _make_server_config() -> ServerConfig:
     )
 
 
-def _tool_call_text(name: str, arguments: dict[str, Any]) -> str:
-    return json.dumps({"name": name, "arguments": arguments})
+def _make_runner_config() -> RunnerConfig:
+    return RunnerConfig(max_tokens=128, temperature=0.0, tool_choice="required")
+
+
+def _tool_call_message(name: str, arguments: dict[str, Any], *, call_id: str = "call-1") -> FakeCompletionMessage:
+    return FakeCompletionMessage(tool_calls=[FakeToolCall(name=name, arguments=json.dumps(arguments), call_id=call_id)])
 
 
 def _patch_openai(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    responses: list[str] | None = None,
+    responses: list[FakeCompletionMessage] | None = None,
     error: Exception | None = None,
 ) -> None:
     def _factory(*_: Any, **kwargs: Any) -> FakeAsyncOpenAI:
@@ -153,7 +196,7 @@ def _patch_openai(
 
 
 def test_runner_initializes_model_and_messages(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_openai(monkeypatch, responses=[_tool_call_text("submit_result", {})])
+    _patch_openai(monkeypatch, responses=[_tool_call_message("submit_result", {})])
 
     definition = _make_definition()
     node = _make_node()
@@ -164,12 +207,13 @@ def test_runner_initializes_model_and_messages(monkeypatch: pytest.MonkeyPatch) 
         workspace_id="ws-1",
         cairn_client=FakeCairnClient(),
         server_config=_make_server_config(),
+        runner_config=_make_runner_config(),
     )
 
     system_message = cast(dict[str, Any], runner.messages[0])
     user_message = cast(dict[str, Any], runner.messages[1])
     assert system_message["role"] == "system"
-    assert "You have access to the following tools" in str(system_message.get("content", ""))
+    assert system_message.get("content") == "You are a lint agent."
     assert user_message["role"] == "user"
     assert "node hello function" in str(user_message.get("content", ""))
     assert runner.turn_count == 0
@@ -190,6 +234,7 @@ def test_missing_model_id_raises_agent_002(monkeypatch: pytest.MonkeyPatch) -> N
         workspace_id="ws-1",
         cairn_client=FakeCairnClient(),
         server_config=_make_server_config(),
+        runner_config=_make_runner_config(),
     )
 
     with pytest.raises(AgentError) as excinfo:
@@ -202,31 +247,11 @@ def test_missing_model_id_raises_agent_002(monkeypatch: pytest.MonkeyPatch) -> N
     assert error.phase == "model_load"
 
 
-def test_parse_tool_calls_handles_json_variants(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_openai(monkeypatch, responses=[_tool_call_text("submit_result", {})])
-
-    runner = FunctionGemmaRunner(
-        definition=_make_definition(),
-        node=_make_node(),
-        workspace_id="ws-1",
-        cairn_client=FakeCairnClient(),
-        server_config=_make_server_config(),
-    )
-
-    raw = _tool_call_text("inspect", {"value": "a"})
-    fenced = "```json\n" + _tool_call_text("inspect", {"value": "b"}) + "\n```"
-    multi = "```json\n" + json.dumps([{"name": "inspect", "arguments": {}}, {"name": "submit_result"}]) + "\n```"
-
-    assert runner._parse_tool_calls(raw)[0]["name"] == "inspect"
-    assert runner._parse_tool_calls(fenced)[0]["name"] == "inspect"
-    assert [call["name"] for call in runner._parse_tool_calls(multi)] == ["inspect", "submit_result"]
-
-
 def test_run_returns_submit_result_on_first_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_openai(
         monkeypatch,
         responses=[
-            _tool_call_text("submit_result", {"summary": "Done", "changed_files": ["src/example.py"], "details": {}})
+            _tool_call_message("submit_result", {"summary": "Done", "changed_files": ["src/example.py"], "details": {}})
         ],
     )
 
@@ -238,6 +263,7 @@ def test_run_returns_submit_result_on_first_turn(monkeypatch: pytest.MonkeyPatch
         workspace_id="ws-1",
         cairn_client=FakeCairnClient(),
         server_config=_make_server_config(),
+        runner_config=_make_runner_config(),
     )
 
     result = asyncio.run(runner.run())
@@ -251,9 +277,9 @@ def test_run_returns_submit_result_on_first_turn(monkeypatch: pytest.MonkeyPatch
 
 def test_run_handles_multiple_tool_turns_then_submit(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = [
-        _tool_call_text("inspect", {"value": "a"}),
-        _tool_call_text("inspect", {"value": "b"}),
-        _tool_call_text("submit_result", {"summary": "Done", "changed_files": [], "details": {"calls": 2}}),
+        _tool_call_message("inspect", {"value": "a"}),
+        _tool_call_message("inspect", {"value": "b"}),
+        _tool_call_message("submit_result", {"summary": "Done", "changed_files": [], "details": {"calls": 2}}),
     ]
     _patch_openai(monkeypatch, responses=responses)
 
@@ -281,6 +307,7 @@ def test_run_handles_multiple_tool_turns_then_submit(monkeypatch: pytest.MonkeyP
         workspace_id="ws-1",
         cairn_client=cairn,
         server_config=_make_server_config(),
+        runner_config=_make_runner_config(),
     )
 
     result = asyncio.run(runner.run())
@@ -292,9 +319,9 @@ def test_run_handles_multiple_tool_turns_then_submit(monkeypatch: pytest.MonkeyP
 
 def test_run_respects_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = [
-        _tool_call_text("inspect", {}),
-        _tool_call_text("inspect", {}),
-        _tool_call_text("inspect", {}),
+        _tool_call_message("inspect", {}),
+        _tool_call_message("inspect", {}),
+        _tool_call_message("inspect", {}),
     ]
     _patch_openai(monkeypatch, responses=responses)
 
@@ -315,6 +342,7 @@ def test_run_respects_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
         workspace_id="ws-1",
         cairn_client=cairn,
         server_config=_make_server_config(),
+        runner_config=_make_runner_config(),
     )
 
     with pytest.raises(AgentError) as excinfo:
@@ -325,8 +353,8 @@ def test_run_respects_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_context_providers_injected_before_tool_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = [
-        _tool_call_text("inspect", {}),
-        _tool_call_text("submit_result", {"summary": "Done", "changed_files": []}),
+        _tool_call_message("inspect", {}),
+        _tool_call_message("submit_result", {"summary": "Done", "changed_files": []}),
     ]
     _patch_openai(monkeypatch, responses=responses)
 
@@ -360,15 +388,17 @@ def test_context_providers_injected_before_tool_dispatch(monkeypatch: pytest.Mon
         workspace_id="ws-1",
         cairn_client=cairn,
         server_config=_make_server_config(),
+        runner_config=_make_runner_config(),
     )
 
     result = asyncio.run(runner.run())
 
     assert result.status == "success"
     assert [call[0] for call in cairn.calls][:3] == [Path("ctx-1.pym"), Path("ctx-2.pym"), Path("inspect.pym")]
-    context_messages: list[str] = []
-    for message in runner.messages:
-        message_data = cast(dict[str, Any], message)
-        if message_data.get("role") == "user" and str(message_data.get("content", "")).startswith("[Context]"):
-            context_messages.append(str(message_data.get("content", "")))
-    assert context_messages == ["[Context] {'ctx': 'one'}", "[Context] {'ctx': 'two'}"]
+    tool_messages = [
+        cast(dict[str, Any], message)
+        for message in runner.messages
+        if cast(dict[str, Any], message).get("role") == "tool"
+        and cast(dict[str, Any], message).get("name") == "inspect"
+    ]
+    assert tool_messages[0]["content"] == '{"ctx": "one"}\n{"ctx": "two"}\n{"ok": true}'

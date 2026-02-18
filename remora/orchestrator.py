@@ -56,6 +56,7 @@ class Coordinator:
                         workspace_id=f"{operation}-{node.node_id}",
                         cairn_client=self.cairn_client,
                         server_config=self.config.server,
+                        runner_config=self.config.runner,
                         adapter_name=op_config.model_id,
                         http_client=self._http_client,
                         event_emitter=self._event_emitter,

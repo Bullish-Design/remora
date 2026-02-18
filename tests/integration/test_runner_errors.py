@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from remora.config import ServerConfig
+from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode
 from remora.errors import AGENT_002, AGENT_003
 from remora.runner import AgentError, FunctionGemmaRunner
@@ -23,6 +23,10 @@ def _server_config(base_url: str = DEFAULT_SERVER_URL) -> ServerConfig:
         timeout=30,
         default_adapter="google/functiongemma-270m-it",
     )
+
+
+def _runner_config() -> RunnerConfig:
+    return RunnerConfig()
 
 
 def _load_fixture() -> str:
@@ -63,6 +67,7 @@ def test_runner_unreachable_server_does_not_block_others(cairn_client_factory) -
         workspace_id="error-missing-model",
         cairn_client=cairn_client_factory(node.text),
         server_config=_server_config("http://missing-host:8000/v1"),
+        runner_config=_runner_config(),
     )
 
     with pytest.raises(AgentError) as excinfo:
@@ -76,6 +81,7 @@ def test_runner_unreachable_server_does_not_block_others(cairn_client_factory) -
         workspace_id="error-valid-model",
         cairn_client=cairn_client_factory(node.text),
         server_config=_server_config(),
+        runner_config=_runner_config(),
     )
 
 
@@ -92,6 +98,7 @@ def test_runner_respects_turn_limit(cairn_client_factory) -> None:
         workspace_id="error-turn-limit",
         cairn_client=cairn_client_factory(node.text),
         server_config=_server_config(),
+        runner_config=_runner_config(),
     )
 
     with pytest.raises(AgentError) as excinfo:

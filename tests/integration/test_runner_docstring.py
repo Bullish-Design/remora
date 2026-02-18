@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from remora.config import ServerConfig
+from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode
 from remora.runner import FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
@@ -16,6 +16,10 @@ FIXTURE = Path("tests/fixtures/integration_target.py")
 
 def _server_config() -> ServerConfig:
     return ServerConfig()
+
+
+def _runner_config() -> RunnerConfig:
+    return RunnerConfig()
 
 
 def _load_fixture() -> str:
@@ -67,6 +71,7 @@ def test_docstring_runner_adds_docstrings(cairn_client_factory) -> None:
         workspace_id="docstring-docstring_001",
         cairn_client=cairn_client,
         server_config=_server_config(),
+        runner_config=_runner_config(),
     )
     result = asyncio.run(runner.run())
     assert result.status == "success"
@@ -79,6 +84,7 @@ def test_docstring_runner_adds_docstrings(cairn_client_factory) -> None:
         workspace_id="docstring-docstring_001",
         cairn_client=cairn_client,
         server_config=_server_config(),
+        runner_config=_runner_config(),
     )
     result = asyncio.run(runner.run())
     assert result.status == "success"

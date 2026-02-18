@@ -49,6 +49,16 @@ Then edit `.env` and set:
 3. `VLLM_BASE_MODEL_PATH`, `VLLM_ADAPTERS_PATH`, `VLLM_CACHE_PATH` to match the storage layout above.
 4. Optional overrides like `TS_HOSTNAME` or `AGENTS_DIR` if needed.
 
+## FunctionGemma Tool Calling
+
+The `entrypoint.sh` script starts vLLM with FunctionGemma tool calling enabled:
+
+- `--enable-auto-tool-choice`
+- `--tool-call-parser functiongemma`
+- `--chat-template /app/tool_chat_template_functiongemma.jinja`
+
+The chat template file is bundled into the container at `/app/tool_chat_template_functiongemma.jinja`.
+
 ## First Boot
 
 ```bash

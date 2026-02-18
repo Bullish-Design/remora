@@ -49,6 +49,9 @@ class RunnerConfig(BaseModel):
     max_turns: int = 20
     max_concurrent_runners: int = 16
     timeout: int = 300
+    max_tokens: int = 512
+    temperature: float = 0.1
+    tool_choice: str = "required"
 
 
 class OperationConfig(BaseModel):

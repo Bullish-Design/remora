@@ -92,6 +92,9 @@ class RunnerConfig(BaseModel):
     max_turns: int = 20          # Per-run turn limit
     max_concurrent_runners: int = 16
     timeout: int = 300           # Seconds per runner
+    max_tokens: int = 512
+    temperature: float = 0.1
+    tool_choice: str = "required"
 ```
 
 #### File Watcher (`remora.watcher`)
@@ -195,53 +198,48 @@ async def run(self) -> AgentResult:
         response = await self.client.chat.completions.create(
             model=self.model_target,
             messages=self.messages,
-            max_tokens=512,
-            temperature=0.1,
+            tools=self.definition.tool_schemas,
+            tool_choice=self.runner_config.tool_choice,
+            max_tokens=self.runner_config.max_tokens,
+            temperature=self.runner_config.temperature,
         )
 
-        content = response.choices[0].message.content or ""
-        self.messages.append({"role": "assistant", "content": content})
+        message = response.choices[0].message
+        self.messages.append(message.model_dump(exclude_none=True))
         self.turn_count += 1
 
-        tool_calls = self._parse_tool_calls(content)
+        tool_calls = message.tool_calls or []
         for tc in tool_calls:
-            result = await self._dispatch_tool(tc)
+            if tc.function.name == "submit_result":
+                return self._build_submit_result(tc.function.arguments)
+            tool_result_content = await self._dispatch_tool(tc)
             self.messages.append({
                 "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": json.dumps(result),
+                "tool_call_id": tc.id,
+                "name": tc.function.name,
+                "content": tool_result_content,
             })
 
-            if tc["function"]["name"] == "submit_result":
-                return AgentResult(**result)
-
         if not tool_calls:
-            return self._extract_result()
+            raise AgentError("Model stopped without calling submit_result")
 
     raise RunnerTurnLimitError(self.definition.name, self.turn_count)
 ```
 
 **Tool Dispatch:**
 ```python
-async def _dispatch_tool(self, tool_call: dict) -> dict:
-    tool_name = tool_call["function"]["name"]
-    tool_args = json.loads(tool_call["function"]["arguments"])
-    tool_def = self.definition.tools[tool_name]
+async def _dispatch_tool(self, tool_call: ToolCall) -> str:
+    tool_name = tool_call.function.name
+    tool_args = json.loads(tool_call.function.arguments or "{}")
+    tool_def = self.definition.tools_by_name[tool_name]
 
-    # 1. Run context providers (inject into messages before dispatching)
+    context_parts = []
     for provider_pym in tool_def.context_providers:
-        ctx = await self.cairn_client.run_pym(
-            provider_pym, self.workspace_id, inputs={}
-        )
-        self.messages.append({
-            "role": "user",
-            "content": f"[Context] {ctx}"
-        })
+        ctx = await self.cairn_client.run_pym(provider_pym, self.workspace_id, inputs={})
+        context_parts.append(json.dumps(ctx))
 
-    # 2. Execute the tool's .pym script
-    return await self.cairn_client.run_pym(
-        tool_def.pym, self.workspace_id, inputs=tool_args
-    )
+    result = await self.cairn_client.run_pym(tool_def.pym, self.workspace_id, inputs=tool_args)
+    return "\n".join(context_parts + [json.dumps(result)])
 ```
 
 ---

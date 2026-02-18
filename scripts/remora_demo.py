@@ -134,6 +134,7 @@ async def _run_once(config: RemoraConfig, demo_root: Path) -> None:
                     workspace_id=workspace_id,
                     cairn_client=cairn_client,
                     server_config=config.server,
+                    runner_config=config.runner,
                     adapter_name=op_config.model_id,
                     event_emitter=event_emitter,
                 )

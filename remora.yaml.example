@@ -46,6 +46,9 @@ runner:
   max_turns: 20
   max_concurrent_runners: 16
   timeout: 300
+  max_tokens: 512
+  temperature: 0.1
+  tool_choice: "required"
 
 cairn:
   timeout: 120

@@ -5,14 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
-import re
 import time
 from typing import Any, Literal, Protocol, cast
 
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
-from openai.types.chat import ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageParam, ChatCompletionToolParam
 
-from remora.config import ServerConfig
+from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode
 from remora.events import EventEmitter, NullEventEmitter
 from remora.errors import AGENT_002, AGENT_003
@@ -55,6 +54,7 @@ class FunctionGemmaRunner:
     workspace_id: str
     cairn_client: CairnClient
     server_config: ServerConfig
+    runner_config: RunnerConfig
     adapter_name: str | None = None
     http_client: AsyncOpenAI | None = None
     event_emitter: EventEmitter = field(default_factory=NullEventEmitter)
@@ -80,22 +80,15 @@ class FunctionGemmaRunner:
         self.messages.append(cast(ChatCompletionMessageParam, {"role": "user", "content": self._initial_message}))
 
     def _build_system_prompt(self) -> str:
-        tool_schema_block = json.dumps(self.definition.tool_schemas, indent=2)
-        return (
-            "You have access to the following tools:\n"
-            f"{tool_schema_block}\n\n"
-            "Call tools by responding with JSON in the format:\n"
-            '{"name": "<tool_name>", "arguments": { ... }}\n\n'
-            f"{self.definition.initial_context.system_prompt}"
-        )
+        return self.definition.initial_context.system_prompt
 
     async def run(self) -> AgentResult:
-        response_text = await self._call_model(phase="model_load")
+        message = await self._call_model(phase="model_load")
 
         while self.turn_count < self.definition.max_turns:
             self.turn_count += 1
-            self.messages.append(cast(ChatCompletionMessageParam, {"role": "assistant", "content": response_text}))
-            tool_calls = self._parse_tool_calls(response_text)
+            self.messages.append(self._coerce_message_param(message))
+            tool_calls = message.tool_calls or []
             if not tool_calls:
                 raise AgentError(
                     node_id=self.node.node_id,
@@ -105,18 +98,23 @@ class FunctionGemmaRunner:
                     message="Model stopped without calling submit_result",
                 )
             for tool_call in tool_calls:
-                name = tool_call.get("name")
+                tool_function = getattr(tool_call, "function", None)
+                name = getattr(tool_function, "name", None)
                 if name == "submit_result":
-                    return self._build_submit_result(tool_call.get("arguments"))
-                tool_result = await self._dispatch_tool(tool_call)
-                tool_payload = json.dumps(tool_result)
+                    return self._build_submit_result(getattr(tool_function, "arguments", None))
+                tool_result_content = await self._dispatch_tool(tool_call)
                 self.messages.append(
                     cast(
                         ChatCompletionMessageParam,
-                        {"role": "user", "content": f"Tool result for {name}: {tool_payload}"},
+                        {
+                            "role": "tool",
+                            "tool_call_id": getattr(tool_call, "id", None) or "unknown",
+                            "name": name or "unknown",
+                            "content": tool_result_content,
+                        },
                     )
                 )
-                response_text = await self._call_model(phase="loop")
+            message = await self._call_model(phase="loop")
 
         raise AgentError(
             node_id=self.node.node_id,
@@ -126,7 +124,7 @@ class FunctionGemmaRunner:
             message=f"Turn limit {self.definition.max_turns} exceeded",
         )
 
-    async def _call_model(self, *, phase: Literal["model_load", "loop"]) -> str:
+    async def _call_model(self, *, phase: Literal["model_load", "loop"]) -> ChatCompletionMessage:
         request_id = None
         start = time.monotonic()
         payload: dict[str, Any] = {
@@ -144,8 +142,10 @@ class FunctionGemmaRunner:
             response = await self._http_client.chat.completions.create(
                 model=self._model_target,
                 messages=cast(list[ChatCompletionMessageParam], self.messages),
-                max_tokens=512,
-                temperature=0.1,
+                tools=cast(list[ChatCompletionToolParam], self.definition.tool_schemas),
+                tool_choice=cast(Any, self.runner_config.tool_choice),
+                max_tokens=self.runner_config.max_tokens,
+                temperature=self.runner_config.temperature,
             )
             request_id = getattr(response, "id", None)
         except (APIConnectionError, APITimeoutError) as exc:
@@ -163,7 +163,8 @@ class FunctionGemmaRunner:
                 error_code=AGENT_002,
                 message=f"Cannot reach vLLM server at {self.server_config.base_url}",
             ) from exc
-        response_text = response.choices[0].message.content or ""
+        message = response.choices[0].message
+        response_text = message.content or ""
         self._emit_model_response(
             start,
             phase=phase,
@@ -172,7 +173,10 @@ class FunctionGemmaRunner:
             usage=response.usage,
             response_text=response_text,
         )
-        return response_text
+        return message
+
+    def _coerce_message_param(self, message: ChatCompletionMessage) -> ChatCompletionMessageParam:
+        return cast(ChatCompletionMessageParam, message.model_dump(exclude_none=True))
 
     def _include_payloads(self) -> bool:
         return bool(getattr(self.event_emitter, "include_payloads", False))
@@ -202,7 +206,8 @@ class FunctionGemmaRunner:
         total_chars = 0
         for message in self.messages:
             role = str(message.get("role", "unknown"))
-            content = self._serialize_payload(message.get("content", ""))
+            raw_content = message.get("content")
+            content = self._serialize_payload(raw_content if raw_content is not None else "")
             total_chars += len(content)
             messages.append({"role": role, "content": self._truncate(content)})
         return {"messages": messages, "prompt_chars": total_chars}
@@ -286,37 +291,10 @@ class FunctionGemmaRunner:
         }
         return AgentResult.model_validate(result_data)
 
-    def _parse_tool_calls(self, text: str) -> list[dict[str, Any]]:
-        if not text:
-            return []
-        json_blocks = re.findall(r"```json\s*(.*?)\s*```", text, re.DOTALL)
-        results: list[dict[str, Any]] = []
-        if json_blocks:
-            for block in json_blocks:
-                results.extend(self._coerce_tool_calls(block))
-            return results
-        results.extend(self._coerce_tool_calls(text))
-        return results
-
-    @staticmethod
-    def _coerce_tool_calls(payload: Any) -> list[dict[str, Any]]:
-        data: Any = payload
-        if isinstance(payload, str):
-            try:
-                data = json.loads(payload.strip())
-            except json.JSONDecodeError:
-                return []
-        if isinstance(data, list):
-            items = data
-        elif isinstance(data, dict):
-            items = [data]
-        else:
-            return []
-        return [item for item in items if isinstance(item, dict) and "name" in item]
-
-    async def _dispatch_tool(self, tool_call: dict[str, Any]) -> dict[str, Any]:
-        name = tool_call.get("name")
-        arguments = tool_call.get("arguments", {})
+    async def _dispatch_tool(self, tool_call: Any) -> str:
+        tool_function = getattr(tool_call, "function", None)
+        tool_name = getattr(tool_function, "name", "unknown")
+        arguments = getattr(tool_function, "arguments", None)
         args: Any = arguments
         if isinstance(arguments, str):
             try:
@@ -325,7 +303,6 @@ class FunctionGemmaRunner:
                 args = {}
         if not isinstance(args, dict):
             args = {}
-        tool_name = str(name) if name is not None else "unknown"
         self.event_emitter.emit(
             {
                 "event": "tool_call",
@@ -335,24 +312,18 @@ class FunctionGemmaRunner:
                 "tool_name": tool_name,
             }
         )
-        tool_def = self.definition.tools_by_name.get(str(name)) if name is not None else None
+        tool_def = self.definition.tools_by_name.get(tool_name)
         if tool_def is None:
-            tool_error = {"error": f"Unknown tool: {name}"}
+            tool_error = {"error": f"Unknown tool: {tool_name}"}
             self._emit_tool_result(tool_name, tool_error)
-            return tool_error
+            return json.dumps(tool_error)
 
+        context_parts: list[str] = []
         for provider_path in tool_def.context_providers:
             context = await self.cairn_client.run_pym(provider_path, self.workspace_id, inputs={})
-            self.messages.append(
-                cast(
-                    ChatCompletionMessageParam,
-                    {
-                        "role": "user",
-                        "content": f"[Context] {context}",
-                    },
-                )
-            )
+            context_parts.append(json.dumps(context))
 
         result = await self.cairn_client.run_pym(tool_def.pym, self.workspace_id, inputs=args)
         self._emit_tool_result(tool_name, result)
-        return result
+        content_parts = context_parts + [json.dumps(result)]
+        return "\n".join(content_parts)
