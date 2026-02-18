@@ -143,6 +143,7 @@ async def _run_once(config: RemoraConfig, demo_root: Path) -> None:
                     event_emitter.emit(
                         {
                             "event": "agent_error",
+                            "agent_id": workspace_id,
                             "node_id": node.node_id,
                             "operation": operation,
                             "phase": "run",

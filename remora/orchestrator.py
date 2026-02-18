@@ -65,6 +65,7 @@ class Coordinator:
                     self._event_emitter.emit(
                         {
                             "event": "agent_error",
+                            "agent_id": f"{operation}-{node.node_id}",
                             "node_id": node.node_id,
                             "operation": operation,
                             "phase": "init",
@@ -82,6 +83,7 @@ class Coordinator:
                         self._event_emitter.emit(
                             {
                                 "event": "agent_error",
+                                "agent_id": runner.workspace_id,
                                 "node_id": node.node_id,
                                 "operation": operation,
                                 "phase": "run",

@@ -214,8 +214,11 @@ def main(
     def render() -> Layout:
         now = time.time()
         layout = Layout()
-        layout.split_column(Layout(name="metrics", size=7), Layout(name="body"))
-        layout["body"].split_row(Layout(name="agents"), Layout(name="logs"))
+        layout.split_column(
+            Layout(name="metrics", size=7),
+            Layout(name="agents", ratio=1),
+            Layout(name="logs", ratio=2),
+        )
         layout["metrics"].update(_make_metrics_panel(window_seconds, model_events, in_flight, len(states), now))
         layout["agents"].update(_make_agents_table(states, now))
         layout["logs"].update(_make_log_table(log_entries))
