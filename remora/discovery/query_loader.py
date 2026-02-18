@@ -100,7 +100,7 @@ class QueryLoader:
             ) from exc
 
         try:
-            query = PY_LANGUAGE.query(query_text)
+            query = Query(PY_LANGUAGE, query_text)
         except Exception as exc:
             raise DiscoveryError(
                 DISC_003,
