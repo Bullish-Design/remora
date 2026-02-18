@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageParam, ChatCompletionToolParam
 
+from remora.cairn import CairnError
 from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode
 from remora.events import EventEmitter, NullEventEmitter
@@ -24,7 +25,7 @@ from remora.subagent import SubagentDefinition
 class CairnClient(Protocol):
     """Protocol for Cairn integration."""
 
-    async def run_pym(self, path: Any, workspace_id: str, inputs: dict[str, Any]) -> dict[str, Any]: ...
+    async def run_pym(self, path: Any, workspace_id: str, inputs: dict[str, Any]) -> dict[str, Any] | str: ...
 
 
 class AgentError(RuntimeError):
@@ -134,7 +135,8 @@ class FunctionGemmaRunner:
             "agent_id": self.workspace_id,
             "node_id": self.node.node_id,
             "operation": self.definition.name,
-            "phase": phase,
+            "phase": "execution",
+            "step": phase,
             "model": self._model_target,
         }
         if self._include_payloads():
@@ -245,12 +247,12 @@ class FunctionGemmaRunner:
             "agent_id": self.workspace_id,
             "node_id": self.node.node_id,
             "operation": self.definition.name,
+            "phase": "execution",
             "model": self._model_target,
             "tool_count": len(tools),
             "tool_choice": tool_choice,
-            "tools_type": type(tools).__name__,
-            "tools_item_types": [type(item).__name__ for item in tools],
         }
+
         if request_id is not None:
             payload["request_id"] = request_id
         if self._include_payloads():
@@ -265,6 +267,7 @@ class FunctionGemmaRunner:
             "agent_id": self.workspace_id,
             "node_id": self.node.node_id,
             "operation": self.definition.name,
+            "phase": "execution",
             "model": model,
             "tool_choice": tool_choice,
             "tools_count": len(tools),
@@ -344,7 +347,8 @@ class FunctionGemmaRunner:
             "agent_id": self.workspace_id,
             "node_id": self.node.node_id,
             "operation": self.definition.name,
-            "phase": phase,
+            "phase": "execution",
+            "step": phase,
             "model": self._model_target,
             "status": status,
             "duration_ms": duration_ms,
@@ -363,7 +367,7 @@ class FunctionGemmaRunner:
                 payload["response_text"] = self._truncate(response_text)
         self.event_emitter.emit(payload)
 
-    def _emit_tool_result(self, tool_name: str, result: dict[str, Any]) -> None:
+    def _emit_tool_result(self, tool_name: str, result: Any) -> None:
         status = "error" if isinstance(result, dict) and result.get("error") else "ok"
         payload: dict[str, Any] = {
             "event": "tool_result",
@@ -371,6 +375,7 @@ class FunctionGemmaRunner:
             "node_id": self.node.node_id,
             "operation": self.definition.name,
             "tool_name": tool_name,
+            "phase": "execution",
             "status": status,
         }
         if status == "error":
@@ -399,16 +404,21 @@ class FunctionGemmaRunner:
         status_raw = filtered.get("status", "success")
         if status_raw not in {"success", "failed", "skipped"}:
             status_raw = "success"
+        details = filtered.get("details", {})
+        if not isinstance(details, dict):
+            details = {}
+        if self.definition.grail_summary:
+            details.setdefault("grail_check", self.definition.grail_summary)
         result_data = {
             "status": status_raw,
             "workspace_id": self.workspace_id,
             "changed_files": filtered.get("changed_files", []),
             "summary": filtered.get("summary", ""),
-            "details": filtered.get("details", {}),
+            "details": details,
             "error": filtered.get("error"),
         }
         try:
-            return AgentResult.model_validate(result_data)
+            result = AgentResult.model_validate(result_data)
         except ValidationError as exc:
             raise AgentError(
                 node_id=self.node.node_id,
@@ -417,6 +427,17 @@ class FunctionGemmaRunner:
                 error_code=AGENT_003,
                 message=f"submit_result payload failed validation: {exc}",
             ) from exc
+        self.event_emitter.emit(
+            {
+                "event": "submit_result",
+                "agent_id": self.workspace_id,
+                "node_id": self.node.node_id,
+                "operation": self.definition.name,
+                "phase": "submission",
+                "status": result.status,
+            }
+        )
+        return result
 
     async def _dispatch_tool(self, tool_call: Any) -> str:
         tool_function = getattr(tool_call, "function", None)
@@ -438,6 +459,8 @@ class FunctionGemmaRunner:
                 "node_id": self.node.node_id,
                 "operation": self.definition.name,
                 "tool_name": tool_name,
+                "phase": "execution",
+                "status": "ok",
             }
         )
         tool_def = self.definition.tools_by_name.get(tool_name)
@@ -448,10 +471,24 @@ class FunctionGemmaRunner:
 
         context_parts: list[str] = []
         for provider_path in tool_def.context_providers:
-            context = await self.cairn_client.run_pym(provider_path, self.workspace_id, inputs=self._base_tool_inputs())
+            try:
+                context = await self.cairn_client.run_pym(
+                    provider_path,
+                    self.workspace_id,
+                    inputs=self._base_tool_inputs(),
+                )
+            except CairnError as exc:
+                tool_error = {"error": f"Context provider failed for {provider_path}: {exc}"}
+                self._emit_tool_result(tool_name, tool_error)
+                return json.dumps(tool_error)
             context_parts.append(json.dumps(context))
 
-        result = await self.cairn_client.run_pym(tool_def.pym, self.workspace_id, inputs=tool_inputs)
+        try:
+            result = await self.cairn_client.run_pym(tool_def.pym, self.workspace_id, inputs=tool_inputs)
+        except CairnError as exc:
+            tool_error = {"error": str(exc)}
+            self._emit_tool_result(tool_name, tool_error)
+            return json.dumps(tool_error)
         self._emit_tool_result(tool_name, result)
         content_parts = context_parts + [json.dumps(result)]
         return "\n".join(content_parts)

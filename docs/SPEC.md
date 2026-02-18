@@ -28,7 +28,7 @@ remora analyze [PATHS...] [OPTIONS]
   - Default: `remora.yaml` in current directory
   - Example: `-c config/remora.yaml`
 
-- `--queries, -q`: Comma-separated list of query types
+- `--query-pack`: Pydantree query pack name
   - Choices: `function_def`, `class_def`, `file`, `all`
   - Default: `all`
   - Example: `-q function_def,class_def`
@@ -161,12 +161,9 @@ remora config [OPTIONS]
 
 **Output:**
 ```yaml
-root_dirs:
-  - src/
-queries:
-  - function_def
-  - class_def
-  - file
+discovery:
+  language: python
+  query_pack: remora_core
 operations:
   lint:
     enabled: true
@@ -192,8 +189,7 @@ class RemoraAnalyzer:
 
     def __init__(
         self,
-        root_dirs: list[str | Path],
-        queries: list[str] | None = None,
+        discovery: DiscoveryConfig | None = None,
         operations: list[Operations] | None = None,
         config_path: Path | None = None,
         config: RemoraConfig | None = None,
@@ -202,8 +198,7 @@ class RemoraAnalyzer:
         Initialize analyzer.
 
         Args:
-            root_dirs: Directories to analyze
-            queries: Query types (function_def, class_def, file)
+            discovery: Discovery settings (language + query pack)
             operations: Operations to run (LINT, TEST, DOCSTRING, SAMPLE_DATA)
             config_path: Path to remora.yaml
             config: RemoraConfig object (overrides config_path)
@@ -273,8 +268,7 @@ from remora import RemoraAnalyzer, Operations
 async def main():
     # Initialize analyzer
     analyzer = RemoraAnalyzer(
-        root_dirs=["src/"],
-        queries=["function_def", "class_def"],
+        discovery=DiscoveryConfig(language="python", query_pack="remora_core"),
         operations=[Operations.LINT, Operations.TEST]
     )
 
@@ -333,13 +327,9 @@ class OperationStatus(str, Enum):
 ### 3.1 `remora.yaml` Schema
 
 ```yaml
-root_dirs:
-  - src/
-  - lib/
-
-queries:
-  - function_def
-  - class_def
+discovery:
+  language: python
+  query_pack: remora_core
 
 agents_dir: agents/
 
@@ -373,11 +363,15 @@ operations:
 
 runner:
   max_turns: 20
-  max_concurrent_runners: 16
-  timeout: 300
+  max_tokens: 512
+  temperature: 0.1
+  tool_choice: required
 
 cairn:
-  timeout: 120
+  command: cairn
+  home: null
+  max_concurrent_agents: 16
+  timeout: 300
 ```
 
 ### 3.2 Configuration Validation (Pydantic Schema)
@@ -392,10 +386,15 @@ class ServerConfig(BaseModel):
     timeout: int = 120
     default_adapter: str = "google/functiongemma-270m-it"
 
+class DiscoveryConfig(BaseModel):
+    language: str = "python"
+    query_pack: str = "remora_core"
+
 class RunnerConfig(BaseModel):
     max_turns: int = 20
-    max_concurrent_runners: int = 16
-    timeout: int = 300
+    max_tokens: int = 512
+    temperature: float = 0.1
+    tool_choice: str = "required"
 
 class OperationConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -406,16 +405,19 @@ class OperationConfig(BaseModel):
     model_id: str | None = None  # LoRA adapter name override
 
 class CairnConfig(BaseModel):
-    timeout: int = 120
+    command: str = "cairn"
+    home: Path | None = None
+    max_concurrent_agents: int = 16
+    timeout: int = 300
 
 class RemoraConfig(BaseModel):
-    root_dirs: list[Path] = Field(default_factory=lambda: [Path(".")])
-    queries: list[str] = Field(default_factory=lambda: ["function_def", "class_def"])
+    discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
     agents_dir: Path = Path("agents")
     server: ServerConfig = Field(default_factory=ServerConfig)
     operations: dict[str, OperationConfig] = Field(default_factory=dict)
     runner: RunnerConfig = Field(default_factory=RunnerConfig)
     cairn: CairnConfig = Field(default_factory=CairnConfig)
+    event_stream: EventStreamConfig = Field(default_factory=EventStreamConfig)
 ```
 
 ## 4. Data Schemas
@@ -892,7 +894,7 @@ num_samples: int = Input("num_samples")
 | `DISC_001` | Query file not found | `.scm` file doesn't exist |
 | `DISC_002` | Invalid query syntax | Malformed Tree-sitter query |
 | `DISC_003` | Source file parse error | Syntax error in Python file |
-| `DISC_004` | No nodes discovered | No nodes matched queries |
+| `DISC_004` | No nodes discovered | No nodes matched query pack |
 
 ### 7.4 Agent Errors (Exit Code 1)
 
@@ -1067,7 +1069,7 @@ class CustomContextProvider(ContextProvider):
 from remora import RemoraAnalyzer
 
 analyzer = RemoraAnalyzer(
-    root_dirs=["src/"],
+    discovery=DiscoveryConfig(language="python", query_pack="remora_core"),
     context_provider=CustomContextProvider()
 )
 ```
@@ -1097,7 +1099,7 @@ class HTMLFormatter(ResultFormatter):
 # Use custom formatter
 from remora import RemoraAnalyzer
 
-analyzer = RemoraAnalyzer(root_dirs=["src/"])
+analyzer = RemoraAnalyzer(discovery=DiscoveryConfig(language="python", query_pack="remora_core"))
 results = await analyzer.analyze()
 
 formatter = HTMLFormatter()

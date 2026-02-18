@@ -21,34 +21,33 @@ def _write_subagent_yaml(agents_dir: Path, *, include_submit: bool = True) -> Pa
     submit_path = tools_dir / "submit.pym"
     context_path = context_dir / "config.pym"
 
-    run_tool_path.write_text("", encoding="utf-8")
-    submit_path.write_text("", encoding="utf-8")
-    context_path.write_text("", encoding="utf-8")
+    run_tool_path.write_text(
+        "from grail import Input\n\npath: str = Input('path')\n\nresult = {'path': path}\nresult\n",
+        encoding="utf-8",
+    )
+    submit_path.write_text(
+        "from grail import Input\n\nsummary: str = Input('summary')\n\nresult = {'summary': summary}\nresult\n",
+        encoding="utf-8",
+    )
+    context_path.write_text(
+        "from grail import Input\n\nnoop: bool = Input('noop', default=False)\n\nresult = {'noop': noop}\nresult\n",
+        encoding="utf-8",
+    )
 
     tools = [
         {
-            "name": "run_tool",
+            "tool_name": "run_tool",
             "pym": "lint/tools/run_tool.pym",
-            "description": "Run the lint tool.",
-            "parameters": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {"path": {"type": "string"}},
-            },
+            "tool_description": "Run the lint tool.",
             "context_providers": ["lint/context/config.pym"],
         }
     ]
     if include_submit:
         tools.append(
             {
-                "name": "submit_result",
+                "tool_name": "submit_result",
                 "pym": "lint/tools/submit.pym",
-                "description": "Submit the result.",
-                "parameters": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {},
-                },
+                "tool_description": "Submit the result.",
             }
         )
 
@@ -134,4 +133,4 @@ def test_tools_by_name_lookup_returns_tool(tmp_path: Path) -> None:
 
     tool = definition.tools_by_name["submit_result"]
 
-    assert tool.description == "Submit the result."
+    assert tool.tool_description == "Submit the result."

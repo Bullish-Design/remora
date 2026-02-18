@@ -13,61 +13,20 @@ initial_context:
     ```
 
 tools:
-  - name: run_linter
+  - tool_name: run_linter
     pym: lint/tools/run_linter.pym
-    description: Run the linter and return a list of issues with line numbers.
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        check_only:
-          type: boolean
-          description: If true, report issues without applying fixes.
+    tool_description: Run the linter and return a list of issues with line numbers.
     context_providers:
       - lint/context/ruff_config.pym
 
-  - name: apply_fix
+  - tool_name: apply_fix
     pym: lint/tools/apply_fix.pym
-    description: Apply a fix for a specific lint issue code.
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        issue_code:
-          type: string
-        line_number:
-          type: integer
-      required:
-        - issue_code
-        - line_number
+    tool_description: Apply a fix for a specific lint issue code.
 
-  - name: read_current_file
+  - tool_name: read_current_file
     pym: lint/tools/read_file.pym
-    description: Read the current state of the file being analyzed.
-    parameters:
-      type: object
-      additionalProperties: false
-      properties: {}
+    tool_description: Read the current state of the file being analyzed.
 
-  - name: submit_result
+  - tool_name: submit_result
     pym: lint/tools/submit.pym
-    description: Submit the final linting results and end the task.
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        summary:
-          type: string
-        issues_fixed:
-          type: integer
-        issues_remaining:
-          type: integer
-        changed_files:
-          type: array
-          items:
-            type: string
-      required:
-        - summary
-        - issues_fixed
-        - issues_remaining
-        - changed_files
+    tool_description: Submit the final linting results and end the task.

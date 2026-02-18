@@ -16,71 +16,26 @@ initial_context:
     ```
 
 tools:
-  - name: analyze_signature
-    pym: agents/test/tools/analyze_signature.pym
-    description: Extract the function signature, including types and defaults.
-    parameters:
-      type: object
-      additionalProperties: false
-      properties: {}
+  - tool_name: analyze_signature
+    pym: test/tools/analyze_signature.pym
+    tool_description: Extract the function signature, including types and defaults.
 
-  - name: read_existing_tests
-    pym: agents/test/tools/read_existing_tests.pym
-    description: Read any existing test file for this module.
-    parameters:
-      type: object
-      additionalProperties: false
-      properties: {}
+  - tool_name: read_existing_tests
+    pym: test/tools/read_existing_tests.pym
+    tool_description: Read any existing test file for this module.
 
-  - name: write_test_file
-    pym: agents/test/tools/write_test_file.pym
-    description: Write generated tests to the appropriate test file.
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        content:
-          type: string
-        path:
-          type: string
-      required:
-        - content
-        - path
+  - tool_name: write_test_file
+    pym: test/tools/write_test_file.pym
+    tool_description: Write generated tests to the appropriate test file.
     context_providers:
-      - agents/test/context/pytest_config.pym
+      - test/context/pytest_config.pym
 
-  - name: run_tests
-    pym: agents/test/tools/run_tests.pym
-    description: Run pytest for the generated tests and report results.
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        path:
-          type: string
-          description: Optional test file path to run.
+  - tool_name: run_tests
+    pym: test/tools/run_tests.pym
+    tool_description: Run pytest for the generated tests and report results.
     context_providers:
-      - agents/test/context/pytest_config.pym
+      - test/context/pytest_config.pym
 
-  - name: submit_result
-    pym: agents/test/tools/submit.pym
-    description: Submit the final test generation results and end the task.
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        summary:
-          type: string
-        tests_generated:
-          type: integer
-        tests_passing:
-          type: integer
-        changed_files:
-          type: array
-          items:
-            type: string
-      required:
-        - summary
-        - tests_generated
-        - tests_passing
-        - changed_files
+  - tool_name: submit_result
+    pym: test/tools/submit.pym
+    tool_description: Submit the final test generation results and end the task.

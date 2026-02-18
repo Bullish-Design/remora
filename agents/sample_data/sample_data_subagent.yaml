@@ -17,48 +17,16 @@ initial_context:
     ```
 
 tools:
-  - name: analyze_signature
-    pym: agents/sample_data/tools/analyze_signature.pym
-    description: Extract the function signature, including types and defaults.
-    parameters:
-      type: object
-      additionalProperties: false
-      properties: {}
+  - tool_name: analyze_signature
+    pym: sample_data/tools/analyze_signature.pym
+    tool_description: Extract the function signature, including types and defaults.
     context_providers:
-      - agents/sample_data/context/existing_fixtures.pym
+      - sample_data/context/existing_fixtures.pym
 
-  - name: write_fixture_file
-    pym: agents/sample_data/tools/write_fixture_file.pym
-    description: Write generated fixtures to the fixtures directory.
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        fixtures:
-          type: array
-          items:
-            type: object
-        format:
-          type: string
-      required:
-        - fixtures
+  - tool_name: write_fixture_file
+    pym: sample_data/tools/write_fixture_file.pym
+    tool_description: Write generated fixtures to the fixtures directory.
 
-  - name: submit_result
-    pym: agents/sample_data/tools/submit.pym
-    description: Submit the final sample data results and end the task.
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        summary:
-          type: string
-        fixtures_generated:
-          type: integer
-        changed_files:
-          type: array
-          items:
-            type: string
-      required:
-        - summary
-        - fixtures_generated
-        - changed_files
+  - tool_name: submit_result
+    pym: sample_data/tools/submit.pym
+    tool_description: Submit the final sample data results and end the task.

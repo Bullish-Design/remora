@@ -15,8 +15,8 @@ from typing import Any
 
 import typer
 
-from remora.config import OperationConfig, RemoraConfig, RunnerConfig, load_config
-from remora.discovery import CSTNode, NodeDiscoverer
+from remora.config import CairnConfig, OperationConfig, RemoraConfig, load_config
+from remora.discovery import CSTNode, PydantreeDiscoverer
 from remora.events import build_event_emitter
 from remora.runner import FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
@@ -96,16 +96,18 @@ def _build_demo_config(base: RemoraConfig, demo_root: Path) -> RemoraConfig:
     }
     return base.model_copy(
         update={
-            "root_dirs": [demo_root],
-            "queries": ["function_def", "class_def"],
             "operations": operations,
-            "runner": RunnerConfig(max_concurrent_runners=1),
+            "cairn": CairnConfig(max_concurrent_agents=1),
         }
     )
 
 
-def _collect_nodes(config: RemoraConfig) -> list[CSTNode]:
-    discoverer = NodeDiscoverer(config.root_dirs, config.queries)
+def _collect_nodes(config: RemoraConfig, demo_root: Path) -> list[CSTNode]:
+    discoverer = PydantreeDiscoverer(
+        [demo_root],
+        config.discovery.language,
+        config.discovery.query_pack,
+    )
     return discoverer.discover()
 
 
@@ -118,7 +120,7 @@ async def _run_once(config: RemoraConfig, demo_root: Path) -> None:
     cairn_client = DemoCairnClient(base_dir=demo_root, work_dir=demo_work_dir)
 
     try:
-        nodes = _collect_nodes(config)
+        nodes = _collect_nodes(config, demo_root)
         operations = list(config.operations.keys())
         for node in nodes:
             for operation in operations:

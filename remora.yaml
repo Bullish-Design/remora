@@ -1,12 +1,9 @@
 # Remora configuration example
 # Copy to remora.yaml and adjust as needed.
 
-root_dirs:
-  - .
-
-queries:
-  - function_def
-  - class_def
+discovery:
+  language: python
+  query_pack: remora_core
 
 agents_dir: agents
 
@@ -44,14 +41,15 @@ operations:
 
 runner:
   max_turns: 20
-  max_concurrent_runners: 16
-  timeout: 300
   max_tokens: 512
   temperature: 0.1
   tool_choice: "required"  # "required" | "auto" | "none"
 
 cairn:
-  timeout: 120
+  command: cairn
+  home: null
+  max_concurrent_agents: 16
+  timeout: 300
 
 event_stream:
   enabled: true

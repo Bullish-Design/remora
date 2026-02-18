@@ -25,7 +25,7 @@ def test_default_config_loads_without_yaml(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.chdir(tmp_path)
     config = load_config()
     assert config.runner.max_turns == 20
-    assert config.queries == ["function_def", "class_def"]
+    assert config.discovery.query_pack == "remora_core"
     assert config.agents_dir == (tmp_path / "agents").resolve()
     assert "lint" in config.operations
 
@@ -37,7 +37,7 @@ def test_yaml_overrides_and_cli_overrides(tmp_path: Path) -> None:
     config_path.write_text(
         yaml.safe_dump(
             {
-                "queries": ["file"],
+                "discovery": {"query_pack": "custom_pack"},
                 "runner": {"max_turns": 10},
             }
         ),
@@ -45,7 +45,7 @@ def test_yaml_overrides_and_cli_overrides(tmp_path: Path) -> None:
     )
     config = load_config(config_path, {"runner": {"max_turns": 18}})
     assert config.runner.max_turns == 18
-    assert config.queries == ["file"]
+    assert config.discovery.query_pack == "custom_pack"
 
 
 def test_invalid_yaml_type_exits_with_config_003(tmp_path: Path) -> None:
@@ -55,7 +55,7 @@ def test_invalid_yaml_type_exits_with_config_003(tmp_path: Path) -> None:
     config_path.write_text("runner:\n  max_turns: nope\n", encoding="utf-8")
     runner = CliRunner()
     result = runner.invoke(app, ["config", "--config", str(config_path)])
-    assert result.exit_code == 3
+    assert result.exit_code == 1
     assert CONFIG_003 in result.output
 
 
@@ -66,7 +66,7 @@ def test_config_command_outputs_yaml(tmp_path: Path) -> None:
     config_path.write_text(
         yaml.safe_dump(
             {
-                "queries": ["file"],
+                "discovery": {"query_pack": "custom_pack"},
                 "runner": {"max_turns": 10},
             }
         ),
@@ -88,5 +88,5 @@ def test_missing_agents_dir_returns_config_004(tmp_path: Path) -> None:
     config_path.write_text("agents_dir: missing_agents\n", encoding="utf-8")
     runner = CliRunner()
     result = runner.invoke(app, ["config", "--config", str(config_path)])
-    assert result.exit_code == 3
+    assert result.exit_code == 1
     assert CONFIG_004 in result.output

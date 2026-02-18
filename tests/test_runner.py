@@ -118,26 +118,26 @@ class FakeCairnClient:
         return self.responses.get(resolved, {})
 
 
+def _tool_schema(name: str, description: str, parameters: dict[str, Any]) -> dict[str, Any]:
+    return {"type": "function", "function": {"name": name, "description": description, "parameters": parameters}}
+
+
 def _make_definition(
     *,
     tools: list[ToolDefinition] | None = None,
     max_turns: int = 10,
+    tool_schemas: list[dict[str, Any]] | None = None,
 ) -> SubagentDefinition:
     if tools is None:
         tools = [
             ToolDefinition(
-                name="submit_result",
+                tool_name="submit_result",
                 pym=Path("submit.pym"),
-                description="Submit the result.",
-                parameters={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {},
-                },
+                tool_description="Submit the result.",
                 context_providers=[],
             )
         ]
-    return SubagentDefinition(
+    definition = SubagentDefinition(
         name="lint_agent",
         max_turns=max_turns,
         initial_context=InitialContext(
@@ -146,6 +146,17 @@ def _make_definition(
         ),
         tools=tools,
     )
+    if tool_schemas is None:
+        tool_schemas = [
+            _tool_schema(
+                tool.name,
+                tool.tool_description,
+                {"type": "object", "additionalProperties": False, "properties": {}},
+            )
+            for tool in tools
+        ]
+    definition._tool_schemas = tool_schemas
+    return definition
 
 
 def _make_node() -> CSTNode:
@@ -284,21 +295,32 @@ def test_run_handles_multiple_tool_turns_then_submit(monkeypatch: pytest.MonkeyP
     _patch_openai(monkeypatch, responses=responses)
 
     tool_def = ToolDefinition(
-        name="inspect",
+        tool_name="inspect",
         pym=Path("inspect.pym"),
-        description="Inspect something.",
-        parameters={"type": "object", "additionalProperties": False, "properties": {"value": {"type": "string"}}},
+        tool_description="Inspect something.",
         context_providers=[],
     )
     submit_def = ToolDefinition(
-        name="submit_result",
+        tool_name="submit_result",
         pym=Path("submit.pym"),
-        description="Submit the result.",
-        parameters={"type": "object", "additionalProperties": False, "properties": {}},
+        tool_description="Submit the result.",
         context_providers=[],
     )
 
-    definition = _make_definition(tools=[tool_def, submit_def])
+    tool_schemas = [
+        _tool_schema(
+            "inspect",
+            "Inspect something.",
+            {"type": "object", "additionalProperties": False, "properties": {"value": {"type": "string"}}},
+        ),
+        _tool_schema(
+            "submit_result",
+            "Submit the result.",
+            {"type": "object", "additionalProperties": False, "properties": {}},
+        ),
+    ]
+
+    definition = _make_definition(tools=[tool_def, submit_def], tool_schemas=tool_schemas)
     node = _make_node()
     cairn = FakeCairnClient({Path("inspect.pym"): {"ok": True}})
     runner = FunctionGemmaRunner(
@@ -326,14 +348,21 @@ def test_run_respects_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_openai(monkeypatch, responses=responses)
 
     tool_def = ToolDefinition(
-        name="inspect",
+        tool_name="inspect",
         pym=Path("inspect.pym"),
-        description="Inspect something.",
-        parameters={"type": "object", "additionalProperties": False, "properties": {}},
+        tool_description="Inspect something.",
         context_providers=[],
     )
 
-    definition = _make_definition(tools=[tool_def], max_turns=2)
+    tool_schemas = [
+        _tool_schema(
+            "inspect",
+            "Inspect something.",
+            {"type": "object", "additionalProperties": False, "properties": {}},
+        )
+    ]
+
+    definition = _make_definition(tools=[tool_def], max_turns=2, tool_schemas=tool_schemas)
     node = _make_node()
     cairn = FakeCairnClient({Path("inspect.pym"): {"ok": True}})
     runner = FunctionGemmaRunner(
@@ -359,21 +388,32 @@ def test_context_providers_injected_before_tool_dispatch(monkeypatch: pytest.Mon
     _patch_openai(monkeypatch, responses=responses)
 
     tool_def = ToolDefinition(
-        name="inspect",
+        tool_name="inspect",
         pym=Path("inspect.pym"),
-        description="Inspect something.",
-        parameters={"type": "object", "additionalProperties": False, "properties": {}},
+        tool_description="Inspect something.",
         context_providers=[Path("ctx-1.pym"), Path("ctx-2.pym")],
     )
     submit_def = ToolDefinition(
-        name="submit_result",
+        tool_name="submit_result",
         pym=Path("submit.pym"),
-        description="Submit the result.",
-        parameters={"type": "object", "additionalProperties": False, "properties": {}},
+        tool_description="Submit the result.",
         context_providers=[],
     )
 
-    definition = _make_definition(tools=[tool_def, submit_def])
+    tool_schemas = [
+        _tool_schema(
+            "inspect",
+            "Inspect something.",
+            {"type": "object", "additionalProperties": False, "properties": {}},
+        ),
+        _tool_schema(
+            "submit_result",
+            "Submit the result.",
+            {"type": "object", "additionalProperties": False, "properties": {}},
+        ),
+    ]
+
+    definition = _make_definition(tools=[tool_def, submit_def], tool_schemas=tool_schemas)
     node = _make_node()
     cairn = FakeCairnClient(
         {

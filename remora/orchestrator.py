@@ -16,6 +16,14 @@ from remora.runner import AgentError, CairnClient, FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
 
 
+def _normalize_phase(phase: str) -> tuple[str, str | None]:
+    if phase in {"discovery", "grail_check", "execution", "submission"}:
+        return phase, None
+    if phase in {"merge"}:
+        return "submission", phase
+    return "execution", phase
+
+
 class Coordinator:
     def __init__(
         self,
@@ -28,7 +36,7 @@ class Coordinator:
         self.config = config
         self.cairn_client = cairn_client
         self._http_client = build_client(config.server)
-        self._semaphore = asyncio.Semaphore(config.runner.max_concurrent_runners)
+        self._semaphore = asyncio.Semaphore(config.cairn.max_concurrent_agents)
         self._event_emitter = build_event_emitter(
             config.event_stream,
             enabled_override=event_stream_enabled,
@@ -59,6 +67,17 @@ class Coordinator:
             definition_path = self.config.agents_dir / op_config.subagent
             try:
                 definition = load_subagent_definition(definition_path, agents_dir=self.config.agents_dir)
+                self._event_emitter.emit(
+                    {
+                        "event": "grail_check",
+                        "agent_id": f"{operation}-{node.node_id}",
+                        "node_id": node.node_id,
+                        "operation": operation,
+                        "phase": "grail_check",
+                        "status": "ok",
+                        "warnings": definition.grail_summary.get("warnings", []),
+                    }
+                )
                 runners[operation] = FunctionGemmaRunner(
                     definition=definition,
                     node=node,
@@ -72,23 +91,26 @@ class Coordinator:
                 )
             except Exception as exc:
                 errors.append({"operation": operation, "phase": "init", "error": str(exc)})
-                self._event_emitter.emit(
-                    {
-                        "event": "agent_error",
-                        "agent_id": f"{operation}-{node.node_id}",
-                        "node_id": node.node_id,
-                        "operation": operation,
-                        "phase": "init",
-                        "error": str(exc),
-                    }
-                )
+                phase, step = _normalize_phase("init")
+                payload = {
+                    "event": "agent_error",
+                    "agent_id": f"{operation}-{node.node_id}",
+                    "node_id": node.node_id,
+                    "operation": operation,
+                    "phase": phase,
+                    "error": str(exc),
+                }
+                if step is not None:
+                    payload["step"] = step
+                self._event_emitter.emit(payload)
 
         async def run_with_limit(operation: str, runner: FunctionGemmaRunner) -> tuple[str, AgentResult | Exception]:
             async with self._semaphore:
                 try:
                     return operation, await runner.run()
                 except Exception as exc:
-                    phase = exc.phase if isinstance(exc, AgentError) else "run"
+                    raw_phase = exc.phase if isinstance(exc, AgentError) else "run"
+                    phase, step = _normalize_phase(raw_phase)
                     error_code = exc.error_code if isinstance(exc, AgentError) else None
                     payload: dict[str, Any] = {
                         "event": "agent_error",
@@ -98,6 +120,8 @@ class Coordinator:
                         "phase": phase,
                         "error": str(exc),
                     }
+                    if step is not None:
+                        payload["step"] = step
                     if error_code is not None:
                         payload["error_code"] = error_code
                     self._event_emitter.emit(payload)

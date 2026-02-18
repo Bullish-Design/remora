@@ -48,8 +48,6 @@ class ServerConfig(BaseModel):
 
 class RunnerConfig(BaseModel):
     max_turns: int = 20
-    max_concurrent_runners: int = 16
-    timeout: int = 300
     max_tokens: int = 512
     temperature: float = 0.1
     tool_choice: str = "required"
@@ -66,8 +64,16 @@ class OperationConfig(BaseModel):
     model_id: str | None = None
 
 
+class DiscoveryConfig(BaseModel):
+    language: str = "python"
+    query_pack: str = "remora_core"
+
+
 class CairnConfig(BaseModel):
-    timeout: int = 120
+    command: str = "cairn"
+    home: Path | None = None
+    max_concurrent_agents: int = 16
+    timeout: int = 300
 
 
 class EventStreamConfig(BaseModel):
@@ -93,8 +99,7 @@ def _default_operations() -> dict[str, OperationConfig]:
 
 
 class RemoraConfig(BaseModel):
-    root_dirs: list[Path] = Field(default_factory=lambda: [Path(".")])
-    queries: list[str] = Field(default_factory=lambda: ["function_def", "class_def"])
+    discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
     agents_dir: Path = Path("agents")
     server: ServerConfig = Field(default_factory=ServerConfig)
     operations: dict[str, OperationConfig] = Field(default_factory=_default_operations)

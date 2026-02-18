@@ -8,10 +8,11 @@ import warnings
 
 import jinja2
 import yaml
-from pydantic import BaseModel, Field, PrivateAttr, field_validator
+from pydantic import BaseModel, Field, PrivateAttr
 
 from remora.discovery import CSTNode
 from remora.errors import AGENT_001
+from remora.tool_registry import GrailToolRegistry, ToolRegistryError
 
 
 class SubagentError(RuntimeError):
@@ -28,25 +29,15 @@ def resolve_path(base: Path, relative: str | Path) -> Path:
 
 
 class ToolDefinition(BaseModel):
-    name: str
     pym: Path
-    description: str
-    parameters: dict[str, Any]
+    tool_name: str | None = None
+    tool_description: str
+    inputs_override: dict[str, dict[str, Any]] = Field(default_factory=dict)
     context_providers: list[Path] = Field(default_factory=list)
 
-    @field_validator("parameters")
-    @classmethod
-    def validate_parameters(cls, value: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(value, dict):
-            raise ValueError("Tool parameters must be a JSON schema object.")
-        if value.get("type") != "object":
-            raise ValueError("Tool parameters must define type: object.")
-        if value.get("additionalProperties") is not False:
-            warnings.warn(
-                "Tool parameters should set additionalProperties: false for strict mode.",
-                stacklevel=2,
-            )
-        return value
+    @property
+    def name(self) -> str:
+        return self.tool_name or self.pym.stem
 
 
 class InitialContext(BaseModel):
@@ -70,27 +61,23 @@ class SubagentDefinition(BaseModel):
     initial_context: InitialContext
     tools: list[ToolDefinition]
     _tools_by_name: dict[str, ToolDefinition] = PrivateAttr(default_factory=dict)
+    _tool_schemas: list[dict[str, Any]] = PrivateAttr(default_factory=list)
+    _grail_summary: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     def model_post_init(self, _: Any) -> None:
         self._tools_by_name = {tool.name: tool for tool in self.tools}
 
     @property
     def tool_schemas(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.parameters,
-                },
-            }
-            for tool in self.tools
-        ]
+        return self._tool_schemas
 
     @property
     def tools_by_name(self) -> dict[str, ToolDefinition]:
         return self._tools_by_name
+
+    @property
+    def grail_summary(self) -> dict[str, Any]:
+        return self._grail_summary
 
 
 def load_subagent_definition(path: Path, agents_dir: Path) -> SubagentDefinition:
@@ -101,6 +88,7 @@ def load_subagent_definition(path: Path, agents_dir: Path) -> SubagentDefinition
     _validate_submit_result(definition, resolved_path)
     _validate_tool_names(definition, resolved_path)
     _validate_jinja2_template(definition, resolved_path)
+    _apply_tool_registry(definition, agents_dir, resolved_path)
     _warn_missing_paths(definition)
     return definition
 
@@ -134,6 +122,17 @@ def _resolve_paths(data: dict[str, Any], agents_dir: Path) -> dict[str, Any]:
     if tools_data:
         resolved["tools"] = tools_data
     return resolved
+
+
+def _apply_tool_registry(definition: SubagentDefinition, agents_dir: Path, path: Path) -> None:
+    grail_root = agents_dir.parent / ".grail"
+    registry = GrailToolRegistry(grail_root)
+    try:
+        catalog = registry.build_tool_catalog(definition.tools)
+        definition._tool_schemas = catalog.schemas
+        definition._grail_summary = catalog.grail_summary
+    except ToolRegistryError as exc:
+        raise SubagentError(exc.code, f"{path}: {exc}") from exc
 
 
 def _validate_submit_result(definition: SubagentDefinition, path: Path) -> None:

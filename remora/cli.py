@@ -37,34 +37,52 @@ def _not_implemented() -> None:
 
 
 def _build_overrides(
-    root_dirs: list[Path] | None,
-    queries: list[str] | None,
+    discovery_language: str | None,
+    query_pack: str | None,
     agents_dir: Path | None,
     max_turns: int | None,
-    max_concurrent_runners: int | None,
-    runner_timeout: int | None,
+    max_tokens: int | None,
+    temperature: float | None,
+    tool_choice: str | None,
+    cairn_command: str | None,
+    cairn_home: Path | None,
+    max_concurrent_agents: int | None,
     cairn_timeout: int | None,
     event_stream: bool | None,
     event_stream_file: Path | None,
 ) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
-    if root_dirs is not None:
-        overrides["root_dirs"] = root_dirs
-    if queries is not None:
-        overrides["queries"] = queries
+    discovery_overrides: dict[str, Any] = {}
+    if discovery_language is not None:
+        discovery_overrides["language"] = discovery_language
+    if query_pack is not None:
+        discovery_overrides["query_pack"] = query_pack
+    if discovery_overrides:
+        overrides["discovery"] = discovery_overrides
     if agents_dir is not None:
         overrides["agents_dir"] = agents_dir
     runner_overrides: dict[str, Any] = {}
     if max_turns is not None:
         runner_overrides["max_turns"] = max_turns
-    if max_concurrent_runners is not None:
-        runner_overrides["max_concurrent_runners"] = max_concurrent_runners
-    if runner_timeout is not None:
-        runner_overrides["timeout"] = runner_timeout
+    if max_tokens is not None:
+        runner_overrides["max_tokens"] = max_tokens
+    if temperature is not None:
+        runner_overrides["temperature"] = temperature
+    if tool_choice is not None:
+        runner_overrides["tool_choice"] = tool_choice
     if runner_overrides:
         overrides["runner"] = runner_overrides
+    cairn_overrides: dict[str, Any] = {}
+    if cairn_command is not None:
+        cairn_overrides["command"] = cairn_command
+    if cairn_home is not None:
+        cairn_overrides["home"] = cairn_home
+    if max_concurrent_agents is not None:
+        cairn_overrides["max_concurrent_agents"] = max_concurrent_agents
     if cairn_timeout is not None:
-        overrides["cairn"] = {"timeout": cairn_timeout}
+        cairn_overrides["timeout"] = cairn_timeout
+    if cairn_overrides:
+        overrides["cairn"] = cairn_overrides
     event_overrides: dict[str, Any] = {}
     if event_stream is not None:
         event_overrides["enabled"] = event_stream
@@ -99,12 +117,16 @@ def config(
         resolve_path=True,
     ),
     output_format: str = typer.Option("yaml", "--format", "-f"),
-    root_dirs: list[Path] | None = typer.Option(None, "--root-dir"),
-    queries: list[str] | None = typer.Option(None, "--query"),
+    discovery_language: str | None = typer.Option(None, "--discovery-language"),
+    query_pack: str | None = typer.Option(None, "--query-pack"),
     agents_dir: Path | None = typer.Option(None, "--agents-dir"),
     max_turns: int | None = typer.Option(None, "--max-turns"),
-    max_concurrent_runners: int | None = typer.Option(None, "--max-concurrent-runners"),
-    runner_timeout: int | None = typer.Option(None, "--runner-timeout"),
+    max_tokens: int | None = typer.Option(None, "--max-tokens"),
+    temperature: float | None = typer.Option(None, "--temperature"),
+    tool_choice: str | None = typer.Option(None, "--tool-choice"),
+    cairn_command: str | None = typer.Option(None, "--cairn-command"),
+    cairn_home: Path | None = typer.Option(None, "--cairn-home"),
+    max_concurrent_agents: int | None = typer.Option(None, "--max-concurrent-agents"),
     cairn_timeout: int | None = typer.Option(None, "--cairn-timeout"),
     event_stream: bool | None = typer.Option(None, "--event-stream/--no-event-stream"),
     event_stream_file: Path | None = typer.Option(
@@ -115,12 +137,16 @@ def config(
     ),
 ) -> None:
     overrides = _build_overrides(
-        root_dirs,
-        queries,
+        discovery_language,
+        query_pack,
         agents_dir,
         max_turns,
-        max_concurrent_runners,
-        runner_timeout,
+        max_tokens,
+        temperature,
+        tool_choice,
+        cairn_command,
+        cairn_home,
+        max_concurrent_agents,
         cairn_timeout,
         event_stream,
         event_stream_file,

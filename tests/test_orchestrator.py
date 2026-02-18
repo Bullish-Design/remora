@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from remora.config import OperationConfig, RemoraConfig, RunnerConfig
+from remora.config import CairnConfig, OperationConfig, RemoraConfig
 from remora.discovery import CSTNode
 from remora.errors import AGENT_001
 from remora.orchestrator import Coordinator
@@ -37,7 +37,7 @@ def _make_config(tmp_path: Path, operations: dict[str, OperationConfig], *, max_
     return RemoraConfig(
         agents_dir=agents_dir,
         operations=operations,
-        runner=RunnerConfig(max_concurrent_runners=max_concurrent),
+        cairn=CairnConfig(max_concurrent_agents=max_concurrent),
     )
 
 

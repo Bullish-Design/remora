@@ -80,21 +80,29 @@ Built with **Pydantic**. Loads `remora.yaml`, merges CLI overrides, validates al
 
 ```python
 class RemoraConfig(BaseModel):
-    root_dirs: list[Path]
-    queries: list[str]           # function_def, class_def, file
+    discovery: DiscoveryConfig
     operations: dict[str, OperationConfig]
     agents_dir: Path             # Root of agents/ directory
     server: ServerConfig
     cairn: CairnConfig
     runner: RunnerConfig         # FunctionGemmaRunner settings
+    event_stream: EventStreamConfig
+
+class DiscoveryConfig(BaseModel):
+    language: str = "python"
+    query_pack: str = "remora_core"
 
 class RunnerConfig(BaseModel):
     max_turns: int = 20          # Per-run turn limit
-    max_concurrent_runners: int = 16
-    timeout: int = 300           # Seconds per runner
     max_tokens: int = 512
     temperature: float = 0.1
     tool_choice: str = "required"
+
+class CairnConfig(BaseModel):
+    command: str = "cairn"
+    home: Path | None = None
+    max_concurrent_agents: int = 16
+    timeout: int = 300
 ```
 
 #### File Watcher (`remora.watcher`)
@@ -110,7 +118,7 @@ Uses **watchfiles** for reactive monitoring. Debounces changes, triggers increme
 Uses **Pydantree** with `.scm` Tree-sitter query files to extract `CSTNode` objects.
 
 ```
-remora/queries/
+queries/python/remora_core/
 ├── function_def.scm
 ├── class_def.scm
 └── file.scm
@@ -545,8 +553,8 @@ Each training example is a full conversation:
 ### Node-Level Concurrency
 
 ```python
-# All nodes processed in parallel, tool calls bounded by max_concurrent_runners
-semaphore = asyncio.Semaphore(config.runner.max_concurrent_runners)
+# All nodes processed in parallel, tool calls bounded by max_concurrent_agents
+semaphore = asyncio.Semaphore(config.cairn.max_concurrent_agents)
 
 async def process_with_limit(node):
     async with semaphore:
@@ -607,13 +615,9 @@ class AgentError(BaseModel):
 ### remora.yaml
 
 ```yaml
-root_dirs:
-  - src/
-  - lib/
-
-queries:
-  - function_def
-  - class_def
+discovery:
+  language: python
+  query_pack: remora_core
 
 agents_dir: agents/   # Root of the agents/ directory
 
@@ -645,11 +649,15 @@ operations:
 
 runner:
   max_turns: 20
-  max_concurrent_runners: 16
-  timeout: 300
+  max_tokens: 512
+  temperature: 0.1
+  tool_choice: required
 
 cairn:
-  timeout: 120
+  command: cairn
+  home: null
+  max_concurrent_agents: 16
+  timeout: 300
 ```
 
 ### Configuration Precedence
