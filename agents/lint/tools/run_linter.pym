@@ -39,18 +39,12 @@ async def _resolve_target_file() -> str | None:
 
 
 def _split_json_objects(text: str) -> list[str]:
-    objects: list[str] = []
-    depth = 0
-    start = None
-    in_string = False
-    escape = False
+    objects, depth, start = [], 0, None
+    in_string, escape = False, False
     for idx, ch in enumerate(text):
         if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
+            escape = not escape and ch == "\\"
+            if ch == '"' and not escape:
                 in_string = False
             continue
         if ch == '"':
@@ -60,28 +54,23 @@ def _split_json_objects(text: str) -> list[str]:
             if depth == 0:
                 start = idx
             depth += 1
-            continue
-        if ch == "}":
+        elif ch == "}":
             depth -= 1
             if depth == 0 and start is not None:
-                objects.append(text[start : idx + 1])
+                objects.append(text[start:idx + 1])
                 start = None
     return objects
 
 
 def _find_value_start(text: str, key: str) -> int | None:
-    token = f'"{key}":'
-    idx = text.find(token)
-    if idx == -1:
-        return None
-    return idx + len(token)
+    idx = text.find(f'"{key}":')
+    return idx + len(f'"{key}":') if idx != -1 else None
 
 
 def _parse_string(text: str) -> str:
     if not text.startswith('"'):
         return ""
-    result = []
-    escape = False
+    result, escape = [], False
     for ch in text[1:]:
         if escape:
             result.append(ch)
@@ -96,31 +85,18 @@ def _parse_string(text: str) -> str:
 
 
 def _parse_number(text: str) -> int:
-    digits = []
-    for ch in text:
-        if ch.isdigit():
-            digits.append(ch)
-        else:
-            break
-    try:
-        return int("".join(digits)) if digits else 0
-    except Exception:
-        return 0
+    digits = [ch for ch in text if ch.isdigit()]
+    return int("".join(digits)) if digits else 0
 
 
 def _extract_object(text: str) -> str:
     if not text.startswith("{"):
         return ""
-    depth = 0
-    in_string = False
-    escape = False
+    depth, in_string, escape = 0, False, False
     for idx, ch in enumerate(text):
         if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
+            escape = not escape and ch == "\\"
+            if ch == '"' and not escape:
                 in_string = False
             continue
         if ch == '"':
@@ -131,45 +107,34 @@ def _extract_object(text: str) -> str:
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                return text[: idx + 1]
+                return text[:idx + 1]
     return ""
 
 
 def _get_string(obj: str, key: str) -> str:
     start = _find_value_start(obj, key)
-    if start is None:
-        return ""
-    raw = obj[start:].lstrip()
-    return _parse_string(raw)
+    return _parse_string(obj[start:].lstrip()) if start else ""
 
 
 def _get_int(obj: str, key: str) -> int:
     start = _find_value_start(obj, key)
-    if start is None:
-        return 0
-    raw = obj[start:].lstrip()
-    return _parse_number(raw)
+    return _parse_number(obj[start:].lstrip()) if start else 0
 
 
 def _get_object(obj: str, key: str) -> str:
     start = _find_value_start(obj, key)
-    if start is None:
-        return ""
-    raw = obj[start:].lstrip()
-    return _extract_object(raw)
+    return _extract_object(obj[start:].lstrip()) if start else ""
 
 
 def _format_issue(issue: str) -> dict[str, Any]:
-    location = _get_object(issue, "location")
-    fix = _get_object(issue, "fix")
+    location, fix = _get_object(issue, "location"), _get_object(issue, "fix")
     applicability = _get_string(fix, "applicability") if fix else ""
-    fixable = bool(fix and applicability != "unfixable")
     return {
         "code": _get_string(issue, "code"),
         "line": _get_int(location, "row"),
         "col": _get_int(location, "column"),
         "message": _get_string(issue, "message"),
-        "fixable": fixable,
+        "fixable": bool(fix and applicability != "unfixable"),
     }
 
 
