@@ -321,7 +321,7 @@ tools:
       additionalProperties: false
 ```
 
-All tool schemas use strict mode (`additionalProperties: false`) to guarantee reliable dispatch to `.pym` scripts.
+Tool schemas use `additionalProperties: false` to guarantee reliable dispatch to `.pym` scripts.
 
 #### Pydantic Model
 
@@ -354,7 +354,7 @@ class SubagentDefinition(BaseModel):
                     "name": t.name,
                     "description": t.description,
                     "parameters": t.parameters,
-                    "strict": True,
+
                 }
             }
             for t in self.tools

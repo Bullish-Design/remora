@@ -1,0 +1,59 @@
+# Remora configuration example
+# Copy to remora.yaml and adjust as needed.
+
+root_dirs:
+  - .
+
+queries:
+  - function_def
+  - class_def
+
+agents_dir: agents
+
+# vLLM server on your Tailscale network
+server:
+  base_url: "http://remora-server:8000/v1"
+  api_key: "EMPTY"
+  timeout: 120
+  default_adapter: "google/functiongemma-270m-it"
+
+operations:
+  lint:
+    enabled: true
+    auto_accept: false
+    subagent: lint/lint_subagent.yaml
+    # model_id here is the LoRA adapter name on the server
+    # omit to use server.default_adapter
+    # model_id: "lint"
+
+  test:
+    enabled: true
+    auto_accept: false
+    subagent: test/test_subagent.yaml
+
+  docstring:
+    enabled: true
+    auto_accept: false
+    subagent: docstring/docstring_subagent.yaml
+    style: google
+
+  sample_data:
+    enabled: false
+    auto_accept: false
+    subagent: sample_data/sample_data_subagent.yaml
+
+runner:
+  max_turns: 20
+  max_concurrent_runners: 16
+  timeout: 300
+  max_tokens: 512
+  temperature: 0.1
+  tool_choice: "required"  # "required" | "auto" | "none"
+
+cairn:
+  timeout: 120
+
+event_stream:
+  enabled: true
+  include_payloads: true
+  max_payload_chars: 40000

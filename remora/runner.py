@@ -140,11 +140,18 @@ class FunctionGemmaRunner:
         self.event_emitter.emit(payload)
         if tool_choice is None:
             tool_choice = self.runner_config.tool_choice
+        tools_payload = self.definition.tool_schemas
+        self._emit_tool_debug("model_tools_before", tool_choice)
+        self._emit_request_debug(
+            model=self._model_target,
+            tool_choice=tool_choice,
+            tools=tools_payload,
+        )
         try:
             response = await self._http_client.chat.completions.create(
                 model=self._model_target,
                 messages=cast(list[ChatCompletionMessageParam], self.messages),
-                tools=cast(list[ChatCompletionToolParam], self.definition.tool_schemas),
+                tools=cast(list[ChatCompletionToolParam], tools_payload),
                 tool_choice=cast(Any, tool_choice),
                 max_tokens=self.runner_config.max_tokens,
                 temperature=self.runner_config.temperature,
@@ -167,6 +174,7 @@ class FunctionGemmaRunner:
             ) from exc
         message = response.choices[0].message
         response_text = message.content or ""
+        self._emit_tool_debug("model_tools_after", tool_choice, request_id=request_id)
         self._emit_model_response(
             start,
             phase=phase,
@@ -214,6 +222,61 @@ class FunctionGemmaRunner:
             "error": None,
         }
         return AgentResult.model_validate(result_data)
+
+    def _emit_tool_debug(self, event: str, tool_choice: Any, *, request_id: str | None = None) -> None:
+        tools = self.definition.tool_schemas
+        payload: dict[str, Any] = {
+            "event": event,
+            "agent_id": self.workspace_id,
+            "node_id": self.node.node_id,
+            "operation": self.definition.name,
+            "model": self._model_target,
+            "tool_count": len(tools),
+            "tool_choice": tool_choice,
+            "tools_type": type(tools).__name__,
+            "tools_item_types": [type(item).__name__ for item in tools],
+        }
+        if request_id is not None:
+            payload["request_id"] = request_id
+        if self._include_payloads():
+            tools_text = self._serialize_payload(tools)
+            payload["tools_chars"] = len(tools_text)
+            payload["tools"] = self._truncate(tools_text)
+        self.event_emitter.emit(payload)
+
+    def _emit_request_debug(self, *, model: str, tool_choice: Any, tools: list[dict[str, Any]]) -> None:
+        payload: dict[str, Any] = {
+            "event": "model_request_debug",
+            "agent_id": self.workspace_id,
+            "node_id": self.node.node_id,
+            "operation": self.definition.name,
+            "model": model,
+            "tool_choice": tool_choice,
+            "tools_count": len(tools),
+        }
+        if self._include_payloads():
+            messages_text = self._serialize_payload(self.messages)
+            tools_text = self._serialize_payload(tools)
+            request_payload = {
+                "model": model,
+                "messages": self.messages,
+                "tools": tools,
+                "tool_choice": tool_choice,
+                "max_tokens": self.runner_config.max_tokens,
+                "temperature": self.runner_config.temperature,
+            }
+            request_text = self._serialize_payload(request_payload)
+            payload.update(
+                {
+                    "messages_chars": len(messages_text),
+                    "tools_chars": len(tools_text),
+                    "messages": messages_text,
+                    "tools": tools_text,
+                    "request_chars": len(request_text),
+                    "request": request_text,
+                }
+            )
+        self.event_emitter.emit(payload)
 
     def _include_payloads(self) -> bool:
         return bool(getattr(self.event_emitter, "include_payloads", False))

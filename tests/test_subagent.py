@@ -84,7 +84,7 @@ def test_load_subagent_definition_resolves_paths(tmp_path: Path) -> None:
     ]
 
 
-def test_tool_schemas_are_strict(tmp_path: Path) -> None:
+def test_tool_schemas_are_functions(tmp_path: Path) -> None:
     agents_dir = tmp_path / "agents"
     subagent_path = _write_subagent_yaml(agents_dir)
     definition = load_subagent_definition(subagent_path, agents_dir)
@@ -92,7 +92,7 @@ def test_tool_schemas_are_strict(tmp_path: Path) -> None:
     schemas = definition.tool_schemas
     assert schemas[0]["type"] == "function"
     assert schemas[0]["function"]["name"] == "run_tool"
-    assert schemas[0]["function"]["strict"] is True
+    assert "strict" not in schemas[0]["function"]
     assert schemas[0]["function"]["parameters"]["type"] == "object"
 
 

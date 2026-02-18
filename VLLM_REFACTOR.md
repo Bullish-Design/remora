@@ -305,7 +305,7 @@ No new `VLLMConfig` section is needed for the core refactor — the tool calling
 
 ### 3.3 `remora/subagent.py`
 
-The `tool_schemas` property is already in the correct OpenAI format for the `tools=` parameter — no change needed. The `"strict": True` field in tool schemas is passed through correctly.
+The `tool_schemas` property is already in the correct OpenAI format for the `tools=` parameter — no change needed. The `additionalProperties: false` checks still enforce strictness on our side; the OpenAI `strict` field is no longer sent to avoid vLLM schema warnings.
 
 The `InitialContext.system_prompt` now becomes the complete system message (no tool preamble is prepended by the runner). Existing YAML files already write concise role descriptions there, so no YAML changes are needed.
 

@@ -15,7 +15,8 @@ set -e
 # --enable-prefix-caching : cache shared system-prompt prefixes across requests
 #                           (major throughput win for remora's repeated tool schemas)
 
-python3 -m vllm.entrypoints.openai.api_server \
+#python3 -m vllm.entrypoints.openai.api_server \
+vllm serve \
     --model google/functiongemma-270m-it \
     --enable-auto-tool-choice \
     --tool-call-parser functiongemma \
