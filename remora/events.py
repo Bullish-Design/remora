@@ -51,9 +51,10 @@ class JsonlEventEmitter:
     def emit(self, payload: dict[str, Any]) -> None:
         if not self.enabled:
             return
-        payload.setdefault("ts", _iso_timestamp())
+        out = {**payload}
+        out.setdefault("ts", _iso_timestamp())
         try:
-            message = json.dumps(payload, default=str)
+            message = json.dumps(out, default=str)
         except (TypeError, ValueError):
             fallback = {"event": "event_encode_error", "payload": str(payload)}
             message = json.dumps(fallback)

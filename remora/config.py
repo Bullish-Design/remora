@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import concurrent.futures
 import os
 import socket
 import warnings
@@ -55,6 +56,8 @@ class RunnerConfig(BaseModel):
 
 
 class OperationConfig(BaseModel):
+    # extra="allow" is intentional: operation-specific keys (e.g. style="google")
+    # are passed through to the subagent and are not validated by Remora.
     model_config = ConfigDict(extra="allow")
 
     enabled: bool = True
@@ -180,12 +183,14 @@ def _warn_missing_subagents(config: RemoraConfig) -> None:
 def _warn_unreachable_server(server: ServerConfig) -> None:
     parsed = urlparse(server.base_url)
     hostname = parsed.hostname
-    if not hostname:
+    if hostname is None:
         return
-    try:
-        socket.getaddrinfo(hostname, None)
-    except socket.gaierror:
-        warnings.warn(
-            f"vLLM server hostname not reachable: {server.base_url}",
-            stacklevel=2,
-        )
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(socket.getaddrinfo, hostname, None)
+        try:
+            future.result(timeout=1.0)
+        except (socket.gaierror, concurrent.futures.TimeoutError):
+            warnings.warn(
+                f"vLLM server hostname not reachable: {server.base_url}",
+                stacklevel=2,
+            )

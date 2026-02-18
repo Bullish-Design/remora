@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,19 @@ from remora.errors import CONFIG_003
 
 app = typer.Typer(help="Remora CLI.")
 console = Console()
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(importlib.metadata.version("remora"))
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(None, "--version", callback=_version_callback, is_eager=True),
+) -> None:
+    pass
 
 
 def _not_implemented() -> None:
@@ -115,10 +129,10 @@ def config(
         config_data = load_config(config_path, overrides)
     except ConfigError as exc:
         _print_config_error(exc.code, str(exc))
-        raise typer.Exit(code=3) from exc
+        raise typer.Exit(code=1) from exc
     except ValidationError as exc:
         _print_config_error(CONFIG_003, str(exc))
-        raise typer.Exit(code=3) from exc
+        raise typer.Exit(code=1) from exc
     payload = serialize_config(config_data)
     output_format_normalized = output_format.lower()
     if output_format_normalized == "yaml":
