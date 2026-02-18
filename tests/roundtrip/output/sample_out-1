@@ -1,0 +1,11 @@
+node_type: class
+name: Greeter
+full_name: Greeter
+node_id: 83b65fe86b9694fb
+file_path: /home/andrew/Documents/Projects/remora/tests/roundtrip/input/sample.py
+lines: 1-3
+bytes: 0-86
+---
+class Greeter:
+    def greet(self, name: str) -> str:
+        return f"Hello, {name}!"

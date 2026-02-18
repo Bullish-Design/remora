@@ -1930,7 +1930,7 @@ No results should appear in `remora/`, `tests/`, `scripts/`, or `pyproject.toml`
 In `remora/errors.py`, verify that `DISC_001` and `DISC_002` are still meaningful:
 
 - `DISC_001` — Previously "Pydantree CLI not found". Repurpose to "Query pack not found" (already done in QueryLoader).
-- `DISC_002` — Previously "Unexpected Pydantree output format". This can be removed or repurposed. If no code references it, remove it.
+- `DISC_002` — Previously "Unexpected Pydantree output format". This can be repurposed into an unexpected treesitter output.
 
 Check if `DISC_002` is still referenced:
 
@@ -1938,7 +1938,7 @@ Check if `DISC_002` is still referenced:
 grep -r "DISC_002" remora/ tests/
 ```
 
-If nothing references it, leave it (it's just a constant string) or remove it for cleanliness.
+If nothing references it, leave it (it's just a constant string) 
 
 #### Verification Checklist — Step 10
 

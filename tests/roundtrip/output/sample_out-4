@@ -1,0 +1,10 @@
+node_type: function
+name: add
+full_name: add
+node_id: c42d7551bbf1dec7
+file_path: /home/andrew/Documents/Projects/remora/tests/roundtrip/input/sample.py
+lines: 6-7
+bytes: 89-137
+---
+def add(x: int, y: int) -> int:
+    return x + y
