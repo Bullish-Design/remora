@@ -1,6 +1,8 @@
 {%- set ns = namespace(developer_content='', has_tools=false) -%}
+{%- set tools = tools or [] -%}
+{%- set messages = messages or [] -%}
 
-{%- if tools is defined and tools | length > 0 -%}
+{%- if tools | length > 0 -%}
     {%- set ns.has_tools = true -%}
 {%- endif -%}
 
