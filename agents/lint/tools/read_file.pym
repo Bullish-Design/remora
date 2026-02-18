@@ -1,31 +1,33 @@
-from __future__ import annotations
+from grail import Input, external
 
-from pathlib import Path
-import json
-import os
-from typing import Any
+target_file_input: str | None = Input("target_file", default=None)
 
 
-def _workspace_root() -> Path:
-    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
-    return Path(workspace) if workspace else Path.cwd()
+@external
+async def read_file(path: str) -> str:
+    """Read the text contents of a file."""
+    ...
 
 
-def _resolve_target_file() -> Path:
-    workspace_root = _workspace_root()
-    env_path = os.getenv("REMORA_TARGET_FILE")
-    if env_path:
-        path = Path(env_path)
-        return path if path.is_absolute() else workspace_root / path
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
 
-    hint_path = workspace_root / ".remora" / "target_file"
-    if hint_path.exists():
-        raw = hint_path.read_text(encoding="utf-8").strip()
-        if raw:
-            path = Path(raw)
-            return path if path.is_absolute() else workspace_root / path
 
-    raise FileNotFoundError("Target file not found for linting.")
+async def _read_optional(path: str) -> str | None:
+    if await file_exists(path=path):
+        return await read_file(path=path)
+    return None
+
+
+async def _resolve_target_file() -> str | None:
+    if target_file_input:
+        return target_file_input.strip()
+    stored = await _read_optional(path=".remora/target_file")
+    if stored:
+        return stored.strip()
+    return None
 
 
 def _line_count(content: str) -> int:
@@ -34,15 +36,13 @@ def _line_count(content: str) -> int:
     return len(content.splitlines())
 
 
-def run(_: dict[str, Any]) -> dict[str, Any]:
-    try:
-        target_file = _resolve_target_file()
-        content = target_file.read_text(encoding="utf-8")
-        return {"content": content, "lines": _line_count(content)}
-    except Exception as exc:  # noqa: BLE001 - tool scripts must never raise
-        return {"error": str(exc)}
+try:
+    target_file = await _resolve_target_file()
+    if not target_file:
+        raise FileNotFoundError("Target file not found for linting.")
+    content = await read_file(path=target_file)
+    result = {"content": content, "lines": _line_count(content)}
+except Exception as exc:
+    result = {"error": str(exc)}
 
-
-if __name__ == "__main__":
-    payload = json.loads(os.environ.get("REMORA_INPUT", "{}"))
-    print(json.dumps(run(payload)))
+result

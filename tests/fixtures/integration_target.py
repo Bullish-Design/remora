@@ -1,15 +1,16 @@
 # This file is intentionally imperfect for integration testing.
 
-import os, sys  # F401: os unused; also missing space after comma (E231)
+import os, sys  # F401: os and sys unused
 
 
 def calculate_discount(price: float, rate: float = 0.1) -> float:
-    # E231: missing whitespace after ':' and '->'
+    # F841: unused variable
+    unused = rate
     return price * (1 - rate)
 
 
 def format_currency(amount, symbol="$"):
-    # No type hints, no docstring
+    # No type hints, no docstring.
     return f"{symbol}{amount:.2f}"
 
 

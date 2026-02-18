@@ -1,43 +1,34 @@
-from __future__ import annotations
+from grail import Input
 
-import json
-import os
-from typing import Any
+summary: str = Input("summary")
+tests_generated: int = Input("tests_generated")
+tests_passing: int = Input("tests_passing")
+changed_files: list[str] = Input("changed_files")
+workspace_id: str | None = Input("workspace_id", default=None)
 
+workspace_value = workspace_id or "unknown"
 
-def _workspace_id() -> str:
-    return os.getenv("REMORA_WORKSPACE_ID", "unknown")
+try:
+    status = "success" if tests_passing >= tests_generated else "failed"
+    result = {
+        "status": status,
+        "workspace_id": workspace_value,
+        "changed_files": [str(path) for path in changed_files],
+        "summary": str(summary),
+        "details": {
+            "tests_generated": int(tests_generated),
+            "tests_passing": int(tests_passing),
+        },
+        "error": None,
+    }
+except Exception as exc:
+    result = {
+        "status": "failed",
+        "workspace_id": workspace_value,
+        "changed_files": [],
+        "summary": "",
+        "details": {},
+        "error": str(exc),
+    }
 
-
-def run(inputs: dict[str, Any]) -> dict[str, Any]:
-    try:
-        summary = str(inputs.get("summary", ""))
-        tests_generated = int(inputs.get("tests_generated", 0) or 0)
-        tests_passing = int(inputs.get("tests_passing", 0) or 0)
-        changed_files = [str(path) for path in inputs.get("changed_files", []) or []]
-        status = "success" if tests_passing >= tests_generated else "failed"
-        return {
-            "status": status,
-            "workspace_id": _workspace_id(),
-            "changed_files": changed_files,
-            "summary": summary,
-            "details": {
-                "tests_generated": tests_generated,
-                "tests_passing": tests_passing,
-            },
-            "error": None,
-        }
-    except Exception as exc:  # noqa: BLE001 - tool scripts must never raise
-        return {
-            "status": "failed",
-            "workspace_id": _workspace_id(),
-            "changed_files": [],
-            "summary": "",
-            "details": {},
-            "error": str(exc),
-        }
-
-
-if __name__ == "__main__":
-    payload = json.loads(os.environ.get("REMORA_INPUT", "{}"))
-    print(json.dumps(run(payload)))
+result

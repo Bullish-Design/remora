@@ -1,51 +1,69 @@
-from __future__ import annotations
-
-from pathlib import Path
-import os
-import yaml
-
+from grail import external
 
 DEFAULT_STYLE = "google"
 ALLOWED_STYLES = {"google", "numpy", "sphinx"}
 
 
-def _workspace_root() -> Path:
-    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
-    return Path(workspace) if workspace else Path.cwd()
+@external
+async def read_file(path: str) -> str:
+    """Read the text contents of a file."""
+    ...
 
 
-def _read_style_from_config(path: Path) -> str | None:
-    try:
-        content = path.read_text(encoding="utf-8")
-        data = yaml.safe_load(content)
-    except Exception:
-        return None
-    if not isinstance(data, dict):
-        return None
-    operations = data.get("operations")
-    if not isinstance(operations, dict):
-        return None
-    docstring_config = operations.get("docstring")
-    if not isinstance(docstring_config, dict):
-        return None
-    style = docstring_config.get("style")
-    if isinstance(style, str):
-        return style
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
+
+
+def _extract_style(content: str) -> str | None:
+    lines = content.splitlines()
+    in_operations = False
+    operations_indent = 0
+    in_docstring = False
+    docstring_indent = 0
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if stripped.startswith("operations:"):
+            in_operations = True
+            operations_indent = indent
+            in_docstring = False
+            continue
+        if in_operations and indent <= operations_indent:
+            in_operations = False
+            in_docstring = False
+
+        if in_operations and stripped.startswith("docstring:"):
+            in_docstring = True
+            docstring_indent = indent
+            continue
+
+        if in_docstring and indent <= docstring_indent:
+            in_docstring = False
+
+        if in_docstring and stripped.startswith("style:"):
+            _, value = stripped.split(":", 1)
+            style = value.strip()
+            if style:
+                return style
     return None
 
 
-def run(_: dict[str, object] | None = None) -> str:
-    try:
-        workspace_root = _workspace_root()
-        config_path = workspace_root / "remora.yaml"
-        if config_path.exists():
-            style = _read_style_from_config(config_path)
-            if style in ALLOWED_STYLES:
-                return style
-        return DEFAULT_STYLE
-    except Exception:
-        return DEFAULT_STYLE
+try:
+    if await file_exists(path="remora.yaml"):
+        raw = await read_file(path="remora.yaml")
+        style = _extract_style(raw)
+        if style in ALLOWED_STYLES:
+            result = style
+        else:
+            result = DEFAULT_STYLE
+    else:
+        result = DEFAULT_STYLE
+except Exception:
+    result = DEFAULT_STYLE
 
-
-if __name__ == "__main__":
-    print(run())
+result

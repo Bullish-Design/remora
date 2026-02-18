@@ -1,74 +1,65 @@
-from __future__ import annotations
+from grail import Input, external
 
-from pathlib import Path
-import ast
-import json
-import os
-from typing import Any
-
-
-def _workspace_root() -> Path:
-    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
-    return Path(workspace) if workspace else Path.cwd()
+docstring: str = Input("docstring")
+style: str = Input("style")
+node_text_input: str | None = Input("node_text", default=None)
+target_file_input: str | None = Input("target_file", default=None)
 
 
-def _resolve_target_file() -> Path:
-    workspace_root = _workspace_root()
-    env_path = os.getenv("REMORA_TARGET_FILE")
-    if env_path:
-        path = Path(env_path)
-        return path if path.is_absolute() else workspace_root / path
-
-    hint_path = workspace_root / ".remora" / "target_file"
-    if hint_path.exists():
-        raw = hint_path.read_text(encoding="utf-8").strip()
-        if raw:
-            path = Path(raw)
-            return path if path.is_absolute() else workspace_root / path
-
-    raise FileNotFoundError("Target file not found for docstring insertion.")
+@external
+async def read_file(path: str) -> str:
+    """Read the text contents of a file."""
+    ...
 
 
-def _load_node_text() -> str | None:
-    env_text = os.getenv("REMORA_NODE_TEXT")
-    if env_text:
-        return env_text
+@external
+async def write_file(path: str, content: str) -> bool:
+    """Write text content to a file."""
+    ...
 
-    workspace_root = _workspace_root()
-    hint_path = workspace_root / ".remora" / "node_text"
-    if hint_path.exists():
-        return hint_path.read_text(encoding="utf-8")
 
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
+
+
+async def _read_optional(path: str) -> str | None:
+    if await file_exists(path=path):
+        return await read_file(path=path)
     return None
 
 
-def _extract_function_name(node_text: str | None) -> str | None:
-    if not node_text:
-        return None
-    try:
-        module = ast.parse(node_text)
-    except Exception:
-        return None
-    for node in module.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            return node.name
+async def _resolve_target_file() -> str | None:
+    if target_file_input:
+        return target_file_input.strip()
+    stored = await _read_optional(path=".remora/target_file")
+    if stored:
+        return stored.strip()
     return None
 
 
-def _find_function(module: ast.Module, name: str | None) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
-    for node in ast.walk(module):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if name is None or node.name == name:
-                return node
+async def _load_node_text() -> str:
+    if node_text_input:
+        return node_text_input
+    stored = await _read_optional(path=".remora/node_text")
+    if stored:
+        return stored
+    return ""
+
+
+def _find_function_name(source: str) -> str | None:
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("def "):
+            return stripped[len("def ") :].split("(", 1)[0].strip()
+        if stripped.startswith("async def "):
+            return stripped[len("async def ") :].split("(", 1)[0].strip()
     return None
 
 
-def _line_indent(line: str) -> str:
-    return line[: len(line) - len(line.lstrip(" \t"))]
-
-
-def _format_docstring(docstring: str, indent: str) -> list[str]:
-    lines = docstring.splitlines()
+def _format_docstring(text: str, indent: str) -> list[str]:
+    lines = text.splitlines()
     if not lines:
         return [f"{indent}\"\"\"\"\"\""]
     if len(lines) == 1:
@@ -79,73 +70,79 @@ def _format_docstring(docstring: str, indent: str) -> list[str]:
     return formatted
 
 
-def _is_docstring_expr(node: ast.AST) -> bool:
-    if not isinstance(node, ast.Expr):
-        return False
-    value = node.value
-    if isinstance(value, ast.Constant):
-        return isinstance(value.value, str)
-    return isinstance(value, ast.Str)
+def _find_function_line(lines: list[str], name: str) -> tuple[int, int] | None:
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith(f"def {name}") or stripped.startswith(f"async def {name}"):
+            return index, len(line) - len(line.lstrip())
+    return None
 
 
-def _apply_docstring(
-    lines: list[str],
-    func: ast.FunctionDef | ast.AsyncFunctionDef,
-    docstring_lines: list[str],
-) -> tuple[list[str], bool]:
-    if func.body and _is_docstring_expr(func.body[0]):
-        doc_node = func.body[0]
-        start = (doc_node.lineno or 1) - 1
-        end = (doc_node.end_lineno or doc_node.lineno or 1) - 1
+def _find_docstring_block(lines: list[str], start_index: int, base_indent: int) -> tuple[int, int] | None:
+    for index in range(start_index + 1, len(lines)):
+        line = lines[index]
+        stripped = line.strip()
+        if not stripped:
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= base_indent:
+            return None
+        if stripped.startswith('"""') or stripped.startswith("'''"):
+            quote = stripped[:3]
+            if stripped.endswith(quote) and len(stripped) > 3:
+                return index, index
+            for end_index in range(index + 1, len(lines)):
+                if quote in lines[end_index]:
+                    return index, end_index
+            return index, index
+        return None
+    return None
+
+
+try:
+    _ = style
+    if not docstring:
+        raise ValueError("Docstring text is required.")
+
+    target_file = await _resolve_target_file()
+    if not target_file:
+        raise ValueError("Target file not found for docstring insertion.")
+
+    content = await read_file(path=target_file)
+    trailing_newline = content.endswith("\n")
+    lines = content.splitlines()
+
+    node_text = await _load_node_text()
+    function_name = _find_function_name(node_text)
+    if not function_name:
+        raise ValueError("Function definition not found in node text.")
+
+    location = _find_function_line(lines, function_name)
+    if not location:
+        raise ValueError("Function definition not found in target file.")
+
+    def_line_index, base_indent = location
+    indent = " " * (base_indent + 4)
+
+    docstring_lines = _format_docstring(docstring, indent)
+    block = _find_docstring_block(lines, def_line_index, base_indent)
+
+    replaced_existing = False
+    if block:
+        start, end = block
         lines[start : end + 1] = docstring_lines
-        return lines, True
-
-    if func.body:
-        insert_at = (func.body[0].lineno or (func.lineno or 1)) - 1
+        replaced_existing = True
     else:
-        insert_at = (func.end_lineno or func.lineno or 1)
-    lines[insert_at:insert_at] = docstring_lines
-    return lines, False
+        insert_at = def_line_index + 1
+        lines[insert_at:insert_at] = docstring_lines
 
+    updated_content = "\n".join(lines)
+    if trailing_newline:
+        updated_content += "\n"
 
-def run(inputs: dict[str, Any]) -> dict[str, Any]:
-    try:
-        docstring = str(inputs.get("docstring", ""))
-        if not docstring:
-            raise ValueError("Docstring text is required.")
+    await write_file(path=target_file, content=updated_content)
+    result = {"success": True, "replaced_existing": replaced_existing}
+except Exception as exc:
+    result = {"success": False, "error": str(exc)}
 
-        target = _resolve_target_file()
-        content = target.read_text(encoding="utf-8")
-        trailing_newline = content.endswith("\n")
-        lines = content.splitlines()
-
-        node_text = _load_node_text()
-        function_name = _extract_function_name(node_text)
-
-        module = ast.parse(content)
-        func = _find_function(module, function_name)
-        if func is None:
-            raise ValueError("Function definition not found in target file.")
-
-        indent = "    "
-        if func.body:
-            body_line_index = (func.body[0].lineno or 1) - 1
-            if 0 <= body_line_index < len(lines):
-                indent = _line_indent(lines[body_line_index]) or indent
-        elif func.lineno and 0 <= func.lineno - 1 < len(lines):
-            indent = _line_indent(lines[func.lineno - 1]) + indent
-
-        docstring_lines = _format_docstring(docstring, indent)
-        updated_lines, replaced_existing = _apply_docstring(lines, func, docstring_lines)
-        updated_content = "\n".join(updated_lines)
-        if trailing_newline:
-            updated_content += "\n"
-        target.write_text(updated_content, encoding="utf-8")
-        return {"success": True, "replaced_existing": replaced_existing}
-    except Exception as exc:  # noqa: BLE001 - tool scripts must never raise
-        return {"success": False, "error": str(exc)}
-
-
-if __name__ == "__main__":
-    payload = json.loads(os.environ.get("REMORA_INPUT", "{}"))
-    print(json.dumps(run(payload)))
+result

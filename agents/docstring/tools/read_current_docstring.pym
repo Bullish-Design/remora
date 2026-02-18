@@ -1,75 +1,97 @@
-from __future__ import annotations
+from grail import Input, external
 
-from pathlib import Path
-import ast
-import json
-import os
-from typing import Any
+node_text_input: str | None = Input("node_text", default=None)
+target_file_input: str | None = Input("target_file", default=None)
 
 
-def _workspace_root() -> Path:
-    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
-    return Path(workspace) if workspace else Path.cwd()
+@external
+async def read_file(path: str) -> str:
+    """Read the text contents of a file."""
+    ...
 
 
-def _resolve_target_file() -> Path | None:
-    workspace_root = _workspace_root()
-    env_path = os.getenv("REMORA_TARGET_FILE")
-    if env_path:
-        path = Path(env_path)
-        return path if path.is_absolute() else workspace_root / path
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
 
-    hint_path = workspace_root / ".remora" / "target_file"
-    if hint_path.exists():
-        raw = hint_path.read_text(encoding="utf-8").strip()
-        if raw:
-            path = Path(raw)
-            return path if path.is_absolute() else workspace_root / path
 
+async def _read_optional(path: str) -> str | None:
+    if await file_exists(path=path):
+        return await read_file(path=path)
     return None
 
 
-def _load_node_text() -> str:
-    env_text = os.getenv("REMORA_NODE_TEXT")
-    if env_text:
-        return env_text
-
-    workspace_root = _workspace_root()
-    hint_path = workspace_root / ".remora" / "node_text"
-    if hint_path.exists():
-        return hint_path.read_text(encoding="utf-8")
-
-    target = _resolve_target_file()
-    if target and target.exists():
-        return target.read_text(encoding="utf-8")
-
-    raise FileNotFoundError("Node text not found for docstring inspection.")
-
-
-def _find_docstring_node(module: ast.Module) -> ast.AST | None:
-    for node in module.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            return node
+async def _resolve_target_file() -> str | None:
+    if target_file_input:
+        return target_file_input.strip()
+    stored = await _read_optional(path=".remora/target_file")
+    if stored:
+        return stored.strip()
     return None
 
 
-def run(_: dict[str, Any]) -> dict[str, Any]:
-    try:
-        source = _load_node_text()
-        module = ast.parse(source)
-        node = _find_docstring_node(module)
-        if node is None:
-            raise ValueError("No docstring-capable node found in node text.")
-
-        docstring = ast.get_docstring(node, clean=False)
-        return {
-            "docstring": docstring,
-            "has_docstring": bool(docstring),
-        }
-    except Exception as exc:  # noqa: BLE001 - tool scripts must never raise
-        return {"error": str(exc)}
+async def _load_node_text() -> str:
+    if node_text_input:
+        return node_text_input
+    stored = await _read_optional(path=".remora/node_text")
+    if stored:
+        return stored
+    target_file = await _resolve_target_file()
+    if target_file and await file_exists(path=target_file):
+        return await read_file(path=target_file)
+    return ""
 
 
-if __name__ == "__main__":
-    payload = json.loads(os.environ.get("REMORA_INPUT", "{}"))
-    print(json.dumps(run(payload)))
+def _find_definition(lines: list[str]) -> tuple[int, int] | None:
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("async def ") or stripped.startswith("def ") or stripped.startswith("class "):
+            indent = len(line) - len(line.lstrip())
+            return index, indent
+    return None
+
+
+def _extract_docstring(lines: list[str], start_index: int, base_indent: int) -> str | None:
+    for index in range(start_index + 1, len(lines)):
+        line = lines[index]
+        stripped = line.strip()
+        if not stripped:
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= base_indent:
+            return None
+        if stripped.startswith('"""') or stripped.startswith("'''"):
+            quote = stripped[:3]
+            remainder = stripped[3:]
+            if remainder.endswith(quote):
+                return remainder[: -3].strip()
+            content_lines: list[str] = []
+            if remainder:
+                content_lines.append(remainder)
+            for inner_index in range(index + 1, len(lines)):
+                inner_line = lines[inner_index]
+                if quote in inner_line:
+                    before = inner_line.split(quote, 1)[0]
+                    content_lines.append(before)
+                    return "\n".join(content_lines).strip()
+                content_lines.append(inner_line.strip())
+            return "\n".join(content_lines).strip()
+        return None
+    return None
+
+
+try:
+    source = await _load_node_text()
+    lines = source.splitlines()
+    definition = _find_definition(lines)
+    if not definition:
+        result = {"error": "No docstring-capable node found in node text."}
+    else:
+        index, indent = definition
+        docstring = _extract_docstring(lines, index, indent)
+        result = {"docstring": docstring, "has_docstring": bool(docstring)}
+except Exception as exc:
+    result = {"error": str(exc)}
+
+result

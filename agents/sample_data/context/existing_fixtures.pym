@@ -1,36 +1,32 @@
-from __future__ import annotations
-
-from pathlib import Path
-import os
-from typing import Any
+from grail import external
 
 
-def _workspace_root() -> Path:
-    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
-    return Path(workspace) if workspace else Path.cwd()
+@external
+async def list_dir(path: str = ".") -> list[str]:
+    """List file names in a directory."""
+    ...
 
 
-def _relative_path(path: Path) -> str:
-    workspace_root = _workspace_root()
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
+
+
+async def _safe_list_dir(path: str) -> list[str]:
     try:
-        return str(path.relative_to(workspace_root))
-    except ValueError:
-        return str(path)
-
-
-def run(_: dict[str, Any] | None = None) -> list[dict[str, str]]:
-    try:
-        fixtures_dir = _workspace_root() / "fixtures"
-        if not fixtures_dir.exists() or not fixtures_dir.is_dir():
-            return []
-        fixtures = []
-        for path in sorted(fixtures_dir.iterdir()):
-            if path.is_file():
-                fixtures.append({"name": path.name, "path": _relative_path(path)})
-        return fixtures
+        return await list_dir(path=path)
     except Exception:
         return []
 
 
-if __name__ == "__main__":
-    print(run())
+fixtures_dir = "fixtures"
+fixtures: list[dict[str, str]] = []
+
+if await file_exists(path=fixtures_dir):
+    entries = await _safe_list_dir(path=fixtures_dir)
+    for name in sorted(entries):
+        fixtures.append({"name": name, "path": f"{fixtures_dir}/{name}"})
+
+result = fixtures
+result

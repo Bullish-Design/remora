@@ -1,44 +1,21 @@
-from __future__ import annotations
+from grail import Input, external
 
-from pathlib import Path
-import json
-import os
-from typing import Any
+content: str = Input("content")
+path_value: str = Input("path")
 
 
-def _workspace_root() -> Path:
-    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
-    return Path(workspace) if workspace else Path.cwd()
+@external
+async def write_file(path: str, content: str) -> bool:
+    """Write text content to a file."""
+    ...
 
 
-def _resolve_path(path_value: str) -> Path:
-    workspace_root = _workspace_root()
-    path = Path(path_value)
-    return path if path.is_absolute() else workspace_root / path
+try:
+    if not path_value:
+        raise ValueError("Test file path is required.")
+    await write_file(path=path_value, content=content)
+    result = {"success": True, "path": path_value}
+except Exception as exc:
+    result = {"success": False, "error": str(exc)}
 
-
-def _relative_path(path: Path) -> str:
-    workspace_root = _workspace_root()
-    try:
-        return str(path.relative_to(workspace_root))
-    except ValueError:
-        return str(path)
-
-
-def run(inputs: dict[str, Any]) -> dict[str, Any]:
-    try:
-        content = str(inputs.get("content", ""))
-        path_value = inputs.get("path")
-        if not path_value:
-            raise ValueError("Test file path is required.")
-        target_path = _resolve_path(str(path_value))
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(content, encoding="utf-8")
-        return {"success": True, "path": _relative_path(target_path)}
-    except Exception as exc:  # noqa: BLE001 - tool scripts must never raise
-        return {"success": False, "error": str(exc)}
-
-
-if __name__ == "__main__":
-    payload = json.loads(os.environ.get("REMORA_INPUT", "{}"))
-    print(json.dumps(run(payload)))
+result

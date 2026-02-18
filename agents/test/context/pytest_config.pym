@@ -1,25 +1,28 @@
-from __future__ import annotations
-
-from pathlib import Path
-import os
+from grail import external
 
 
-def _workspace_root() -> Path:
-    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
-    return Path(workspace) if workspace else Path.cwd()
+@external
+async def read_file(path: str) -> str:
+    """Read the text contents of a file."""
+    ...
+
+
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
 
 
 def _extract_tool_section(content: str, section: str) -> str:
     lines = content.splitlines()
-    start_index = None
     header = f"[{section}]"
+    start_index = None
     for idx, line in enumerate(lines):
         if line.strip() == header:
             start_index = idx
             break
     if start_index is None:
         return ""
-
     collected = [lines[start_index]]
     for line in lines[start_index + 1 :]:
         if line.startswith("[") and line.strip().endswith("]"):
@@ -28,23 +31,15 @@ def _extract_tool_section(content: str, section: str) -> str:
     return "\n".join(collected).strip()
 
 
-def run(_: dict[str, object] | None = None) -> str:
-    try:
-        workspace_root = _workspace_root()
-        pytest_ini = workspace_root / "pytest.ini"
-        if pytest_ini.exists():
-            return pytest_ini.read_text(encoding="utf-8")
+try:
+    if await file_exists(path="pytest.ini"):
+        result = await read_file(path="pytest.ini")
+    elif await file_exists(path="pyproject.toml"):
+        content = await read_file(path="pyproject.toml")
+        result = _extract_tool_section(content, "tool.pytest.ini_options")
+    else:
+        result = ""
+except Exception:
+    result = ""
 
-        pyproject = workspace_root / "pyproject.toml"
-        if pyproject.exists():
-            content = pyproject.read_text(encoding="utf-8")
-            section = _extract_tool_section(content, "tool.pytest.ini_options")
-            return section
-
-        return ""
-    except Exception:
-        return ""
-
-
-if __name__ == "__main__":
-    print(run())
+result

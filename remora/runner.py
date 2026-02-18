@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import time
+from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
@@ -180,7 +181,7 @@ class FunctionGemmaRunner:
             phase=phase,
             request_id=request_id,
             status="ok",
-            usage=response.usage,
+            usage=getattr(response, "usage", None),
             response_text=response_text,
         )
         return message
@@ -195,6 +196,19 @@ class FunctionGemmaRunner:
         if next_turn >= self.definition.max_turns:
             return {"type": "function", "function": {"name": "submit_result"}}
         return tool_choice
+
+    def _relative_node_path(self) -> str:
+        try:
+            return str(self.node.file_path.relative_to(Path.cwd()))
+        except ValueError:
+            return str(self.node.file_path)
+
+    def _base_tool_inputs(self) -> dict[str, Any]:
+        return {
+            "node_text": self.node.text,
+            "target_file": self._relative_node_path(),
+            "workspace_id": self.workspace_id,
+        }
 
     def _handle_no_tool_calls(self, message: ChatCompletionMessage) -> AgentResult:
         if self.runner_config.tool_choice == "required":
@@ -403,6 +417,7 @@ class FunctionGemmaRunner:
                 args = {}
         if not isinstance(args, dict):
             args = {}
+        tool_inputs = {**self._base_tool_inputs(), **args}
         self.event_emitter.emit(
             {
                 "event": "tool_call",
@@ -420,10 +435,10 @@ class FunctionGemmaRunner:
 
         context_parts: list[str] = []
         for provider_path in tool_def.context_providers:
-            context = await self.cairn_client.run_pym(provider_path, self.workspace_id, inputs={})
+            context = await self.cairn_client.run_pym(provider_path, self.workspace_id, inputs=self._base_tool_inputs())
             context_parts.append(json.dumps(context))
 
-        result = await self.cairn_client.run_pym(tool_def.pym, self.workspace_id, inputs=args)
+        result = await self.cairn_client.run_pym(tool_def.pym, self.workspace_id, inputs=tool_inputs)
         self._emit_tool_result(tool_name, result)
         content_parts = context_parts + [json.dumps(result)]
         return "\n".join(content_parts)

@@ -44,8 +44,10 @@ for member in members:
                 "over_by": total - budget_limit
             })
 
-{
+result = {
     "analyzed": len(members),
     "over_budget_count": len(over_budget),
     "details": over_budget,
 }
+
+result

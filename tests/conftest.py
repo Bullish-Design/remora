@@ -11,15 +11,22 @@ import urllib.request
 
 import pytest
 
+from remora.config import ServerConfig
+
 SERVER_URL = os.environ.get("REMORA_SERVER_URL", "http://remora-server:8000/v1")
+SERVER = ServerConfig(base_url=SERVER_URL)
 
 
-def _server_available(base_url: str) -> bool:
+def _server_available(server: ServerConfig) -> bool:
     try:
-        with urllib.request.urlopen(f"{base_url}/models", timeout=2) as response:
-            return response.status == 200
+        with urllib.request.urlopen(f"{server.base_url}/models", timeout=2) as response:
+            if response.status != 200:
+                return False
+            payload = json.loads(response.read().decode("utf-8"))
     except Exception:
         return False
+    model_ids = {item.get("id") for item in payload.get("data", []) if isinstance(item, dict)}
+    return server.default_adapter in model_ids
 
 
 @dataclass
@@ -107,9 +114,12 @@ def cairn_client_factory(integration_workspace: tuple[Path, Path]):
     return _factory
 
 
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    if not _server_available(SERVER_URL):
-        skip = pytest.mark.skip(reason=f"vLLM server not reachable at {SERVER_URL}")
-        for item in items:
-            if item.get_closest_marker("integration"):
-                item.add_marker(skip)
+@pytest.fixture(scope="session")
+def vllm_available() -> bool:
+    return _server_available(SERVER)
+
+
+@pytest.fixture(autouse=True)
+def skip_integration_if_unavailable(vllm_available: bool, request: pytest.FixtureRequest) -> None:
+    if request.node.get_closest_marker("integration") and not vllm_available:
+        pytest.skip(f"vLLM server not reachable at {SERVER.base_url}")

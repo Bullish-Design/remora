@@ -69,6 +69,7 @@ def test_process_node_returns_results(monkeypatch: pytest.MonkeyPatch, tmp_path:
             server_config: object,
             runner_config: object,
             adapter_name: str | None = None,
+            http_client: object | None = None,
             event_emitter: object | None = None,
         ) -> None:
             self.workspace_id = workspace_id
@@ -113,6 +114,7 @@ def test_process_node_respects_semaphore(monkeypatch: pytest.MonkeyPatch, tmp_pa
             server_config: object,
             runner_config: object,
             adapter_name: str | None = None,
+            http_client: object | None = None,
             event_emitter: object | None = None,
         ) -> None:
             self.workspace_id = workspace_id
@@ -161,6 +163,7 @@ def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch,
             server_config: object,
             runner_config: object,
             adapter_name: str | None = None,
+            http_client: object | None = None,
             event_emitter: object | None = None,
         ) -> None:
             self.workspace_id = workspace_id
@@ -207,6 +210,7 @@ def test_process_node_skips_disabled_operation(monkeypatch: pytest.MonkeyPatch, 
             server_config: object,
             runner_config: object,
             adapter_name: str | None = None,
+            http_client: object | None = None,
             event_emitter: object | None = None,
         ) -> None:
             self.workspace_id = workspace_id
@@ -248,6 +252,7 @@ def test_bad_subagent_path_records_init_error(monkeypatch: pytest.MonkeyPatch, t
             server_config: object,
             runner_config: object,
             adapter_name: str | None = None,
+            http_client: object | None = None,
             event_emitter: object | None = None,
         ) -> None:
             self.workspace_id = workspace_id

@@ -1,103 +1,138 @@
-from __future__ import annotations
-
-from pathlib import Path
-import ast
-import json
-import os
+from grail import Input, external
 from typing import Any
 
-import yaml
+fixtures: list[object] = Input("fixtures")
+format_input: str = Input("format", default="json")
+node_text_input: str | None = Input("node_text", default=None)
 
 
-def _workspace_root() -> Path:
-    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
-    return Path(workspace) if workspace else Path.cwd()
+@external
+async def read_file(path: str) -> str:
+    """Read the text contents of a file."""
+    ...
 
 
-def _resolve_target_file() -> Path | None:
-    workspace_root = _workspace_root()
-    env_path = os.getenv("REMORA_TARGET_FILE")
-    if env_path:
-        path = Path(env_path)
-        return path if path.is_absolute() else workspace_root / path
+@external
+async def write_file(path: str, content: str) -> bool:
+    """Write text content to a file."""
+    ...
 
-    hint_path = workspace_root / ".remora" / "target_file"
-    if hint_path.exists():
-        raw = hint_path.read_text(encoding="utf-8").strip()
-        if raw:
-            path = Path(raw)
-            return path if path.is_absolute() else workspace_root / path
 
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
+
+
+def _json_escape(text: str) -> str:
+    return (
+        text.replace("\\", "\\\\")
+        .replace('"', "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+
+
+def _to_json(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int) or isinstance(value, float):
+        return str(value)
+    if isinstance(value, str):
+        return f"\"{_json_escape(value)}\""
+    if isinstance(value, list):
+        inner = ", ".join(_to_json(item) for item in value)
+        return f"[{inner}]"
+    if isinstance(value, dict):
+        pieces = []
+        for key in value:
+            pieces.append(f"{_to_json(str(key))}: {_to_json(value[key])}")
+        return "{" + ", ".join(pieces) + "}"
+    return _to_json(str(value))
+
+
+def _yaml_escape(value: str) -> str:
+    if value == "" or any(ch in value for ch in [":", "#", "\n", "\r", "\t"]):
+        return f"\"{value.replace('"', '\\"')}\""
+    return value
+
+
+def _yaml_scalar(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int) or isinstance(value, float):
+        return str(value)
+    return _yaml_escape(str(value))
+
+
+def _to_yaml(values: list[object]) -> str:
+    lines: list[str] = []
+    for item in values:
+        if isinstance(item, dict):
+            if not item:
+                lines.append("- {}")
+                continue
+            first = True
+            for key in item:
+                prefix = "- " if first else "  "
+                lines.append(f"{prefix}{key}: {_yaml_scalar(item[key])}")
+                first = False
+        else:
+            lines.append(f"- {_yaml_scalar(item)}")
+    return "\n".join(lines)
+
+
+async def _read_optional(path: str) -> str | None:
+    if await file_exists(path=path):
+        return await read_file(path=path)
     return None
 
 
-def _load_node_text() -> str:
-    env_text = os.getenv("REMORA_NODE_TEXT")
-    if env_text:
-        return env_text
-
-    workspace_root = _workspace_root()
-    hint_path = workspace_root / ".remora" / "node_text"
-    if hint_path.exists():
-        return hint_path.read_text(encoding="utf-8")
-
-    target = _resolve_target_file()
-    if target and target.exists():
-        return target.read_text(encoding="utf-8")
-
-    return ""
-
-
-def _resolve_function_name() -> str:
-    source = _load_node_text()
-    if not source:
-        return "fixture"
-    try:
-        module = ast.parse(source)
-    except SyntaxError:
-        return "fixture"
-    for node in module.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            return node.name
+def _find_function_name(source: str) -> str:
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("def "):
+            return stripped[len("def ") :].split("(", 1)[0].strip()
+        if stripped.startswith("async def "):
+            return stripped[len("async def ") :].split("(", 1)[0].strip()
     return "fixture"
 
 
-def _relative_path(path: Path) -> str:
-    workspace_root = _workspace_root()
-    try:
-        return str(path.relative_to(workspace_root))
-    except ValueError:
-        return str(path)
+async def _load_node_text() -> str:
+    if node_text_input:
+        return node_text_input
+    stored = await _read_optional(path=".remora/node_text")
+    if stored:
+        return stored
+    return ""
 
 
-def _serialize_fixtures(fixtures: list[object], fmt: str) -> tuple[str, str]:
-    fmt = fmt.lower()
+try:
+    if not isinstance(fixtures, list) or not fixtures:
+        raise ValueError("Fixtures must be a non-empty list.")
+
+    fmt = str(format_input or "json").lower()
     if fmt in {"yaml", "yml"}:
-        content = yaml.safe_dump(fixtures, sort_keys=False)
-        return content, "yaml"
-    if fmt != "json":
+        content = _to_yaml(fixtures)
+        extension = "yaml"
+    elif fmt == "json":
+        content = _to_json(fixtures)
+        extension = "json"
+    else:
         raise ValueError(f"Unsupported fixture format: {fmt}")
-    content = json.dumps(fixtures, indent=2)
-    return content, "json"
 
+    node_text = await _load_node_text()
+    function_name = _find_function_name(node_text) if node_text else "fixture"
+    target_path = f"fixtures/{function_name}_fixtures.{extension}"
 
-def run(inputs: dict[str, Any]) -> dict[str, Any]:
-    try:
-        fixtures = inputs.get("fixtures")
-        if not isinstance(fixtures, list) or not fixtures:
-            raise ValueError("Fixtures must be a non-empty list.")
+    await write_file(path=target_path, content=content)
+    result = {"success": True, "path": target_path}
+except Exception as exc:
+    result = {"success": False, "error": str(exc)}
 
-        fmt = str(inputs.get("format", "json"))
-        content, extension = _serialize_fixtures(fixtures, fmt)
-        function_name = _resolve_function_name()
-        target_path = _workspace_root() / "fixtures" / f"{function_name}_fixtures.{extension}"
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(content, encoding="utf-8")
-        return {"success": True, "path": _relative_path(target_path)}
-    except Exception as exc:  # noqa: BLE001 - tool scripts must never raise
-        return {"success": False, "error": str(exc)}
-
-
-if __name__ == "__main__":
-    payload = json.loads(os.environ.get("REMORA_INPUT", "{}"))
-    print(json.dumps(run(payload)))
+result

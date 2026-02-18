@@ -1,43 +1,34 @@
-from __future__ import annotations
+from grail import Input
 
-import json
-import os
-from typing import Any
+summary: str = Input("summary")
+issues_fixed: int = Input("issues_fixed")
+issues_remaining: int = Input("issues_remaining")
+changed_files: list[str] = Input("changed_files")
+workspace_id: str | None = Input("workspace_id", default=None)
 
+workspace_value = workspace_id or "unknown"
 
-def _workspace_id() -> str:
-    return os.getenv("REMORA_WORKSPACE_ID", "unknown")
+try:
+    status = "success" if issues_remaining == 0 else "failed"
+    result = {
+        "status": status,
+        "workspace_id": workspace_value,
+        "changed_files": [str(path) for path in changed_files],
+        "summary": str(summary),
+        "details": {
+            "issues_fixed": int(issues_fixed),
+            "issues_remaining": int(issues_remaining),
+        },
+        "error": None,
+    }
+except Exception as exc:
+    result = {
+        "status": "failed",
+        "workspace_id": workspace_value,
+        "changed_files": [],
+        "summary": "",
+        "details": {},
+        "error": str(exc),
+    }
 
-
-def run(inputs: dict[str, Any]) -> dict[str, Any]:
-    try:
-        summary = str(inputs.get("summary", ""))
-        issues_fixed = int(inputs.get("issues_fixed", 0) or 0)
-        issues_remaining = int(inputs.get("issues_remaining", 0) or 0)
-        changed_files = [str(path) for path in inputs.get("changed_files", []) or []]
-        status = "success" if issues_remaining == 0 else "failed"
-        return {
-            "status": status,
-            "workspace_id": _workspace_id(),
-            "changed_files": changed_files,
-            "summary": summary,
-            "details": {
-                "issues_fixed": issues_fixed,
-                "issues_remaining": issues_remaining,
-            },
-            "error": None,
-        }
-    except Exception as exc:  # noqa: BLE001 - tool scripts must never raise
-        return {
-            "status": "failed",
-            "workspace_id": _workspace_id(),
-            "changed_files": [],
-            "summary": "",
-            "details": {},
-            "error": str(exc),
-        }
-
-
-if __name__ == "__main__":
-    payload = json.loads(os.environ.get("REMORA_INPUT", "{}"))
-    print(json.dumps(run(payload)))
+result

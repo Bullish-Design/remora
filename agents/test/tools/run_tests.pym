@@ -1,137 +1,178 @@
-from __future__ import annotations
-
-from pathlib import Path
-import json
-import os
-import subprocess
-import sys
-import tempfile
+from grail import Input, external
 from typing import Any
-import xml.etree.ElementTree as ET
+
+path_input: str | None = Input("path", default=None)
+target_file_input: str | None = Input("target_file", default=None)
 
 
-def _workspace_root() -> Path:
-    workspace = os.getenv("REMORA_WORKSPACE_DIR") or os.getenv("CAIRN_WORKSPACE_DIR")
-    return Path(workspace) if workspace else Path.cwd()
+@external
+async def read_file(path: str) -> str:
+    """Read the text contents of a file."""
+    ...
 
 
-def _resolve_target_file() -> Path:
-    workspace_root = _workspace_root()
-    env_path = os.getenv("REMORA_TARGET_FILE")
-    if env_path:
-        path = Path(env_path)
-        return path if path.is_absolute() else workspace_root / path
-
-    hint_path = workspace_root / ".remora" / "target_file"
-    if hint_path.exists():
-        raw = hint_path.read_text(encoding="utf-8").strip()
-        if raw:
-            path = Path(raw)
-            return path if path.is_absolute() else workspace_root / path
-
-    raise FileNotFoundError("Target file not found for tests.")
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
 
 
-def _default_test_path(target_file: Path) -> Path:
-    workspace_root = _workspace_root()
-    module_name = target_file.stem
-    return workspace_root / "tests" / f"test_{module_name}.py"
+@external
+async def run_command(cmd: str, args: list[str]) -> dict[str, Any]:
+    """Run a command in the sandbox."""
+    ...
 
 
-def _resolve_test_path(inputs: dict[str, Any]) -> Path:
-    if inputs.get("path"):
-        path = Path(str(inputs["path"]))
-        return path if path.is_absolute() else _workspace_root() / path
-    target_file = _resolve_target_file()
-    return _default_test_path(target_file)
+async def _read_optional(path: str) -> str | None:
+    if await file_exists(path=path):
+        return await read_file(path=path)
+    return None
 
 
-def _run_pytest(test_path: Path, junit_path: Path) -> subprocess.CompletedProcess[str]:
-    cmd = [
-        sys.executable,
-        "-m",
-        "pytest",
+async def _resolve_target_file() -> str | None:
+    if target_file_input:
+        return target_file_input.strip()
+    stored = await _read_optional(path=".remora/target_file")
+    if stored:
+        return stored.strip()
+    return None
+
+
+def _default_test_path(target_file: str) -> str:
+    filename = target_file.split("/")[-1]
+    module_name = filename.rsplit(".", 1)[0]
+    return f"tests/test_{module_name}.py"
+
+
+def _read_attr(tag: str, key: str) -> int:
+    marker = f"{key}=\""
+    if marker not in tag:
+        return 0
+    value = tag.split(marker, 1)[1].split("\"", 1)[0]
+    try:
+        return int(value)
+    except Exception:
+        return 0
+
+
+def _parse_totals(xml: str) -> dict[str, int]:
+    totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+    index = 0
+    while True:
+        start = xml.find("<testsuite", index)
+        if start == -1:
+            break
+        end = xml.find(">", start)
+        if end == -1:
+            break
+        tag = xml[start:end]
+        for key in totals:
+            totals[key] += _read_attr(tag, key)
+        index = end + 1
+    return totals
+
+
+def _read_str_attr(tag: str, key: str) -> str:
+    marker = f"{key}=\""
+    if marker not in tag:
+        return ""
+    return tag.split(marker, 1)[1].split("\"", 1)[0]
+
+
+def _extract_failure_detail(block: str, tag: str) -> str:
+    start = block.find(f"<{tag}")
+    if start == -1:
+        return ""
+    end_tag = block.find(">", start)
+    if end_tag == -1:
+        return ""
+    header = block[start:end_tag]
+    message = _read_str_attr(header, "message")
+    if message:
+        return message.strip()
+    close = block.find(f"</{tag}>", end_tag)
+    if close == -1:
+        return ""
+    return block[end_tag + 1 : close].strip()
+
+
+def _parse_failures(xml: str) -> list[dict[str, str]]:
+    failures: list[dict[str, str]] = []
+    index = 0
+    while True:
+        start = xml.find("<testcase", index)
+        if start == -1:
+            break
+        end = xml.find(">", start)
+        if end == -1:
+            break
+        tag = xml[start:end]
+        name = _read_str_attr(tag, "name")
+        classname = _read_str_attr(tag, "classname")
+        full_name = f"{classname}::{name}" if classname else name
+        close = xml.find("</testcase>", end)
+        if close == -1:
+            index = end + 1
+            continue
+        body = xml[end:close]
+        detail = ""
+        if "<failure" in body:
+            detail = _extract_failure_detail(body, "failure")
+        elif "<error" in body:
+            detail = _extract_failure_detail(body, "error")
+        if detail:
+            failures.append({"test": full_name, "message": detail})
+        index = close + len("</testcase>")
+    return failures
+
+
+try:
+    target_file = await _resolve_target_file()
+    test_path = path_input.strip() if path_input else None
+    if not test_path:
+        if not target_file:
+            raise FileNotFoundError("Target file not found for tests.")
+        test_path = _default_test_path(target_file)
+
+    if not await file_exists(path=test_path):
+        raise FileNotFoundError(f"Test file not found: {test_path}")
+
+    report_path = ".remora/pytest_report.xml"
+    command_args = [
         "-q",
         "--disable-warnings",
-        f"--junitxml={junit_path}",
-        str(test_path),
+        f"--junitxml={report_path}",
+        test_path,
     ]
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        cwd=str(_workspace_root()),
-        timeout=30,
-        check=False,
-    )
+    completed = await run_command(cmd="pytest", args=command_args)
+    stdout = str(completed.get("stdout", ""))
+    stderr = str(completed.get("stderr", ""))
+    exit_code = int(completed.get("exit_code", 0) or 0)
 
+    if not await file_exists(path=report_path):
+        raise RuntimeError(stderr.strip() or stdout.strip() or "Pytest report not generated.")
 
-def _parse_junit(path: Path) -> dict[str, Any]:
-    tree = ET.parse(path)
-    root = tree.getroot()
-    suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
-    totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
-    failures: list[dict[str, str]] = []
-
-    for suite in suites:
-        totals["tests"] += int(suite.attrib.get("tests", 0) or 0)
-        totals["failures"] += int(suite.attrib.get("failures", 0) or 0)
-        totals["errors"] += int(suite.attrib.get("errors", 0) or 0)
-        totals["skipped"] += int(suite.attrib.get("skipped", 0) or 0)
-
-        for case in suite.iter("testcase"):
-            test_name = case.attrib.get("name", "")
-            classname = case.attrib.get("classname")
-            full_name = f"{classname}::{test_name}" if classname else test_name
-            failure_node = case.find("failure")
-            error_node = case.find("error")
-            detail_node = failure_node if failure_node is not None else error_node
-            if detail_node is None:
-                continue
-            message = (detail_node.attrib.get("message") or detail_node.text or "").strip()
-            failures.append({"test": full_name, "message": message})
+    xml = await read_file(path=report_path)
+    totals = _parse_totals(xml)
+    failures = _parse_failures(xml)
 
     passed = totals["tests"] - totals["failures"] - totals["errors"] - totals["skipped"]
-    return {
+    result = {
         "passed": max(passed, 0),
         "failed": totals["failures"],
         "errors": totals["errors"],
         "failures": failures,
     }
 
+    if exit_code not in {0, 1}:
+        result["errors"] = max(result.get("errors", 0), 1)
+        result["failures"].append(
+            {
+                "test": "pytest",
+                "message": stderr.strip() or stdout.strip() or "Pytest failed to run.",
+            }
+        )
+except Exception as exc:
+    result = {"error": str(exc), "passed": 0, "failed": 0, "errors": 1, "failures": []}
 
-def run(inputs: dict[str, Any]) -> dict[str, Any]:
-    try:
-        test_path = _resolve_test_path(inputs)
-        if not test_path.exists():
-            raise FileNotFoundError(f"Test file not found: {test_path}")
-        workspace_root = _workspace_root()
-        with tempfile.NamedTemporaryFile(
-            prefix="pytest_report_",
-            suffix=".xml",
-            dir=str(workspace_root),
-            delete=False,
-        ) as handle:
-            junit_path = Path(handle.name)
-
-        completed = _run_pytest(test_path, junit_path)
-        if not junit_path.exists():
-            raise RuntimeError(completed.stderr.strip() or "Pytest report not generated.")
-
-        result = _parse_junit(junit_path)
-        if completed.returncode not in {0, 1}:
-            result["errors"] = max(result.get("errors", 0), 1)
-            result["failures"].append(
-                {
-                    "test": "pytest",
-                    "message": completed.stderr.strip() or "Pytest failed to run.",
-                }
-            )
-        return result
-    except Exception as exc:  # noqa: BLE001 - tool scripts must never raise
-        return {"error": str(exc), "passed": 0, "failed": 0, "errors": 1, "failures": []}
-
-
-if __name__ == "__main__":
-    payload = json.loads(os.environ.get("REMORA_INPUT", "{}"))
-    print(json.dumps(run(payload)))
+result
