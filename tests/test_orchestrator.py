@@ -81,8 +81,11 @@ def test_process_node_returns_results(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr("remora.orchestrator.load_subagent_definition", fake_load_subagent_definition)
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
 
-    coordinator = Coordinator(config, FakeCairnClient())
-    result = asyncio.run(coordinator.process_node(node, ["lint", "test", "docstring"]))
+    async def run_test():
+        async with Coordinator(config, FakeCairnClient()) as coordinator:
+            return await coordinator.process_node(node, ["lint", "test", "docstring"])
+
+    result = asyncio.run(run_test())
 
     assert result.operations["lint"].summary == "lint"
     assert result.operations["test"].summary == "test"
@@ -129,8 +132,11 @@ def test_process_node_respects_semaphore(monkeypatch: pytest.MonkeyPatch, tmp_pa
     monkeypatch.setattr("remora.orchestrator.load_subagent_definition", fake_load_subagent_definition)
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
 
-    coordinator = Coordinator(config, FakeCairnClient())
-    asyncio.run(coordinator.process_node(node, ["lint", "test", "docstring", "sample"]))
+    async def run_test():
+        async with Coordinator(config, FakeCairnClient()) as coordinator:
+            await coordinator.process_node(node, ["lint", "test", "docstring", "sample"])
+
+    asyncio.run(run_test())
 
     assert state["max"] == 2
 
@@ -178,8 +184,11 @@ def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr("remora.orchestrator.load_subagent_definition", fake_load_subagent_definition)
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
 
-    coordinator = Coordinator(config, FakeCairnClient())
-    result = asyncio.run(coordinator.process_node(node, ["lint", "test", "docstring"]))
+    async def run_test():
+        async with Coordinator(config, FakeCairnClient()) as coordinator:
+            return await coordinator.process_node(node, ["lint", "test", "docstring"])
+
+    result = asyncio.run(run_test())
 
     assert "test" not in result.operations
     assert any(error["operation"] == "test" and error["phase"] == "run" for error in result.errors)
@@ -221,8 +230,11 @@ def test_process_node_skips_disabled_operation(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr("remora.orchestrator.load_subagent_definition", fake_load_subagent_definition)
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
 
-    coordinator = Coordinator(config, FakeCairnClient())
-    result = asyncio.run(coordinator.process_node(node, ["lint", "test"]))
+    async def run_test():
+        async with Coordinator(config, FakeCairnClient()) as coordinator:
+            return await coordinator.process_node(node, ["lint", "test"])
+
+    result = asyncio.run(run_test())
 
     assert called == ["lint_subagent"]
     assert "test" not in result.operations
@@ -263,8 +275,11 @@ def test_bad_subagent_path_records_init_error(monkeypatch: pytest.MonkeyPatch, t
     monkeypatch.setattr("remora.orchestrator.load_subagent_definition", fake_load_subagent_definition)
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
 
-    coordinator = Coordinator(config, FakeCairnClient())
-    result = asyncio.run(coordinator.process_node(node, ["good", "bad"]))
+    async def run_test():
+        async with Coordinator(config, FakeCairnClient()) as coordinator:
+            return await coordinator.process_node(node, ["good", "bad"])
+
+    result = asyncio.run(run_test())
 
     assert "good" in result.operations
     assert "bad" not in result.operations

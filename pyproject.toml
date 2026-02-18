@@ -69,6 +69,7 @@ prerelease = "allow"
 # Keep the default behavior; this section is here so you can extend it later if needed.
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 addopts = "-q --cov=remora --cov-report=term-missing -m \"not integration\""
 testpaths = ["tests"]
 markers = ["integration: requires vLLM FunctionGemma server"]

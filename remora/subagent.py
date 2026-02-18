@@ -8,7 +8,7 @@ import warnings
 
 import jinja2
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from remora.discovery import CSTNode
 from remora.errors import AGENT_001
@@ -69,6 +69,10 @@ class SubagentDefinition(BaseModel):
     max_turns: int = 20
     initial_context: InitialContext
     tools: list[ToolDefinition]
+    _tools_by_name: dict[str, ToolDefinition] = PrivateAttr(default_factory=dict)
+
+    def model_post_init(self, _: Any) -> None:
+        self._tools_by_name = {tool.name: tool for tool in self.tools}
 
     @property
     def tool_schemas(self) -> list[dict[str, Any]]:
@@ -86,7 +90,7 @@ class SubagentDefinition(BaseModel):
 
     @property
     def tools_by_name(self) -> dict[str, ToolDefinition]:
-        return {tool.name: tool for tool in self.tools}
+        return self._tools_by_name
 
 
 def load_subagent_definition(path: Path, agents_dir: Path) -> SubagentDefinition:
@@ -95,6 +99,8 @@ def load_subagent_definition(path: Path, agents_dir: Path) -> SubagentDefinition
     resolved = _resolve_paths(data, agents_dir)
     definition = SubagentDefinition.model_validate(resolved)
     _validate_submit_result(definition, resolved_path)
+    _validate_tool_names(definition, resolved_path)
+    _validate_jinja2_template(definition, resolved_path)
     _warn_missing_paths(definition)
     return definition
 
@@ -137,6 +143,28 @@ def _validate_submit_result(definition: SubagentDefinition, path: Path) -> None:
             AGENT_001,
             f"Subagent definition must include exactly one submit_result tool: {path}",
         )
+
+
+def _validate_tool_names(definition: SubagentDefinition, path: Path) -> None:
+    seen: set[str] = set()
+    for tool in definition.tools:
+        if tool.name in seen:
+            raise SubagentError(
+                AGENT_001,
+                f"Duplicate tool name '{tool.name}' in subagent definition: {path}",
+            )
+        seen.add(tool.name)
+
+
+def _validate_jinja2_template(definition: SubagentDefinition, path: Path) -> None:
+    env = jinja2.Environment()
+    try:
+        env.parse(definition.initial_context.node_context)
+    except jinja2.TemplateSyntaxError as exc:
+        raise SubagentError(
+            AGENT_001,
+            f"Invalid Jinja2 template in node_context of {path}: {exc}",
+        ) from exc
 
 
 def _warn_missing_paths(definition: SubagentDefinition) -> None:
