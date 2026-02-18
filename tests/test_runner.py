@@ -9,7 +9,7 @@ import json
 import pytest
 
 from remora.config import RunnerConfig, ServerConfig
-from remora.discovery import CSTNode
+from remora.discovery import CSTNode, NodeType
 from remora.errors import AGENT_002, AGENT_003, AGENT_004
 from remora.runner import AgentError, FunctionGemmaRunner
 from remora.subagent import InitialContext, SubagentDefinition, ToolDefinition
@@ -162,12 +162,14 @@ def _make_definition(
 def _make_node() -> CSTNode:
     return CSTNode(
         node_id="node-1",
-        node_type="function",
+        node_type=NodeType.FUNCTION,
         name="hello",
         file_path=Path("src/example.py"),
         start_byte=0,
         end_byte=10,
         text="def hello(): ...",
+        start_line=1,
+        end_line=1,
     )
 
 

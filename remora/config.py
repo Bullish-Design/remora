@@ -67,6 +67,7 @@ class OperationConfig(BaseModel):
 class DiscoveryConfig(BaseModel):
     language: str = "python"
     query_pack: str = "remora_core"
+    query_dir: Path | None = None  # None = use built-in queries inside the package
 
 
 class CairnConfig(BaseModel):

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from remora.config import RunnerConfig, ServerConfig
-from remora.discovery import CSTNode
+from remora.discovery import CSTNode, NodeType
 from remora.runner import FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
 
@@ -38,12 +38,14 @@ def _function_node(text: str, name: str) -> CSTNode:
             end_byte = start_byte + len(snippet.encode())
             return CSTNode(
                 node_id=f"docstring_{name}",
-                node_type="function",
+                node_type=NodeType.FUNCTION,
                 name=name,
                 file_path=FIXTURE,
                 start_byte=start_byte,
                 end_byte=end_byte,
                 text=snippet,
+                start_line=node.lineno,
+                end_line=node.end_lineno or node.lineno,
             )
     raise AssertionError(f"Function {name} not found")
 

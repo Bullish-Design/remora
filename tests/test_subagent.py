@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from remora.discovery import CSTNode
+from remora.discovery import CSTNode, NodeType
 from remora.errors import AGENT_001
 from remora.subagent import SubagentError, load_subagent_definition
 
@@ -112,12 +112,14 @@ def test_initial_context_render_interpolates_fields(tmp_path: Path) -> None:
 
     node = CSTNode(
         node_id="node-1",
-        node_type="function",
+        node_type=NodeType.FUNCTION,
         name="hello",
         file_path=Path("src/example.py"),
         start_byte=0,
         end_byte=10,
         text="def hello(): ...",
+        start_line=1,
+        end_line=1,
     )
 
     rendered = definition.initial_context.render(node)

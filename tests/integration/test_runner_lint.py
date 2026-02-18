@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from remora.config import RunnerConfig, ServerConfig
-from remora.discovery import CSTNode
+from remora.discovery import CSTNode, NodeType
 from remora.runner import FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
 
@@ -30,12 +30,14 @@ def test_lint_runner_fixes_issues(cairn_client_factory) -> None:
     text = _load_fixture()
     node = CSTNode(
         node_id="lint_001",
-        node_type="file",
+        node_type=NodeType.FILE,
         name="integration_target",
         file_path=FIXTURE,
         start_byte=0,
         end_byte=len(text.encode()),
         text=text,
+        start_line=1,
+        end_line=text.count("\n") + 1,
     )
     definition = load_subagent_definition(Path("agents/lint/lint_subagent.yaml"), agents_dir=Path("agents"))
     definition = definition.model_copy(update={"max_turns": 30})

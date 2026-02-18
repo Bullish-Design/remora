@@ -49,7 +49,7 @@ class InitialContext(BaseModel):
         return template.render(
             node_text=node.text,
             node_name=node.name,
-            node_type=node.node_type,
+            node_type=node.node_type.value,
             file_path=str(node.file_path),
         )
 

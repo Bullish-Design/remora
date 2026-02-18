@@ -13,7 +13,7 @@ from rich.table import Table
 
 from remora.cairn import CairnCLIClient, CairnError
 from remora.config import RemoraConfig
-from remora.discovery import CSTNode, PydantreeDiscoverer
+from remora.discovery import CSTNode, TreeSitterDiscoverer
 from remora.events import EventEmitter, JsonlEventEmitter, NullEventEmitter
 from remora.orchestrator import Coordinator
 from remora.results import AgentResult, AnalysisResults, NodeResult
@@ -81,11 +81,12 @@ class RemoraAnalyzer:
         if operations is None:
             operations = [name for name, op_config in self.config.operations.items() if op_config.enabled]
 
-        # Discover nodes using Pydantree
-        discoverer = PydantreeDiscoverer(
+        # Discover nodes using tree-sitter
+        discoverer = TreeSitterDiscoverer(
             root_dirs=paths,
             language=self.config.discovery.language,
             query_pack=self.config.discovery.query_pack,
+            query_dir=self.config.discovery.query_dir,
             event_emitter=self._event_emitter,
         )
         self._nodes = discoverer.discover()

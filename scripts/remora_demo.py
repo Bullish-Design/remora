@@ -9,7 +9,7 @@ import typer
 
 from remora.cairn import CairnCLIClient
 from remora.config import OperationConfig, RemoraConfig, load_config
-from remora.discovery import CSTNode, PydantreeDiscoverer
+from remora.discovery import CSTNode, TreeSitterDiscoverer
 from remora.orchestrator import Coordinator
 
 app = typer.Typer(help="Run a small Remora demo workload.")
@@ -39,10 +39,11 @@ def _build_demo_config(base: RemoraConfig, demo_root: Path) -> RemoraConfig:
 
 
 def _collect_nodes(config: RemoraConfig, demo_root: Path, event_emitter=None) -> list[CSTNode]:
-    discoverer = PydantreeDiscoverer(
-        [demo_root],
-        config.discovery.language,
-        config.discovery.query_pack,
+    discoverer = TreeSitterDiscoverer(
+        root_dirs=[demo_root],
+        language=config.discovery.language,
+        query_pack=config.discovery.query_pack,
+        query_dir=config.discovery.query_dir,
         event_emitter=event_emitter,
     )
     return discoverer.discover()
