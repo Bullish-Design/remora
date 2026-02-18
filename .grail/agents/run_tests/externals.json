@@ -1,0 +1,48 @@
+{
+  "externals": [
+    {
+      "name": "read_file",
+      "async": true,
+      "parameters": [
+        {
+          "name": "path",
+          "type": "str",
+          "default": null
+        }
+      ],
+      "return_type": "str",
+      "docstring": "Read the text contents of a file."
+    },
+    {
+      "name": "file_exists",
+      "async": true,
+      "parameters": [
+        {
+          "name": "path",
+          "type": "str",
+          "default": null
+        }
+      ],
+      "return_type": "bool",
+      "docstring": "Check if a file or directory exists."
+    },
+    {
+      "name": "run_command",
+      "async": true,
+      "parameters": [
+        {
+          "name": "cmd",
+          "type": "str",
+          "default": null
+        },
+        {
+          "name": "args",
+          "type": "list[str]",
+          "default": null
+        }
+      ],
+      "return_type": "dict[str, Any]",
+      "docstring": "Run a command in the sandbox."
+    }
+  ]
+}

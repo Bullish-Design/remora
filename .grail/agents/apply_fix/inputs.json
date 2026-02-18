@@ -1,0 +1,22 @@
+{
+  "inputs": [
+    {
+      "name": "issue_code",
+      "type": "str",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "line_number",
+      "type": "int",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "target_file_input",
+      "type": "str | None",
+      "required": true,
+      "default": null
+    }
+  ]
+}

@@ -29,3 +29,39 @@ class NodeResult(BaseModel):
     @property
     def all_success(self) -> bool:
         return all(result.status == "success" for result in self.operations.values())
+
+
+class AnalysisResults(BaseModel):
+    """Complete results from analyzing a codebase."""
+
+    nodes: list[NodeResult] = Field(default_factory=list)
+    total_nodes: int = 0
+    total_operations: int = 0
+    successful_operations: int = 0
+    failed_operations: int = 0
+    skipped_operations: int = 0
+
+    @classmethod
+    def from_node_results(cls, results: list[NodeResult]) -> "AnalysisResults":
+        """Build AnalysisResults from a list of NodeResult objects."""
+        successful = sum(1 for nr in results for ar in nr.operations.values() if ar.status == "success")
+        failed = sum(1 for nr in results for ar in nr.operations.values() if ar.status == "failed")
+        skipped = sum(1 for nr in results for ar in nr.operations.values() if ar.status == "skipped")
+        total_ops = sum(len(nr.operations) for nr in results)
+
+        return cls(
+            nodes=results,
+            total_nodes=len(results),
+            total_operations=total_ops,
+            successful_operations=successful,
+            failed_operations=failed,
+            skipped_operations=skipped,
+        )
+
+    def to_json(self) -> str:
+        """Serialize to JSON."""
+        return self.model_dump_json(indent=2)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dictionary."""
+        return self.model_dump(mode="json")

@@ -1,0 +1,29 @@
+# Remora sample project for acceptance testing
+# This project contains intentional defects for testing
+
+discovery:
+  language: python
+  query_pack: remora_core
+
+server:
+  base_url: "http://remora-server:8000/v1"
+  api_key: "EMPTY"
+  default_adapter: "google/functiongemma-270m-it"
+
+operations:
+  lint:
+    enabled: true
+    auto_accept: false
+    subagent: lint/lint_subagent.yaml
+  test:
+    enabled: true
+    auto_accept: false
+    subagent: test/test_subagent.yaml
+  docstring:
+    enabled: true
+    auto_accept: false
+    subagent: docstring/docstring_subagent.yaml
+    style: google
+  sample_data:
+    enabled: false
+    subagent: sample_data/sample_data_subagent.yaml

@@ -1,0 +1,16 @@
+{
+  "inputs": [
+    {
+      "name": "path_input",
+      "type": "str | None",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "target_file_input",
+      "type": "str | None",
+      "required": true,
+      "default": null
+    }
+  ]
+}

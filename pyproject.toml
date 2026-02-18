@@ -75,6 +75,7 @@ testpaths = ["tests"]
 markers = [
   "integration: requires vLLM FunctionGemma server",
   "grail_runtime: exercises Grail runtime execution",
+  "acceptance: end-to-end MVP acceptance tests (requires vLLM server)",
 ]
 
 [tool.mypy]
