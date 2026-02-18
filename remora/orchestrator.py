@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from typing import Any
 from pathlib import Path
 
 from remora.client import build_client
@@ -11,7 +12,7 @@ from remora.config import RemoraConfig
 from remora.discovery import CSTNode
 from remora.events import EventStreamController, build_event_emitter
 from remora.results import AgentResult, NodeResult
-from remora.runner import CairnClient, FunctionGemmaRunner
+from remora.runner import AgentError, CairnClient, FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
 
 
@@ -81,16 +82,19 @@ class Coordinator:
                     try:
                         return operation, await runner.run()
                     except Exception as exc:
-                        self._event_emitter.emit(
-                            {
-                                "event": "agent_error",
-                                "agent_id": runner.workspace_id,
-                                "node_id": node.node_id,
-                                "operation": operation,
-                                "phase": "run",
-                                "error": str(exc),
-                            }
-                        )
+                        phase = exc.phase if isinstance(exc, AgentError) else "run"
+                        error_code = exc.error_code if isinstance(exc, AgentError) else None
+                        payload: dict[str, Any] = {
+                            "event": "agent_error",
+                            "agent_id": runner.workspace_id,
+                            "node_id": node.node_id,
+                            "operation": operation,
+                            "phase": phase,
+                            "error": str(exc),
+                        }
+                        if error_code is not None:
+                            payload["error_code"] = error_code
+                        self._event_emitter.emit(payload)
                         return operation, exc
 
             results: dict[str, AgentResult] = {}

@@ -9,13 +9,14 @@ import time
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
+from pydantic import ValidationError
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageParam, ChatCompletionToolParam
 
 from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode
 from remora.events import EventEmitter, NullEventEmitter
-from remora.errors import AGENT_002, AGENT_003
+from remora.errors import AGENT_002, AGENT_003, AGENT_004
 from remora.results import AgentResult
 from remora.subagent import SubagentDefinition
 
@@ -116,7 +117,7 @@ class FunctionGemmaRunner:
             node_id=self.node.node_id,
             operation=self.definition.name,
             phase="loop",
-            error_code=AGENT_003,
+            error_code=AGENT_004,
             message=f"Turn limit {self.definition.max_turns} exceeded",
         )
 
@@ -395,15 +396,27 @@ class FunctionGemmaRunner:
             for key, value in payload.items()
             if key in {"status", "changed_files", "summary", "details", "error"}
         }
+        status_raw = filtered.get("status", "success")
+        if status_raw not in {"success", "failed", "skipped"}:
+            status_raw = "success"
         result_data = {
-            "status": filtered.get("status", "success"),
+            "status": status_raw,
             "workspace_id": self.workspace_id,
             "changed_files": filtered.get("changed_files", []),
             "summary": filtered.get("summary", ""),
             "details": filtered.get("details", {}),
             "error": filtered.get("error"),
         }
-        return AgentResult.model_validate(result_data)
+        try:
+            return AgentResult.model_validate(result_data)
+        except ValidationError as exc:
+            raise AgentError(
+                node_id=self.node.node_id,
+                operation=self.definition.name,
+                phase="merge",
+                error_code=AGENT_003,
+                message=f"submit_result payload failed validation: {exc}",
+            ) from exc
 
     async def _dispatch_tool(self, tool_call: Any) -> str:
         tool_function = getattr(tool_call, "function", None)

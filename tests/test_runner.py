@@ -10,7 +10,7 @@ import pytest
 
 from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode
-from remora.errors import AGENT_002, AGENT_003
+from remora.errors import AGENT_002, AGENT_003, AGENT_004
 from remora.runner import AgentError, FunctionGemmaRunner
 from remora.subagent import InitialContext, SubagentDefinition, ToolDefinition
 
@@ -348,7 +348,7 @@ def test_run_respects_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(AgentError) as excinfo:
         asyncio.run(runner.run())
 
-    assert excinfo.value.error_code == AGENT_003
+    assert excinfo.value.error_code == AGENT_004
 
 
 def test_context_providers_injected_before_tool_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
