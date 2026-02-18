@@ -28,7 +28,7 @@ remora analyze [PATHS...] [OPTIONS]
   - Default: `remora.yaml` in current directory
   - Example: `-c config/remora.yaml`
 
-- `--query-pack`: Pydantree query pack name
+- `--query-pack`: tree-sitter query pack name
   - Choices: `function_def`, `class_def`, `file`, `all`
   - Default: `all`
   - Example: `-q function_def,class_def`
@@ -314,6 +314,7 @@ class NodeType(str, Enum):
     FILE = "file"
     CLASS = "class"
     FUNCTION = "function"
+    METHOD = "method"
 
 class OperationStatus(str, Enum):
     """Operation result status."""
@@ -330,6 +331,7 @@ class OperationStatus(str, Enum):
 discovery:
   language: python
   query_pack: remora_core
+  # query_dir: null  # Use built-in queries (default)
 
 agents_dir: agents/
 
@@ -389,6 +391,7 @@ class ServerConfig(BaseModel):
 class DiscoveryConfig(BaseModel):
     language: str = "python"
     query_pack: str = "remora_core"
+    query_dir: Path | None = None  # None = use built-in queries
 
 class RunnerConfig(BaseModel):
     max_turns: int = 20
@@ -425,22 +428,35 @@ class RemoraConfig(BaseModel):
 ### 4.1 CST Node
 
 ```python
-from pydantic import BaseModel, Field
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
-from typing import Literal
 
-class CSTNode(BaseModel):
+class NodeType(str, Enum):
+    """CST node types."""
+    FILE = "file"
+    CLASS = "class"
+    FUNCTION = "function"
+    METHOD = "method"
+
+@dataclass(frozen=True)
+class CSTNode:
     """Represents a single CST node extracted from source code."""
 
-    node_id: str = Field(
-        description="Unique identifier (hash of file_path + node_type + name)"
-    )
-    node_type: Literal["file", "class", "function"]
-    name: str = Field(description="Name of the node (function/class name or filename)")
-    file_path: Path = Field(description="Path to source file")
-    start_byte: int = Field(description="Start byte offset in file")
-    end_byte: int = Field(description="End byte offset in file")
-    text: str = Field(description="Source code text of the node")
+    node_id: str  # sha256(file_path:node_type:name)[:16]
+    node_type: NodeType
+    name: str  # Name of the node (function/class name or filename stem)
+    file_path: Path  # Path to source file
+    start_byte: int  # Start byte offset in file
+    end_byte: int  # End byte offset in file
+    text: str  # Source code text of the node
+    start_line: int  # 1-indexed start line
+    end_line: int  # 1-indexed end line
+
+    @property
+    def full_name(self) -> str:
+        """Qualified name including parent class, e.g. 'ClassName.method_name'."""
+        ...
 
     @property
     def context(self) -> str:
@@ -519,7 +535,7 @@ class NodeResult(BaseModel):
 
     node_id: str
     node_name: str
-    node_type: Literal["file", "class", "function"]
+    node_type: Literal["file", "class", "function", "method"]
     file_path: Path
     operations: dict[str, OperationResult] = Field(
         description="Map of operation name to result"
@@ -588,28 +604,24 @@ class AnalysisResults(BaseModel):
 
 ## 5. Tree-sitter Query Files (.scm)
 
+Query files are located in `remora/queries/python/remora_core/`.
+
 ### 5.1 `function_def.scm`
 
-Extracts function definitions.
+Extracts all function definitions (sync and async). Methods are detected by parent inspection at extraction time.
 
 ```scheme
-; Capture function definitions
+; Capture all function definitions (sync and async)
 (function_definition
   name: (identifier) @function.name
 ) @function.def
-
-; Capture async function definitions
-(function_definition
-  "async"
-  name: (identifier) @async_function.name
-) @async_function.def
 ```
 
 **Captures:**
 - `@function.def`: The entire function node
 - `@function.name`: The function name
-- `@async_function.def`: Async function node
-- `@async_function.name`: Async function name
+
+**Note:** Methods (functions inside classes) are classified as `NodeType.METHOD` during extraction by inspecting the tree-sitter parent chain.
 
 ### 5.2 `class_def.scm`
 
@@ -630,29 +642,15 @@ Extracts class definitions.
 
 ### 5.3 `file.scm`
 
-Captures file-level structure.
+Captures one FILE node per module.
 
 ```scheme
-; Capture module-level elements
-(module) @file.module
-
-; Capture imports
-(import_statement) @file.import
-(import_from_statement) @file.import_from
-
-; Capture module docstring (first string literal)
-(module
-  (expression_statement
-    (string) @file.docstring
-  )
-)
+; Capture one FILE node per module
+(module) @file.def
 ```
 
 **Captures:**
-- `@file.module`: The entire file as a module
-- `@file.import`: Import statements
-- `@file.import_from`: From-import statements
-- `@file.docstring`: Module-level docstring
+- `@file.def`: The entire module
 
 ## 6. Agent Contracts
 
@@ -891,10 +889,10 @@ num_samples: int = Input("num_samples")
 
 | Code | Message | Cause |
 |------|---------|-------|
-| `DISC_001` | Query file not found | `.scm` file doesn't exist |
-| `DISC_002` | Invalid query syntax | Malformed Tree-sitter query |
-| `DISC_003` | Source file parse error | Syntax error in Python file |
-| `DISC_004` | No nodes discovered | No nodes matched query pack |
+| `DISC_001` | Query pack not found | Query pack directory doesn't exist or has no `.scm` files |
+| `DISC_002` | Unexpected tree-sitter output | Malformed or unexpected output from tree-sitter |
+| `DISC_003` | Query syntax error | Malformed tree-sitter query in `.scm` file |
+| `DISC_004` | Source file parse error | Syntax error in Python file or file not readable |
 
 ### 7.4 Agent Errors (Exit Code 1)
 
@@ -1203,6 +1201,6 @@ Register LoRA adapters with the vLLM server and reference them via `operations.<
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2026-02-17
-**Status**: Initial Draft
+**Document Version**: 1.1
+**Last Updated**: 2026-02-18
+**Status**: tree-sitter refactor complete

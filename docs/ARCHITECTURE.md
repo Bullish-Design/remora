@@ -4,7 +4,7 @@
 
 Remora is a code analysis and enhancement system built around **custom-trained FunctionGemma subagents** served from a vLLM inference server on your Tailscale network. Each specialized operation (lint, test, docstring, sample_data) targets a LoRA adapter on the shared FunctionGemma base model, while the client runs the multi-turn tool-calling loop locally.
 
-The system layers three established components — **Pydantree** for CST node extraction, **Cairn** for sandboxed tool execution, and the **OpenAI Python SDK** for HTTP inference — under a new orchestration layer that coordinates the FunctionGemma runner loop.
+The system layers three established components — **tree-sitter** for CST node extraction, **Cairn** for sandboxed tool execution, and the **OpenAI Python SDK** for HTTP inference — under a new orchestration layer that coordinates the FunctionGemma runner loop.
 
 ### Core Principles
 
@@ -32,7 +32,7 @@ The system layers three established components — **Pydantree** for CST node ex
 │  Orchestration Layer                                         │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐ │
 │  │ Node Discovery  │  │ Coordinator     │  │ Result      │ │
-│  │ (Pydantree)     │  │                 │  │ Presenter   │ │
+│  │ (tree-sitter)   │  │                 │  │ Presenter   │ │
 │  └─────────────────┘  └─────────────────┘  └─────────────┘ │
 └─────────────────────────────────────────────────────────────┘
                           ↓
@@ -91,6 +91,7 @@ class RemoraConfig(BaseModel):
 class DiscoveryConfig(BaseModel):
     language: str = "python"
     query_pack: str = "remora_core"
+    query_dir: Path | None = None  # None = use built-in queries
 
 class RunnerConfig(BaseModel):
     max_turns: int = 20          # Per-run turn limit
@@ -115,24 +116,42 @@ Uses **watchfiles** for reactive monitoring. Debounces changes, triggers increme
 
 #### Node Discovery Engine (`remora.discovery`)
 
-Uses **Pydantree** with `.scm` Tree-sitter query files to extract `CSTNode` objects.
+Uses **tree-sitter** with `.scm` query files to extract `CSTNode` objects.
 
 ```
-queries/python/remora_core/
+remora/queries/python/remora_core/
 ├── function_def.scm
 ├── class_def.scm
 └── file.scm
 ```
 
 ```python
-class CSTNode(BaseModel):
-    node_id: str        # hash(file_path + node_type + name)
-    node_type: Literal["file", "class", "function"]
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+
+class NodeType(str, Enum):
+    FILE = "file"
+    CLASS = "class"
+    FUNCTION = "function"
+    METHOD = "method"
+
+@dataclass(frozen=True)
+class CSTNode:
+    node_id: str        # sha256(file_path:node_type:name)[:16]
+    node_type: NodeType
     name: str
     file_path: Path
     start_byte: int
     end_byte: int
     text: str
+    start_line: int     # 1-indexed
+    end_line: int       # 1-indexed
+    
+    @property
+    def full_name(self) -> str:
+        """Qualified name, e.g. 'ClassName.method_name'."""
+        ...
 ```
 
 #### Coordinator (`remora.orchestrator`)
@@ -522,7 +541,7 @@ Each training example is a full conversation:
 2. Config loaded and validated (RemoraConfig)
 
 3. Node Discovery:
-   Pydantree extracts CSTNode list from src/
+   tree-sitter extracts CSTNode list from src/
 
 4. For each node (concurrent, up to max_concurrent):
    Coordinator spawns FunctionGemmaRunner for each operation
@@ -588,7 +607,7 @@ vLLM keeps the base model and LoRA adapters loaded server-side and continuously 
 
 | Failure Mode | Recovery | User Impact |
 |---|---|---|
-| Node discovery failure (bad query) | Skip node, log `DISC_002` | Warning for affected file |
+| Node discovery failure (bad query) | Skip node, log `DISC_001` | Warning for affected file |
 | Subagent YAML invalid | Skip operation, log `AGENT_001` | Error shown for operation |
 | vLLM server not reachable | Skip operation, log `AGENT_002` | Error shown for operation |
 | Runner turn limit hit | Mark operation failed, log `AGENT_003` | Partial result returned |
@@ -618,6 +637,7 @@ class AgentError(BaseModel):
 discovery:
   language: python
   query_pack: remora_core
+  # query_dir: null  # Use built-in queries (default)
 
 agents_dir: agents/   # Root of the agents/ directory
 
@@ -678,7 +698,7 @@ cairn:
 | Application | Config | Pydantic |
 | Application | Terminal UI | Rich |
 | Application | File Watching | watchfiles |
-| Orchestration | Node Discovery | Pydantree + Tree-sitter |
+| Orchestration | Node Discovery | tree-sitter + tree-sitter-python |
 | Orchestration | Async Runtime | AsyncIO |
 | Runner | HTTP Client | OpenAI Python SDK |
 | Server | Model Inference | vLLM (OpenAI-compatible API) |
@@ -692,6 +712,6 @@ cairn:
 
 ---
 
-**Document Version**: 2.0
-**Last Updated**: 2026-02-17
-**Status**: FunctionGemma Rework
+**Document Version**: 2.1
+**Last Updated**: 2026-02-18
+**Status**: tree-sitter refactor complete

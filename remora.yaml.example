@@ -4,6 +4,7 @@
 discovery:
   language: python
   query_pack: remora_core
+  # query_dir: null  # Use built-in queries (default). Set to override.
 
 agents_dir: agents
 
