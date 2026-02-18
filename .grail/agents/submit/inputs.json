@@ -7,7 +7,13 @@
       "default": null
     },
     {
-      "name": "fixtures_generated",
+      "name": "issues_fixed",
+      "type": "int",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "issues_remaining",
       "type": "int",
       "required": true,
       "default": null

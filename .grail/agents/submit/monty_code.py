@@ -2,8 +2,8 @@
 
 workspace_value = workspace_id or 'unknown'
 try:
-    status = 'success' if fixtures_generated > 0 else 'skipped'
-    result = {'status': status, 'workspace_id': workspace_value, 'changed_files': [str(path) for path in changed_files], 'summary': str(summary), 'details': {'fixtures_generated': int(fixtures_generated)}, 'error': None}
+    status = 'success' if issues_remaining == 0 else 'failed'
+    result = {'status': status, 'workspace_id': workspace_value, 'changed_files': [str(path) for path in changed_files], 'summary': str(summary), 'details': {'issues_fixed': int(issues_fixed), 'issues_remaining': int(issues_remaining)}, 'error': None}
 except Exception as exc:
     result = {'status': 'failed', 'workspace_id': workspace_value, 'changed_files': [], 'summary': '', 'details': {}, 'error': str(exc)}
 result
