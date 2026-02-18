@@ -1,118 +1,170 @@
-# Remora Runtime Integration Plan (Cairn + Grail + Pydantree)
+# Remora Full-Rewrite Integration Plan (Cairn + Grail + Pydantree)
 
 ## Objective
 
-Unify Remora’s runtime across Cairn, Grail, and Pydantree so that:
+Rewrite Remora to be a thin, reliable orchestration layer that:
 
-- `.pym` tooling runs through Grail consistently in all execution paths.
-- Cairn orchestration invokes Grail validation and artifacts as first‑class outputs.
-- AST/CST discovery is upgraded to a true concrete syntax pipeline via Pydantree.
+- **Uses Cairn as the only execution runtime** (sandbox, lifecycle, workspace isolation).
+- **Uses Grail as the only `.pym` parser/validator/executor** (inputs + externals + runtime).
+- **Uses Pydantree as the only discovery engine** (concrete syntax spans + typed captures).
 
-## Current State
+All existing Remora runtime paths are considered legacy unless they align with these contracts.
 
-- Remora runtime does **not** invoke Grail directly; it only consumes `.pym` files through Cairn’s client execution model.
-- `.pym` tools are treated as Python files in tests, which bypasses Grail.
-- Discovery uses a Python `ast` walker, not a concrete syntax tree.
+## Core Decisions (and Why)
 
-## Integration Principles
+1. **Cairn integration is CLI-first (not in-process API)**
+   - **Why:** Keeps Remora loosely coupled, aligns with shell-first contracts, and allows independent versioning.
+   - **Implication:** Remora must parse structured CLI outputs and map them into `AgentResult` consistently.
+   - **Trade-off:** Less streaming granularity and higher process overhead than an in-process API.
 
-1. **Grail is the source of truth for `.pym` parsing + validation.**
-2. **Cairn runs scripts but must surface Grail check artifacts and errors.**
-3. **Pydantree provides the CST layer to enrich node text, span, and edits.**
+2. **Grail is the source of truth for tool schemas**
+   - **Why:** `.pym` is the canonical tool contract. Grail emits inputs/externals metadata deterministically.
+   - **Implication:** Tool parameter schemas are generated from `inputs.json` and validated against `externals.json`.
 
-## Phase 1: Grail‑First `.pym` Validation
+3. **YAML overrides remain first-class (explicit precedence)**
+   - **Why:** Some tools need enriched descriptions, custom names, or compatibility shims.
+   - **Implication:** Schema assembly rules must be explicit and audited (see “Schema Assembly Rules”).
 
-### Goals
+4. **Pydantree replaces AST discovery entirely**
+   - **Why:** Concrete syntax spans + deterministic captures are required for reliable edits and tool context.
+   - **Implication:** Remora must own a Pydantree query pack and version it via manifests.
 
-- Every `.pym` file passes `grail check --strict`.
-- Grail artifacts (`stubs.pyi`, `monty_code.py`, `check.json`) generated for all tools.
+5. **Single event stream across discovery + validation + execution**
+   - **Why:** Remora’s UI/logs need a single timeline with consistent phase semantics.
+   - **Implication:** All stages emit JSONL events with `phase` and structured payloads.
 
-### Exact Steps
+## Target Architecture
 
-1. Add a Grail validation step in Remora’s CLI run path:
-   - `remora/runner.py`: validate `.pym` using `grail.load(...).check()` before execution.
-   - If `check.valid` is false, abort with `AGENT_001` and surface Grail error list.
-2. Store Grail artifacts alongside existing `.remora/` artifacts per workspace.
-3. Expose artifacts in event stream payloads (for UI + logs).
+### 1) Execution + Workspaces (Cairn + Grail)
 
-### Required Tests
+- Remora never executes `.pym` itself; it **always submits to Cairn**.
+- Cairn runs `grail.load(...).check()` before execution and stores artifacts under `.grail/agents/{agent_id}/`.
+- Cairn `submit_result()` payload becomes the canonical `AgentResult`.
 
-- Unit test: `grail.load(...).check()` invoked in runner.
-- Integration test: bad `.pym` yields structured error with Grail messages.
+**Why this is chosen:** Cairn already owns sandbox boundaries, copy-on-write overlays, and human gating. Remora should not duplicate runtime logic.
 
-## Phase 2: Cairn Execution Consistency
+### 2) Tool Registry (Grail-first + YAML overrides)
 
-### Goals
+- Every `.pym` must declare `Input(...)`s and `@external`s.
+- Remora builds a tool catalog by running `grail check --strict` and reading:
+  - `inputs.json` → parameter schema
+  - `externals.json` → external function validation
+  - `check.json` → validation status + warnings
 
-- Cairn uses Grail artifacts for execution parity in all environments.
-- Remora never executes `.pym` without Grail validation.
+**Why this is chosen:** It removes schema drift and keeps tool contracts aligned with executable code.
 
-### Exact Steps
+### 3) Discovery + CST (Pydantree-only)
 
-1. In `remora/runner.py`, persist Grail artifacts to workspace `.grail/<script>`.
-2. If Cairn executes a `.pym`, verify Grail artifacts exist before execution.
-3. Update event stream to include Grail check summary and artifact paths.
+- Remora ships a Pydantree query pack (ex: `python/remora_core`).
+- Discovery runs through Pydantree’s runtime CLI and returns typed capture models.
+- Remora maps capture spans to `CSTNode` with exact source text and byte ranges.
 
-### Required Tests
+**Why this is chosen:** Pydantree enforces deterministic query workflows and provides concrete syntax spans.
 
-- Verify artifacts are created during a normal runner execution.
-- Ensure missing artifacts surface a clear actionable error.
+### 4) Unified Event Model
 
-## Phase 3: Pydantree CST Integration
+All stages emit JSONL events with a shared schema:
 
-### Goals
+- `phase`: `discovery | grail_check | execution | submission`
+- `agent_id`, `node_id`, `tool_name` (where applicable)
+- `status`, `error`, `duration_ms`
 
-- Replace `ast`-based discovery with Pydantree CST for stable node IDs and accurate spans.
-- Node text and edits become whitespace‑preserving and round‑trip safe.
+**Why this is chosen:** The UI and CLI can present one consistent timeline.
 
-### Exact Steps
+## Schema Assembly Rules (Grail + YAML)
 
-1. Introduce a CST discovery adapter:
-   - New module: `remora/pydantree_discovery.py`.
-   - Interface returns `CSTNode` with concrete ranges + exact source text.
-2. Add feature flag in config:
-   - `discovery.engine = "pydantree" | "ast"`.
-3. Update `remora/discovery.py` to route by config flag.
-4. Add mapping logic from Pydantree nodes to Remora `CSTNode` shape.
+1. Start with Grail `inputs.json`.
+2. Apply YAML overrides:
+   - `tool_name`, `tool_description`
+   - `inputs_override` (add/replace/remove input fields)
+3. Emit warnings when overrides change:
+   - `type`, `required`, or `default` compared to Grail.
+4. Final schema is the one surfaced to the model.
 
-### Required Tests
+**Why this is chosen:** Grail stays canonical, but overrides allow compatibility fixes and richer metadata.
 
-- Golden tests for node IDs + spans under Pydantree.
-- Regression tests to ensure AST and Pydantree output parity for key cases.
+## Canonical Data Layout
 
-## Phase 4: Cohesive Runtime Pipeline
+Uses Cairn’s filesystem contract:
 
-### Goals
+```
+.agentfs/
+  stable.db
+  agent-{id}.db
+  bin.db
 
-- Unified error model across Grail, Cairn, and Pydantree.
-- Clear user‑facing diagnostics for syntax, validation, and runtime failures.
+.grail/agents/{agent_id}/
+  task.pym
+  check.json
+  inputs.json
+  externals.json
+  stubs.pyi
+  monty_code.py
 
-### Exact Steps
+logs/workshop.jsonl
+```
 
-1. Normalize error types:
-   - Map Grail errors to Remora’s `AgentError` codes.
-   - Map Pydantree parse errors to `DISC_002` (or introduce a new error code).
-2. Standardize event payloads:
-   - `error_phase`: `discovery | grail_check | execution | submission`.
-3. Update CLI to report errors with structured summaries + remediation hints.
+Remora does not create parallel artifact directories.
 
-## Validation Checklist
+## Config Surface (Rewrite)
 
-- All `.pym` files validated via Grail before any execution.
-- All `.pym` tools run through Grail in tests and CI.
-- Cairn orchestration emits Grail artifacts and uses them in runtime context.
-- Pydantree discovery is a supported, tested code path.
+- `discovery.language` (ex: `python`)
+- `discovery.query_pack` (ex: `remora_core`)
+- `cairn.command` (default: `cairn`)
+- `cairn.home` and `cairn.max_concurrent_agents`
+- `event_stream.output`
+
+Remove:
+- AST-specific `queries` config
+- ad-hoc runtime toggles not aligned with Cairn/Grail/Pydantree
+
+## Implementation Phases
+
+### Phase 0 — Delete Parallel Runtimes
+- Remove AST discovery pipeline.
+- Remove any `.pym` subprocess execution.
+- Remove manual tool parameter schemas (schema assembly becomes Grail-first).
+
+### Phase 1 — Grail Tool Registry
+- Implement a Grail validator/catalog builder:
+  - runs `grail check --strict`
+  - caches `inputs.json`, `externals.json`, `check.json`
+- Build tool schemas from Grail + YAML overrides.
+
+### Phase 2 — Cairn Execution Bridge (CLI)
+- Implement a Cairn client wrapper that:
+  - spawns/queues `.pym` via CLI,
+  - waits for submission results,
+  - maps submission payloads into `AgentResult`.
+
+### Phase 3 — Pydantree Discovery
+- Create a Pydantree query pack for Remora core needs.
+- Build `PydantreeDiscoverer` that emits `CSTNode` from typed captures.
+- Remove AST-based `NodeDiscoverer` entirely.
+
+### Phase 4 — Unified Event + Result Model
+- Emit discovery, validation, execution, and submission events into one stream.
+- Add Grail validation summaries to `AgentResult.details`.
+
+## Testing Strategy
+
+- **Discovery tests:** Pydantree captures return stable spans and text for functions/classes.
+- **Grail registry tests:** invalid `.pym` fails with structured errors; schemas match `inputs.json`.
+- **End-to-end test:** runner triggers Cairn execution; Grail artifacts appear; `AgentResult` matches submission.
 
 ## Risks & Mitigations
 
-- **Risk**: Grail example files imply top‑level `await` but parser rejects it.
-  - **Mitigation**: Update `.pym` files to avoid top‑level `await` or add a Grail‑compliant wrapper.
-- **Risk**: Pydantree node mapping diverges from current AST node IDs.
-  - **Mitigation**: Introduce compatibility mode and validate outputs side‑by‑side.
+- **Risk:** YAML overrides drift from Grail semantics.
+  - **Mitigation:** emit warnings for type/required/default changes.
+- **Risk:** Pydantree query pack drift.
+  - **Mitigation:** lock query pack with manifest hashes and validate in CI.
+- **Risk:** CLI execution limits visibility into live run state.
+  - **Mitigation:** parse Cairn status outputs and emit intermediate events.
 
 ## Success Criteria
 
-- Grail validation runs for 100% of tool scripts.
-- Cairn runtime persists Grail artifacts per agent execution.
-- Pydantree provides concrete syntax nodes for all discovery operations.
-- Tests cover Grail + Cairn + Pydantree execution paths end‑to‑end.
+- All `.pym` tools validate with `grail check --strict` before execution.
+- Remora never executes `.pym` outside Cairn.
+- Discovery is Pydantree-only (no AST fallback).
+- Tool schemas are Grail-first with explicit YAML overrides.
+- A single event stream covers discovery → validation → execution → submission.
