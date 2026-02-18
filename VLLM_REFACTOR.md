@@ -1,372 +1,421 @@
-# vLLM Python Client Integration — Refactor Plan
+# vLLM FunctionGemma Tool Calling — Refactor Plan
 
 **Date:** 2026-02-18
-**Current state:** Remora uses the `openai` Python SDK (`AsyncOpenAI`) pointed at a vLLM server's OpenAI-compatible endpoint (`/v1/chat/completions`)
-**Target state:** Remora uses the `vllm` Python client library directly for inference, unlocking native vLLM capabilities
+**Current state:** Remora manually injects tool schemas into the system prompt as JSON text, parses tool calls from the model's raw text output using regex heuristics, and formats tool results as `role="user"` messages.
+**Target state:** Remora uses vLLM's native tool calling API with the `functiongemma` parser, passing tools via the standard `tools=` parameter and receiving structured `tool_calls` objects back.
 
 ---
 
-## 1. Background: Why Change?
+## 1. What's Wrong with the Current Approach
 
-The current approach uses the `openai` SDK as a generic HTTP client. This works because vLLM exposes an OpenAI-compatible REST API. However, it treats vLLM as a black box and cannot use any vLLM-specific functionality.
+The current approach is fundamentally incompatible with FunctionGemma's actual wire format. There are three layers of mismatch:
 
-The `vllm` Python package includes a client-side library (`vllm.sampling_params`, `vllm.outputs`, and in newer releases, async client wrappers) that speaks the native vLLM API directly. Crucially, this API exposes features that have no equivalent in the OpenAI spec:
+### 1.1 System prompt injection is wrong
 
-- **Guided JSON / structured outputs** — constrain the model to emit valid JSON matching a schema
-- **`sampling_params` full control** — beam search, top-k, top-p, repetition penalties, stop sequences, etc.
-- **Logprobs and token-level metadata** — know the model's confidence per token
-- **Prompt-level prefix caching hints** — explicitly mark shared prefixes for KV cache reuse
-- **LoRA adapter hot-swap via API** — specify adapter in the request, with validation
-- **`best_of` / beam search** — generate N candidates and select the best
-- **Per-request token budget enforcement** — reject requests that would exceed VRAM budget
+Remora currently builds this system prompt in `runner.py:_build_system_prompt()`:
 
----
+```
+You have access to the following tools:
+[JSON array of tool schemas]
 
-## 2. What Needs to Change
+Call tools by responding with JSON in the format:
+{"name": "<tool_name>", "arguments": { ... }}
 
-### 2.1 `remora/client.py`
+[subagent system_prompt]
+```
 
-**Current:**
+FunctionGemma was **not trained on this prompt format**. The model does not know to output `{"name": ..., "arguments": ...}`. It was trained with a specific Jinja2 chat template (`tool_chat_template_functiongemma.jinja`) that presents tools as:
+
+```
+<start_of_turn>user
+[system prompt content]
+Available functions:
+Function: get_weather
+Description: Get the current weather
+Parameters: {"type": "object", ...}
+<end_of_turn>
+<start_of_turn>model
+```
+
+This formatting is handled server-side by vLLM's chat template renderer when the client passes tools via the standard `tools=` parameter.
+
+### 1.2 Output format expectation is wrong
+
+The current `_parse_tool_calls` looks for JSON in the model's text output. FunctionGemma outputs a custom format:
+
+```
+<start_function_call>call:get_weather{location:<escape>London<escape>,unit:<escape>celsius<escape>}<end_function_call>
+```
+
+The vLLM server's `functiongemma` tool parser (`--tool-call-parser functiongemma`) automatically translates this into standard OpenAI-format `tool_calls` objects before the response reaches the client. The client never sees the raw `<start_function_call>` format.
+
+### 1.3 Tool result message format is wrong
+
+Remora currently appends tool results as:
+
 ```python
-from openai import AsyncOpenAI
-from remora.config import ServerConfig
+{"role": "user", "content": "[Tool result for run_linter] {...}"}
+```
 
-def build_client(server_config: ServerConfig) -> AsyncOpenAI:
-    return AsyncOpenAI(
-        base_url=server_config.base_url,
-        api_key=server_config.api_key,
-        timeout=server_config.timeout,
+The correct format (per the FunctionGemma chat template) is:
+
+```python
+{"role": "tool", "content": "...", "tool_call_id": "call_abc123", "name": "run_linter"}
+```
+
+The chat template renders `role="tool"` messages as:
+
+```
+<start_of_turn>user
+Function result for run_linter: {...}
+<end_of_turn>
+```
+
+Using the wrong role means the model does not recognise previous tool results as function outputs, breaking the multi-turn loop.
+
+---
+
+## 2. The Correct Architecture
+
+### 2.1 Server startup flags (required)
+
+The vLLM server must be started with:
+
+```bash
+python3 -m vllm.entrypoints.openai.api_server \
+    --model google/functiongemma-270m-it \
+    --enable-auto-tool-choice \
+    --tool-call-parser functiongemma \
+    --chat-template examples/tool_chat_template_functiongemma.jinja \
+    --enable-lora \
+    --max-loras 20 \
+    --max-lora-rank 32 \
+    --enable-prefix-caching \
+    --max-num-seqs 256
+```
+
+Key flags:
+- `--enable-auto-tool-choice` — allows the model to call tools automatically
+- `--tool-call-parser functiongemma` — uses vLLM's built-in FunctionGemma parser that understands `<start_function_call>...<end_function_call>` output
+- `--chat-template examples/tool_chat_template_functiongemma.jinja` — formats system/user/tool messages correctly for FunctionGemma
+
+### 2.2 Client-side call (correct form)
+
+```python
+response = await client.chat.completions.create(
+    model=self._model_target,
+    messages=self.messages,          # standard OpenAI message list
+    tools=self.definition.tool_schemas,   # OpenAI-format tool definitions
+    tool_choice="required",          # guarantee a tool call every turn
+    max_tokens=512,
+    temperature=0.1,
+)
+```
+
+`tool_choice="required"` is supported as of vllm>=0.8.3. It guarantees the model produces at least one tool call, preventing the "model stopped without calling submit_result" error.
+
+### 2.3 Response parsing (correct form)
+
+The response, after vLLM's parser runs, uses standard OpenAI format:
+
+```python
+message = response.choices[0].message
+
+if message.tool_calls:
+    for tool_call in message.tool_calls:
+        name = tool_call.function.name                          # "run_linter"
+        arguments = json.loads(tool_call.function.arguments)    # {"check_only": true}
+        call_id = tool_call.id                                  # "call_abc123"
+```
+
+No regex, no JSON extraction, no `_parse_tool_calls` needed.
+
+### 2.4 Message history format
+
+The message list must use standard OpenAI roles:
+
+```python
+# System message — subagent's system_prompt only (NO tool injection)
+{"role": "system", "content": "You are a Python linting specialist..."}
+
+# Initial user message — the node code
+{"role": "user", "content": "Code to analyze:\n```python\ndef foo(): ...\n```"}
+
+# Model's tool call (appended from response)
+{
+    "role": "assistant",
+    "content": None,
+    "tool_calls": [
+        {
+            "id": "call_abc123",
+            "type": "function",
+            "function": {
+                "name": "run_linter",
+                "arguments": '{"check_only": false}'
+            }
+        }
+    ]
+}
+
+# Tool result (role="tool", NOT role="user")
+{
+    "role": "tool",
+    "tool_call_id": "call_abc123",
+    "name": "run_linter",
+    "content": '{"issues": [{"code": "E501", "line": 3}]}'
+}
+```
+
+---
+
+## 3. Files That Need to Change
+
+### 3.1 `remora/runner.py` — FunctionGemmaRunner
+
+This is the largest change. The following methods change completely:
+
+**`_build_system_prompt()` → remove tool injection**
+
+Currently injects the full tool schema JSON into the system prompt. Remove this entirely. The new system message is just `self.definition.initial_context.system_prompt` — the subagent's role description with no tool preamble.
+
+```python
+# Before (wrong):
+def _build_system_prompt(self) -> str:
+    tool_schema_block = json.dumps(self.definition.tool_schemas, indent=2)
+    return (
+        "You have access to the following tools:\n"
+        f"{tool_schema_block}\n\n"
+        "Call tools by responding with JSON in the format:\n"
+        '{"name": "<tool_name>", "arguments": { ... }}\n\n'
+        f"{self.definition.initial_context.system_prompt}"
     )
+
+# After (correct):
+def _build_system_prompt(self) -> str:
+    return self.definition.initial_context.system_prompt
 ```
 
-**Target:**
-
-Replace `AsyncOpenAI` with a vLLM async HTTP client. The vLLM project provides `vllm.entrypoints.openai.async_client.AsyncOpenAI` (for OpenAI-compat) but more importantly the lower-level `vllm.engine.async_llm_engine` for in-process use, or for remote use: the `openai`-compatible API remains the primary network interface.
-
-However, the actual vLLM client-side library (`vllm` package installed on the client) provides:
-- `from vllm import SamplingParams` — for parameterizing requests
-- `from vllm.engine.arg_utils import AsyncEngineArgs` — for server config when embedding vLLM in-process
-
-For **remote vLLM** (the remora deployment model — client talks to a vLLM server over the network), the recommended approach is to use vLLM's `openai`-compatible API but with the `vllm`-specific extensions in the request body.
-
-The key change is adding a `vllm`-aware client wrapper that:
-1. Continues using HTTP POST to `/v1/chat/completions`
-2. Adds `extra_body` fields for vLLM-specific parameters (guided decoding, etc.)
-3. Can optionally use the `vllm` client library directly when co-located
-
-**File changes required:**
-- `remora/client.py` — Replace `AsyncOpenAI` client builder with a `VLLMClient` wrapper
-- `remora/config.py` — Add `VLLMConfig` section for vLLM-specific parameters
-- `pyproject.toml` — Add `vllm` to dependencies (or `vllm-client` if/when available as separate package)
-
----
-
-### 2.2 `remora/config.py`
-
-Add a new configuration section for vLLM-specific parameters:
+**`_call_model()` → pass `tools` and `tool_choice` parameters**
 
 ```python
-class VLLMConfig(BaseModel):
-    guided_json: bool = True           # Enable JSON schema-constrained decoding
-    top_p: float = 0.9
-    top_k: int = 50
-    repetition_penalty: float = 1.0
-    stop: list[str] = Field(default_factory=list)
-    logprobs: int | None = None        # Number of top logprobs to return per token
-    prompt_logprobs: int | None = None
-    skip_special_tokens: bool = True
-    max_logprobs: int = 20
-```
-
-Update `RemoraConfig`:
-```python
-class RemoraConfig(BaseModel):
-    ...
-    vllm: VLLMConfig = Field(default_factory=VLLMConfig)  # NEW
-```
-
-Also extend `RunnerConfig`:
-```python
-class RunnerConfig(BaseModel):
-    max_turns: int = 20
-    max_concurrent_runners: int = 16
-    timeout: int = 300
-    max_tokens: int = 512             # NEW — was hardcoded in runner.py:147
-    temperature: float = 0.1          # NEW — was hardcoded in runner.py:148
-```
-
----
-
-### 2.3 `remora/runner.py`
-
-This is where the largest change happens. The call to `_http_client.chat.completions.create()` needs to be updated to pass vLLM-specific parameters.
-
-**Current `_call_model`:**
-```python
+# Before (wrong):
 response = await self._http_client.chat.completions.create(
     model=self._model_target,
     messages=cast(list[ChatCompletionMessageParam], self.messages),
     max_tokens=512,
     temperature=0.1,
 )
-```
+content = response.choices[0].message.content
 
-**Target `_call_model`:**
-```python
+# After (correct):
 response = await self._http_client.chat.completions.create(
     model=self._model_target,
     messages=cast(list[ChatCompletionMessageParam], self.messages),
-    max_tokens=self._runner_config.max_tokens,
-    temperature=self._runner_config.temperature,
-    extra_body={
-        "guided_json": self._tool_call_schema() if self._vllm_config.guided_json else None,
-        "top_p": self._vllm_config.top_p,
-        "repetition_penalty": self._vllm_config.repetition_penalty,
-        "stop": self._vllm_config.stop or None,
-        "logprobs": self._vllm_config.logprobs,
-        "skip_special_tokens": self._vllm_config.skip_special_tokens,
-    },
-)
-```
-
-Where `_tool_call_schema()` computes a JSON schema that constrains the model output to be a valid tool call object:
-```python
-def _tool_call_schema(self) -> dict:
-    tool_names = [t.name for t in self.definition.tools]
-    return {
-        "oneOf": [
-            {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "enum": tool_names},
-                    "arguments": {"type": "object"},
-                },
-                "required": ["name"],
-            }
-        ]
-    }
-```
-
-**Additional changes to `runner.py`:**
-
-1. Add `runner_config: RunnerConfig` and `vllm_config: VLLMConfig` as dataclass fields
-2. Use `self.runner_config.max_tokens` and `self.runner_config.temperature` instead of hardcoded values
-3. Update `__post_init__` to receive the new config fields
-4. Update `_call_model` to pass `extra_body`
-5. Update `FunctionGemmaRunner` dataclass signature to accept the new fields
-
----
-
-### 2.4 `remora/orchestrator.py`
-
-Pass the new config sections through to `FunctionGemmaRunner`:
-
-```python
-# In process_node, when constructing runners:
-runners[operation] = FunctionGemmaRunner(
-    definition=definition,
-    node=node,
-    workspace_id=f"{operation}-{node.node_id}",
-    cairn_client=self.cairn_client,
-    server_config=self.config.server,
-    runner_config=self.config.runner,   # NEW
-    vllm_config=self.config.vllm,       # NEW
-    adapter_name=op_config.model_id,
-    http_client=self._http_client,
-    event_emitter=self._event_emitter,
-)
-```
-
----
-
-### 2.5 `pyproject.toml`
-
-Add `vllm` to the dependency list. Note: the `vllm` package is large (~GB with CUDA dependencies). For client-only use (no local inference), there may be a lighter-weight option:
-
-**Option A — Full vLLM client+server package:**
-```toml
-dependencies = [
-    ...
-    "vllm>=0.4.0",
-]
-```
-
-**Option B — Use `openai` SDK with `extra_body` (no new dependency):**
-The `openai` Python SDK supports passing arbitrary additional body parameters via `extra_body={}`. This approach requires **no new dependencies** and achieves the same result for remote vLLM, since vLLM's API is OpenAI-compatible and accepts these extra fields.
-
-**Recommendation:** Use Option B initially (no new deps, immediate benefit from guided JSON), then evaluate adding `vllm` as a full dependency once in-process inference or logprob analysis is needed.
-
----
-
-## 3. Additional Functionality Enabled by vLLM Integration
-
-### 3.1 Guided JSON Decoding (Most Impactful)
-
-**What it does:** vLLM's `guided_json` parameter accepts a JSON schema. The vLLM server uses constrained decoding (via `outlines` or `lm-format-enforcer`) to guarantee every token emitted conforms to the schema. The model literally cannot output invalid JSON.
-
-**Impact on remora:**
-- Eliminates the `_parse_tool_calls` regex heuristic entirely
-- Eliminates `AGENT_003 / "Model stopped without calling submit_result"` errors caused by the model outputting plain text instead of JSON
-- The `_coerce_tool_calls` fallback becomes unnecessary
-- Tool call parsing becomes trivial: `json.loads(response_text)`
-
-This is the single most impactful change. The errors shown in the problem statement (model responding with "I apologize, but I cannot assist...") are caused by the model generating plain text. With guided JSON, this is structurally impossible.
-
-**How to use:**
-```python
-# Pass in extra_body to openai SDK call:
-extra_body={
-    "guided_json": {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "enum": ["run_linter", "apply_fix", "submit_result"]},
-            "arguments": {"type": "object"},
-        },
-        "required": ["name", "arguments"],
-    }
-}
-```
-
-### 3.2 Per-Turn SamplingParams Control
-
-**What it does:** Different turns in the agent loop may benefit from different sampling parameters. For example:
-- `model_load` (first turn) — lower temperature for more deterministic tool selection
-- `loop` turns — slightly higher temperature for more exploratory reasoning
-- Final turns near the limit — temperature=0 for greedy, deterministic completion
-
-With native vLLM, `SamplingParams` can be constructed per-call and passed directly:
-```python
-from vllm import SamplingParams
-
-params = SamplingParams(
-    temperature=0.0 if self.turn_count > self.definition.max_turns - 2 else 0.1,
+    tools=cast(list[ChatCompletionToolParam], self.definition.tool_schemas),
+    tool_choice="required",
     max_tokens=512,
-    guided_json=tool_schema,
+    temperature=0.1,
 )
+# Returns the full message object, not just text content
+return response.choices[0].message
 ```
 
-### 3.3 Logprobs for Confidence-Aware Routing
+**`_parse_tool_calls()` and `_coerce_tool_calls()` → delete**
 
-**What it does:** vLLM can return per-token log probabilities alongside the response. This allows the orchestrator to:
-- Detect when the model is "uncertain" about a tool call (low logprob on the tool name)
-- Retry with a different sampling strategy when confidence is below a threshold
-- Collect per-turn confidence metrics for monitoring and model evaluation
+These are no longer needed. The vLLM server's `functiongemma` tool parser handles all output format conversion server-side. The client receives structured `tool_calls` objects from the standard OpenAI response format.
 
-**Impact on remora:**
-- New event field: `"tool_confidence": 0.87` in `tool_call` events
-- New routing logic in `run()` to retry on low-confidence turns
-- Enables automated quality scoring without human review
+**Main `run()` loop → use `message.tool_calls` instead of text parsing**
 
-### 3.4 Token Budget Enforcement and Cost Estimation
-
-**What it does:** vLLM exposes `prompt_tokens` and `completion_tokens` in every response (already captured by remora's event system). With the `vllm` client, you can also:
-- Set `max_tokens` per-turn based on remaining budget
-- Receive `finish_reason: "length"` when the model hits its token limit
-- React to `finish_reason` in the agent loop (e.g., retry with a shorter prompt)
-
-Currently remora logs token counts but does not use them for control flow. Integration enables:
 ```python
-# In _call_model, after response:
-if response.choices[0].finish_reason == "length":
-    # Model hit token limit — summarize conversation and retry
-    await self._summarize_and_continue()
+# Before (wrong):
+response_text = await self._call_model(phase="model_load")
+self.messages.append({"role": "assistant", "content": response_text})
+tool_calls = self._parse_tool_calls(response_text)
+
+# After (correct):
+message = await self._call_model(phase="model_load")
+self.messages.append(message)   # append the full assistant message (preserves tool_calls field)
+tool_calls = message.tool_calls or []
 ```
 
-### 3.5 Structured Output for `submit_result`
+**`_dispatch_tool()` → append role="tool" result, not role="user"**
 
-**What it does:** The `submit_result` tool has a well-defined schema per subagent. With guided JSON, the model can be constrained to emit a `submit_result` call whose `arguments` matches the exact schema of that subagent's submit tool.
-
-This catches issues like:
-- Docstring agent returns `action: "added"` but the AgentResult expects `status: "success"`
-- Lint agent omits the required `issues_fixed` field
-- Sample data agent returns extra fields that cause Pydantic `ValidationError`
-
-With schema enforcement, these field mismatches are caught at the token level, not at parse time.
-
-### 3.6 Multi-LoRA Adapter Validation
-
-**What it does:** When remora targets a LoRA adapter (e.g., `model_id: "lint"` in `OperationConfig`), the vLLM server must have that adapter loaded. The vLLM client can enumerate loaded adapters via `GET /v1/models` before starting the run.
-
-Currently `remora/config.py` only does a DNS check for the server. With the vLLM client, a pre-flight check can:
-- List all loaded LoRA adapters
-- Warn if a requested adapter is not loaded
-- Fall back to the base model if an adapter is missing
-
-### 3.7 Prefix Cache Warm-up
-
-**What it does:** The system prompt for each operation (lint, docstring, etc.) is repeated for every single node. vLLM's prefix caching means the KV cache for the system prompt is shared across requests — but only if the system prompt bytes are identical.
-
-With the vLLM client, you can:
-- Pre-warm the prefix cache by sending a dummy request for each operation's system prompt before the main run
-- Monitor `prefix_cache_hit_rate` via vLLM metrics to confirm caching is working
-- Ensure system prompts are not padded or modified between calls (breaking cache hit)
-
-This is particularly impactful for large codebases where the same system prompt is used for thousands of nodes.
-
-### 3.8 Streaming Responses
-
-**What it does:** vLLM supports streaming token-by-token output. For longer responses, streaming allows the remora TUI to show token generation in real time rather than waiting for the full response.
-
-Currently remora waits for the complete response before processing. With streaming:
 ```python
-async for chunk in client.chat.completions.create(..., stream=True):
-    content += chunk.choices[0].delta.content or ""
-    # Emit streaming event to TUI
+# Before (wrong):
+tool_result = await self.cairn_client.run_pym(...)
+self.messages.append({
+    "role": "user",
+    "content": f"[Tool result for {tool_name}] {json.dumps(tool_result)}"
+})
+
+# After (correct):
+tool_result = await self.cairn_client.run_pym(...)
+self.messages.append({
+    "role": "tool",
+    "tool_call_id": tool_call.id,      # must match the tool_call id
+    "name": tool_call.function.name,
+    "content": json.dumps(tool_result),
+})
 ```
 
-This improves perceived responsiveness for users monitoring the dashboard.
+**Context providers → inject as user messages before dispatch**
+
+Context providers currently inject `{"role": "user", "content": "[Context] {...}"}` messages. In the new format these can remain as `role="user"` messages inserted before the tool result, or they can be concatenated into the tool result content. The simplest approach is to prepend them to the tool result content:
+
+```python
+context_parts = []
+for provider_path in tool_def.context_providers:
+    ctx_result = await self.cairn_client.run_pym(provider_path, self.workspace_id, {})
+    context_parts.append(json.dumps(ctx_result))
+
+tool_result_content = "\n".join(context_parts + [json.dumps(tool_result)])
+self.messages.append({
+    "role": "tool",
+    "tool_call_id": tool_call.id,
+    "name": tool_call.function.name,
+    "content": tool_result_content,
+})
+```
+
+**`_build_submit_result()` → read from `tool_call.function.arguments`**
+
+```python
+# Before (wrong):
+arguments = tool_call.get("arguments", {})
+
+# After (correct):
+arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+```
+
+### 3.2 `remora/config.py`
+
+Add configurable inference parameters (currently hardcoded in `runner.py`):
+
+```python
+class RunnerConfig(BaseModel):
+    max_turns: int = 20
+    max_concurrent_runners: int = 16
+    timeout: int = 300
+    max_tokens: int = 512        # was hardcoded
+    temperature: float = 0.1     # was hardcoded
+    tool_choice: str = "required"  # "required" | "auto" | "none"
+```
+
+No new `VLLMConfig` section is needed for the core refactor — the tool calling integration is entirely handled by the server flags and the `tools=` parameter in the client call. Server-side vLLM flags are documented in `docs/SERVER_SETUP.md`, not in client config.
+
+### 3.3 `remora/subagent.py`
+
+The `tool_schemas` property is already in the correct OpenAI format for the `tools=` parameter — no change needed. The `"strict": True` field in tool schemas is passed through correctly.
+
+The `InitialContext.system_prompt` now becomes the complete system message (no tool preamble is prepended by the runner). Existing YAML files already write concise role descriptions there, so no YAML changes are needed.
+
+### 3.4 `server/` directory — `entrypoint.sh` update
+
+The vLLM server startup command must be updated to include the FunctionGemma tool calling flags:
+
+```bash
+python3 -m vllm.entrypoints.openai.api_server \
+    --model google/functiongemma-270m-it \
+    --enable-auto-tool-choice \
+    --tool-call-parser functiongemma \
+    --chat-template /app/tool_chat_template_functiongemma.jinja \
+    --enable-lora \
+    --max-loras 20 \
+    --max-lora-rank 32 \
+    --enable-prefix-caching \
+    --max-num-seqs 256
+```
+
+The `tool_chat_template_functiongemma.jinja` file (from vLLM's `examples/` directory) must be bundled into the Docker image.
+
+### 3.5 `tests/test_runner.py`
+
+The fake client and test assertions need updating:
+
+**`FakeChatCompletions.create`** — must accept `tools` and `tool_choice` parameters, and return a response object with `.message.tool_calls` (not just `.message.content`):
+
+```python
+class FakeChatCompletions:
+    async def create(self, *, model, messages, tools=None, tool_choice=None,
+                     max_tokens, temperature):
+        ...
+        # Return mock with tool_calls structure
+        return FakeCompletionResponse(
+            tool_calls=[FakeToolCall(name=..., arguments=...)]
+        )
+```
+
+All test assertions that check `runner.messages` for `{"role": "user", "content": "[Tool result..."}` must change to check for `{"role": "tool", "tool_call_id": ..., "content": ...}`.
 
 ---
 
-## 4. Migration Sequence
-
-The safest path to integration, from least to most invasive:
-
-**Phase 1 — No new dependencies, immediate bug fix:**
-- Add `extra_body={"guided_json": schema}` to the existing `openai` SDK call
-- Move `max_tokens` and `temperature` to `RunnerConfig`
-- This fixes the model-stops-without-calling-submit-result error
-
-**Phase 2 — Config restructuring:**
-- Add `VLLMConfig` to `RemoraConfig`
-- Surface `top_p`, `repetition_penalty`, `stop` sequences as config options
-- Add `finish_reason` handling in `run()`
-
-**Phase 3 — Client refactor:**
-- Replace the `openai.AsyncOpenAI` import with a thin `VLLMHttpClient` wrapper that handles `extra_body` natively
-- Add pre-flight adapter validation against `/v1/models`
-- Add prefix cache warm-up logic to `Coordinator`
-
-**Phase 4 — In-process vLLM (optional, for single-machine deployments):**
-- Add optional in-process `AsyncLLMEngine` mode that bypasses HTTP entirely
-- This is only relevant if remora and the model are on the same machine
-
----
-
-## 5. Files Changed Summary
+## 4. Files Changed Summary
 
 | File | Change Type | Description |
 |---|---|---|
-| `remora/client.py` | Refactor | Replace `AsyncOpenAI` builder with `VLLMHttpClient` wrapper |
-| `remora/config.py` | Addition | Add `VLLMConfig`, move `max_tokens`/`temperature` to `RunnerConfig` |
-| `remora/runner.py` | Refactor | Use configurable params, pass `guided_json`, handle `finish_reason` |
-| `remora/orchestrator.py` | Update | Pass `runner_config` and `vllm_config` to `FunctionGemmaRunner` |
-| `pyproject.toml` | Update | Add `vllm>=0.4.0` (or use `openai` `extra_body` to avoid dep) |
-| `tests/test_runner.py` | Update | Update `FakeAsyncOpenAI` to accept `extra_body` in `create()` |
-| `tests/test_config.py` | Update | Add tests for `VLLMConfig` defaults and YAML loading |
-| `remora.yaml.example` | Update | Document new `vllm:` config section |
+| `remora/runner.py` | Major refactor | Remove manual tool injection and text parsing; use `tools=` parameter and `message.tool_calls`; change tool results to `role="tool"` |
+| `remora/config.py` | Minor addition | Move `max_tokens`, `temperature` to `RunnerConfig`; add `tool_choice` |
+| `server/entrypoint.sh` | Update | Add `--enable-auto-tool-choice --tool-call-parser functiongemma --chat-template` flags |
+| `server/` (new file) | New file | Bundle `tool_chat_template_functiongemma.jinja` into server image |
+| `tests/test_runner.py` | Update | Update fakes and assertions for new message format and tool_calls structure |
+| `docs/SERVER_SETUP.md` | Update | Document required server flags for FunctionGemma tool calling |
+| `remora.yaml.example` | Minor update | Document `runner.tool_choice` config option |
+
+**No changes needed:**
+- `remora/subagent.py` — `tool_schemas` property already emits correct OpenAI format
+- `remora/client.py` — `AsyncOpenAI` builder unchanged; `tools=` is a standard parameter
+- `remora/orchestrator.py` — orchestration logic unchanged
+- Subagent YAML files — `initial_context.system_prompt` already just the role description
+- `pyproject.toml` — no new dependencies; `openai>=1.0` already supports `tools=`
 
 ---
 
-## 6. Dependency Notes
+## 5. Additional Functionality Enabled
 
-The `vllm` package requires CUDA and is not installable in a pure CPU environment. If adding it as a hard dependency, it will break installation on developer machines without GPUs.
+### 5.1 `tool_choice="required"` — eliminates AGENT_003 errors
 
-**Recommended approach:** Add `vllm` as an optional dependency:
-```toml
-[project.optional-dependencies]
-vllm = ["vllm>=0.4.0"]
-dev = ["pytest>=7.0", "pytest-cov>=4.1", "mypy>=1.10", "ruff>=0.5.0"]
+With `tool_choice="required"` (supported in vllm>=0.8.3), the server uses structured outputs to guarantee the model produces at least one valid tool call. The model cannot output plain text. This permanently solves the "Model stopped without calling submit_result" error without any client-side workarounds.
+
+### 5.2 Parallel tool calls
+
+The FunctionGemma model can output multiple `<start_function_call>` blocks in a single response. The vLLM parser returns all of them as a list in `message.tool_calls`. The refactored runner naturally handles this — the `for tool_call in message.tool_calls` loop processes each one.
+
+This means a single model turn can dispatch multiple tools simultaneously (e.g., `read_current_docstring` and `read_type_hints` at once), reducing the number of model calls needed.
+
+### 5.3 `tool_choice="auto"` for smarter routing
+
+Setting `tool_choice="auto"` allows the model to decide whether to call a tool or respond in plain text. This enables a more conversational final turn where the model can summarise without being forced to call `submit_result` — instead, remora can detect when `tool_calls` is empty and interpret `message.content` as the completion signal.
+
+### 5.4 Named function forcing
+
+Setting `tool_choice={"type": "function", "function": {"name": "submit_result"}}` forces the model to call `submit_result` specifically. This can be used on the last turn before the turn limit to gracefully close out the loop:
+
+```python
+if self.turn_count >= self.definition.max_turns - 1:
+    # Force the model to conclude on the next call
+    tool_choice = {"type": "function", "function": {"name": "submit_result"}}
 ```
 
-For Phase 1 and 2 (guided JSON via `extra_body`), no new dependency is needed at all — the `openai` SDK's `extra_body` parameter passes arbitrary additional fields through to the server.
+### 5.5 Streaming tool call deltas
+
+With `stream=True`, vLLM streams `<start_function_call>` output token-by-token and the `functiongemma` parser buffers and reconstructs the tool call incrementally. The client receives delta objects as the function name and arguments stream in. This enables live progress in the `remora-tui` dashboard showing which tool is being called and its arguments forming in real time.
+
+### 5.6 Logprobs on tool name selection
+
+With `logprobs=True`, the model returns per-token log probabilities. For FunctionGemma tool calls, this means the client can see the model's confidence on the function name token (e.g., high confidence on `run_linter` vs low confidence choosing between `apply_fix` and `submit_result`). Low-confidence tool selections can be flagged or retried.
+
+### 5.7 Prefix caching for system prompts
+
+With `--enable-prefix-caching` on the server, the KV cache for the system prompt is shared across all requests that have the same prefix. Since all `docstring_agent` calls share the same system prompt, the first request pays the full prefill cost but all subsequent requests get a cache hit — dramatically reducing TTFT for large batches. This is server-side only, no client changes required.
+
+---
+
+## 6. Root Cause of Current Errors (Updated)
+
+The vLLM documentation confirms the root cause of the errors shown in the problem statement:
+
+**The model `google/functiongemma-270m-it` was trained with the FunctionGemma chat template** (`tool_chat_template_functiongemma.jinja`). When tools are NOT presented in this format — i.e., when they are injected manually into the system prompt text as JSON — the model does not recognise the context as a tool-calling task. It falls through to its general instruction-following behaviour and produces a refusal.
+
+The fix is not a prompt workaround. The fix is to use the standard `tools=` parameter in the API call and start the vLLM server with `--tool-call-parser functiongemma --chat-template tool_chat_template_functiongemma.jinja`. The chat template then presents tools correctly to the model, the model produces `<start_function_call>` output, the parser converts it to `tool_calls`, and the client receives a structured tool call object.
+
+No guided JSON, no regex parsing, no prompt engineering. Just the correct API usage.

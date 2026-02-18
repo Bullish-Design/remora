@@ -62,23 +62,42 @@ This is correct behavior — the code is working as designed. The problem is ups
 
 ## Why the Model Produces Refusals
 
-### Cause 1: System prompt format mismatch (most likely)
+### Cause 1 (confirmed): Wrong tool calling API usage — chat template mismatch
 
-The `google/functiongemma-270m-it` model was fine-tuned on a specific dataset with a specific system prompt format. The remora system prompt format is:
+This is the definitive root cause, confirmed by vLLM's official documentation for FunctionGemma.
+
+FunctionGemma (`google/functiongemma-270m-it`) was trained with a specific Jinja2 chat template — `tool_chat_template_functiongemma.jinja`. This template presents tool definitions to the model as:
+
+```
+<start_of_turn>user
+[system prompt content]
+Available functions:
+Function: run_linter
+Description: Run the linter and return a list of issues with line numbers.
+Parameters: {"type": "object", ...}
+<end_of_turn>
+<start_of_turn>model
+```
+
+Remora currently injects tools into the system message as a JSON array:
 
 ```
 You have access to the following tools:
-[JSON array of tool schemas]
+[{"type": "function", "function": {"name": "run_linter", ...}}, ...]
 
 Call tools by responding with JSON in the format:
 {"name": "<tool_name>", "arguments": { ... }}
-
-[subagent system_prompt from YAML]
 ```
 
-If the model was trained on a different format (e.g., `<tool>` XML tags, a `functions:` YAML block, or a different JSON key naming convention), it will not recognize this as a function-calling context and will fall back to its instruction-tuning behavior — which is to respond in natural language and decline tasks outside its perceived scope.
+The model was **never trained on this format**. It does not recognise it as a tool-calling context. It falls through to its instruction-following behaviour and declines.
 
-The giveaway is the phrasing **"My current capabilities are limited to assisting with document management tasks using the provided tools."** The model is echoing back something from its training distribution. A general-purpose Gemma-IT model would typically say "I can help with that!" rather than "I cannot assist." This language suggests the model was fine-tuned with a specific narrow system prompt that described only document management, and it is now refusing to generalize beyond that training distribution.
+Furthermore, FunctionGemma does not output `{"name": ..., "arguments": ...}` JSON. It outputs:
+
+```
+<start_function_call>call:run_linter{check_only:<escape>true<escape>}<end_function_call>
+```
+
+vLLM's `functiongemma` tool parser (`--tool-call-parser functiongemma`) is responsible for translating this format into standard OpenAI `tool_calls` objects. Without this flag on the server, neither the input formatting nor the output parsing work correctly.
 
 ### Cause 2: The model may not be the intended FunctionGemma variant
 
@@ -86,55 +105,48 @@ The config default is `google/functiongemma-270m-it`. Compare to the model IDs u
 - `docs/brainstorm/Refined_vLLM.md`: `google/function-gemma-3-270m`
 - `docs/brainstorm/vllm_multi_lora_setup.md` directory: `function-gemma-270m/`
 
-There is a discrepancy in the model name. `functiongemma-270m-it` (no hyphen, no version number) vs `function-gemma-3-270m` (hyphenated, version 3). If the wrong model variant is being served — for example, if a general-purpose Gemma 270M instruction-tuned model was deployed instead of the FunctionGemma fine-tune — it would produce exactly these refusals.
-
-### Cause 3: The model is responding to the right system prompt but requires a different trigger
-
-Some instruction-tuned models require the user message to contain an explicit function-call instruction to enter "tool use mode." The current user message is:
-
-```
-Code to document:
-```python
-def normalize(values: list[int]) -> list[float]:
-    ...
-```
-
-There is no explicit instruction saying "call a tool now." Some FunctionGemma training recipes require a phrase like "Use the available tools to complete this task." Without it, the model treats the message as a regular user question and responds in natural language.
+There is a naming discrepancy. If the wrong model variant is being served, it would also produce these refusals. According to vLLM's documentation, the supported model ID is explicitly `google/functiongemma-270m-it`, which matches the remora config default and is the correct name.
 
 ---
 
 ## How to Fix
 
-### Fix 1: Enable guided JSON decoding (recommended, most reliable)
+### Fix 1: Use the correct vLLM tool calling API (the real fix)
 
-This fix makes the model structurally incapable of outputting plain text — every token it generates must conform to the tool-call JSON schema. This bypasses the model behavior issue entirely.
+This is the complete, correct fix. It requires changes to both the server and the client.
 
-Modify `_call_model` in `runner.py` to pass `extra_body` to the vLLM server:
+**Server:** Start vLLM with:
+```bash
+python3 -m vllm.entrypoints.openai.api_server \
+    --model google/functiongemma-270m-it \
+    --enable-auto-tool-choice \
+    --tool-call-parser functiongemma \
+    --chat-template examples/tool_chat_template_functiongemma.jinja \
+    ...
+```
+
+The `--tool-call-parser functiongemma` flag activates vLLM's built-in FunctionGemma parser, which:
+1. Presents tools to the model using the correct chat template format
+2. Parses `<start_function_call>...<end_function_call>` responses into standard OpenAI `tool_calls` objects
+
+**Client:** Change `_call_model` in `runner.py` to pass tools via the standard `tools=` parameter and add `tool_choice="required"` (supported in vllm>=0.8.3):
 
 ```python
-# runner.py — in _call_model()
-tool_names = [tool.name for tool in self.definition.tools]
-guided_schema = {
-    "type": "object",
-    "properties": {
-        "name": {"type": "string", "enum": tool_names},
-        "arguments": {"type": "object"},
-    },
-    "required": ["name"],
-}
-
 response = await self._http_client.chat.completions.create(
     model=self._model_target,
     messages=cast(list[ChatCompletionMessageParam], self.messages),
+    tools=cast(list[ChatCompletionToolParam], self.definition.tool_schemas),
+    tool_choice="required",   # guarantees a tool call every turn
     max_tokens=512,
     temperature=0.1,
-    extra_body={"guided_json": guided_schema},
 )
+message = response.choices[0].message
+tool_calls = message.tool_calls or []   # structured objects, no regex needed
 ```
 
-This requires the vLLM server to have `outlines` or `lm-format-enforcer` installed (included by default in recent vLLM releases). No changes to the client library are needed — the `openai` SDK passes `extra_body` fields through to the server.
+Also remove the manual tool injection from `_build_system_prompt()` — the chat template handles this server-side. And change tool result messages from `role="user"` to `role="tool"` with `tool_call_id` set.
 
-This fix also eliminates the `_parse_tool_calls` complexity and the `_coerce_tool_calls` fallback, since the response will always be valid JSON.
+See `VLLM_REFACTOR.md` for the complete list of code changes.
 
 ### Fix 2: Verify the correct model is being served
 
@@ -161,9 +173,9 @@ python3 -m vllm.entrypoints.openai.api_server \
     ...
 ```
 
-### Fix 3: Add an explicit tool-call instruction to the user message
+### Fix 3: Add an explicit first-step hint to the user message
 
-Modify the `node_context` template in the subagent YAML files to include an explicit instruction to call a tool:
+Once Fix 1 is in place, the model should call tools reliably. However, adding an explicit action hint in the `node_context` template reduces first-turn uncertainty and saves tokens:
 
 ```yaml
 # docstring_subagent.yaml
@@ -177,53 +189,17 @@ initial_context:
     Begin by calling read_current_docstring to check for an existing docstring.
 ```
 
-```yaml
-# lint_subagent.yaml
-initial_context:
-  node_context: |
-    Code to analyze:
-    ```python
-    {{ node_text }}
-    ```
-
-    Begin by calling run_linter to check for issues.
-```
-
-This gives the model an explicit action to take, which should trigger the function-calling behavior rather than the natural-language response path.
-
-### Fix 4: Add a retry with simplified prompt on plain-text response
-
-A more robust (but more complex) fix adds a retry layer when the model outputs non-JSON:
-
-```python
-# In runner.py, modify the no-tool-calls branch:
-if not tool_calls:
-    if self.turn_count == 1:
-        # First turn: model may be confused. Prompt it explicitly.
-        self.messages.append({
-            "role": "user",
-            "content": "Please call one of the available tools now. Respond with JSON only."
-        })
-        response_text = await self._call_model(phase="loop")
-        continue
-    raise AgentError(...)
-```
-
-This provides one recovery attempt before failing. Combined with Fix 3 (explicit instruction in user message), the model should rarely reach this branch.
+This costs nothing and works well with the FunctionGemma chat template.
 
 ---
 
 ## Priority Recommendation
 
-Apply fixes in this order:
+1. **Fix 1 is the complete solution.** Update the vLLM server startup flags and the `_call_model` call in `runner.py`. This addresses all three layers of mismatch (prompt format, output parsing, tool result format) and makes the error structurally impossible.
 
-1. **Fix 2 first** — Verify the correct model is deployed. If the wrong model is running, none of the other fixes will matter.
+2. **Fix 2 in parallel** — Run `curl http://remora-server:8000/v1/models` to confirm the model ID is correct before spending time on code changes.
 
-2. **Fix 1 next** — Enable `guided_json`. This is a one-line addition to `_call_model` and permanently prevents plain-text responses. It also removes the fragile `_parse_tool_calls` regex logic.
-
-3. **Fix 3 as well** — Adding explicit "call the tool" instructions to `node_context` templates costs nothing and improves reliability even when guided JSON is enabled (explicit instructions reduce token waste on the first turn).
-
-Fix 4 is optional and may mask underlying model issues rather than fixing them.
+3. **Fix 3 as a polish step** — Add first-step hints to YAML templates after Fix 1 is validated.
 
 ---
 
