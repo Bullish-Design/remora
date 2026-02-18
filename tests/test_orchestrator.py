@@ -57,7 +57,7 @@ def test_process_node_returns_results(monkeypatch: pytest.MonkeyPatch, tmp_path:
     }
 
     def fake_load_subagent_definition(path: Path, agents_dir: Path) -> SimpleNamespace:
-        return SimpleNamespace(name=path.stem)
+        return SimpleNamespace(name=path.stem, grail_summary={})
 
     class FakeRunner:
         def __init__(
@@ -105,7 +105,7 @@ def test_process_node_respects_semaphore(monkeypatch: pytest.MonkeyPatch, tmp_pa
     state = {"current": 0, "max": 0}
 
     def fake_load_subagent_definition(path: Path, agents_dir: Path) -> SimpleNamespace:
-        return SimpleNamespace(name=path.stem)
+        return SimpleNamespace(name=path.stem, grail_summary={})
 
     class FakeRunner:
         def __init__(
@@ -157,7 +157,7 @@ def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch,
     }
 
     def fake_load_subagent_definition(path: Path, agents_dir: Path) -> SimpleNamespace:
-        return SimpleNamespace(name=path.stem)
+        return SimpleNamespace(name=path.stem, grail_summary={})
 
     class FakeRunner:
         def __init__(
@@ -207,7 +207,7 @@ def test_process_node_skips_disabled_operation(monkeypatch: pytest.MonkeyPatch, 
 
     def fake_load_subagent_definition(path: Path, agents_dir: Path) -> SimpleNamespace:
         called.append(path.stem)
-        return SimpleNamespace(name=path.stem)
+        return SimpleNamespace(name=path.stem, grail_summary={})
 
     class FakeRunner:
         def __init__(
@@ -252,7 +252,7 @@ def test_bad_subagent_path_records_init_error(monkeypatch: pytest.MonkeyPatch, t
     def fake_load_subagent_definition(path: Path, agents_dir: Path) -> SimpleNamespace:
         if "missing" in str(path):
             raise SubagentError(AGENT_001, f"Failed to read subagent definition: {path}")
-        return SimpleNamespace(name=path.stem)
+        return SimpleNamespace(name=path.stem, grail_summary={})
 
     class FakeRunner:
         def __init__(
