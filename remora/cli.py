@@ -30,6 +30,8 @@ def _build_overrides(
     max_concurrent_runners: int | None,
     runner_timeout: int | None,
     cairn_timeout: int | None,
+    event_stream: bool | None,
+    event_stream_file: Path | None,
 ) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
     if root_dirs is not None:
@@ -49,6 +51,13 @@ def _build_overrides(
         overrides["runner"] = runner_overrides
     if cairn_timeout is not None:
         overrides["cairn"] = {"timeout": cairn_timeout}
+    event_overrides: dict[str, Any] = {}
+    if event_stream is not None:
+        event_overrides["enabled"] = event_stream
+    if event_stream_file is not None:
+        event_overrides["output"] = event_stream_file
+    if event_overrides:
+        overrides["event_stream"] = event_overrides
     return overrides
 
 
@@ -83,6 +92,13 @@ def config(
     max_concurrent_runners: int | None = typer.Option(None, "--max-concurrent-runners"),
     runner_timeout: int | None = typer.Option(None, "--runner-timeout"),
     cairn_timeout: int | None = typer.Option(None, "--cairn-timeout"),
+    event_stream: bool | None = typer.Option(None, "--event-stream/--no-event-stream"),
+    event_stream_file: Path | None = typer.Option(
+        None,
+        "--event-stream-file",
+        dir_okay=False,
+        resolve_path=True,
+    ),
 ) -> None:
     overrides = _build_overrides(
         root_dirs,
@@ -92,6 +108,8 @@ def config(
         max_concurrent_runners,
         runner_timeout,
         cairn_timeout,
+        event_stream,
+        event_stream_file,
     )
     try:
         config_data = load_config(config_path, overrides)

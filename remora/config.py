@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import os
 import socket
 import warnings
 from urllib.parse import urlparse
@@ -14,6 +15,21 @@ from pydantic import BaseModel, ConfigDict, Field
 from remora.errors import CONFIG_003, CONFIG_004
 
 DEFAULT_CONFIG_FILENAME = "remora.yaml"
+
+
+def _default_cache_dir() -> Path:
+    cache_root = os.getenv("XDG_CACHE_HOME")
+    if cache_root:
+        return Path(cache_root) / "remora"
+    return Path.home() / ".cache" / "remora"
+
+
+def _default_event_output() -> Path:
+    return _default_cache_dir() / "events.jsonl"
+
+
+def _default_event_control() -> Path:
+    return _default_cache_dir() / "events.control"
 
 
 class ConfigError(RuntimeError):
@@ -48,6 +64,14 @@ class CairnConfig(BaseModel):
     timeout: int = 120
 
 
+class EventStreamConfig(BaseModel):
+    enabled: bool = False
+    output: Path | None = Field(default_factory=_default_event_output)
+    control_file: Path | None = Field(default_factory=_default_event_control)
+    include_payloads: bool = True
+    max_payload_chars: int = 4000
+
+
 def _default_operations() -> dict[str, OperationConfig]:
     return {
         "lint": OperationConfig(subagent="lint/lint_subagent.yaml"),
@@ -70,6 +94,7 @@ class RemoraConfig(BaseModel):
     operations: dict[str, OperationConfig] = Field(default_factory=_default_operations)
     runner: RunnerConfig = Field(default_factory=RunnerConfig)
     cairn: CairnConfig = Field(default_factory=CairnConfig)
+    event_stream: EventStreamConfig = Field(default_factory=EventStreamConfig)
 
 
 def load_config(config_path: Path | None = None, overrides: dict[str, Any] | None = None) -> RemoraConfig:

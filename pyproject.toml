@@ -31,6 +31,8 @@ pydantree = { git = "https://github.com/Bullish-Design/pydantree.git" }
 
 [project.scripts]
 remora = "remora.cli:app"
+remora-tui = "scripts.remora_tui:app"
+remora-demo = "scripts.remora_demo:app"
 
 [project.optional-dependencies]
 dev = [
@@ -49,7 +51,7 @@ requires = ["hatchling>=1.18"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["remora"]
+packages = ["remora", "scripts"]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -57,6 +59,7 @@ include = [
   "agents",
   "training",
   "docs",
+  "scripts",
   "CONTRIBUTING.md",
   "pyproject.toml",
 ]

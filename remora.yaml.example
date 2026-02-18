@@ -49,3 +49,8 @@ runner:
 
 cairn:
   timeout: 120
+
+event_stream:
+  enabled: false
+  include_payloads: true
+  max_payload_chars: 4000

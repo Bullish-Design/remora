@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import re
+import time
 from typing import Any, Literal, Protocol, cast
 
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
@@ -13,6 +14,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from remora.config import ServerConfig
 from remora.discovery import CSTNode
+from remora.events import EventEmitter, NullEventEmitter
 from remora.errors import AGENT_002, AGENT_003
 from remora.results import AgentResult
 from remora.subagent import SubagentDefinition
@@ -55,6 +57,7 @@ class FunctionGemmaRunner:
     server_config: ServerConfig
     adapter_name: str | None = None
     http_client: AsyncOpenAI | None = None
+    event_emitter: EventEmitter = field(default_factory=NullEventEmitter)
     messages: list[ChatCompletionMessageParam] = field(init=False)
     turn_count: int = field(init=False)
     _http_client: AsyncOpenAI = field(init=False)
@@ -124,6 +127,19 @@ class FunctionGemmaRunner:
         )
 
     async def _call_model(self, *, phase: Literal["model_load", "loop"]) -> str:
+        request_id = None
+        start = time.monotonic()
+        payload: dict[str, Any] = {
+            "event": "model_request",
+            "agent_id": self.workspace_id,
+            "node_id": self.node.node_id,
+            "operation": self.definition.name,
+            "phase": phase,
+            "model": self._model_target,
+        }
+        if self._include_payloads():
+            payload.update(self._build_message_payload())
+        self.event_emitter.emit(payload)
         try:
             response = await self._http_client.chat.completions.create(
                 model=self._model_target,
@@ -131,7 +147,15 @@ class FunctionGemmaRunner:
                 max_tokens=512,
                 temperature=0.1,
             )
+            request_id = getattr(response, "id", None)
         except (APIConnectionError, APITimeoutError) as exc:
+            self._emit_model_response(
+                start,
+                phase=phase,
+                request_id=request_id,
+                status="error",
+                error=str(exc),
+            )
             raise AgentError(
                 node_id=self.node.node_id,
                 operation=self.definition.name,
@@ -139,7 +163,104 @@ class FunctionGemmaRunner:
                 error_code=AGENT_002,
                 message=f"Cannot reach vLLM server at {self.server_config.base_url}",
             ) from exc
-        return response.choices[0].message.content or ""
+        response_text = response.choices[0].message.content or ""
+        self._emit_model_response(
+            start,
+            phase=phase,
+            request_id=request_id,
+            status="ok",
+            usage=response.usage,
+            response_text=response_text,
+        )
+        return response_text
+
+    def _include_payloads(self) -> bool:
+        return bool(getattr(self.event_emitter, "include_payloads", False))
+
+    def _payload_limit(self) -> int:
+        limit = getattr(self.event_emitter, "max_payload_chars", 0)
+        return int(limit) if limit else 0
+
+    def _truncate(self, text: str) -> str:
+        limit = self._payload_limit()
+        if limit > 0 and len(text) > limit:
+            return f"{text[:limit]}…"
+        return text
+
+    def _serialize_payload(self, value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (dict, list)):
+            try:
+                return json.dumps(value, ensure_ascii=False)
+            except (TypeError, ValueError):
+                return str(value)
+        return str(value)
+
+    def _build_message_payload(self) -> dict[str, Any]:
+        messages: list[dict[str, Any]] = []
+        total_chars = 0
+        for message in self.messages:
+            role = str(message.get("role", "unknown"))
+            content = self._serialize_payload(message.get("content", ""))
+            total_chars += len(content)
+            messages.append({"role": role, "content": self._truncate(content)})
+        return {"messages": messages, "prompt_chars": total_chars}
+
+    def _emit_model_response(
+        self,
+        start: float,
+        *,
+        phase: Literal["model_load", "loop"],
+        request_id: str | None,
+        status: Literal["ok", "error"],
+        usage: Any | None = None,
+        error: str | None = None,
+        response_text: str | None = None,
+    ) -> None:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        payload: dict[str, Any] = {
+            "event": "model_response",
+            "agent_id": self.workspace_id,
+            "node_id": self.node.node_id,
+            "operation": self.definition.name,
+            "phase": phase,
+            "model": self._model_target,
+            "status": status,
+            "duration_ms": duration_ms,
+        }
+        if request_id is not None:
+            payload["request_id"] = request_id
+        if error is not None:
+            payload["error"] = error
+        if usage is not None:
+            payload["prompt_tokens"] = getattr(usage, "prompt_tokens", None)
+            payload["completion_tokens"] = getattr(usage, "completion_tokens", None)
+            payload["total_tokens"] = getattr(usage, "total_tokens", None)
+        if response_text is not None:
+            payload["response_chars"] = len(response_text)
+            if self._include_payloads():
+                payload["response_text"] = self._truncate(response_text)
+        self.event_emitter.emit(payload)
+
+    def _emit_tool_result(self, tool_name: str, result: dict[str, Any]) -> None:
+        status = "error" if isinstance(result, dict) and result.get("error") else "ok"
+        payload: dict[str, Any] = {
+            "event": "tool_result",
+            "agent_id": self.workspace_id,
+            "node_id": self.node.node_id,
+            "operation": self.definition.name,
+            "tool_name": tool_name,
+            "status": status,
+        }
+        if status == "error":
+            error_value = result.get("error") if isinstance(result, dict) else result
+            payload["error"] = str(error_value)
+        if self._include_payloads():
+            result_text = self._serialize_payload(result)
+            payload["tool_output_chars"] = len(result_text)
+            payload["tool_output"] = self._truncate(result_text)
+        self.event_emitter.emit(payload)
 
     def _build_submit_result(self, arguments: Any) -> AgentResult:
         payload: Any = arguments
@@ -204,9 +325,21 @@ class FunctionGemmaRunner:
                 args = {}
         if not isinstance(args, dict):
             args = {}
+        tool_name = str(name) if name is not None else "unknown"
+        self.event_emitter.emit(
+            {
+                "event": "tool_call",
+                "agent_id": self.workspace_id,
+                "node_id": self.node.node_id,
+                "operation": self.definition.name,
+                "tool_name": tool_name,
+            }
+        )
         tool_def = self.definition.tools_by_name.get(str(name)) if name is not None else None
         if tool_def is None:
-            return {"error": f"Unknown tool: {name}"}
+            tool_error = {"error": f"Unknown tool: {name}"}
+            self._emit_tool_result(tool_name, tool_error)
+            return tool_error
 
         for provider_path in tool_def.context_providers:
             context = await self.cairn_client.run_pym(provider_path, self.workspace_id, inputs={})
@@ -220,4 +353,6 @@ class FunctionGemmaRunner:
                 )
             )
 
-        return await self.cairn_client.run_pym(tool_def.pym, self.workspace_id, inputs=args)
+        result = await self.cairn_client.run_pym(tool_def.pym, self.workspace_id, inputs=args)
+        self._emit_tool_result(tool_name, result)
+        return result

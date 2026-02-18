@@ -22,7 +22,7 @@ initial_context:
 
 tools:
   - name: read_current_docstring
-    pym: agents/docstring/tools/read_current_docstring.pym
+    pym: docstring/tools/read_current_docstring.pym
     description: Read the existing docstring from the current node, if any.
     parameters:
       type: object
@@ -30,7 +30,7 @@ tools:
       properties: {}
 
   - name: read_type_hints
-    pym: agents/docstring/tools/read_type_hints.pym
+    pym: docstring/tools/read_type_hints.pym
     description: Extract parameter and return type annotations from the node.
     parameters:
       type: object
@@ -38,7 +38,7 @@ tools:
       properties: {}
 
   - name: write_docstring
-    pym: agents/docstring/tools/write_docstring.pym
+    pym: docstring/tools/write_docstring.pym
     description: Insert or replace the docstring in the source file.
     parameters:
       type: object
@@ -52,10 +52,10 @@ tools:
         - docstring
         - style
     context_providers:
-      - agents/docstring/context/docstring_style.pym
+      - docstring/context/docstring_style.pym
 
   - name: submit_result
-    pym: agents/docstring/tools/submit.pym
+    pym: docstring/tools/submit.pym
     description: Submit the final docstring result and end the task.
     parameters:
       type: object

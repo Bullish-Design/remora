@@ -14,7 +14,7 @@ initial_context:
 
 tools:
   - name: run_linter
-    pym: agents/lint/tools/run_linter.pym
+    pym: lint/tools/run_linter.pym
     description: Run the linter and return a list of issues with line numbers.
     parameters:
       type: object
@@ -24,10 +24,10 @@ tools:
           type: boolean
           description: If true, report issues without applying fixes.
     context_providers:
-      - agents/lint/context/ruff_config.pym
+      - lint/context/ruff_config.pym
 
   - name: apply_fix
-    pym: agents/lint/tools/apply_fix.pym
+    pym: lint/tools/apply_fix.pym
     description: Apply a fix for a specific lint issue code.
     parameters:
       type: object
@@ -42,7 +42,7 @@ tools:
         - line_number
 
   - name: read_current_file
-    pym: agents/lint/tools/read_file.pym
+    pym: lint/tools/read_file.pym
     description: Read the current state of the file being analyzed.
     parameters:
       type: object
@@ -50,7 +50,7 @@ tools:
       properties: {}
 
   - name: submit_result
-    pym: agents/lint/tools/submit.pym
+    pym: lint/tools/submit.pym
     description: Submit the final linting results and end the task.
     parameters:
       type: object
