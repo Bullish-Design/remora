@@ -65,14 +65,14 @@ Instead of a monolithic script that runs once, each FunctionGemma subagent runs 
 
 ```
 1. Build initial messages (system prompt + CST node context)
-2. Call model with tool catalog → model responds with tool_calls or text
+2. Call model with tool catalog and configured tool_choice
 3. If tool_calls:
    a. For each tool call:
       - Run any per-tool context providers (inject into messages)
       - Execute the tool's .pym script in the Cairn workspace
       - Append tool result to messages
    b. Go to step 2
-4. If no tool_calls (or submit_result called): task complete
+4. If no tool_calls: task completes only when tool_choice allows text responses
 ```
 
 The model can call tools in sequence, read their outputs, decide whether to try again or proceed differently, and ultimately call `submit_result` when it determines the task is done.

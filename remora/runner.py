@@ -83,20 +83,14 @@ class FunctionGemmaRunner:
         return self.definition.initial_context.system_prompt
 
     async def run(self) -> AgentResult:
-        message = await self._call_model(phase="model_load")
+        message = await self._call_model(phase="model_load", tool_choice=self._tool_choice_for_turn(1))
 
         while self.turn_count < self.definition.max_turns:
             self.turn_count += 1
             self.messages.append(self._coerce_message_param(message))
             tool_calls = message.tool_calls or []
             if not tool_calls:
-                raise AgentError(
-                    node_id=self.node.node_id,
-                    operation=self.definition.name,
-                    phase="loop",
-                    error_code=AGENT_003,
-                    message="Model stopped without calling submit_result",
-                )
+                return self._handle_no_tool_calls(message)
             for tool_call in tool_calls:
                 tool_function = getattr(tool_call, "function", None)
                 name = getattr(tool_function, "name", None)
@@ -114,7 +108,8 @@ class FunctionGemmaRunner:
                         },
                     )
                 )
-            message = await self._call_model(phase="loop")
+            next_turn = self.turn_count + 1
+            message = await self._call_model(phase="loop", tool_choice=self._tool_choice_for_turn(next_turn))
 
         raise AgentError(
             node_id=self.node.node_id,
@@ -124,7 +119,12 @@ class FunctionGemmaRunner:
             message=f"Turn limit {self.definition.max_turns} exceeded",
         )
 
-    async def _call_model(self, *, phase: Literal["model_load", "loop"]) -> ChatCompletionMessage:
+    async def _call_model(
+        self,
+        *,
+        phase: Literal["model_load", "loop"],
+        tool_choice: Any | None = None,
+    ) -> ChatCompletionMessage:
         request_id = None
         start = time.monotonic()
         payload: dict[str, Any] = {
@@ -138,12 +138,14 @@ class FunctionGemmaRunner:
         if self._include_payloads():
             payload.update(self._build_message_payload())
         self.event_emitter.emit(payload)
+        if tool_choice is None:
+            tool_choice = self.runner_config.tool_choice
         try:
             response = await self._http_client.chat.completions.create(
                 model=self._model_target,
                 messages=cast(list[ChatCompletionMessageParam], self.messages),
                 tools=cast(list[ChatCompletionToolParam], self.definition.tool_schemas),
-                tool_choice=cast(Any, self.runner_config.tool_choice),
+                tool_choice=cast(Any, tool_choice),
                 max_tokens=self.runner_config.max_tokens,
                 temperature=self.runner_config.temperature,
             )
@@ -177,6 +179,41 @@ class FunctionGemmaRunner:
 
     def _coerce_message_param(self, message: ChatCompletionMessage) -> ChatCompletionMessageParam:
         return cast(ChatCompletionMessageParam, message.model_dump(exclude_none=True))
+
+    def _tool_choice_for_turn(self, next_turn: int) -> Any:
+        tool_choice: Any = self.runner_config.tool_choice
+        if tool_choice == "none":
+            return tool_choice
+        if next_turn >= self.definition.max_turns:
+            return {"type": "function", "function": {"name": "submit_result"}}
+        return tool_choice
+
+    def _handle_no_tool_calls(self, message: ChatCompletionMessage) -> AgentResult:
+        if self.runner_config.tool_choice == "required":
+            raise AgentError(
+                node_id=self.node.node_id,
+                operation=self.definition.name,
+                phase="loop",
+                error_code=AGENT_003,
+                message="Model stopped without calling submit_result",
+            )
+        content = message.content or ""
+        if content:
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                return self._build_submit_result(parsed)
+        result_data = {
+            "status": "success",
+            "workspace_id": self.workspace_id,
+            "changed_files": [],
+            "summary": content,
+            "details": {},
+            "error": None,
+        }
+        return AgentResult.model_validate(result_data)
 
     def _include_payloads(self) -> bool:
         return bool(getattr(self.event_emitter, "include_payloads", False))

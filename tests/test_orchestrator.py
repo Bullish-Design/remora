@@ -67,6 +67,7 @@ def test_process_node_returns_results(monkeypatch: pytest.MonkeyPatch, tmp_path:
             workspace_id: str,
             cairn_client: FakeCairnClient,
             server_config: object,
+            runner_config: object,
             adapter_name: str | None = None,
             event_emitter: object | None = None,
         ) -> None:
@@ -110,6 +111,7 @@ def test_process_node_respects_semaphore(monkeypatch: pytest.MonkeyPatch, tmp_pa
             workspace_id: str,
             cairn_client: FakeCairnClient,
             server_config: object,
+            runner_config: object,
             adapter_name: str | None = None,
             event_emitter: object | None = None,
         ) -> None:
@@ -157,6 +159,7 @@ def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch,
             workspace_id: str,
             cairn_client: FakeCairnClient,
             server_config: object,
+            runner_config: object,
             adapter_name: str | None = None,
             event_emitter: object | None = None,
         ) -> None:
@@ -202,6 +205,7 @@ def test_process_node_skips_disabled_operation(monkeypatch: pytest.MonkeyPatch, 
             workspace_id: str,
             cairn_client: FakeCairnClient,
             server_config: object,
+            runner_config: object,
             adapter_name: str | None = None,
             event_emitter: object | None = None,
         ) -> None:
@@ -242,6 +246,7 @@ def test_bad_subagent_path_records_init_error(monkeypatch: pytest.MonkeyPatch, t
             workspace_id: str,
             cairn_client: FakeCairnClient,
             server_config: object,
+            runner_config: object,
             adapter_name: str | None = None,
             event_emitter: object | None = None,
         ) -> None:

@@ -221,7 +221,7 @@ async def run(self) -> AgentResult:
             })
 
         if not tool_calls:
-            raise AgentError("Model stopped without calling submit_result")
+            return self._handle_no_tool_calls(message)
 
     raise RunnerTurnLimitError(self.definition.name, self.turn_count)
 ```

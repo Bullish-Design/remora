@@ -48,7 +48,7 @@ runner:
   timeout: 300
   max_tokens: 512
   temperature: 0.1
-  tool_choice: "required"
+  tool_choice: "required"  # "required" | "auto" | "none"
 
 cairn:
   timeout: 120
