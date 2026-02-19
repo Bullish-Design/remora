@@ -223,27 +223,35 @@ class SnapshotRecord:
     resume_count: int = 0
     max_resumes: int = 5  # Safety cap to prevent infinite resume loops
 
+    def cleanup(self) -> None:
+        cleanup_fn = getattr(self.snapshot, "close", None) or getattr(self.snapshot, "cleanup", None)
+        if not callable(cleanup_fn):
+            return
+        result = cleanup_fn()
+        if asyncio.iscoroutine(result):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                asyncio.run(result)
+            else:
+                loop.create_task(result)
+
 
 class SnapshotManager:
     """Manages pause/resume lifecycle for Grail script executions.
 
-    .. note::
-
-        Snapshots run **in-process** (not in the ``ProcessPoolExecutor``)
-        because they hold references to non-picklable ``GrailScript`` context
-        (``source_map``, ``externals``).  This is safe because snapshot
-        operations are lightweight — they only step through external-function
-        call boundaries.  Grail resource limits still protect against runaway
-        scripts.
+    Notes:
+        Snapshots run in-process (not in the ``ProcessPoolExecutor``) because
+        they hold references to non-picklable GrailScript context. The
+        operations are lightweight and still guarded by Grail limits.
 
     Usage flow:
-
-    1. ``ToolDispatcher`` calls ``start_script()`` instead of ``execute()``
-    2. If the script suspends at an external call, a ``SnapshotRecord`` is
-       stored and a ``snapshot_id`` is returned to the model.
-    3. The model calls ``resume_tool`` with the ``snapshot_id`` to continue.
-    4. ``SnapshotManager.resume_script()`` advances the snapshot with the
-       provided return value.
+        1. ``ToolDispatcher`` calls ``start_script()`` instead of ``execute()``.
+        2. Suspended scripts store a ``SnapshotRecord`` and return a
+           ``snapshot_id`` to the model.
+        3. The model calls ``resume_tool`` with the ``snapshot_id`` to continue.
+        4. ``resume_script()`` advances the snapshot with the provided return
+           value.
     """
 
     def __init__(
@@ -306,7 +314,7 @@ class SnapshotManager:
             }
 
         if record.resume_count >= record.max_resumes:
-            self._snapshots.pop(snapshot_id, None)
+            self._drop_snapshot(snapshot_id)
             return {
                 "error": True,
                 "code": "MAX_RESUMES",
@@ -316,13 +324,13 @@ class SnapshotManager:
         try:
             new_snapshot = record.snapshot.resume(return_value=return_value)
         except Exception as exc:
-            self._snapshots.pop(snapshot_id, None)
+            self._drop_snapshot(snapshot_id)
             return {"error": True, "code": "RESUME_FAILED", "message": str(exc)}
 
         record.resume_count += 1
 
         if new_snapshot.is_complete:
-            self._snapshots.pop(snapshot_id, None)
+            self._drop_snapshot(snapshot_id)
             return {"error": False, "result": new_snapshot.value}
 
         # Still suspended — update the record with the new snapshot
@@ -342,17 +350,27 @@ class SnapshotManager:
         """Remove all snapshots belonging to an agent. Returns count removed."""
         to_remove = [sid for sid, r in self._snapshots.items() if r.agent_id == agent_id]
         for sid in to_remove:
-            del self._snapshots[sid]
+            self._drop_snapshot(sid)
         return len(to_remove)
 
     def clear(self) -> None:
         """Remove all snapshots."""
-        self._snapshots.clear()
+        for sid in list(self._snapshots.keys()):
+            self._drop_snapshot(sid)
 
     @property
     def active_count(self) -> int:
         """Number of currently stored snapshots."""
         return len(self._snapshots)
+
+    def _drop_snapshot(self, snapshot_id: str) -> None:
+        record = self._snapshots.pop(snapshot_id, None)
+        if record is None:
+            return
+        try:
+            record.cleanup()
+        except Exception:
+            pass
 
     # -- internal helpers ----------------------------------------------------
 
@@ -393,5 +411,5 @@ class SnapshotManager:
         """Store a snapshot, evicting oldest if at capacity."""
         if len(self._snapshots) >= self._max_snapshots:
             oldest = min(self._snapshots.values(), key=lambda r: r.created_at)
-            del self._snapshots[oldest.snapshot_id]
+            self._drop_snapshot(oldest.snapshot_id)
         self._snapshots[record.snapshot_id] = record

@@ -14,6 +14,8 @@ from remora.discovery import CSTNode
 from remora.errors import AGENT_001
 from remora.tool_registry import GrailToolRegistry, ToolRegistryError
 
+SUBMIT_RESULT_TOOL = "submit_result"
+
 
 class SubagentError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
@@ -136,11 +138,11 @@ def _apply_tool_registry(definition: SubagentDefinition, agents_dir: Path, path:
 
 
 def _validate_submit_result(definition: SubagentDefinition, path: Path) -> None:
-    submit_tools = [tool for tool in definition.tools if tool.name == "submit_result"]
+    submit_tools = [tool for tool in definition.tools if tool.name == SUBMIT_RESULT_TOOL]
     if len(submit_tools) != 1:
         raise SubagentError(
             AGENT_001,
-            f"Subagent definition must include exactly one submit_result tool: {path}",
+            f"Subagent definition must include exactly one {SUBMIT_RESULT_TOOL} tool: {path}",
         )
 
 

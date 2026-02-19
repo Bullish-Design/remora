@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from contextlib import suppress
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
@@ -15,7 +16,14 @@ from pydantic import BaseModel, Field, field_validator
 from remora.client import build_client
 from remora.config import RemoraConfig, resolve_grail_limits
 from remora.discovery import CSTNode
-from remora.events import EventStreamController, build_event_emitter, CompositeEventEmitter
+from remora.events import (
+    CompositeEventEmitter,
+    EventEmitter,
+    EventName,
+    EventStatus,
+    EventStreamController,
+    build_event_emitter,
+)
 from remora.execution import ProcessIsolatedExecutor, SnapshotManager
 from remora.results import AgentResult, NodeResult
 from remora.runner import AgentError, FunctionGemmaRunner
@@ -42,8 +50,11 @@ class RemoraAgentState(str, Enum):
 class RemoraAgentContext(BaseModel):
     """Structured runtime context for a single agent task.
 
-    Replaces the plain ``workspace_id: str`` with a Pydantic model that tracks
-    lifecycle state and timestamps, inspired by Cairn's ``AgentContext``.
+    Args:
+        agent_id: Unique identifier for the agent run.
+        task: Human-readable task name.
+        operation: Operation name being executed.
+        node_id: CST node identifier.
     """
 
     agent_id: str
@@ -62,7 +73,11 @@ class RemoraAgentContext(BaseModel):
         return value
 
     def transition(self, new_state: RemoraAgentState) -> None:
-        """Move to *new_state* and update the lifecycle timestamp."""
+        """Move to a new state and update timestamps.
+
+        Args:
+            new_state: The new lifecycle state.
+        """
         self.state = new_state
         self.state_changed_at = time.monotonic()
 
@@ -73,6 +88,14 @@ class RemoraAgentContext(BaseModel):
 
 
 def _normalize_phase(phase: str) -> tuple[str, str | None]:
+    """Normalize phase names for event payloads.
+
+    Args:
+        phase: Raw phase label.
+
+    Returns:
+        Tuple of normalized phase and optional subphase.
+    """
     if phase in {"discovery", "grail_check", "execution", "submission"}:
         return phase, None
     if phase in {"merge"}:
@@ -99,6 +122,8 @@ PRIORITY_MAP = {
 
 
 class Coordinator:
+    """Coordinate discovery, execution, and workspace management."""
+
     def __init__(
         self,
         config: RemoraConfig,
@@ -128,11 +153,13 @@ class Coordinator:
                 include_full_prompts=config.llm_log.include_full_prompts,
                 max_content_lines=config.llm_log.max_content_lines,
             )
+            emitters = cast(list[EventEmitter], [self._event_emitter, self._llm_logger])
             self._event_emitter = CompositeEventEmitter(
-                emitters=[self._event_emitter, self._llm_logger],
+                emitters=emitters,
                 enabled=True,
-                include_payloads=True, # Composite needs payloads to pass them down
+                include_payloads=True,  # Composite needs payloads to pass them down
             )
+
         self._watch_task: asyncio.Task[None] | None = None
         self._running_tasks: set[asyncio.Task[Any]] = set()
         self._shutdown_requested: bool = False
@@ -157,11 +184,11 @@ class Coordinator:
             # Check if one of the children is the controller
             for child in self._event_emitter.emitters:
                 if isinstance(child, EventStreamController):
-                     self._watch_task = asyncio.create_task(child.watch())
-        
+                    self._watch_task = asyncio.create_task(child.watch())
+
         if self._llm_logger:
             self._llm_logger.open()
-            
+
         self._setup_signal_handlers()
         return self
 
@@ -178,6 +205,9 @@ class Coordinator:
                 await self._watch_task
         if self._llm_logger:
             self._llm_logger.close()
+        close_result = self._http_client.close()
+        if inspect.isawaitable(close_result):
+            await close_result
         self._event_emitter.close()
         await self._workspace_manager.close_all()
         await self._workspace_cache.clear()
@@ -239,12 +269,12 @@ class Coordinator:
                 definition = load_subagent_definition(definition_path, agents_dir=self.config.agents_dir)
                 self._event_emitter.emit(
                     {
-                        "event": "grail_check",
+                        "event": EventName.GRAIL_CHECK,
                         "agent_id": ctx.agent_id,
                         "node_id": node.node_id,
                         "operation": operation,
                         "phase": "grail_check",
-                        "status": "ok",
+                        "status": EventStatus.OK,
                         "warnings": definition.grail_summary.get("warnings", []),
                     }
                 )
@@ -270,7 +300,7 @@ class Coordinator:
                 errors.append({"operation": operation, "phase": "init", "error": str(exc)})
                 phase, step = _normalize_phase("init")
                 payload = {
-                    "event": "agent_error",
+                    "event": EventName.AGENT_ERROR,
                     "agent_id": ctx.agent_id,
                     "node_id": node.node_id,
                     "operation": operation,
@@ -314,7 +344,7 @@ class Coordinator:
                         phase, step = _normalize_phase(raw_phase)
                         error_code = getattr(exc, "error_code", None)
                         payload: dict[str, Any] = {
-                            "event": "agent_error",
+                            "event": EventName.AGENT_ERROR,
                             "agent_id": ctx.agent_id,
                             "node_id": node.node_id,
                             "operation": operation,
@@ -357,11 +387,13 @@ class Coordinator:
                         item,
                         exc_info=item,
                     )
-                    errors.append({
-                        "operation": "unknown",
-                        "phase": "run",
-                        "error": str(item),
-                    })
+                    errors.append(
+                        {
+                            "operation": "unknown",
+                            "phase": "run",
+                            "error": str(item),
+                        }
+                    )
                     continue
                 operation, outcome = item
                 if isinstance(outcome, Exception):

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 import logging
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
@@ -17,10 +18,10 @@ from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageParam,
 
 from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode
-from remora.events import EventEmitter, NullEventEmitter
+from remora.events import EventEmitter, EventName, EventStatus, NullEventEmitter
 from remora.errors import AGENT_002, AGENT_003, AGENT_004
-from remora.results import AgentResult
-from remora.subagent import SubagentDefinition
+from remora.results import AgentResult, AgentStatus
+from remora.subagent import SUBMIT_RESULT_TOOL, SubagentDefinition
 
 if TYPE_CHECKING:
     from remora.execution import SnapshotManager
@@ -29,7 +30,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-
+def _missing_identifier(label: str) -> str:
+    return f"missing-{label}-{uuid.uuid4().hex[:8]}"
 
 
 class GrailExecutor(Protocol):
@@ -76,6 +78,14 @@ class AgentError(RuntimeError):
 
 @dataclass
 class FunctionGemmaRunner:
+    """Run a function-calling agent loop for one CST node.
+
+    Args:
+        definition: Subagent configuration and tool catalog.
+        node: Discovered CST node to operate on.
+        ctx: Context for this agent run.
+    """
+
     definition: SubagentDefinition
     node: CSTNode
     ctx: RemoraAgentContext
@@ -117,7 +127,7 @@ class FunctionGemmaRunner:
         self._initial_message = self.definition.initial_context.render(self.node)
         self.messages.append(cast(ChatCompletionMessageParam, {"role": "system", "content": self._system_prompt}))
         self.messages.append(cast(ChatCompletionMessageParam, {"role": "user", "content": self._initial_message}))
-        
+
         # Configure retry strategy from config
         retry_config = self.server_config.retry
         self._retry = RetryStrategy(
@@ -137,6 +147,7 @@ class FunctionGemmaRunner:
         return self.definition.initial_context.system_prompt
 
     async def run(self) -> AgentResult:
+        """Execute the model loop until a result is produced."""
         message = await self._call_model(phase="model_load", tool_choice=self._tool_choice_for_turn(1))
 
         while self.turn_count < self.definition.max_turns:
@@ -148,16 +159,18 @@ class FunctionGemmaRunner:
             for tool_call in tool_calls:
                 tool_function = getattr(tool_call, "function", None)
                 name = getattr(tool_function, "name", None)
-                if name == "submit_result":
+                if name == SUBMIT_RESULT_TOOL:
                     return self._build_submit_result(getattr(tool_function, "arguments", None))
                 tool_result_content = await self._dispatch_tool(tool_call)
+                tool_call_id = getattr(tool_call, "id", None) or _missing_identifier("tool-call")
+                tool_name = name or _missing_identifier("tool-name")
                 self.messages.append(
                     cast(
                         ChatCompletionMessageParam,
                         {
                             "role": "tool",
-                            "tool_call_id": getattr(tool_call, "id", None) or "unknown",
-                            "name": name or "unknown",
+                            "tool_call_id": tool_call_id,
+                            "name": tool_name,
                             "content": tool_result_content,
                         },
                     )
@@ -182,7 +195,7 @@ class FunctionGemmaRunner:
         request_id = None
         start = time.monotonic()
         payload: dict[str, Any] = {
-            "event": "model_request",
+            "event": EventName.MODEL_REQUEST,
             "agent_id": self.workspace_id,
             "node_id": self.node.node_id,
             "operation": self.definition.name,
@@ -195,7 +208,7 @@ class FunctionGemmaRunner:
         self.event_emitter.emit(payload)
         if tool_choice is None:
             tool_choice = self.runner_config.tool_choice
-        
+
         # Filter out system-injected inputs from the schema sent to the model
         raw_tools = self.definition.tool_schemas
         tools_payload = []
@@ -205,14 +218,14 @@ class FunctionGemmaRunner:
             tool_params = tool_copy.get("function", {}).get("parameters", {})
             properties = tool_params.get("properties", {})
             required = tool_params.get("required", [])
-            
+
             # Keys to remove
             for key in ["node_text", "target_file", "workspace_id", "node_text_input", "target_file_input"]:
                 if key in properties:
                     del properties[key]
                 if key in required:
                     required.remove(key)
-            
+
             tools_payload.append(tool_copy)
 
         self._emit_tool_debug("model_tools_before", tool_choice)
@@ -250,7 +263,7 @@ class FunctionGemmaRunner:
                 start,
                 phase=phase,
                 request_id=request_id,
-                status="error",
+                status=EventStatus.ERROR,
                 error=str(exc),
             )
             raise AgentError(
@@ -267,7 +280,7 @@ class FunctionGemmaRunner:
             start,
             phase=phase,
             request_id=request_id,
-            status="ok",
+            status=EventStatus.OK,
             usage=getattr(response, "usage", None),
             response_text=response_text,
         )
@@ -305,7 +318,7 @@ class FunctionGemmaRunner:
                 operation=self.definition.name,
                 phase="loop",
                 error_code=AGENT_003,
-                message="Model stopped without calling submit_result",
+                message=f"Model stopped without calling {SUBMIT_RESULT_TOOL}",
             )
         content = message.content or ""
         if content:
@@ -316,7 +329,7 @@ class FunctionGemmaRunner:
             if isinstance(parsed, dict):
                 return self._build_submit_result(parsed)
         result_data = {
-            "status": "success",
+            "status": AgentStatus.SUCCESS,
             "workspace_id": self.workspace_id,
             "changed_files": [],
             "summary": content,
@@ -348,7 +361,7 @@ class FunctionGemmaRunner:
 
     def _emit_request_debug(self, *, model: str, tool_choice: Any, tools: list[dict[str, Any]]) -> None:
         payload: dict[str, Any] = {
-            "event": "model_request_debug",
+            "event": EventName.MODEL_REQUEST_DEBUG,
             "agent_id": self.workspace_id,
             "node_id": self.node.node_id,
             "operation": self.definition.name,
@@ -428,7 +441,7 @@ class FunctionGemmaRunner:
     ) -> None:
         duration_ms = int((time.monotonic() - start) * 1000)
         payload: dict[str, Any] = {
-            "event": "model_response",
+            "event": EventName.MODEL_RESPONSE,
             "agent_id": self.workspace_id,
             "node_id": self.node.node_id,
             "operation": self.definition.name,
@@ -453,9 +466,9 @@ class FunctionGemmaRunner:
         self.event_emitter.emit(payload)
 
     def _emit_tool_result(self, tool_name: str, result: Any) -> None:
-        status = "error" if isinstance(result, dict) and result.get("error") else "ok"
+        status = EventStatus.ERROR if isinstance(result, dict) and result.get("error") else EventStatus.OK
         payload: dict[str, Any] = {
-            "event": "tool_result",
+            "event": EventName.TOOL_RESULT,
             "agent_id": self.workspace_id,
             "node_id": self.node.node_id,
             "operation": self.definition.name,
@@ -463,7 +476,7 @@ class FunctionGemmaRunner:
             "phase": "execution",
             "status": status,
         }
-        if status == "error":
+        if status == EventStatus.ERROR:
             error_value = result.get("error") if isinstance(result, dict) else result
             payload["error"] = str(error_value)
         if self._include_payloads():
@@ -486,9 +499,9 @@ class FunctionGemmaRunner:
             for key, value in payload.items()
             if key in {"status", "changed_files", "summary", "details", "error"}
         }
-        status_raw = filtered.get("status", "success")
-        if status_raw not in {"success", "failed", "skipped"}:
-            status_raw = "success"
+        status_raw = filtered.get("status", AgentStatus.SUCCESS)
+        if status_raw not in {AgentStatus.SUCCESS, AgentStatus.FAILED, AgentStatus.SKIPPED}:
+            status_raw = AgentStatus.SUCCESS
         details = filtered.get("details", {})
         if not isinstance(details, dict):
             details = {}
@@ -514,7 +527,7 @@ class FunctionGemmaRunner:
             ) from exc
         self.event_emitter.emit(
             {
-                "event": "submit_result",
+                "event": EventName.SUBMIT_RESULT,
                 "agent_id": self.workspace_id,
                 "node_id": self.node.node_id,
                 "operation": self.definition.name,
@@ -522,14 +535,12 @@ class FunctionGemmaRunner:
                 "status": result.status,
             }
         )
-        logger.info(
-            "Agent %s submitted result: status=%s", self.workspace_id, result.status
-        )
+        logger.info("Agent %s submitted result: status=%s", self.workspace_id, result.status)
         return result
 
     async def _dispatch_tool(self, tool_call: Any) -> str:
         tool_function = getattr(tool_call, "function", None)
-        tool_name = getattr(tool_function, "name", "unknown")
+        tool_name = getattr(tool_function, "name", None) or _missing_identifier("tool-name")
         arguments = getattr(tool_function, "arguments", None)
         args: Any = arguments
         if isinstance(arguments, str):
@@ -543,13 +554,13 @@ class FunctionGemmaRunner:
         logger.debug("Dispatching tool %s for %s", tool_name, self.workspace_id)
         self.event_emitter.emit(
             {
-                "event": "tool_call",
+                "event": EventName.TOOL_CALL,
                 "agent_id": self.workspace_id,
                 "node_id": self.node.node_id,
                 "operation": self.definition.name,
                 "tool_name": tool_name,
                 "phase": "execution",
-                "status": "ok",
+                "status": EventStatus.OK,
             }
         )
 
@@ -566,7 +577,9 @@ class FunctionGemmaRunner:
         # --- In-process execution via GrailExecutor ---
         if self.grail_executor is not None and self.grail_dir is not None:
             return await self._dispatch_tool_grail(
-                tool_name, tool_def, tool_inputs,
+                tool_name,
+                tool_def,
+                tool_inputs,
             )
 
         # If we get here, no executor is configured
@@ -584,33 +597,46 @@ class FunctionGemmaRunner:
         assert self.grail_executor is not None
         assert self.grail_dir is not None
 
+        context_parts, error = await self._run_context_providers(tool_name, tool_def)
+        if error is not None:
+            self._emit_tool_result(tool_name, error)
+            return json.dumps(error)
+
+        result = await self._execute_grail_script(tool_def.pym, tool_inputs)
+        if result.get("error"):
+            self._emit_tool_result(tool_name, result)
+            return json.dumps(result)
+        tool_result = result.get("result", {})
+        self._emit_tool_result(tool_name, tool_result)
+        content_parts = context_parts + [json.dumps(tool_result)]
+        return "\n".join(content_parts)
+
+    async def _run_context_providers(self, tool_name: str, tool_def: Any) -> tuple[list[str], dict[str, Any] | None]:
+        """Execute context providers for a tool.
+
+        Args:
+            tool_name: Tool name for logging context.
+            tool_def: Tool definition containing context providers.
+
+        Returns:
+            A list of serialized context outputs and an optional error payload.
+        """
         context_parts: list[str] = []
         for provider_path in tool_def.context_providers:
-            result = await self.grail_executor.execute(
-                pym_path=provider_path,
-                grail_dir=self.grail_dir,
-                inputs=self._base_tool_inputs(),
-                limits=self.grail_limits,
-                agent_id=self.ctx.agent_id,
-                workspace_path=self.workspace_root,
-                stable_path=self.stable_root,
-                node_source=self.node.text,
-                node_metadata={
-                    "name": self.node.name,
-                    "type": self.node.node_type,
-                    "file_path": str(self.node.file_path),
-                    "node_id": self.node.node_id,
-                },
-            )
+            result = await self._execute_grail_script(provider_path, self._base_tool_inputs())
             if result.get("error"):
-                self._emit_tool_result(tool_name, result)
-                return json.dumps(result)
+                return [], result
             context_parts.append(json.dumps(result.get("result", {})))
+        return context_parts, None
 
-        result = await self.grail_executor.execute(
-            pym_path=tool_def.pym,
+    async def _execute_grail_script(self, pym_path: Path, inputs: dict[str, Any]) -> dict[str, Any]:
+        """Execute a grail script with shared metadata."""
+        assert self.grail_executor is not None
+        assert self.grail_dir is not None
+        return await self.grail_executor.execute(
+            pym_path=pym_path,
             grail_dir=self.grail_dir,
-            inputs=tool_inputs,
+            inputs=inputs,
             limits=self.grail_limits,
             agent_id=self.ctx.agent_id,
             workspace_path=self.workspace_root,
@@ -623,13 +649,6 @@ class FunctionGemmaRunner:
                 "node_id": self.node.node_id,
             },
         )
-        if result.get("error"):
-            self._emit_tool_result(tool_name, result)
-            return json.dumps(result)
-        tool_result = result.get("result", {})
-        self._emit_tool_result(tool_name, tool_result)
-        content_parts = context_parts + [json.dumps(tool_result)]
-        return "\n".join(content_parts)
 
     async def _handle_resume(self, args: dict[str, Any]) -> str:
         """Handle a ``resume_tool`` call from the model."""
@@ -656,4 +675,3 @@ class FunctionGemmaRunner:
                 result.get("resume_count", 0),
             )
         return json.dumps(result)
-

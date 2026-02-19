@@ -15,6 +15,13 @@ The system layers three established components — **tree-sitter** for CST node 
 5. **Human Authority**: Changes must be explicitly accepted before merging to the stable workspace
 6. **Fail-Safe Processing**: Individual agent failures are logged but never halt overall analysis
 
+### Logging Guidelines
+
+- **DEBUG**: Internal state changes, method entry/exit, verbose diagnostics
+- **INFO**: User-facing milestones (discovery started, agent completed)
+- **WARNING**: Recoverable issues that affect a node or tool
+- **ERROR**: Failures that prevent a requested operation from completing
+
 ---
 
 ## Architecture Layers

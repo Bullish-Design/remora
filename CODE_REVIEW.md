@@ -276,13 +276,9 @@ class AgentStatus:
 
 The discovery module is entirely synchronous while the rest of the system is async. This forces `asyncio.run()` or `await asyncio.to_thread()` at integration points.
 
-**Recommendation**: Consider making discovery async for consistency, or document the sync nature clearly.
+**Recommendation**: Make discovery async for consistency
 
-#### 9. Test Helper Pollution (`tests/helpers.py`)
-
-Test helpers like `FakeAsyncOpenAI`, `FakeGrailExecutor` are well-designed but tightly coupled to test implementation details.
-
-**Recommendation**: Consider moving these to a `remora.testing` module so they can be reused by downstream projects.
+#### 9. SKIPPED
 
 #### 10. Workspace Directory Structure Assumptions (`orchestrator.py:292-297`)
 

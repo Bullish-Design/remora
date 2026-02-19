@@ -53,44 +53,48 @@ def _build_overrides(
     event_stream_file: Path | None,
 ) -> dict[str, Any]:
     overrides: dict[str, Any] = {}
-    discovery_overrides: dict[str, Any] = {}
-    if discovery_language is not None:
-        discovery_overrides["language"] = discovery_language
-    if query_pack is not None:
-        discovery_overrides["query_pack"] = query_pack
-    if discovery_overrides:
-        overrides["discovery"] = discovery_overrides
-    if agents_dir is not None:
-        overrides["agents_dir"] = agents_dir
-    runner_overrides: dict[str, Any] = {}
-    if max_turns is not None:
-        runner_overrides["max_turns"] = max_turns
-    if max_tokens is not None:
-        runner_overrides["max_tokens"] = max_tokens
-    if temperature is not None:
-        runner_overrides["temperature"] = temperature
-    if tool_choice is not None:
-        runner_overrides["tool_choice"] = tool_choice
-    if runner_overrides:
-        overrides["runner"] = runner_overrides
-    cairn_overrides: dict[str, Any] = {}
-    if cairn_command is not None:
-        cairn_overrides["command"] = cairn_command
-    if cairn_home is not None:
-        cairn_overrides["home"] = cairn_home
-    if max_concurrent_agents is not None:
-        cairn_overrides["max_concurrent_agents"] = max_concurrent_agents
-    if cairn_timeout is not None:
-        cairn_overrides["timeout"] = cairn_timeout
-    if cairn_overrides:
-        overrides["cairn"] = cairn_overrides
-    event_overrides: dict[str, Any] = {}
-    if event_stream is not None:
-        event_overrides["enabled"] = event_stream
-    if event_stream_file is not None:
-        event_overrides["output"] = event_stream_file
-    if event_overrides:
-        overrides["event_stream"] = event_overrides
+
+    override_mapping: dict[str, tuple[str, ...]] = {
+        "discovery_language": ("discovery", "language"),
+        "query_pack": ("discovery", "query_pack"),
+        "agents_dir": ("agents_dir",),
+        "max_turns": ("runner", "max_turns"),
+        "max_tokens": ("runner", "max_tokens"),
+        "temperature": ("runner", "temperature"),
+        "tool_choice": ("runner", "tool_choice"),
+        "cairn_command": ("cairn", "command"),
+        "cairn_home": ("cairn", "home"),
+        "max_concurrent_agents": ("cairn", "max_concurrent_agents"),
+        "cairn_timeout": ("cairn", "timeout"),
+        "event_stream": ("event_stream", "enabled"),
+        "event_stream_file": ("event_stream", "output"),
+    }
+
+    values: dict[str, Any] = {
+        "discovery_language": discovery_language,
+        "query_pack": query_pack,
+        "agents_dir": agents_dir,
+        "max_turns": max_turns,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "tool_choice": tool_choice,
+        "cairn_command": cairn_command,
+        "cairn_home": cairn_home,
+        "max_concurrent_agents": max_concurrent_agents,
+        "cairn_timeout": cairn_timeout,
+        "event_stream": event_stream,
+        "event_stream_file": event_stream_file,
+    }
+
+    for key, path in override_mapping.items():
+        value = values.get(key)
+        if value is None:
+            continue
+        target = overrides
+        for segment in path[:-1]:
+            target = target.setdefault(segment, {})
+        target[path[-1]] = value
+
     return overrides
 
 
@@ -304,10 +308,7 @@ def watch(
 
                 async def on_changes(changes: list) -> None:
                     changed_paths = [c.path for c in changes]
-                    console.print(
-                        f"\n[bold cyan]Detected {len(changes)} change(s), "
-                        f"re-analyzing...[/bold cyan]"
-                    )
+                    console.print(f"\n[bold cyan]Detected {len(changes)} change(s), re-analyzing...[/bold cyan]")
                     analyzer = RemoraAnalyzer(config)
                     results = await analyzer.analyze(changed_paths, ops)
                     presenter = ResultPresenter("table")

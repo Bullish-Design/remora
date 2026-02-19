@@ -39,7 +39,6 @@ class ConfigError(RuntimeError):
         self.code = code
 
 
-
 class RetryConfig(BaseModel):
     max_attempts: int = 3
     initial_delay: float = 1.0
@@ -81,19 +80,18 @@ class DiscoveryConfig(BaseModel):
 
 
 class CairnConfig(BaseModel):
-    # command: str = "cairn"  # REMOVED: In-process execution only
     home: Path | None = None
     max_concurrent_agents: int = 16
     timeout: int = 300
     limits_preset: Literal["strict", "default", "permissive"] = "default"
     limits_override: dict[str, Any] = Field(default_factory=dict)
-    pool_workers: int = 4                # ProcessPoolExecutor max_workers
+    pool_workers: int = 4  # ProcessPoolExecutor max_workers
     max_queue_size: int = 100
     workspace_cache_size: int = 100
     # Snapshot pause/resume (Phase 6)
-    enable_snapshots: bool = False       # Opt-in: most tools don't need pause/resume
-    max_snapshots: int = 50              # Max concurrent suspended scripts
-    max_resumes_per_script: int = 5      # Safety cap per snapshot
+    enable_snapshots: bool = False  # Opt-in: most tools don't need pause/resume
+    max_snapshots: int = 50  # Max concurrent suspended scripts
+    max_resumes_per_script: int = 5  # Safety cap per snapshot
 
 
 class EventStreamConfig(BaseModel):

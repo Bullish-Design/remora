@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -11,11 +12,12 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 
+from cairn.runtime.workspace_manager import WorkspaceManager
 from remora.config import RemoraConfig
 from remora.discovery import CSTNode, TreeSitterDiscoverer
-from remora.events import EventEmitter, JsonlEventEmitter, NullEventEmitter
+from remora.events import EventEmitter, EventName, EventStatus, JsonlEventEmitter, NullEventEmitter
 from remora.orchestrator import Coordinator
-from remora.results import AgentResult, AnalysisResults, NodeResult
+from remora.results import AgentResult, AgentStatus, AnalysisResults, NodeResult
 from remora.runner import AgentError
 
 
@@ -59,6 +61,7 @@ class RemoraAnalyzer:
         self._results: AnalysisResults | None = None
         self._nodes: list[CSTNode] = []
         self._workspaces: dict[tuple[str, str], WorkspaceInfo] = {}
+        self._workspace_manager = WorkspaceManager()
 
     async def analyze(
         self,
@@ -91,7 +94,6 @@ class RemoraAnalyzer:
         # Run analysis through coordinator
         async with Coordinator(
             config=self.config,
-
             event_stream_enabled=self.config.event_stream.enabled,
             event_stream_output=self.config.event_stream.output,
         ) as coordinator:
@@ -142,18 +144,18 @@ class RemoraAnalyzer:
         targets = self._filter_workspaces(node_id, operation, WorkspaceState.PENDING)
 
         for key, info in targets:
-                # Call Cairn CLI to merge workspace
-                await self._cairn_merge(info.workspace_id)
-                info.state = WorkspaceState.ACCEPTED
-                self._event_emitter.emit(
-                    {
-                        "event": "workspace_accepted",
-                        "workspace_id": info.workspace_id,
-                        "node_id": info.node_id,
-                        "operation": info.operation,
-                        "status": "ok",
-                    }
-                )
+            # Call Cairn CLI to merge workspace
+            await self._cairn_merge(info.workspace_id)
+            info.state = WorkspaceState.ACCEPTED
+            self._event_emitter.emit(
+                {
+                    "event": EventName.WORKSPACE_ACCEPTED,
+                    "workspace_id": info.workspace_id,
+                    "node_id": info.node_id,
+                    "operation": info.operation,
+                    "status": EventStatus.OK,
+                }
+            )
 
     async def reject(self, node_id: str | None = None, operation: str | None = None) -> None:
         """Reject changes and discard workspace.
@@ -165,18 +167,18 @@ class RemoraAnalyzer:
         targets = self._filter_workspaces(node_id, operation, WorkspaceState.PENDING)
 
         for key, info in targets:
-                # Call Cairn CLI to discard workspace
-                await self._cairn_discard(info.workspace_id)
-                info.state = WorkspaceState.REJECTED
-                self._event_emitter.emit(
-                    {
-                        "event": "workspace_rejected",
-                        "workspace_id": info.workspace_id,
-                        "node_id": info.node_id,
-                        "operation": info.operation,
-                        "status": "ok",
-                    }
-                )
+            # Call Cairn CLI to discard workspace
+            await self._cairn_discard(info.workspace_id)
+            info.state = WorkspaceState.REJECTED
+            self._event_emitter.emit(
+                {
+                    "event": EventName.WORKSPACE_REJECTED,
+                    "workspace_id": info.workspace_id,
+                    "node_id": info.node_id,
+                    "operation": info.operation,
+                    "status": EventStatus.OK,
+                }
+            )
 
     async def retry(
         self,
@@ -282,15 +284,60 @@ class RemoraAnalyzer:
             results.append((key, info))
         return results
 
+    def _workspace_db_path(self, workspace_id: str) -> Path:
+        cache_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
+        return cache_root / "workspaces" / workspace_id / "workspace.db"
+
+    def _workspace_root(self, workspace_id: str) -> Path:
+        return self._workspace_db_path(workspace_id).parent
+
+    def _project_root(self) -> Path:
+        return self.config.agents_dir.parent.resolve()
+
+    @staticmethod
+    def _write_workspace_file(target_path: Path, content: bytes | str) -> None:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, bytes):
+            target_path.write_bytes(content)
+        else:
+            target_path.write_text(content, encoding="utf-8")
+
+    @staticmethod
+    def _remove_workspace_dir(workspace_root: Path) -> None:
+        if workspace_root.exists():
+            shutil.rmtree(workspace_root)
+
     async def _cairn_merge(self, workspace_id: str) -> None:
-        """Merge a workspace into stable (STUB)."""
-        # TODO: Replace with proper WorkspaceManager integration
-        pass
+        """Merge a workspace into stable."""
+        workspace_db = self._workspace_db_path(workspace_id)
+        if not workspace_db.exists():
+            raise FileNotFoundError(f"Workspace database not found: {workspace_db}")
+
+        project_root = self._project_root()
+        async with self._workspace_manager.open_workspace(workspace_db) as workspace:
+            changed_paths = await workspace.overlay.list_changes("/")
+            for overlay_path in changed_paths:
+                relative_path = overlay_path.lstrip("/")
+                target_path = (project_root / relative_path).resolve()
+                if project_root not in target_path.parents and target_path != project_root:
+                    raise ValueError(f"Refusing to write outside project root: {target_path}")
+                content = await workspace.files.read(overlay_path, mode="binary", encoding=None)
+                await asyncio.to_thread(self._write_workspace_file, target_path, content)
+
+            await workspace.overlay.reset()
+
+        await asyncio.to_thread(self._remove_workspace_dir, self._workspace_root(workspace_id))
 
     async def _cairn_discard(self, workspace_id: str) -> None:
-        """Discard a workspace (STUB)."""
-        # TODO: Replace with proper WorkspaceManager integration
-        pass
+        """Discard a workspace."""
+        workspace_db = self._workspace_db_path(workspace_id)
+        if not workspace_db.exists():
+            raise FileNotFoundError(f"Workspace database not found: {workspace_db}")
+
+        async with self._workspace_manager.open_workspace(workspace_db) as workspace:
+            await workspace.overlay.reset()
+
+        await asyncio.to_thread(self._remove_workspace_dir, self._workspace_root(workspace_id))
 
     def _apply_config_override(self, overrides: dict[str, Any]) -> RemoraConfig:
         """Apply config overrides and return new config."""
@@ -366,9 +413,9 @@ class ResultPresenter:
             for op in operations:
                 if op in node.operations:
                     result = node.operations[op]
-                    if result.status == "success":
+                    if result.status == AgentStatus.SUCCESS:
                         symbol = "[green]✓[/green]"
-                    elif result.status == "failed":
+                    elif result.status == AgentStatus.FAILED:
                         symbol = "[red]✗[/red]"
                     else:
                         symbol = "[yellow]-[/yellow]"
@@ -406,7 +453,7 @@ class ResultPresenter:
 
         for node in results.nodes:
             for op_name, result in node.operations.items():
-                if result.status != "success":
+                if result.status != AgentStatus.SUCCESS:
                     continue
 
                 self.console.print(f"\n[cyan]{node.file_path.name}::{node.node_name}[/cyan]")

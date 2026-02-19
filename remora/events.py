@@ -18,6 +18,25 @@ ENV_EVENT_STREAM = "REMORA_EVENT_STREAM"
 ENV_EVENT_STREAM_FILE = "REMORA_EVENT_STREAM_FILE"
 
 
+class EventName:
+    MODEL_REQUEST = "model_request"
+    MODEL_REQUEST_DEBUG = "model_request_debug"
+    MODEL_RESPONSE = "model_response"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    SUBMIT_RESULT = "submit_result"
+    AGENT_ERROR = "agent_error"
+    GRAIL_CHECK = "grail_check"
+    DISCOVERY = "discovery"
+    WORKSPACE_ACCEPTED = "workspace_accepted"
+    WORKSPACE_REJECTED = "workspace_rejected"
+
+
+class EventStatus:
+    OK = "ok"
+    ERROR = "error"
+
+
 class EventEmitter(Protocol):
     enabled: bool
     include_payloads: bool
@@ -44,6 +63,7 @@ class NullEventEmitter:
 @dataclass
 class CompositeEventEmitter:
     """Fans out events to multiple emitters."""
+
     emitters: list[EventEmitter]
     enabled: bool = True
     include_payloads: bool = True

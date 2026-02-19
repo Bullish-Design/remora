@@ -12,6 +12,7 @@ from remora.discovery.match_extractor import MatchExtractor
 from remora.discovery.models import CSTNode, DiscoveryError, NodeType, compute_node_id
 from remora.discovery.query_loader import CompiledQuery, QueryLoader
 from remora.discovery.source_parser import SourceParser
+from remora.events import EventName, EventStatus
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,10 @@ def _default_query_dir() -> Path:
 
 class TreeSitterDiscoverer:
     """Discovers code nodes by parsing Python files with tree-sitter.
+
+    Note:
+        Discovery is synchronous; use ``asyncio.to_thread`` if calling from
+        an async workflow.
 
     Usage:
         discoverer = TreeSitterDiscoverer(
@@ -58,7 +63,7 @@ class TreeSitterDiscoverer:
         Emits a discovery event with timing if an event_emitter is set.
         """
         start = time.monotonic()
-        status = "ok"
+        status = EventStatus.OK
         try:
             queries = self._loader.load_query_pack(self.query_dir, self.language, self.query_pack)
             py_files = self._collect_files()
@@ -74,14 +79,14 @@ class TreeSitterDiscoverer:
             all_nodes.sort(key=lambda n: (str(n.file_path), n.start_byte, n.node_type.value, n.name))
             return all_nodes
         except Exception:
-            status = "error"
+            status = EventStatus.ERROR
             raise
         finally:
             if self.event_emitter is not None:
                 duration_ms = int((time.monotonic() - start) * 1000)
                 self.event_emitter.emit(
                     {
-                        "event": "discovery",
+                        "event": EventName.DISCOVERY,
                         "phase": "discovery",
                         "status": status,
                         "duration_ms": duration_ms,

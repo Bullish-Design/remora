@@ -49,17 +49,11 @@ class FileChange:
 class RemoraFileWatcher:
     """Watch for file changes and trigger Remora analysis.
 
-    Wraps ``watchfiles.awatch`` with Remora-specific behaviour:
-
-    * **Extension filtering** – only changes to files whose suffix is in
-      ``extensions`` reach the callback (default: ``{".py"}``).
-    * **Ignore patterns** – directory components matching any entry in
-      ``ignore_patterns`` are silently skipped (mirrors Cairn's
-      ``FileWatcher.should_ignore``).
-    * **Debouncing** – rapid changes are batched within ``debounce_ms``
-      before the callback fires.
-    * **Graceful stop** – call :meth:`stop` (or send SIGINT) to exit the
-      watch loop cleanly.
+    Features:
+        - Extension filtering for configured suffixes.
+        - Ignore patterns that skip matching directories.
+        - Debounced change batches before callbacks fire.
+        - Graceful stop via ``stop()`` or SIGINT.
     """
 
     def __init__(
@@ -74,9 +68,7 @@ class RemoraFileWatcher:
         self._watch_paths = [p.resolve() for p in watch_paths]
         self._on_changes = on_changes
         self._extensions = extensions if extensions is not None else {".py"}
-        self._ignore_patterns = (
-            ignore_patterns if ignore_patterns is not None else list(DEFAULT_IGNORE_PATTERNS)
-        )
+        self._ignore_patterns = ignore_patterns if ignore_patterns is not None else list(DEFAULT_IGNORE_PATTERNS)
         self._debounce_s = debounce_ms / 1000.0
         self._stop_event = asyncio.Event()
         self._running = False
@@ -88,7 +80,7 @@ class RemoraFileWatcher:
         return self._running
 
     async def start(self) -> None:
-        """Start watching for changes.  Blocks until :meth:`stop` is called."""
+        """Start watching for changes until ``stop()`` is called."""
         self._running = True
         self._stop_event.clear()
         pending: list[FileChange] = []

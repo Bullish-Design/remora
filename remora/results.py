@@ -8,6 +8,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class AgentStatus:
+    SUCCESS = "success"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
 class AgentResult(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -28,7 +34,7 @@ class NodeResult(BaseModel):
 
     @property
     def all_success(self) -> bool:
-        return all(result.status == "success" for result in self.operations.values())
+        return all(result.status == AgentStatus.SUCCESS for result in self.operations.values())
 
 
 class AnalysisResults(BaseModel):
@@ -44,9 +50,9 @@ class AnalysisResults(BaseModel):
     @classmethod
     def from_node_results(cls, results: list[NodeResult]) -> "AnalysisResults":
         """Build AnalysisResults from a list of NodeResult objects."""
-        successful = sum(1 for nr in results for ar in nr.operations.values() if ar.status == "success")
-        failed = sum(1 for nr in results for ar in nr.operations.values() if ar.status == "failed")
-        skipped = sum(1 for nr in results for ar in nr.operations.values() if ar.status == "skipped")
+        successful = sum(1 for nr in results for ar in nr.operations.values() if ar.status == AgentStatus.SUCCESS)
+        failed = sum(1 for nr in results for ar in nr.operations.values() if ar.status == AgentStatus.FAILED)
+        skipped = sum(1 for nr in results for ar in nr.operations.values() if ar.status == AgentStatus.SKIPPED)
         total_ops = sum(len(nr.operations) for nr in results)
 
         return cls(

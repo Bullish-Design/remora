@@ -2,6 +2,12 @@
 
 Local code analysis and enhancement using FunctionGemma subagents.
 
+## Documentation
+
+- `docs/CONFIGURATION.md`
+- `docs/TROUBLESHOOTING.md`
+- `docs/API_REFERENCE.md`
+
 ## vLLM setup
 
 Remora uses a vLLM server on your Tailscale network. Follow the server bring-up guide, then point `remora.yaml` at the server.
