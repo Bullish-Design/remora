@@ -195,7 +195,26 @@ class FunctionGemmaRunner:
         self.event_emitter.emit(payload)
         if tool_choice is None:
             tool_choice = self.runner_config.tool_choice
-        tools_payload = self.definition.tool_schemas
+        
+        # Filter out system-injected inputs from the schema sent to the model
+        raw_tools = self.definition.tool_schemas
+        tools_payload = []
+        for tool in raw_tools:
+            # excessive copying to avoid mutating original
+            tool_copy = json.loads(json.dumps(tool))
+            tool_params = tool_copy.get("function", {}).get("parameters", {})
+            properties = tool_params.get("properties", {})
+            required = tool_params.get("required", [])
+            
+            # Keys to remove
+            for key in ["node_text", "target_file", "workspace_id", "node_text_input", "target_file_input"]:
+                if key in properties:
+                    del properties[key]
+                if key in required:
+                    required.remove(key)
+            
+            tools_payload.append(tool_copy)
+
         self._emit_tool_debug("model_tools_before", tool_choice)
         self._emit_request_debug(
             model=self._model_target,

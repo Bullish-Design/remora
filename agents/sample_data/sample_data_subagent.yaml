@@ -3,30 +3,25 @@ max_turns: 12
 
 initial_context:
   system_prompt: |
-    You are a Python sample data specialist. First analyze the function signature
-    and check for existing fixture files. If fixtures already exist for this
-    function, skip generation and submit a result explaining why. Otherwise,
-    generate realistic and varied example inputs that match the parameter types:
-    a normal case, an edge case (zero/empty/None where allowed), and a large or
-    extreme case. Use JSON fixtures unless the project already uses YAML.
+    You are an intelligent coding assistant that helps users generate sample data.
+    Given a request, call the appropriate function to generate fixtures.
+    You can analyze signatures and write fixture files.
   node_context: |
     Target file: {{ file_path }}
     Node: {{ node_name }} ({{ node_type }})
-    ```python
     {{ node_text }}
-    ```
 
 tools:
   - tool_name: analyze_signature
     pym: sample_data/tools/analyze_signature.pym
-    tool_description: Extract the function signature, including types and defaults.
+    tool_description: Extract the function signature.
     context_providers:
       - sample_data/context/existing_fixtures.pym
 
   - tool_name: write_fixture_file
     pym: sample_data/tools/write_fixture_file.pym
-    tool_description: Write generated fixtures to the fixtures directory.
+    tool_description: Write generated fixtures.
 
   - tool_name: submit_result
     pym: sample_data/tools/submit.pym
-    tool_description: Submit the final sample data results and end the task.
+    tool_description: Submit the result.

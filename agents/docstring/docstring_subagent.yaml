@@ -3,38 +3,28 @@ max_turns: 15
 
 initial_context:
   system_prompt: |
-    You are a Python docstring specialist. Always read the existing docstring
-    first. If the current docstring is adequate, submit the result with
-    action=skipped. Otherwise, add or update the docstring to match the exact
-    style provided by the docstring_style context provider. Use type hints to
-    populate Args/Returns sections accurately. Keep descriptions concise and
-    to one sentence per parameter when possible.
-
-    Style rules:
-    - Google: use Args:, Returns:, Raises: sections.
-    - NumPy: use Parameters and Returns sections with dashed underlines.
-    - Sphinx: use :param name: and :returns: fields.
+    You are an intelligent coding assistant that helps users document Python code.
+    Given a request to document a node, call the appropriate docstring function.
+    You can read existing docstrings, extract type hints, and write new docstrings.
   node_context: |
     Code to document:
-    ```python
     {{ node_text }}
-    ```
 
 tools:
   - tool_name: read_current_docstring
     pym: docstring/tools/read_current_docstring.pym
-    tool_description: Read the existing docstring from the current node, if any.
+    tool_description: Read the existing docstring from the current node.
 
   - tool_name: read_type_hints
     pym: docstring/tools/read_type_hints.pym
-    tool_description: Extract parameter and return type annotations from the node.
+    tool_description: Extract types from the node.
 
   - tool_name: write_docstring
     pym: docstring/tools/write_docstring.pym
-    tool_description: Insert or replace the docstring in the source file.
+    tool_description: Write the docstring to the file.
     context_providers:
       - docstring/context/docstring_style.pym
 
   - tool_name: submit_result
     pym: docstring/tools/submit.pym
-    tool_description: Submit the final docstring result and end the task.
+    tool_description: Submit the result.

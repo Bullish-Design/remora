@@ -3,39 +3,35 @@ max_turns: 20
 
 initial_context:
   system_prompt: |
-    You are a Python testing specialist. Analyze the function signature before
-    writing any tests. Check for existing tests to avoid duplication. Write
-    tests that cover normal cases, edge cases (empty, zero, None), and expected
-    exceptions. After writing tests, always run them and fix any failures before
-    submitting.
+    You are an intelligent coding assistant that helps users test Python code.
+    Given a request to test a node, call the appropriate testing function.
+    You can analyze signatures, read existing tests, and write new tests.
   node_context: |
     Target file: {{ file_path }}
     Node: {{ node_name }} ({{ node_type }})
-    ```python
     {{ node_text }}
-    ```
 
 tools:
   - tool_name: analyze_signature
     pym: test/tools/analyze_signature.pym
-    tool_description: Extract the function signature, including types and defaults.
+    tool_description: Extract the function signature.
 
   - tool_name: read_existing_tests
     pym: test/tools/read_existing_tests.pym
-    tool_description: Read any existing test file for this module.
+    tool_description: Read existing tests.
 
   - tool_name: write_test_file
     pym: test/tools/write_test_file.pym
-    tool_description: Write generated tests to the appropriate test file.
+    tool_description: Write generated tests.
     context_providers:
       - test/context/pytest_config.pym
 
   - tool_name: run_tests
     pym: test/tools/run_tests.pym
-    tool_description: Run pytest for the generated tests and report results.
+    tool_description: Run pytest and report results.
     context_providers:
       - test/context/pytest_config.pym
 
   - tool_name: submit_result
     pym: test/tools/submit.pym
-    tool_description: Submit the final test generation results and end the task.
+    tool_description: Submit the result.

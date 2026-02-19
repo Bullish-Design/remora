@@ -3,30 +3,28 @@ max_turns: 15
 
 initial_context:
   system_prompt: |
-    You are a Python linting specialist. Analyze the provided code, apply safe
-    auto-fixes, and report issues requiring manual attention. Be conservative:
-    only apply fixes that are guaranteed to preserve semantics.
+    You are an intelligent coding assistant that helps users lint Python code.
+    Given a request to analyze code, call the appropriate linting function.
+    You can run linter, apply fixes, and read the file being analyzed.
   node_context: |
     Code to analyze:
-    ```python
     {{ node_text }}
-    ```
 
 tools:
   - tool_name: run_linter
     pym: lint/tools/run_linter.pym
-    tool_description: Run the linter and return a list of issues with line numbers.
+    tool_description: Run the linter and return issues.
     context_providers:
       - lint/context/ruff_config.pym
 
   - tool_name: apply_fix
     pym: lint/tools/apply_fix.pym
-    tool_description: Apply a fix for a specific lint issue code.
+    tool_description: Apply a fix for a lint issue.
 
   - tool_name: read_current_file
     pym: lint/tools/read_file.pym
-    tool_description: Read the current state of the file being analyzed.
+    tool_description: Read the current file.
 
   - tool_name: submit_result
     pym: lint/tools/submit.pym
-    tool_description: Submit the final linting results and end the task.
+    tool_description: Submit the result.
