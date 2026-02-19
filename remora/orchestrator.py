@@ -322,6 +322,9 @@ class Coordinator:
             for item in raw:
                 if isinstance(item, BaseException):
                     # Task-level exception (e.g. CancelledError from shutdown)
+                    print(f"!!! SWALLOWED EXCEPTION: {type(item).__name__}: {item}", flush=True)
+                    import traceback
+                    traceback.print_exception(type(item), item, item.__traceback__)
                     continue
                 operation, outcome = item
                 if isinstance(outcome, Exception):
