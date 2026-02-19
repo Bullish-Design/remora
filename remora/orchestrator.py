@@ -298,10 +298,10 @@ class Coordinator:
 
                     # Track workspace via cache for lifecycle management
                     cache_key = ctx.agent_id
-                    ws = self._workspace_cache.get(cache_key)
+                    ws = await self._workspace_cache.get(cache_key)
                     if ws is None:
                         ws = await Fsdantic.open(path=str(workspace_path))
-                        self._workspace_cache.put(cache_key, ws)
+                        await self._workspace_cache.put(cache_key, ws)
 
                     ctx.transition(RemoraAgentState.EXECUTING)
                     try:
@@ -328,9 +328,7 @@ class Coordinator:
                         self._event_emitter.emit(payload)
                         return operation, exc
                     finally:
-                        removed_ws = self._workspace_cache.remove(cache_key)
-                        if removed_ws is not None:
-                            await removed_ws.close()
+                        await self._workspace_cache.remove(cache_key)
                         # Phase 6: Clean up any dangling snapshots for this agent
                         if self._snapshot_manager is not None:
                             self._snapshot_manager.cleanup_agent(ctx.agent_id)

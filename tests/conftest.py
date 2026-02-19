@@ -139,3 +139,12 @@ def vllm_available() -> bool:
 def skip_integration_if_unavailable(vllm_available: bool, request: pytest.FixtureRequest) -> None:
     if request.node.get_closest_marker("integration") and not vllm_available:
         pytest.skip(f"vLLM server not reachable at {SERVER.base_url}")
+
+
+@pytest.fixture
+def llm_logger(tmp_path: Path):
+    from remora.llm_logger import LlmConversationLogger
+    logger = LlmConversationLogger(output=tmp_path / "llm_conversations.log")
+    logger.open()
+    yield logger
+    logger.close()

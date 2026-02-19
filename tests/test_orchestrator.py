@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, AsyncMock
 
 import pytest
 
-from remora.config import CairnConfig, OperationConfig, RemoraConfig
+from remora.config import CairnConfig, OperationConfig, RemoraConfig, LlmLogConfig
 from remora.discovery import CSTNode, NodeType
 from remora.errors import AGENT_001
 from remora.orchestrator import Coordinator, RemoraAgentContext, RemoraAgentState
@@ -36,6 +36,7 @@ def _make_config(tmp_path: Path, operations: dict[str, OperationConfig], *, max_
         agents_dir=agents_dir,
         operations=operations,
         cairn=CairnConfig(max_concurrent_agents=max_concurrent),
+        llm_log=LlmLogConfig(enabled=True, output=tmp_path / "llm_conversations.log"),
     )
 
 

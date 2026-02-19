@@ -27,7 +27,7 @@ def _load_fixture() -> str:
 
 
 @pytest.mark.integration
-def test_lint_runner_fixes_issues(grail_executor_factory, tmp_path) -> None:
+def test_lint_runner_fixes_issues(grail_executor_factory, tmp_path, llm_logger) -> None:
     text = _load_fixture()
     node = CSTNode(
         node_id="lint_001",
@@ -55,6 +55,7 @@ def test_lint_runner_fixes_issues(grail_executor_factory, tmp_path) -> None:
         grail_dir=workspace_dir,
         server_config=_server_config(),
         runner_config=_runner_config(),
+        event_emitter=llm_logger,
     )
 
     result = asyncio.run(runner.run())
