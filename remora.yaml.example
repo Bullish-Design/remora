@@ -57,7 +57,7 @@ runner:
   tool_choice: "required"  # "required" | "auto" | "none"
 
 cairn:
-  command: cairn
+  # command: cairn  # Removed (using in-process execution)
   home: null
   max_concurrent_agents: 16
   timeout: 300

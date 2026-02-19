@@ -81,7 +81,7 @@ class DiscoveryConfig(BaseModel):
 
 
 class CairnConfig(BaseModel):
-    command: str = "cairn"               # DEPRECATED — kept for migration period
+    # command: str = "cairn"  # REMOVED: In-process execution only
     home: Path | None = None
     max_concurrent_agents: int = 16
     timeout: int = 300

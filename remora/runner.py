@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageParam, ChatCompletionToolParam
 
-from remora.cairn import CairnError
+
 from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode
 from remora.events import EventEmitter, NullEventEmitter
@@ -25,10 +25,7 @@ if TYPE_CHECKING:
     from remora.orchestrator import RemoraAgentContext
 
 
-class CairnClient(Protocol):
-    """Protocol for Cairn integration (legacy subprocess path)."""
 
-    async def run_pym(self, path: Any, workspace_id: str, inputs: dict[str, Any]) -> dict[str, Any] | str: ...
 
 
 class GrailExecutor(Protocol):
@@ -78,7 +75,7 @@ class FunctionGemmaRunner:
     definition: SubagentDefinition
     node: CSTNode
     ctx: RemoraAgentContext
-    cairn_client: CairnClient
+
     server_config: ServerConfig
     runner_config: RunnerConfig
     adapter_name: str | None = None
@@ -514,16 +511,16 @@ class FunctionGemmaRunner:
             self._emit_tool_result(tool_name, tool_error)
             return json.dumps(tool_error)
 
-        # --- In-process execution via GrailExecutor (new path) ---
+        # --- In-process execution via GrailExecutor ---
         if self.grail_executor is not None and self.grail_dir is not None:
             return await self._dispatch_tool_grail(
                 tool_name, tool_def, tool_inputs,
             )
 
-        # --- Legacy subprocess execution via CairnClient ---
-        return await self._dispatch_tool_cairn(
-            tool_name, tool_def, tool_inputs,
-        )
+        # If we get here, no executor is configured
+        tool_error = {"error": "No execution backend configured"}
+        self._emit_tool_result(tool_name, tool_error)
+        return json.dumps(tool_error)
 
     async def _dispatch_tool_grail(
         self,
@@ -582,33 +579,3 @@ class FunctionGemmaRunner:
         content_parts = context_parts + [json.dumps(tool_result)]
         return "\n".join(content_parts)
 
-    async def _dispatch_tool_cairn(
-        self,
-        tool_name: str,
-        tool_def: Any,
-        tool_inputs: dict[str, Any],
-    ) -> str:
-        """Execute a tool via the legacy Cairn CLI subprocess."""
-        context_parts: list[str] = []
-        for provider_path in tool_def.context_providers:
-            try:
-                context = await self.cairn_client.run_pym(
-                    provider_path,
-                    self.workspace_id,
-                    inputs=self._base_tool_inputs(),
-                )
-            except CairnError as exc:
-                tool_error = {"error": f"Context provider failed for {provider_path}: {exc}"}
-                self._emit_tool_result(tool_name, tool_error)
-                return json.dumps(tool_error)
-            context_parts.append(json.dumps(context))
-
-        try:
-            result = await self.cairn_client.run_pym(tool_def.pym, self.workspace_id, inputs=tool_inputs)
-        except CairnError as exc:
-            tool_error = {"error": str(exc)}
-            self._emit_tool_result(tool_name, tool_error)
-            return json.dumps(tool_error)
-        self._emit_tool_result(tool_name, result)
-        content_parts = context_parts + [json.dumps(result)]
-        return "\n".join(content_parts)
