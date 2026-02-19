@@ -1,24 +1,33 @@
 # How to Create a Grail `.pym` Script
 
-Grail is the library Cairn uses to safely execute Python code inside Monty — a minimal, sandboxed Python interpreter written in Rust. This guide explains how to write `.pym` files that Cairn agents run.
+Grail is the library that powers safe code execution inside Monty — a minimal, sandboxed Python interpreter written in Rust. This guide explains how to write `.pym` files for use in Remora agents and standalone Cairn scripts.
+
+> **See also:** [HOW_TO_CREATE_AN_AGENT.md](HOW_TO_CREATE_AN_AGENT.md) for the full agent creation workflow — YAML definitions, prompt engineering, tool schemas, and the end-to-end pipeline.
 
 ---
 
 ## Table of Contents
 
 1. [What is a `.pym` File?](#1-what-is-a-pym-file)
-2. [File Structure](#2-file-structure)
-3. [Declaring Inputs](#3-declaring-inputs)
-4. [Declaring External Functions](#4-declaring-external-functions)
-5. [Executable Code](#5-executable-code)
-6. [Return Value](#6-return-value)
-7. [Supported Python Features](#7-supported-python-features)
-8. [Unsupported Python Features](#8-unsupported-python-features)
-9. [Cairn's External Function API](#9-cairns-external-function-api)
-10. [Validating with `grail check`](#10-validating-with-grail-check)
-11. [Error Handling](#11-error-handling)
-12. [Resource Limits](#12-resource-limits)
-13. [Examples](#13-examples)
+2. [Two Modes: Remora Tool vs. Standalone Agent](#2-two-modes-remora-tool-vs-standalone-agent)
+3. [File Structure](#3-file-structure)
+4. [Declaring Inputs](#4-declaring-inputs)
+5. [Declaring External Functions](#5-declaring-external-functions)
+6. [Executable Code](#6-executable-code)
+7. [Return Value](#7-return-value)
+8. [Supported Python Features](#8-supported-python-features)
+9. [Unsupported Python Features](#9-unsupported-python-features)
+10. [External Function API](#10-external-function-api)
+11. [Validating with `grail check`](#11-validating-with-grail-check)
+12. [Error Handling](#12-error-handling)
+13. [Resource Limits](#13-resource-limits)
+14. [Remora Tool Patterns](#14-remora-tool-patterns)
+15. [Examples — Remora Tools](#15-examples--remora-tools)
+    - [Read-Only Tool: Read Current Docstring](#read-only-tool-read-current-docstring)
+    - [Write Tool: Apply Lint Fix](#write-tool-apply-lint-fix)
+    - [Submit Tool: Lint Result](#submit-tool-lint-result)
+    - [Context Provider: Ruff Config](#context-provider-ruff-config)
+16. [Examples — Standalone Cairn Agents](#16-examples--standalone-cairn-agents)
     - [Simple: Echo Task Description](#simple-echo-task-description)
     - [Simple: List and Log Directory Contents](#simple-list-and-log-directory-contents)
     - [Intermediate: Search and Report](#intermediate-search-and-report)
@@ -36,11 +45,61 @@ Key characteristics:
 - `.pym` files are **valid Python** — IDEs provide syntax highlighting, autocomplete, and type checking.
 - They run inside **Monty**, not CPython, so only a subset of Python is available.
 - They declare their external dependencies (inputs and functions) explicitly at the top of the file, making the interface transparent and checkable before execution.
-- In Cairn, the orchestrator loads and runs `.pym` scripts as agents, providing file system access through the declared external functions.
+- In Remora, `.pym` scripts serve as individual **tools** that an LLM agent calls in a loop.
+- In standalone Cairn mode, a single `.pym` script can be a complete **agent** that does all the work itself.
 
 ---
 
-## 2. File Structure
+## 2. Two Modes: Remora Tool vs. Standalone Agent
+
+`.pym` scripts are used in two distinct ways. Understanding the difference is critical for writing effective scripts.
+
+### Remora Tool Scripts
+
+In Remora, an LLM agent (e.g. FunctionGemma 270M) decides which tools to call. Each tool is a separate `.pym` file that does **one thing**:
+
+```
+LLM decides → calls run_linter.pym → gets result →
+LLM decides → calls apply_fix.pym → gets result →
+LLM decides → calls submit_result.pym → done
+```
+
+**Characteristics of Remora tool scripts:**
+
+| Property | Value |
+|----------|-------|
+| Size | Small (30–150 lines) |
+| Inputs | System-injected (`node_text`, `target_file`) + model-provided (`issue_code`, etc.) |
+| External functions | Only the ones the tool needs (typically 2–4) |
+| Return value | Dict with result data — fed back to the LLM as a tool response |
+| `submit_result` | A **separate** `.pym` script, not an `@external` call |
+| Error handling | `try/except` wrapper — never crash, return `{"error": ...}` |
+
+### Standalone Cairn Agent Scripts
+
+In standalone mode (without an LLM loop), a single `.pym` script receives a `task_description`, does everything, and calls `submit_result()` as an `@external` function:
+
+```
+Cairn injects task_description → agent.pym does all work →
+calls submit_result() externally → returns final dict
+```
+
+**Characteristics of standalone scripts:**
+
+| Property | Value |
+|----------|-------|
+| Size | Larger (100–300 lines) |
+| Inputs | `task_description` (str) + custom inputs |
+| External functions | Usually all 8 Cairn externals |
+| Return value | Dict with summary — secondary to `submit_result()` |
+| `submit_result` | An `@external` function called within the script |
+| Error handling | Can use either pattern |
+
+Both modes use the same `.pym` syntax, the same Grail tooling, and the same Monty interpreter. The difference is in how they're orchestrated.
+
+---
+
+## 3. File Structure
 
 A `.pym` file has two clear sections:
 
@@ -79,9 +138,9 @@ await log(message=f"Received task: {task_description}")
 
 ---
 
-## 3. Declaring Inputs
+## 4. Declaring Inputs
 
-Inputs are values that the host (Cairn) injects at runtime. Declare them with `Input()`:
+Inputs are values that the host injects at runtime. Declare them with `Input()`:
 
 ```python
 from grail import Input
@@ -96,15 +155,50 @@ verbose: bool = Input("verbose", default=False)
 
 **Supported input types:** `str`, `int`, `float`, `bool`, `list[T]`, `dict[K, V]`, `None`, `Any`, and unions like `str | None`.
 
-In Cairn, every agent script receives exactly one standard input:
+### Remora Tool Inputs
 
-| Name               | Type  | Description                              |
-|--------------------|-------|------------------------------------------|
+In Remora, tools receive two categories of inputs:
+
+**System-injected inputs** — provided automatically by the runner, never by the model:
+
+| Name | Type | Description |
+|------|------|-------------|
+| `node_text` / `node_text_input` | `str \| None` | Source code of the target node |
+| `target_file` / `target_file_input` | `str \| None` | Relative path to the source file |
+| `workspace_id` | `str \| None` | Agent workspace identifier |
+
+**Model-provided inputs** — arguments the LLM chooses to pass:
+
+| Example | Type | Description |
+|---------|------|-------------|
+| `issue_code` | `str` | A ruff issue code like `F401` |
+| `line_number` | `int` | Line number for a fix |
+| `docstring` | `str` | Docstring text to write |
+| `check_only` | `bool` | Whether to only check without fixing |
+
+Always declare system-injected inputs with `default=None` so they work both in the agent loop (where they're injected) and in standalone testing (where they might not be):
+
+```python
+# System-injected — always use default=None
+node_text_input: str | None = Input("node_text", default=None)
+target_file_input: str | None = Input("target_file", default=None)
+
+# Model-provided — required (no default) unless optional
+issue_code: str = Input("issue_code")
+line_number: int = Input("line_number")
+```
+
+### Standalone Cairn Inputs
+
+In standalone Cairn mode, every agent receives one standard input:
+
+| Name | Type | Description |
+|------|------|-------------|
 | `task_description` | `str` | The task the agent was asked to complete |
 
 ---
 
-## 4. Declaring External Functions
+## 5. Declaring External Functions
 
 External functions are callable capabilities provided by the host at runtime. Declare them with `@external`:
 
@@ -128,14 +222,20 @@ async def write_file(path: str, content: str) -> bool:
 - The decorator is `@external`, imported from `grail`.
 - The function signature must have complete type annotations on every parameter and the return type.
 - The body must be `...` (a bare Ellipsis literal — not a string, not a `pass`).
-- The function can be `async def` (most Cairn tools are async) or `def`.
+- The function can be `async def` (most tools are async) or `def`.
 - The docstring (optional but recommended) becomes hover documentation in your IDE.
 
 Only declare externals you actually call. Declared-but-unused externals produce a `W002` warning from `grail check`.
 
+### Remora vs. Standalone Usage
+
+In **Remora tools**, declare only the externals your specific tool needs. A read-only tool might only need `read_file` and `file_exists`. A submit tool might not need any externals at all.
+
+In **standalone Cairn agents**, you typically declare most or all of the available externals since your script handles the entire workflow.
+
 ---
 
-## 5. Executable Code
+## 6. Executable Code
 
 After the declarations section, write the executable logic. This runs directly in Monty at the top level — there is no `main()` function to define.
 
@@ -181,7 +281,7 @@ result = await process({"name": "example"})
 
 ---
 
-## 6. Return Value
+## 7. Return Value
 
 The last expression in the file is the script's return value. It can be any value — a dict, a list, a string, a bool, or `None`.
 
@@ -194,11 +294,22 @@ The last expression in the file is the script's return value. It can be any valu
 }
 ```
 
-For Cairn agents, the return value is typically a dict summarizing what was done. The primary output channel is `submit_result()`, which must be called before the script ends. The return value from the script itself is secondary — it is logged but not used for agent review.
+### Return Values in Remora Tools
+
+In Remora, the return value is JSON-serialized and sent back to the LLM as a tool response message. The LLM reads this to decide what to do next. Design return values with the model in mind:
+
+- **Be concise.** Large return values waste context tokens.
+- **Use flat dicts.** Avoid deep nesting.
+- **Include actionable data.** Return information the model needs for its next decision.
+- **On errors, return `{"error": "message"}`** so the model can interpret the failure.
+
+### Return Values in Standalone Cairn Agents
+
+In standalone mode, the return value is logged but not used for agent review. The primary output channel is `submit_result()`, which must be called before the script ends.
 
 ---
 
-## 7. Supported Python Features
+## 8. Supported Python Features
 
 Monty supports a practical subset of Python:
 
@@ -226,7 +337,7 @@ Monty supports a practical subset of Python:
 
 ---
 
-## 8. Unsupported Python Features
+## 9. Unsupported Python Features
 
 These Python features are **not available** in Monty. `grail check` will report errors if you use them:
 
@@ -264,9 +375,9 @@ config = {"max_size": 100, "mode": "fast"}
 
 ---
 
-## 9. Cairn's External Function API
+## 10. External Function API
 
-Cairn injects these eight external functions into every agent script. Declare only the ones you use.
+These external functions are available to `.pym` scripts at runtime. In **Remora tools**, declare only the ones you use. In **standalone agents**, you may declare most or all of them.
 
 ### `read_file`
 
@@ -348,7 +459,23 @@ async def search_content(pattern: str, path: str = ".") -> list[dict[str, Any]]:
   - `"line"`: Line number (int, 1-indexed)
   - `"text"`: The matching line content (str)
 
-### `submit_result`
+### `run_command`
+
+```python
+@external
+async def run_command(command: str) -> dict[str, Any]:
+    """Execute a shell command and return its output."""
+    ...
+```
+
+- `command`: The shell command to execute.
+- Returns: A dict with:
+  - `"stdout"`: Standard output (str)
+  - `"stderr"`: Standard error (str)
+  - `"returncode"`: Exit code (int)
+- Commands run in the agent's workspace directory.
+
+### `submit_result` (standalone Cairn agents only)
 
 ```python
 @external
@@ -361,6 +488,8 @@ async def submit_result(summary: str, changed_files: list[str]) -> bool:
 - `changed_files`: List of relative paths to files that were created or modified.
 - Returns `True` on success.
 - **Must be called before the script ends.** Without a call to `submit_result`, the orchestrator will not transition the agent to the reviewing state.
+
+> **Note:** In Remora, `submit_result` is a separate `.pym` **tool** — it is NOT declared as an `@external` in other tools. See [HOW_TO_CREATE_AN_AGENT.md](HOW_TO_CREATE_AN_AGENT.md#8-the-submit_result-tool) for the Remora submit pattern.
 
 ### `log`
 
@@ -377,7 +506,7 @@ async def log(message: str) -> bool:
 
 ---
 
-## 10. Validating with `grail check`
+## 11. Validating with `grail check`
 
 Before running a script, validate it:
 
@@ -398,7 +527,7 @@ grail check --format json my_agent.pym
 **Error codes:**
 
 | Code  | Severity | Meaning                                            |
-|-------|----------|----------------------------------------------------|
+|-------|----------|----------------------------------------------------
 | E001  | Error    | Class definition (not supported in Monty)         |
 | E002  | Error    | Generator / `yield` (not supported)               |
 | E003  | Error    | `with` statement (not supported)                  |
@@ -418,13 +547,15 @@ After running `grail check`, inspect `.grail/<script_name>/` for generated artif
 - `stubs.pyi` — generated type stubs for Monty's type checker
 - `check.json` — validation results
 - `externals.json` — extracted external function signatures
-- `inputs.json` — extracted input declarations
+- `inputs.json` — extracted input declarations (used by Remora's `tool_registry.py` to build tool schemas)
 - `monty_code.py` — the actual code sent to Monty (declarations stripped)
 - `run.log` — stdout/stderr from the last execution
 
+> **Remora integration:** The `inputs.json` file is critical. Remora's `tool_registry.py` reads it to build the OpenAI-format tool schema that the LLM sees. Always run `grail check` after modifying a `.pym` file to regenerate this file.
+
 ---
 
-## 11. Error Handling
+## 12. Error Handling
 
 ### In the Script
 
@@ -436,6 +567,20 @@ try:
 except Exception as e:
     await log(message=f"Could not read config.json: {e}")
     content = "{}"
+```
+
+### Remora Tool Pattern
+
+In Remora tools, always wrap the entire executable section so the tool never crashes. A crash aborts the entire agent run:
+
+```python
+try:
+    # ... do work ...
+    result = {"success": True, "data": processed_data}
+except Exception as exc:
+    result = {"error": str(exc)}
+
+result
 ```
 
 ### Error Types from the Host
@@ -456,7 +601,7 @@ Errors reference the original `.pym` file with line numbers — not the generate
 
 ---
 
-## 12. Resource Limits
+## 13. Resource Limits
 
 Monty enforces resource limits to prevent runaway scripts. Cairn's defaults (from `ExecutorSettings`):
 
@@ -466,23 +611,462 @@ Monty enforces resource limits to prevent runaway scripts. Cairn's defaults (fro
 | Memory           | 100 MB        |
 | Recursion depth  | 1000 frames   |
 
-If a script exceeds a limit, Cairn raises a `ResourceLimitError` or `TimeoutError` and marks the agent as `ERRORED`.
+If a script exceeds a limit, a `ResourceLimitError` or `TimeoutError` is raised.
 
 To avoid hitting limits:
 
 - Avoid deep recursion — use loops instead of recursive helpers.
 - Process data incrementally rather than loading everything into memory.
 - Keep helper functions shallow and focused.
+- In Remora tools, keep scripts small and focused on one task — this naturally avoids limit issues.
 
 ---
 
-## 13. Examples
+## 14. Remora Tool Patterns
+
+These patterns appear throughout Remora's existing tool scripts. Follow them when writing new tools.
+
+### Pattern 1: Defensive Input Resolution
+
+System-injected inputs may or may not be present (e.g. during testing). Always provide a fallback chain:
+
+```python
+from grail import Input, external
+
+target_file_input: str | None = Input("target_file", default=None)
+node_text_input: str | None = Input("node_text", default=None)
+
+@external
+async def read_file(path: str) -> str:
+    """Read the text contents of a file."""
+    ...
+
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async def _read_optional(path: str) -> str | None:
+    """Read a file if it exists, otherwise return None."""
+    if await file_exists(path=path):
+        return await read_file(path=path)
+    return None
+
+
+async def _resolve_target_file() -> str | None:
+    """Resolve target file from injected input or workspace file."""
+    if target_file_input:
+        return target_file_input.strip()
+    stored = await _read_optional(path=".remora/target_file")
+    if stored:
+        return stored.strip()
+    return None
+
+
+async def _load_node_text() -> str:
+    """Load node text from injected input, workspace file, or target file."""
+    if node_text_input:
+        return node_text_input
+    stored = await _read_optional(path=".remora/node_text")
+    if stored:
+        return stored
+    target_file = await _resolve_target_file()
+    if target_file and await file_exists(path=target_file):
+        return await read_file(path=target_file)
+    return ""
+```
+
+This resolution chain tries three sources in order:
+1. The injected input (provided by the runner during normal operation)
+2. A workspace file (`.remora/target_file` or `.remora/node_text`) for testing/debugging
+3. Direct file read as a last resort
+
+### Pattern 2: Try/Except Wrapper
+
+Every Remora tool must wrap its executable section:
+
+```python
+try:
+    # All tool logic here
+    source = await _load_node_text()
+    # ... process ...
+    result = {"data": processed, "count": len(processed)}
+except Exception as exc:
+    result = {"error": str(exc)}
+
+result
+```
+
+### Pattern 3: Concise, Flat Return Dicts
+
+Return values go into the LLM's context window. Keep them small and flat:
+
+```python
+# Good — concise, flat, actionable
+result = {
+    "issues": [
+        {"code": "F401", "line": 5, "fixable": True},
+        {"code": "E501", "line": 12, "fixable": False},
+    ],
+    "total": 2,
+    "fixable_count": 1,
+}
+
+# Bad — verbose, nested, wastes tokens
+result = {
+    "analysis": {
+        "results": {
+            "issues": {
+                "critical": [...],
+                "warnings": [...],
+            }
+        }
+    }
+}
+```
+
+### Pattern 4: One Tool, One Job
+
+Each `.pym` tool should either read or write, not both. This gives the LLM clearer choices:
+
+| Tool Purpose | Does | Doesn't |
+|----------|------|---------|
+| `read_current_docstring.pym` | Reads and extracts docstring | Modify the file |
+| `write_docstring.pym` | Writes/replaces docstring in file | Return analysis |
+| `run_linter.pym` | Runs ruff and returns issues | Apply fixes |
+| `apply_fix.pym` | Applies a specific fix | Run full linting |
+
+### Pattern 5: Use `run_command` for External Tooling
+
+When you need to invoke an external tool (linter, test runner, formatter), use the `run_command` external:
+
+```python
+@external
+async def run_command(command: str) -> dict[str, Any]:
+    """Execute a shell command and return its output."""
+    ...
+
+result = await run_command(command=f"ruff check --select {issue_code} {target_file}")
+stdout = result["stdout"]
+returncode = result["returncode"]
+```
+
+Parse the stdout/stderr from the command to build your tool's return dict.
+
+---
+
+## 15. Examples — Remora Tools
+
+These examples show the patterns used in Remora agent tools — small, focused `.pym` scripts that the LLM calls individually.
+
+---
+
+### Read-Only Tool: Read Current Docstring
+
+Reads and extracts the existing docstring from a Python function or class. Does not modify any files.
+
+**`read_current_docstring.pym`:**
+```python
+from grail import Input, external
+
+node_text_input: str | None = Input("node_text", default=None)
+target_file_input: str | None = Input("target_file", default=None)
+
+
+@external
+async def read_file(path: str) -> str:
+    """Read the text contents of a file."""
+    ...
+
+
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
+
+
+async def _read_optional(path: str) -> str | None:
+    if await file_exists(path=path):
+        return await read_file(path=path)
+    return None
+
+
+async def _resolve_target_file() -> str | None:
+    if target_file_input:
+        return target_file_input.strip()
+    stored = await _read_optional(path=".remora/target_file")
+    if stored:
+        return stored.strip()
+    return None
+
+
+async def _load_node_text() -> str:
+    if node_text_input:
+        return node_text_input
+    stored = await _read_optional(path=".remora/node_text")
+    if stored:
+        return stored
+    target_file = await _resolve_target_file()
+    if target_file and await file_exists(path=target_file):
+        return await read_file(path=target_file)
+    return ""
+
+
+def _find_definition(lines: list[str]) -> tuple[int, int] | None:
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("async def ") or stripped.startswith("def ") or stripped.startswith("class "):
+            indent = len(line) - len(line.lstrip())
+            return index, indent
+    return None
+
+
+def _extract_docstring(lines: list[str], start_index: int, base_indent: int) -> str | None:
+    for index in range(start_index + 1, len(lines)):
+        line = lines[index]
+        stripped = line.strip()
+        if not stripped:
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= base_indent:
+            return None
+        if stripped.startswith('"""') or stripped.startswith("'''"):
+            quote = stripped[:3]
+            remainder = stripped[3:]
+            if remainder.endswith(quote):
+                return remainder[: -3].strip()
+            content_lines: list[str] = []
+            if remainder:
+                content_lines.append(remainder)
+            for inner_index in range(index + 1, len(lines)):
+                inner_line = lines[inner_index]
+                if quote in inner_line:
+                    before = inner_line.split(quote, 1)[0]
+                    content_lines.append(before)
+                    return "\n".join(content_lines).strip()
+                content_lines.append(inner_line.strip())
+            return "\n".join(content_lines).strip()
+        return None
+    return None
+
+
+try:
+    source = await _load_node_text()
+    lines = source.splitlines()
+    definition = _find_definition(lines)
+    if not definition:
+        result = {"error": "No docstring-capable node found in node text."}
+    else:
+        index, indent = definition
+        docstring = _extract_docstring(lines, index, indent)
+        result = {"docstring": docstring, "has_docstring": bool(docstring)}
+except Exception as exc:
+    result = {"error": str(exc)}
+
+result
+```
+
+**What this demonstrates:**
+- Defensive input resolution (`_load_node_text`, `_resolve_target_file`)
+- Read-only — no `write_file` declared
+- String parsing in pure Python (no `re` or `ast` available)
+- Concise return dict with `has_docstring` flag for easy LLM interpretation
+- Full `try/except` wrapper
+
+---
+
+### Write Tool: Apply Lint Fix
+
+Applies a ruff autofix for a specific issue code at a specific line. Takes model-provided arguments.
+
+**`apply_fix.pym`:**
+```python
+from grail import Input, external
+from typing import Any
+
+issue_code: str = Input("issue_code")
+line_number: int = Input("line_number")
+target_file_input: str | None = Input("target_file", default=None)
+
+
+@external
+async def run_command(command: str) -> dict[str, Any]:
+    """Execute a shell command and return its output."""
+    ...
+
+
+@external
+async def read_file(path: str) -> str:
+    """Read the text contents of a file."""
+    ...
+
+
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
+
+
+async def _read_optional(path: str) -> str | None:
+    if await file_exists(path=path):
+        return await read_file(path=path)
+    return None
+
+
+async def _resolve_target_file() -> str | None:
+    if target_file_input:
+        return target_file_input.strip()
+    stored = await _read_optional(path=".remora/target_file")
+    if stored:
+        return stored.strip()
+    return None
+
+
+try:
+    target_file = await _resolve_target_file()
+    if not target_file:
+        raise ValueError("Target file not found.")
+
+    cmd = f"ruff check --select {issue_code} --fix {target_file}"
+    run_result = await run_command(command=cmd)
+
+    updated_content = await read_file(path=target_file)
+
+    result = {
+        "success": run_result["returncode"] == 0,
+        "issue_code": issue_code,
+        "line_number": line_number,
+        "stdout": run_result["stdout"],
+        "file_content_after": updated_content[:500],  # Truncate for context
+    }
+except Exception as exc:
+    result = {"error": str(exc)}
+
+result
+```
+
+**What this demonstrates:**
+- Model-provided inputs (`issue_code`, `line_number`) alongside system-injected inputs
+- Using `run_command` for external tooling (ruff)
+- Truncating large outputs to preserve context tokens
+- Write operation — modifies the file via ruff
+
+---
+
+### Submit Tool: Lint Result
+
+The submit tool that the LLM calls when linting is complete. All arguments are model-provided except `workspace_id`.
+
+**`submit.pym`:**
+```python
+from grail import Input
+
+summary: str = Input("summary")
+issues_fixed: int = Input("issues_fixed")
+issues_remaining: int = Input("issues_remaining")
+changed_files: list[str] = Input("changed_files")
+workspace_id: str | None = Input("workspace_id", default=None)
+
+workspace_value = workspace_id or "unknown"
+
+try:
+    status = "success" if issues_remaining == 0 else "failed"
+    result = {
+        "status": status,
+        "workspace_id": workspace_value,
+        "changed_files": [str(path) for path in changed_files],
+        "summary": str(summary),
+        "details": {
+            "issues_fixed": int(issues_fixed),
+            "issues_remaining": int(issues_remaining),
+        },
+        "error": None,
+    }
+except Exception as exc:
+    result = {
+        "status": "failed",
+        "workspace_id": workspace_value,
+        "changed_files": [],
+        "summary": "",
+        "details": {},
+        "error": str(exc),
+    }
+
+result
+```
+
+**What this demonstrates:**
+- No `@external` functions needed — submit is pure data assembly
+- `workspace_id` is system-injected (filtered from model view), all others are model-provided
+- Status is derived from the data (`issues_remaining == 0`)
+- Error path always returns a valid dict
+
+---
+
+### Context Provider: Ruff Config
+
+Context providers run before a tool and inject additional context. This one reads the project's ruff configuration.
+
+**`ruff_config.pym`:**
+```python
+from grail import Input, external
+
+target_file_input: str | None = Input("target_file", default=None)
+
+
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
+
+
+@external
+async def read_file(path: str) -> str:
+    """Read the text contents of a file."""
+    ...
+
+
+async def _read_optional(path: str) -> str | None:
+    if await file_exists(path=path):
+        return await read_file(path=path)
+    return None
+
+
+# Check common ruff config locations
+config_content = None
+for config_path in ["ruff.toml", ".ruff.toml", "pyproject.toml"]:
+    content = await _read_optional(path=config_path)
+    if content:
+        config_content = content
+        break
+
+if config_content:
+    result = {"ruff_config": config_content[:1000], "config_source": config_path}
+else:
+    result = {"ruff_config": None, "config_source": None}
+
+result
+```
+
+**What this demonstrates:**
+- Context provider pattern — no model-provided inputs, only system-injected
+- Reads project config files
+- Truncates large config content
+- Result is prepended to the main tool's output
+
+---
+
+## 16. Examples — Standalone Cairn Agents
+
+These examples show the standalone Cairn agent pattern — a single `.pym` that handles the entire workflow. This pattern is useful for self-contained tasks that don't need LLM-guided decision making.
 
 ---
 
 ### Simple: Echo Task Description
 
-The minimal valid Cairn agent script. Declares the standard `task_description` input and `submit_result` external, logs what it received, and submits.
+The minimal valid standalone Cairn agent script. Declares the standard `task_description` input and `submit_result` external, logs what it received, and submits.
 
 **`echo_task.pym`:**
 ```python
@@ -967,7 +1551,7 @@ await log(message=f"Done. {summary}")
 
 **What this demonstrates:**
 - Six inputs, including booleans and strings with defaults
-- All eight Cairn external functions declared and used
+- Most Cairn external functions declared and used
 - Helper functions (closures) defined between declarations and executable code
 - A helper that returns a `tuple[bool, int]`
 - Multi-phase agent workflow (search → replace → verify → submit)
@@ -981,7 +1565,35 @@ await log(message=f"Done. {summary}")
 
 ## Appendix: Quick Reference
 
-### Minimal Cairn Agent Template
+### Minimal Remora Tool Template
+
+```python
+from grail import Input, external
+
+node_text_input: str | None = Input("node_text", default=None)
+target_file_input: str | None = Input("target_file", default=None)
+
+@external
+async def read_file(path: str) -> str:
+    """Read the text contents of a file."""
+    ...
+
+@external
+async def file_exists(path: str) -> bool:
+    """Check if a file or directory exists."""
+    ...
+
+# Your logic here
+try:
+    # ... do work with node_text_input or target_file_input ...
+    result = {"success": True}
+except Exception as exc:
+    result = {"error": str(exc)}
+
+result
+```
+
+### Minimal Standalone Agent Template
 
 ```python
 from grail import external, Input
@@ -1007,7 +1619,7 @@ await submit_result(summary="Task complete.", changed_files=[])
 {"status": "ok"}
 ```
 
-### All Cairn External Function Signatures
+### All External Function Signatures
 
 ```python
 from grail import external
@@ -1032,18 +1644,31 @@ async def search_files(pattern: str) -> list[str]: ...
 async def search_content(pattern: str, path: str = ".") -> list[dict[str, Any]]: ...
 
 @external
-async def submit_result(summary: str, changed_files: list[str]) -> bool: ...
+async def run_command(command: str) -> dict[str, Any]: ...
+
+@external
+async def submit_result(summary: str, changed_files: list[str]) -> bool: ...  # standalone only
 
 @external
 async def log(message: str) -> bool: ...
+```
+
+### System-Injected Inputs (Remora)
+
+These are automatically provided by the runner and filtered from the LLM's tool schema view:
+
+```python
+node_text_input: str | None = Input("node_text", default=None)      # Source code of target node
+target_file_input: str | None = Input("target_file", default=None)  # Relative path to source file
+workspace_id: str | None = Input("workspace_id", default=None)      # Agent workspace ID
 ```
 
 ### `grail check` Cheat Sheet
 
 ```bash
 grail check                        # Check all .pym files
-grail check my_agent.pym           # Check one file
-grail check --strict my_agent.pym  # Warnings as errors
+grail check my_tool.pym            # Check one file
+grail check --strict my_tool.pym   # Warnings as errors
 grail check --format json          # JSON output for CI
 grail watch                        # Auto-check on file changes
 grail clean                        # Remove .grail/ artifacts

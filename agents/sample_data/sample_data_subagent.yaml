@@ -3,9 +3,7 @@ max_turns: 12
 
 initial_context:
   system_prompt: |
-    You are an intelligent coding assistant that helps users generate sample data.
-    Given a request, call the appropriate function to generate fixtures.
-    You can analyze signatures and write fixture files.
+    You are a Python fixture generator. Given Python code, call the appropriate function to analyze the function signature or write fixture data. Always call a function.
   node_context: |
     Target file: {{ file_path }}
     Node: {{ node_name }} ({{ node_type }})
@@ -14,14 +12,19 @@ initial_context:
 tools:
   - tool_name: analyze_signature
     pym: sample_data/tools/analyze_signature.pym
-    tool_description: Extract the function signature.
+    tool_description: Extract the function signature, parameter names, and types from the Python code to determine what fixture data is needed.
     context_providers:
       - sample_data/context/existing_fixtures.pym
 
   - tool_name: write_fixture_file
     pym: sample_data/tools/write_fixture_file.pym
-    tool_description: Write generated fixtures.
+    tool_description: Write generated fixture data to a file for use in tests.
+    inputs_override:
+      fixtures:
+        description: "List of fixture data objects to write."
+      format_input:
+        description: "The output format for fixtures. Defaults to json."
 
   - tool_name: submit_result
     pym: sample_data/tools/submit.pym
-    tool_description: Submit the result.
+    tool_description: Submit the final result after fixture generation is complete.

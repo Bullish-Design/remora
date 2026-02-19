@@ -3,9 +3,7 @@ max_turns: 15
 
 initial_context:
   system_prompt: |
-    You are an intelligent coding assistant that helps users document Python code.
-    Given a request to document a node, call the appropriate docstring function.
-    You can read existing docstrings, extract type hints, and write new docstrings.
+    You are a Python docstring generator. Given Python code, call the appropriate function to read, analyze, or write docstrings. Always call a function.
   node_context: |
     Code to document:
     {{ node_text }}
@@ -13,18 +11,30 @@ initial_context:
 tools:
   - tool_name: read_current_docstring
     pym: docstring/tools/read_current_docstring.pym
-    tool_description: Read the existing docstring from the current node.
+    tool_description: Read the existing docstring from the current Python function or class. Returns the docstring text if one exists.
 
   - tool_name: read_type_hints
     pym: docstring/tools/read_type_hints.pym
-    tool_description: Extract types from the node.
+    tool_description: Extract parameter type annotations and return type from the Python function signature.
 
   - tool_name: write_docstring
     pym: docstring/tools/write_docstring.pym
-    tool_description: Write the docstring to the file.
+    tool_description: Write or replace a docstring on the current Python function or class.
+    inputs_override:
+      docstring:
+        description: "The docstring text to write."
+      style:
+        description: "The docstring style format to use, e.g. google or numpy."
     context_providers:
       - docstring/context/docstring_style.pym
 
   - tool_name: submit_result
     pym: docstring/tools/submit.pym
-    tool_description: Submit the result.
+    tool_description: Submit the final result after docstring work is complete.
+    inputs_override:
+      summary:
+        description: "A short summary of what was done."
+      action:
+        description: "The action taken: added, updated, or skipped."
+      changed_files:
+        description: "List of file paths that were modified."

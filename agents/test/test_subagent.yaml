@@ -3,9 +3,7 @@ max_turns: 20
 
 initial_context:
   system_prompt: |
-    You are an intelligent coding assistant that helps users test Python code.
-    Given a request to test a node, call the appropriate testing function.
-    You can analyze signatures, read existing tests, and write new tests.
+    You are a Python test generator. Given Python code, call the appropriate function to analyze it, read existing tests, write new tests, or run tests. Always call a function.
   node_context: |
     Target file: {{ file_path }}
     Node: {{ node_name }} ({{ node_type }})
@@ -14,24 +12,29 @@ initial_context:
 tools:
   - tool_name: analyze_signature
     pym: test/tools/analyze_signature.pym
-    tool_description: Extract the function signature.
+    tool_description: Extract the function signature, parameter names, and types from the Python code.
 
   - tool_name: read_existing_tests
     pym: test/tools/read_existing_tests.pym
-    tool_description: Read existing tests.
+    tool_description: Read any existing test files for the current Python code.
 
   - tool_name: write_test_file
     pym: test/tools/write_test_file.pym
-    tool_description: Write generated tests.
+    tool_description: Write a new pytest test file with generated test cases.
+    inputs_override:
+      content:
+        description: "The full Python source code of the test file to write."
+      path_value:
+        description: "The file path where the test file should be written."
     context_providers:
       - test/context/pytest_config.pym
 
   - tool_name: run_tests
     pym: test/tools/run_tests.pym
-    tool_description: Run pytest and report results.
+    tool_description: Run pytest on the generated tests and return pass or fail results.
     context_providers:
       - test/context/pytest_config.pym
 
   - tool_name: submit_result
     pym: test/tools/submit.pym
-    tool_description: Submit the result.
+    tool_description: Submit the final result after test generation is complete.

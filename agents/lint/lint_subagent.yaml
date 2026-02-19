@@ -3,9 +3,7 @@ max_turns: 15
 
 initial_context:
   system_prompt: |
-    You are an intelligent coding assistant that helps users lint Python code.
-    Given a request to analyze code, call the appropriate linting function.
-    You can run linter, apply fixes, and read the file being analyzed.
+    You are a Python code linter. Given Python code, call the appropriate function to lint it, fix issues, or read the file. Always call a function.
   node_context: |
     Code to analyze:
     {{ node_text }}
@@ -13,18 +11,35 @@ initial_context:
 tools:
   - tool_name: run_linter
     pym: lint/tools/run_linter.pym
-    tool_description: Run the linter and return issues.
+    tool_description: Run ruff linter on the Python code and return a list of issues found.
+    inputs_override:
+      check_only:
+        description: "If true, only check for issues without applying fixes."
     context_providers:
       - lint/context/ruff_config.pym
 
   - tool_name: apply_fix
     pym: lint/tools/apply_fix.pym
-    tool_description: Apply a fix for a lint issue.
+    tool_description: Apply an automatic fix for a specific lint issue by its code and line number.
+    inputs_override:
+      issue_code:
+        description: "The ruff issue code to fix, e.g. F401 or E501."
+      line_number:
+        description: "The line number where the issue occurs."
 
   - tool_name: read_current_file
     pym: lint/tools/read_file.pym
-    tool_description: Read the current file.
+    tool_description: Read and return the full contents of the current Python file being analyzed.
 
   - tool_name: submit_result
     pym: lint/tools/submit.pym
-    tool_description: Submit the result.
+    tool_description: Submit the final linting result after all issues have been checked and optionally fixed.
+    inputs_override:
+      summary:
+        description: "A short summary of what was done."
+      issues_fixed:
+        description: "The number of issues that were fixed."
+      issues_remaining:
+        description: "The number of issues still remaining."
+      changed_files:
+        description: "List of file paths that were modified."
