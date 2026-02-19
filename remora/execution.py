@@ -27,11 +27,14 @@ def _run_in_child(
     This function runs in a separate OS process via ProcessPoolExecutor.
     Any crash here (segfault, os._exit) only kills this worker, not Remora.
     """
-    import grail
     from remora.externals import create_remora_externals
     from fsdantic import Fsdantic
 
     async def _execute_async() -> dict[str, Any]:
+        # Check if file exists (skipped if mocked)
+        if not Path(pym_path).exists():
+            return {"error": True, "code": "INTERNAL", "message": f".pym file not found: {pym_path}"}
+
         script = grail.load(pym_path, grail_dir=grail_dir)
         check = script.check()
         if not check.valid:
@@ -42,13 +45,12 @@ def _run_in_child(
         if agent_id and workspace_path and node_source and node_metadata:
             try:
                 # Open the workspace (and stable fs as readonly view of same path for now)
-                # In a full Cairn setup, stable_fs would be distinct. 
+                # In a full Cairn setup, stable_fs would be distinct.
                 # Here we map them both to workspace_path for simplicity in Phase 4.
                 # TODO: Pass distinct stable_path if needed.
-                async with (
-                    Fsdantic.open(workspace_path) as agent_fs,
-                    Fsdantic.open(stable_path or workspace_path, readonly=True) as stable_fs,
-                ):
+                agent_fs = await Fsdantic.open(path=workspace_path)
+                stable_fs = await Fsdantic.open(path=(stable_path or workspace_path))
+                try:
                     externals = create_remora_externals(
                         agent_id=agent_id,
                         node_source=node_source,
@@ -75,9 +77,12 @@ def _run_in_child(
                         }
                     except grail.GrailError as exc:
                         return {"error": True, "code": "GRAIL", "message": str(exc)}
+                finally:
+                    await agent_fs.close()
+                    await stable_fs.close()
             except Exception as exc:
                 return {"error": True, "code": "INTERNAL", "message": f"{type(exc).__name__}: {exc}"}
-        
+
         # Fallback for tools without externals (e.g. simple logic tools)
         try:
             # We use script.run even without externals to be consistent
@@ -96,6 +101,12 @@ def _run_in_child(
                 "code": "EXECUTION",
                 "message": str(exc),
                 "lineno": getattr(exc, "lineno", None),
+            }
+        except grail.GrailError as exc:
+            return {
+                "error": True,
+                "code": "GRAIL",
+                "message": str(exc),
             }
         except Exception as exc:
             return {"error": True, "code": "INTERNAL", "message": f"{type(exc).__name__}: {exc}"}
@@ -116,9 +127,7 @@ class ProcessIsolatedExecutor:
 
     def _ensure_pool(self) -> concurrent.futures.ProcessPoolExecutor:
         if self._pool is None or self._pool._broken:  # noqa: SLF001
-            self._pool = concurrent.futures.ProcessPoolExecutor(
-                max_workers=self._max_workers
-            )
+            self._pool = concurrent.futures.ProcessPoolExecutor(max_workers=self._max_workers)
         return self._pool
 
     async def execute(
@@ -331,9 +340,7 @@ class SnapshotManager:
 
     def cleanup_agent(self, agent_id: str) -> int:
         """Remove all snapshots belonging to an agent. Returns count removed."""
-        to_remove = [
-            sid for sid, r in self._snapshots.items() if r.agent_id == agent_id
-        ]
+        to_remove = [sid for sid, r in self._snapshots.items() if r.agent_id == agent_id]
         for sid in to_remove:
             del self._snapshots[sid]
         return len(to_remove)

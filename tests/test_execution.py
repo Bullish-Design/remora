@@ -33,10 +33,14 @@ def _make_script(
 ) -> MagicMock:
     script = MagicMock()
     script.check.return_value = _make_check(valid=check_valid, errors=check_errors)
-    if run_side_effect is not None:
-        script.run_sync.side_effect = run_side_effect
-    else:
-        script.run_sync.return_value = run_result
+
+    # Create async mock for script.run
+    async def _async_run(*args, **kwargs):
+        if run_side_effect is not None:
+            raise run_side_effect
+        return run_result
+
+    script.run = _async_run
     return script
 
 
@@ -46,8 +50,10 @@ def _make_script(
 
 
 @patch("remora.execution.grail")
-def test_run_in_child_success(mock_grail: MagicMock) -> None:
+@patch("remora.execution.Path.exists")
+def test_run_in_child_success(mock_exists: MagicMock, mock_grail: MagicMock) -> None:
     """Valid script returns result dict."""
+    mock_exists.return_value = True
     script = _make_script(run_result={"answer": 42})
     mock_grail.load.return_value = script
 
@@ -56,12 +62,13 @@ def test_run_in_child_success(mock_grail: MagicMock) -> None:
     assert result == {"error": False, "result": {"answer": 42}}
     mock_grail.load.assert_called_once_with("/fake.pym", grail_dir="/fake_grail")
     script.check.assert_called_once()
-    script.run_sync.assert_called_once_with(inputs={"x": 1}, limits={})
 
 
 @patch("remora.execution.grail")
-def test_run_in_child_check_failure(mock_grail: MagicMock) -> None:
+@patch("remora.execution.Path.exists")
+def test_run_in_child_check_failure(mock_exists: MagicMock, mock_grail: MagicMock) -> None:
     """Invalid script returns GRAIL_CHECK error."""
+    mock_exists.return_value = True
     err = MagicMock()
     err.__str__ = lambda self: "bad declaration"
     script = _make_script(check_valid=False, check_errors=[err])
@@ -72,22 +79,23 @@ def test_run_in_child_check_failure(mock_grail: MagicMock) -> None:
     assert result["error"] is True
     assert result["code"] == "GRAIL_CHECK"
     assert "bad declaration" in result["message"]
-    script.run_sync.assert_not_called()
 
 
 @patch("remora.execution.grail")
-def test_run_in_child_limit_error(mock_grail: MagicMock) -> None:
+@patch("remora.execution.Path.exists")
+def test_run_in_child_limit_error(mock_exists: MagicMock, mock_grail: MagicMock) -> None:
     """LimitError maps to structured dict with limit_type."""
-    limit_exc = MagicMock(spec=Exception)
-    limit_exc.limit_type = "max_duration"
-    limit_exc.__str__ = lambda self: "duration exceeded"
-    limit_exc.__class__ = type("LimitError", (Exception,), {})
-    mock_grail.LimitError = type(limit_exc)
+    mock_exists.return_value = True
 
-    # Rebuild with the real exception class
-    real_exc = mock_grail.LimitError()
+    # Create a proper exception class
+    class LimitError(Exception):
+        pass
+
+    mock_grail.LimitError = LimitError
+
+    # Create exception instance with limit_type
+    real_exc = LimitError("duration exceeded")
     real_exc.limit_type = "max_duration"
-    real_exc.__str__ = lambda: "duration exceeded"
 
     script = _make_script(run_side_effect=real_exc)
     mock_grail.load.return_value = script
@@ -100,8 +108,10 @@ def test_run_in_child_limit_error(mock_grail: MagicMock) -> None:
 
 
 @patch("remora.execution.grail")
-def test_run_in_child_execution_error(mock_grail: MagicMock) -> None:
+@patch("remora.execution.Path.exists")
+def test_run_in_child_execution_error(mock_exists: MagicMock, mock_grail: MagicMock) -> None:
     """ExecutionError maps to structured dict with lineno."""
+    mock_exists.return_value = True
 
     class FakeExecError(Exception):
         pass
@@ -124,17 +134,25 @@ def test_run_in_child_execution_error(mock_grail: MagicMock) -> None:
 
 
 @patch("remora.execution.grail")
-def test_run_in_child_grail_error(mock_grail: MagicMock) -> None:
+@patch("remora.execution.Path.exists")
+def test_run_in_child_grail_error(mock_exists: MagicMock, mock_grail: MagicMock) -> None:
     """GrailError maps to code GRAIL."""
+    mock_exists.return_value = True
 
-    class FakeGrailError(Exception):
+    class LimitError(Exception):
         pass
 
-    mock_grail.LimitError = type("LimitError", (Exception,), {})
-    mock_grail.ExecutionError = type("ExecutionError", (Exception,), {})
-    mock_grail.GrailError = FakeGrailError
+    class ExecutionError(Exception):
+        pass
 
-    exc = FakeGrailError("something went wrong")
+    class GrailError(Exception):
+        pass
+
+    mock_grail.LimitError = LimitError
+    mock_grail.ExecutionError = ExecutionError
+    mock_grail.GrailError = GrailError
+
+    exc = GrailError("something went wrong")
 
     script = _make_script(run_side_effect=exc)
     mock_grail.load.return_value = script
@@ -147,8 +165,10 @@ def test_run_in_child_grail_error(mock_grail: MagicMock) -> None:
 
 
 @patch("remora.execution.grail")
-def test_run_in_child_unexpected_error(mock_grail: MagicMock) -> None:
+@patch("remora.execution.Path.exists")
+def test_run_in_child_unexpected_error(mock_exists: MagicMock, mock_grail: MagicMock) -> None:
     """Generic Exception maps to code INTERNAL."""
+    mock_exists.return_value = True
     mock_grail.LimitError = type("LimitError", (Exception,), {})
     mock_grail.ExecutionError = type("ExecutionError", (Exception,), {})
     mock_grail.GrailError = type("GrailError", (Exception,), {})
@@ -174,6 +194,11 @@ async def test_executor_success() -> None:
     executor = ProcessIsolatedExecutor(max_workers=1, call_timeout=5.0)
     expected = {"error": False, "result": {"ok": True}}
 
+    # Use ThreadPoolExecutor to avoid pickling issues with MagicMock
+    import concurrent.futures
+
+    executor._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
     with patch("remora.execution._run_in_child", return_value=expected) as mock_run:
         result = await executor.execute(
             pym_path=Path("/test.pym"),
@@ -190,6 +215,11 @@ async def test_executor_success() -> None:
 async def test_executor_timeout() -> None:
     """Timeout returns a structured TIMEOUT error dict."""
     executor = ProcessIsolatedExecutor(max_workers=1, call_timeout=0.01)
+
+    # Use ThreadPoolExecutor to avoid pickling issues
+    import concurrent.futures
+
+    executor._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
     import time
 

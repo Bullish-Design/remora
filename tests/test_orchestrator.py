@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock, AsyncMock
 
 import pytest
 
@@ -12,9 +13,6 @@ from remora.errors import AGENT_001
 from remora.orchestrator import Coordinator, RemoraAgentContext, RemoraAgentState
 from remora.results import AgentResult
 from remora.subagent import SubagentError
-
-
-
 
 
 def _make_node() -> CSTNode:
@@ -41,6 +39,43 @@ def _make_config(tmp_path: Path, operations: dict[str, OperationConfig], *, max_
     )
 
 
+def _mock_cairn_components(monkeypatch: pytest.MonkeyPatch, max_concurrent: int = 100) -> None:
+    """Mock Cairn components that require database/file access."""
+    # Create a real semaphore to enforce concurrency limits
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    class MockTaskQueue:
+        def __init__(self, **kwargs):
+            pass
+
+        def acquire(self, priority=None):
+            return semaphore
+
+    monkeypatch.setattr("remora.orchestrator.TaskQueue", MockTaskQueue)
+
+    mock_workspace_manager = MagicMock()
+    mock_workspace_manager.close_all = AsyncMock()
+    monkeypatch.setattr("remora.orchestrator.WorkspaceManager", lambda: mock_workspace_manager)
+
+    mock_workspace_cache = MagicMock()
+    mock_workspace_cache.get = MagicMock(return_value=None)
+    mock_workspace_cache.put = MagicMock()
+    mock_workspace_cache.remove = MagicMock(return_value=None)
+    mock_workspace_cache.clear = AsyncMock()
+    monkeypatch.setattr("remora.orchestrator.WorkspaceCache", lambda **kwargs: mock_workspace_cache)
+
+    # Mock Fsdantic to avoid database access
+    mock_ws = MagicMock()
+    mock_ws.close = AsyncMock()
+
+    class MockFsdantic:
+        @classmethod
+        async def open(cls, *, path=None, id=None):
+            return mock_ws
+
+    monkeypatch.setattr("remora.orchestrator.Fsdantic", MockFsdantic)
+
+
 def test_process_node_returns_results(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     operations = {
         "lint": OperationConfig(subagent="lint/lint_subagent.yaml"),
@@ -60,19 +95,9 @@ def test_process_node_returns_results(monkeypatch: pytest.MonkeyPatch, tmp_path:
         return SimpleNamespace(name=path.stem, grail_summary={})
 
     class FakeRunner:
-        def __init__(
-            self,
-            definition: object,
-            node: CSTNode,
-            ctx: RemoraAgentContext,
-
-            server_config: object,
-            runner_config: object,
-            adapter_name: str | None = None,
-            http_client: object | None = None,
-            event_emitter: object | None = None,
-        ) -> None:
-            self.workspace_id = ctx.agent_id
+        def __init__(self, *args, **kwargs) -> None:
+            ctx = kwargs.get("ctx")
+            self.workspace_id = ctx.agent_id if ctx else "unknown"
 
         async def run(self) -> AgentResult:
             operation = self.workspace_id.split("-", 1)[0]
@@ -80,6 +105,8 @@ def test_process_node_returns_results(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     monkeypatch.setattr("remora.orchestrator.load_subagent_definition", fake_load_subagent_definition)
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
+
+    _mock_cairn_components(monkeypatch)
 
     async def run_test():
         async with Coordinator(config) as coordinator:
@@ -108,19 +135,9 @@ def test_process_node_respects_semaphore(monkeypatch: pytest.MonkeyPatch, tmp_pa
         return SimpleNamespace(name=path.stem, grail_summary={})
 
     class FakeRunner:
-        def __init__(
-            self,
-            definition: object,
-            node: CSTNode,
-            ctx: RemoraAgentContext,
-
-            server_config: object,
-            runner_config: object,
-            adapter_name: str | None = None,
-            http_client: object | None = None,
-            event_emitter: object | None = None,
-        ) -> None:
-            self.workspace_id = ctx.agent_id
+        def __init__(self, *args, **kwargs) -> None:
+            ctx = kwargs.get("ctx")
+            self.workspace_id = ctx.agent_id if ctx else "unknown"
 
         async def run(self) -> AgentResult:
             state["current"] += 1
@@ -132,6 +149,8 @@ def test_process_node_respects_semaphore(monkeypatch: pytest.MonkeyPatch, tmp_pa
     monkeypatch.setattr("remora.orchestrator.load_subagent_definition", fake_load_subagent_definition)
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
 
+    _mock_cairn_components(monkeypatch, max_concurrent=2)
+
     async def run_test():
         async with Coordinator(config) as coordinator:
             await coordinator.process_node(node, ["lint", "test", "docstring", "sample"])
@@ -142,6 +161,9 @@ def test_process_node_respects_semaphore(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
 
 def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from remora.runner import AgentError
+    from datetime import datetime, timezone
+
     operations = {
         "lint": OperationConfig(subagent="lint/lint_subagent.yaml"),
         "test": OperationConfig(subagent="test/test_subagent.yaml"),
@@ -150,9 +172,16 @@ def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch,
     config = _make_config(tmp_path, operations)
     node = _make_node()
 
-    results_map: dict[str, AgentResult | Exception] = {
+    results_map: dict[str, AgentResult | AgentError] = {
         "lint": AgentResult(status="success", workspace_id="lint-node-1", summary="lint", changed_files=[]),
-        "test": RuntimeError("boom"),
+        "test": AgentError(
+            node_id="node-1",
+            operation="test",
+            phase="loop",
+            error_code="TEST_001",
+            message="boom",
+            timestamp=datetime.now(timezone.utc),
+        ),
         "docstring": AgentResult(status="success", workspace_id="docstring-node-1", summary="doc", changed_files=[]),
     }
 
@@ -160,19 +189,9 @@ def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch,
         return SimpleNamespace(name=path.stem, grail_summary={})
 
     class FakeRunner:
-        def __init__(
-            self,
-            definition: object,
-            node: CSTNode,
-            ctx: RemoraAgentContext,
-
-            server_config: object,
-            runner_config: object,
-            adapter_name: str | None = None,
-            http_client: object | None = None,
-            event_emitter: object | None = None,
-        ) -> None:
-            self.workspace_id = ctx.agent_id
+        def __init__(self, *args, **kwargs) -> None:
+            ctx = kwargs.get("ctx")
+            self.workspace_id = ctx.agent_id if ctx else "unknown"
 
         async def run(self) -> AgentResult:
             operation = self.workspace_id.split("-", 1)[0]
@@ -183,6 +202,8 @@ def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch,
 
     monkeypatch.setattr("remora.orchestrator.load_subagent_definition", fake_load_subagent_definition)
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
+
+    _mock_cairn_components(monkeypatch)
 
     async def run_test():
         async with Coordinator(config) as coordinator:
@@ -210,25 +231,17 @@ def test_process_node_skips_disabled_operation(monkeypatch: pytest.MonkeyPatch, 
         return SimpleNamespace(name=path.stem, grail_summary={})
 
     class FakeRunner:
-        def __init__(
-            self,
-            definition: object,
-            node: CSTNode,
-            ctx: RemoraAgentContext,
-
-            server_config: object,
-            runner_config: object,
-            adapter_name: str | None = None,
-            http_client: object | None = None,
-            event_emitter: object | None = None,
-        ) -> None:
-            self.workspace_id = ctx.agent_id
+        def __init__(self, *args, **kwargs) -> None:
+            ctx = kwargs.get("ctx")
+            self.workspace_id = ctx.agent_id if ctx else "unknown"
 
         async def run(self) -> AgentResult:
             return AgentResult(status="success", workspace_id=self.workspace_id, summary="ok", changed_files=[])
 
     monkeypatch.setattr("remora.orchestrator.load_subagent_definition", fake_load_subagent_definition)
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
+
+    _mock_cairn_components(monkeypatch)
 
     async def run_test():
         async with Coordinator(config) as coordinator:
@@ -255,25 +268,17 @@ def test_bad_subagent_path_records_init_error(monkeypatch: pytest.MonkeyPatch, t
         return SimpleNamespace(name=path.stem, grail_summary={})
 
     class FakeRunner:
-        def __init__(
-            self,
-            definition: object,
-            node: CSTNode,
-            ctx: RemoraAgentContext,
-
-            server_config: object,
-            runner_config: object,
-            adapter_name: str | None = None,
-            http_client: object | None = None,
-            event_emitter: object | None = None,
-        ) -> None:
-            self.workspace_id = ctx.agent_id
+        def __init__(self, *args, **kwargs) -> None:
+            ctx = kwargs.get("ctx")
+            self.workspace_id = ctx.agent_id if ctx else "unknown"
 
         async def run(self) -> AgentResult:
             return AgentResult(status="success", workspace_id=self.workspace_id, summary="ok", changed_files=[])
 
     monkeypatch.setattr("remora.orchestrator.load_subagent_definition", fake_load_subagent_definition)
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
+
+    _mock_cairn_components(monkeypatch)
 
     async def run_test():
         async with Coordinator(config) as coordinator:
@@ -293,6 +298,7 @@ def test_agent_context_state_transitions() -> None:
 
     # Ensure time passes (on Windows/monotonic resolution can be coarse)
     import time
+
     time.sleep(0.001)
 
     ctx.transition(RemoraAgentState.EXECUTING)
@@ -332,27 +338,29 @@ def test_coordinator_graceful_shutdown_cancels_tasks(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("remora.orchestrator.load_subagent_definition", fake_load_subagent_definition)
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", ForeverRunner)
 
+    _mock_cairn_components(monkeypatch)
+
     async def run_shutdown_test():
         coordinator = Coordinator(config)
         async with coordinator:
             # Start processing
             process_task = asyncio.create_task(coordinator.process_node(node, ["slow"]))
-            
+
             # Wait for task to be scheduled and running
             await asyncio.sleep(0.01)
             assert len(coordinator._running_tasks) == 1
-            
+
             # Simulate shutdown signal (manually calling the handler)
             coordinator._request_shutdown()
             assert coordinator._shutdown_requested
-            
+
             # process_node should complete (likely with partial results or empty)
             result = await process_task
-            
+
             # The running task inside should have been cancelled
             # In our implementation, process_node gathers tasks with return_exceptions=True
             # so the main process_node call finishes.
-            
+
             # The shutdown request should have cleared the running task from the set eventually
             # (or at least marked it cancelled)
             return len(coordinator._running_tasks)
@@ -361,4 +369,3 @@ def test_coordinator_graceful_shutdown_cancels_tasks(monkeypatch: pytest.MonkeyP
     # Note: process_node catches the cancellation internally and returns partial results,
     # so we expect it to finish without raising CancelledError to the caller.
     asyncio.run(run_shutdown_test())
-

@@ -101,7 +101,6 @@ class Coordinator:
     def __init__(
         self,
         config: RemoraConfig,
-
         *,
         event_stream_enabled: bool | None = None,
         event_stream_output: Path | None = None,
@@ -227,7 +226,6 @@ class Coordinator:
                         definition=definition,
                         node=node,
                         ctx=ctx,
-
                         server_config=self.config.server,
                         runner_config=self.config.runner,
                         adapter_name=op_config.model_id,
@@ -263,7 +261,7 @@ class Coordinator:
             op_config = self.config.operations.get(operation)
             priority_str = op_config.priority if op_config else "normal"
             priority = PRIORITY_MAP.get(priority_str, TaskPriority.NORMAL)
-            
+
             async with self._queue.acquire(priority=priority):
                 # Phase 4: Manage workspace lifecycle
                 cache_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
@@ -277,7 +275,7 @@ class Coordinator:
                 cache_key = ctx.agent_id
                 ws = self._workspace_cache.get(cache_key)
                 if ws is None:
-                    ws = await Fsdantic.open(str(workspace_path))
+                    ws = await Fsdantic.open(path=str(workspace_path))
                     self._workspace_cache.put(cache_key, ws)
 
                 ctx.transition(RemoraAgentState.EXECUTING)
@@ -314,10 +312,7 @@ class Coordinator:
 
         results: dict[str, AgentResult] = {}
         if runners:
-            tasks = [
-                asyncio.ensure_future(run_with_limit(op, ctx, runner))
-                for op, (ctx, runner) in runners.items()
-            ]
+            tasks = [asyncio.ensure_future(run_with_limit(op, ctx, runner)) for op, (ctx, runner) in runners.items()]
             self._running_tasks.update(tasks)
             try:
                 raw = await asyncio.gather(*tasks, return_exceptions=True)
