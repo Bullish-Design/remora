@@ -10,7 +10,6 @@ import pytest
 from pathlib import Path
 
 from remora.analyzer import RemoraAnalyzer
-from remora.cairn import CairnCLIClient
 from remora.config import load_config
 from remora.subagent import load_subagent_definition
 

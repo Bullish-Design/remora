@@ -14,9 +14,7 @@ from remora.results import AgentResult
 from remora.subagent import SubagentError
 
 
-class FakeCairnClient:
-    async def run_pym(self, path: object, workspace_id: str, inputs: dict[str, object]) -> dict[str, object]:
-        return {}
+
 
 
 def _make_node() -> CSTNode:
@@ -67,7 +65,7 @@ def test_process_node_returns_results(monkeypatch: pytest.MonkeyPatch, tmp_path:
             definition: object,
             node: CSTNode,
             ctx: RemoraAgentContext,
-            cairn_client: FakeCairnClient,
+
             server_config: object,
             runner_config: object,
             adapter_name: str | None = None,
@@ -84,7 +82,7 @@ def test_process_node_returns_results(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
 
     async def run_test():
-        async with Coordinator(config, FakeCairnClient()) as coordinator:
+        async with Coordinator(config) as coordinator:
             return await coordinator.process_node(node, ["lint", "test", "docstring"])
 
     result = asyncio.run(run_test())
@@ -115,7 +113,7 @@ def test_process_node_respects_semaphore(monkeypatch: pytest.MonkeyPatch, tmp_pa
             definition: object,
             node: CSTNode,
             ctx: RemoraAgentContext,
-            cairn_client: FakeCairnClient,
+
             server_config: object,
             runner_config: object,
             adapter_name: str | None = None,
@@ -135,7 +133,7 @@ def test_process_node_respects_semaphore(monkeypatch: pytest.MonkeyPatch, tmp_pa
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
 
     async def run_test():
-        async with Coordinator(config, FakeCairnClient()) as coordinator:
+        async with Coordinator(config) as coordinator:
             await coordinator.process_node(node, ["lint", "test", "docstring", "sample"])
 
     asyncio.run(run_test())
@@ -167,7 +165,7 @@ def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch,
             definition: object,
             node: CSTNode,
             ctx: RemoraAgentContext,
-            cairn_client: FakeCairnClient,
+
             server_config: object,
             runner_config: object,
             adapter_name: str | None = None,
@@ -187,7 +185,7 @@ def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
 
     async def run_test():
-        async with Coordinator(config, FakeCairnClient()) as coordinator:
+        async with Coordinator(config) as coordinator:
             return await coordinator.process_node(node, ["lint", "test", "docstring"])
 
     result = asyncio.run(run_test())
@@ -217,7 +215,7 @@ def test_process_node_skips_disabled_operation(monkeypatch: pytest.MonkeyPatch, 
             definition: object,
             node: CSTNode,
             ctx: RemoraAgentContext,
-            cairn_client: FakeCairnClient,
+
             server_config: object,
             runner_config: object,
             adapter_name: str | None = None,
@@ -233,7 +231,7 @@ def test_process_node_skips_disabled_operation(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
 
     async def run_test():
-        async with Coordinator(config, FakeCairnClient()) as coordinator:
+        async with Coordinator(config) as coordinator:
             return await coordinator.process_node(node, ["lint", "test"])
 
     result = asyncio.run(run_test())
@@ -262,7 +260,7 @@ def test_bad_subagent_path_records_init_error(monkeypatch: pytest.MonkeyPatch, t
             definition: object,
             node: CSTNode,
             ctx: RemoraAgentContext,
-            cairn_client: FakeCairnClient,
+
             server_config: object,
             runner_config: object,
             adapter_name: str | None = None,
@@ -278,7 +276,7 @@ def test_bad_subagent_path_records_init_error(monkeypatch: pytest.MonkeyPatch, t
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", FakeRunner)
 
     async def run_test():
-        async with Coordinator(config, FakeCairnClient()) as coordinator:
+        async with Coordinator(config) as coordinator:
             return await coordinator.process_node(node, ["good", "bad"])
 
     result = asyncio.run(run_test())
@@ -335,7 +333,7 @@ def test_coordinator_graceful_shutdown_cancels_tasks(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", ForeverRunner)
 
     async def run_shutdown_test():
-        coordinator = Coordinator(config, FakeCairnClient())
+        coordinator = Coordinator(config)
         async with coordinator:
             # Start processing
             process_task = asyncio.create_task(coordinator.process_node(node, ["slow"]))

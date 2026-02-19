@@ -8,6 +8,7 @@ import pytest
 
 from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode, NodeType
+from remora.orchestrator import RemoraAgentContext
 from remora.runner import FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
 
@@ -51,17 +52,23 @@ def _function_node(text: str, name: str) -> CSTNode:
 
 
 @pytest.mark.integration
-def test_test_runner_generates_tests(cairn_client_factory) -> None:
+def test_test_runner_generates_tests(grail_executor_factory, tmp_path) -> None:
     text = _load_fixture()
     node = _function_node(text, "format_currency")
     definition = load_subagent_definition(Path("agents/test/test_subagent.yaml"), agents_dir=Path("agents"))
     definition = definition.model_copy(update={"max_turns": 30})
-    cairn_client = cairn_client_factory(node.text)
+    definition = definition.model_copy(update={"max_turns": 30})
+    
+    executor = grail_executor_factory()
+    workspace_dir = tmp_path / "test-test_001"
+    executor.setup_workspace(workspace_dir, node_text=node.text)
+
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
-        workspace_id="test-test_001",
-        cairn_client=cairn_client,
+        ctx=RemoraAgentContext(agent_id="test-test_001", task="test", operation="test", node_id="test_format_currency"),
+        grail_executor=executor,
+        grail_dir=workspace_dir,
         server_config=_server_config(),
         runner_config=_runner_config(),
     )
@@ -72,7 +79,7 @@ def test_test_runner_generates_tests(cairn_client_factory) -> None:
     assert result.changed_files
     assert any("test_" in path for path in result.changed_files)
 
-    workspace_path = cairn_client.workspace_path("test-test_001")
+    workspace_path = workspace_dir
     test_file_paths = [workspace_path / path for path in result.changed_files if "test_" in path]
     assert test_file_paths
     test_content = test_file_paths[0].read_text(encoding="utf-8")

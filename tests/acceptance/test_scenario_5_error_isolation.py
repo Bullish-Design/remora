@@ -9,7 +9,6 @@ import pytest
 from pathlib import Path
 
 from remora.analyzer import RemoraAnalyzer
-from remora.cairn import CairnCLIClient
 from remora.config import load_config
 
 pytestmark = pytest.mark.acceptance
@@ -26,8 +25,8 @@ async def test_error_isolation(sample_project: Path, remora_config: Path):
     config.operations["lint"].model_id = "non-existent-model-12345"
 
     # Create analyzer
-    cairn_client = CairnCLIClient(config.cairn)
-    analyzer = RemoraAnalyzer(config, cairn_client)
+    # Create analyzer
+    analyzer = RemoraAnalyzer(config)
 
     # Analyze with both operations (one will fail)
     src_path = sample_project / "src"

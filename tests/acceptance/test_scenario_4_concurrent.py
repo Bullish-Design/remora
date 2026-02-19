@@ -10,7 +10,6 @@ import pytest
 from pathlib import Path
 
 from remora.analyzer import RemoraAnalyzer
-from remora.cairn import CairnCLIClient
 from remora.config import load_config
 
 pytestmark = pytest.mark.acceptance
@@ -23,8 +22,8 @@ async def test_concurrent_processing(sample_project: Path, remora_config: Path):
     config = load_config(remora_config)
 
     # Create analyzer
-    cairn_client = CairnCLIClient(config.cairn)
-    analyzer = RemoraAnalyzer(config, cairn_client)
+    # Create analyzer
+    analyzer = RemoraAnalyzer(config)
 
     # Analyze entire src directory with multiple operations
     src_path = sample_project / "src"

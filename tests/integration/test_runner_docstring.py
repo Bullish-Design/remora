@@ -8,6 +8,7 @@ import pytest
 
 from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode, NodeType
+from remora.orchestrator import RemoraAgentContext
 from remora.runner import FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
 
@@ -59,19 +60,24 @@ def _assert_docstring(module: ast.Module, name: str) -> None:
 
 
 @pytest.mark.integration
-def test_docstring_runner_adds_docstrings(cairn_client_factory) -> None:
+def test_docstring_runner_adds_docstrings(grail_executor_factory, tmp_path) -> None:
     text = _load_fixture()
     first_node = _function_node(text, "format_currency")
     second_node = _function_node(text, "parse_config")
     definition = load_subagent_definition(Path("agents/docstring/docstring_subagent.yaml"), agents_dir=Path("agents"))
     definition = definition.model_copy(update={"max_turns": 30})
-    cairn_client = cairn_client_factory(first_node.text)
+    definition = definition.model_copy(update={"max_turns": 30})
+    
+    executor = grail_executor_factory()
+    workspace_dir = tmp_path / "docstring-docstring_001"
+    executor.setup_workspace(workspace_dir, node_text=first_node.text)
 
     runner = FunctionGemmaRunner(
         definition=definition,
         node=first_node,
-        workspace_id="docstring-docstring_001",
-        cairn_client=cairn_client,
+        ctx=RemoraAgentContext(agent_id="docstring-docstring_001", task="docstring", operation="docstring", node_id="docstring_format_currency"),
+        grail_executor=executor,
+        grail_dir=workspace_dir,
         server_config=_server_config(),
         runner_config=_runner_config(),
     )
@@ -79,19 +85,20 @@ def test_docstring_runner_adds_docstrings(cairn_client_factory) -> None:
     assert result.status == "success"
     assert result.changed_files
 
-    cairn_client.node_text = second_node.text
+    executor.setup_workspace(workspace_dir, node_text=second_node.text)
     runner = FunctionGemmaRunner(
         definition=definition,
         node=second_node,
-        workspace_id="docstring-docstring_001",
-        cairn_client=cairn_client,
+        ctx=RemoraAgentContext(agent_id="docstring-docstring_001", task="docstring", operation="docstring", node_id="docstring_parse_config"),
+        grail_executor=executor,
+        grail_dir=workspace_dir,
         server_config=_server_config(),
         runner_config=_runner_config(),
     )
     result = asyncio.run(runner.run())
     assert result.status == "success"
 
-    workspace_path = cairn_client.workspace_path("docstring-docstring_001")
+    workspace_path = workspace_dir
     updated = (workspace_path / "tests/fixtures/integration_target.py").read_text(encoding="utf-8")
     module = ast.parse(updated)
     _assert_docstring(module, "format_currency")

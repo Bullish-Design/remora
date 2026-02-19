@@ -16,7 +16,6 @@ from rich.console import Console
 from rich.table import Table
 
 from remora.analyzer import RemoraAnalyzer, ResultPresenter
-from remora.cairn import CairnCLIClient
 from remora.config import ConfigError, RemoraConfig, load_config, serialize_config
 from remora.errors import CONFIG_003
 from remora.subagent import load_subagent_definition
@@ -190,8 +189,7 @@ def analyze(
 
     # Create analyzer and run
     async def _run():
-        cairn_client = CairnCLIClient(config.cairn)
-        analyzer = RemoraAnalyzer(config, cairn_client)
+        analyzer = RemoraAnalyzer(config)
         results = await analyzer.analyze(paths, ops)
 
         # Display results
@@ -298,10 +296,8 @@ def watch(
     try:
 
         async def _watch() -> None:
-            cairn_client = CairnCLIClient(config.cairn)
             async with Coordinator(
                 config,
-                cairn_client,
                 event_stream_enabled=event_stream,
                 event_stream_output=event_stream_file,
             ) as coordinator:
@@ -312,7 +308,7 @@ def watch(
                         f"\n[bold cyan]Detected {len(changes)} change(s), "
                         f"re-analyzing...[/bold cyan]"
                     )
-                    analyzer = RemoraAnalyzer(config, cairn_client)
+                    analyzer = RemoraAnalyzer(config)
                     results = await analyzer.analyze(changed_paths, ops)
                     presenter = ResultPresenter("table")
                     presenter.display(results)

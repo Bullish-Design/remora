@@ -117,15 +117,7 @@ class FakeAsyncOpenAI:
         self.chat = SimpleNamespace(completions=FakeChatCompletions(responses or [], error=error))
 
 
-class FakeCairnClient:
-    def __init__(self, responses: dict[Path, dict[str, Any]] | None = None) -> None:
-        self.responses = responses or {}
-        self.calls: list[tuple[Path, str, dict[str, Any]]] = []
 
-    async def run_pym(self, path: Any, workspace_id: str, inputs: dict[str, Any]) -> dict[str, Any]:
-        resolved = Path(path)
-        self.calls.append((resolved, workspace_id, inputs))
-        return self.responses.get(resolved, {})
 
 
 def _tool_schema(name: str, description: str, parameters: dict[str, Any]) -> dict[str, Any]:
@@ -228,7 +220,7 @@ def test_runner_initializes_model_and_messages(monkeypatch: pytest.MonkeyPatch) 
         definition=definition,
         node=node,
         ctx=_make_ctx(),
-        cairn_client=FakeCairnClient(),
+        ctx=_make_ctx(),
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),
     )
@@ -255,7 +247,7 @@ def test_missing_model_id_raises_agent_002(monkeypatch: pytest.MonkeyPatch) -> N
         definition=definition,
         node=node,
         ctx=_make_ctx(),
-        cairn_client=FakeCairnClient(),
+        ctx=_make_ctx(),
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),
     )
@@ -284,7 +276,7 @@ def test_run_returns_submit_result_on_first_turn(monkeypatch: pytest.MonkeyPatch
         definition=definition,
         node=node,
         ctx=_make_ctx(),
-        cairn_client=FakeCairnClient(),
+        ctx=_make_ctx(),
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),
     )
@@ -334,12 +326,7 @@ def test_run_handles_multiple_tool_turns_then_submit(monkeypatch: pytest.MonkeyP
 
     definition = _make_definition(tools=[tool_def, submit_def], tool_schemas=tool_schemas)
     node = _make_node()
-    cairn = FakeCairnClient({Path("inspect.pym"): {"ok": True}})
-    runner = FunctionGemmaRunner(
-        definition=definition,
-        node=node,
         ctx=_make_ctx(),
-        cairn_client=cairn,
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),
     )
@@ -376,12 +363,7 @@ def test_run_respects_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
 
     definition = _make_definition(tools=[tool_def], max_turns=2, tool_schemas=tool_schemas)
     node = _make_node()
-    cairn = FakeCairnClient({Path("inspect.pym"): {"ok": True}})
-    runner = FunctionGemmaRunner(
-        definition=definition,
-        node=node,
         ctx=_make_ctx(),
-        cairn_client=cairn,
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),
     )
@@ -427,18 +409,7 @@ def test_context_providers_injected_before_tool_dispatch(monkeypatch: pytest.Mon
 
     definition = _make_definition(tools=[tool_def, submit_def], tool_schemas=tool_schemas)
     node = _make_node()
-    cairn = FakeCairnClient(
-        {
-            Path("ctx-1.pym"): {"ctx": "one"},
-            Path("ctx-2.pym"): {"ctx": "two"},
-            Path("inspect.pym"): {"ok": True},
-        }
-    )
-    runner = FunctionGemmaRunner(
-        definition=definition,
-        node=node,
-        ctx=_make_ctx(),
-        cairn_client=cairn,
+    grail_executor=cairn,
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),
     )

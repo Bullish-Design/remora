@@ -7,7 +7,7 @@ from pathlib import Path
 
 import typer
 
-from remora.cairn import CairnCLIClient
+
 from remora.config import OperationConfig, RemoraConfig, load_config
 from remora.discovery import CSTNode, TreeSitterDiscoverer
 from remora.orchestrator import Coordinator
@@ -50,11 +50,8 @@ def _collect_nodes(config: RemoraConfig, demo_root: Path, event_emitter=None) ->
 
 
 async def _run_once(config: RemoraConfig, demo_root: Path) -> None:
-    cairn_client = CairnCLIClient(config.cairn)
-
     async with Coordinator(
         config=config,
-        cairn_client=cairn_client,
         event_stream_enabled=True,
     ) as coordinator:
         nodes = _collect_nodes(config, demo_root, event_emitter=coordinator._event_emitter)

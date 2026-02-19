@@ -72,7 +72,7 @@ def _make_runner(*, snapshot_manager: MagicMock | None = None) -> FunctionGemmaR
         server_config=server_config,
         runner_config=runner_config,
         snapshot_manager=snapshot_manager,
-        cairn_client=MagicMock(),
+
     )
     return runner
 

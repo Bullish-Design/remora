@@ -11,7 +11,6 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 
-from remora.cairn import CairnCLIClient, CairnError
 from remora.config import RemoraConfig
 from remora.discovery import CSTNode, TreeSitterDiscoverer
 from remora.events import EventEmitter, JsonlEventEmitter, NullEventEmitter
@@ -46,18 +45,16 @@ class RemoraAnalyzer:
     def __init__(
         self,
         config: RemoraConfig,
-        cairn_client: CairnCLIClient | None = None,
         event_emitter: EventEmitter | None = None,
     ):
         """Initialize analyzer.
 
         Args:
             config: Remora configuration
-            cairn_client: Optional Cairn client (creates default if not provided)
             event_emitter: Optional event emitter for progress tracking
         """
         self.config = config
-        self.cairn = cairn_client or CairnCLIClient(config.cairn)
+
         self._event_emitter = event_emitter or NullEventEmitter()
         self._results: AnalysisResults | None = None
         self._nodes: list[CSTNode] = []
@@ -94,7 +91,7 @@ class RemoraAnalyzer:
         # Run analysis through coordinator
         async with Coordinator(
             config=self.config,
-            cairn_client=self.cairn,
+
             event_stream_enabled=self.config.event_stream.enabled,
             event_stream_output=self.config.event_stream.output,
         ) as coordinator:
@@ -145,7 +142,6 @@ class RemoraAnalyzer:
         targets = self._filter_workspaces(node_id, operation, WorkspaceState.PENDING)
 
         for key, info in targets:
-            try:
                 # Call Cairn CLI to merge workspace
                 await self._cairn_merge(info.workspace_id)
                 info.state = WorkspaceState.ACCEPTED
@@ -158,18 +154,6 @@ class RemoraAnalyzer:
                         "status": "ok",
                     }
                 )
-            except CairnError as exc:
-                self._event_emitter.emit(
-                    {
-                        "event": "workspace_accept_failed",
-                        "workspace_id": info.workspace_id,
-                        "node_id": info.node_id,
-                        "operation": info.operation,
-                        "status": "error",
-                        "error": str(exc),
-                    }
-                )
-                raise
 
     async def reject(self, node_id: str | None = None, operation: str | None = None) -> None:
         """Reject changes and discard workspace.
@@ -181,7 +165,6 @@ class RemoraAnalyzer:
         targets = self._filter_workspaces(node_id, operation, WorkspaceState.PENDING)
 
         for key, info in targets:
-            try:
                 # Call Cairn CLI to discard workspace
                 await self._cairn_discard(info.workspace_id)
                 info.state = WorkspaceState.REJECTED
@@ -194,18 +177,6 @@ class RemoraAnalyzer:
                         "status": "ok",
                     }
                 )
-            except CairnError as exc:
-                self._event_emitter.emit(
-                    {
-                        "event": "workspace_reject_failed",
-                        "workspace_id": info.workspace_id,
-                        "node_id": info.node_id,
-                        "operation": info.operation,
-                        "status": "error",
-                        "error": str(exc),
-                    }
-                )
-                raise
 
     async def retry(
         self,
@@ -246,7 +217,6 @@ class RemoraAnalyzer:
         # Re-run the operation
         async with Coordinator(
             config=config,
-            cairn_client=self.cairn,
             event_stream_enabled=config.event_stream.enabled,
             event_stream_output=config.event_stream.output,
         ) as coordinator:
@@ -313,38 +283,14 @@ class RemoraAnalyzer:
         return results
 
     async def _cairn_merge(self, workspace_id: str) -> None:
-        """Merge a workspace into stable using Cairn CLI."""
-        proc = await asyncio.create_subprocess_exec(
-            self.config.cairn.command,
-            "merge",
-            workspace_id,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(),
-            timeout=self.config.cairn.timeout,
-        )
-        if proc.returncode != 0:
-            message = stderr.decode("utf-8", errors="replace").strip()
-            raise CairnError(message or f"Cairn merge failed with exit code {proc.returncode}")
+        """Merge a workspace into stable (STUB)."""
+        # TODO: Replace with proper WorkspaceManager integration
+        pass
 
     async def _cairn_discard(self, workspace_id: str) -> None:
-        """Discard a workspace using Cairn CLI."""
-        proc = await asyncio.create_subprocess_exec(
-            self.config.cairn.command,
-            "discard",
-            workspace_id,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(),
-            timeout=self.config.cairn.timeout,
-        )
-        if proc.returncode != 0:
-            message = stderr.decode("utf-8", errors="replace").strip()
-            raise CairnError(message or f"Cairn discard failed with exit code {proc.returncode}")
+        """Discard a workspace (STUB)."""
+        # TODO: Replace with proper WorkspaceManager integration
+        pass
 
     def _apply_config_override(self, overrides: dict[str, Any]) -> RemoraConfig:
         """Apply config overrides and return new config."""

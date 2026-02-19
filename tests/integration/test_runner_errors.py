@@ -9,6 +9,7 @@ import pytest
 from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode, NodeType
 from remora.errors import AGENT_002, AGENT_003
+from remora.orchestrator import RemoraAgentContext
 from remora.runner import AgentError, FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
 
@@ -58,16 +59,21 @@ def _function_node(text: str, name: str) -> CSTNode:
 
 
 @pytest.mark.integration
-def test_runner_unreachable_server_does_not_block_others(cairn_client_factory) -> None:
+def test_runner_unreachable_server_does_not_block_others(grail_executor_factory, tmp_path) -> None:
     text = _load_fixture()
     node = _function_node(text, "format_currency")
     definition = load_subagent_definition(Path("agents/test/test_subagent.yaml"), agents_dir=Path("agents"))
+    
+    executor = grail_executor_factory()
+    workspace_dir_1 = tmp_path / "error-missing-model"
+    executor.setup_workspace(workspace_dir_1, node_text=node.text)
 
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
-        workspace_id="error-missing-model",
-        cairn_client=cairn_client_factory(node.text),
+        ctx=RemoraAgentContext(agent_id="error-missing-model", task="test", operation="test", node_id="errors_format_currency"),
+        grail_executor=executor,
+        grail_dir=workspace_dir_1,
         server_config=_server_config("http://missing-host:8000/v1"),
         runner_config=_runner_config(),
     )
@@ -77,28 +83,37 @@ def test_runner_unreachable_server_does_not_block_others(cairn_client_factory) -
 
     assert excinfo.value.error_code == AGENT_002
 
+    workspace_dir_2 = tmp_path / "error-valid-model"
+    executor.setup_workspace(workspace_dir_2, node_text=node.text)
+    
     FunctionGemmaRunner(
         definition=definition,
         node=node,
-        workspace_id="error-valid-model",
-        cairn_client=cairn_client_factory(node.text),
+        ctx=RemoraAgentContext(agent_id="error-valid-model", task="test", operation="test", node_id="errors_format_currency"),
+        grail_executor=executor,
+        grail_dir=workspace_dir_2,
         server_config=_server_config(),
         runner_config=_runner_config(),
     )
 
 
 @pytest.mark.integration
-def test_runner_respects_turn_limit(cairn_client_factory) -> None:
+def test_runner_respects_turn_limit(grail_executor_factory, tmp_path) -> None:
     text = _load_fixture()
     node = _function_node(text, "format_currency")
     definition = load_subagent_definition(Path("agents/test/test_subagent.yaml"), agents_dir=Path("agents"))
     definition = definition.model_copy(update={"max_turns": 1})
 
+    executor = grail_executor_factory()
+    workspace_dir = tmp_path / "error-turn-limit"
+    executor.setup_workspace(workspace_dir, node_text=node.text)
+
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
-        workspace_id="error-turn-limit",
-        cairn_client=cairn_client_factory(node.text),
+        ctx=RemoraAgentContext(agent_id="error-turn-limit", task="test", operation="test", node_id="errors_format_currency"),
+        grail_executor=executor,
+        grail_dir=workspace_dir,
         server_config=_server_config(),
         runner_config=_runner_config(),
     )

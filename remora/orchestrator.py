@@ -18,7 +18,7 @@ from remora.discovery import CSTNode
 from remora.events import EventStreamController, build_event_emitter
 from remora.execution import ProcessIsolatedExecutor, SnapshotManager
 from remora.results import AgentResult, NodeResult
-from remora.runner import AgentError, CairnClient, FunctionGemmaRunner
+from remora.runner import AgentError, FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
 
 logger = logging.getLogger(__name__)
@@ -101,13 +101,13 @@ class Coordinator:
     def __init__(
         self,
         config: RemoraConfig,
-        cairn_client: CairnClient,
+
         *,
         event_stream_enabled: bool | None = None,
         event_stream_output: Path | None = None,
     ) -> None:
         self.config = config
-        self.cairn_client = cairn_client
+
         self._http_client = build_client(config.server)
         self._queue = TaskQueue(max_size=config.cairn.max_queue_size)
         self._workspace_manager = WorkspaceManager()
@@ -227,7 +227,7 @@ class Coordinator:
                         definition=definition,
                         node=node,
                         ctx=ctx,
-                        cairn_client=self.cairn_client,
+
                         server_config=self.config.server,
                         runner_config=self.config.runner,
                         adapter_name=op_config.model_id,
