@@ -109,6 +109,7 @@ class Coordinator:
 
         self._http_client = build_client(config.server)
         self._queue = TaskQueue(max_size=config.cairn.max_queue_size)
+        self._semaphore = asyncio.Semaphore(config.cairn.max_concurrent_agents)
         self._workspace_manager = WorkspaceManager()
         self._workspace_cache = WorkspaceCache(max_size=config.cairn.workspace_cache_size)
         self._event_emitter = build_event_emitter(
@@ -258,11 +259,7 @@ class Coordinator:
             ctx: RemoraAgentContext,
             runner: FunctionGemmaRunner,
         ) -> tuple[str, AgentResult | Exception]:
-            op_config = self.config.operations.get(operation)
-            priority_str = op_config.priority if op_config else "normal"
-            priority = PRIORITY_MAP.get(priority_str, TaskPriority.NORMAL)
-
-            async with self._queue.acquire(priority=priority):
+            async with self._semaphore:
                 # Phase 4: Manage workspace lifecycle
                 cache_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
                 workspace_path = cache_root / "workspaces" / ctx.agent_id
@@ -283,11 +280,11 @@ class Coordinator:
                     result = await runner.run()
                     ctx.transition(RemoraAgentState.COMPLETED)
                     return operation, result
-                except AgentError as exc:
+                except Exception as exc:
                     ctx.transition(RemoraAgentState.ERRORED)
-                    raw_phase = exc.phase if isinstance(exc, AgentError) else "run"
+                    raw_phase = getattr(exc, "phase", "run")
                     phase, step = _normalize_phase(raw_phase)
-                    error_code = exc.error_code if isinstance(exc, AgentError) else None
+                    error_code = getattr(exc, "error_code", None)
                     payload: dict[str, Any] = {
                         "event": "agent_error",
                         "agent_id": ctx.agent_id,
@@ -321,10 +318,20 @@ class Coordinator:
 
             for item in raw:
                 if isinstance(item, BaseException):
-                    # Task-level exception (e.g. CancelledError from shutdown)
-                    print(f"!!! SWALLOWED EXCEPTION: {type(item).__name__}: {item}", flush=True)
-                    import traceback
-                    traceback.print_exception(type(item), item, item.__traceback__)
+                    if isinstance(item, asyncio.CancelledError):
+                        # Genuine shutdown cancellation — skip silently
+                        continue
+                    # Unexpected exception that escaped run_with_limit
+                    logger.error(
+                        "Unhandled exception in run_with_limit: %s",
+                        item,
+                        exc_info=item,
+                    )
+                    errors.append({
+                        "operation": "unknown",
+                        "phase": "run",
+                        "error": str(item),
+                    })
                     continue
                 operation, outcome = item
                 if isinstance(outcome, Exception):
