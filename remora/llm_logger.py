@@ -32,11 +32,22 @@ class LlmConversationLogger:
         self._current_agent: str | None = None
     
     def open(self) -> None:
-        if isinstance(self._output, Path):
-            self._output.parent.mkdir(parents=True, exist_ok=True)
-            self._stream = self._output.open("a", encoding="utf-8")
-        elif hasattr(self._output, "write"):
-            self._stream = self._output
+        output = self._output
+        if isinstance(output, Path):
+            # Generate timestamped filename for daily rotation
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            
+            if output.is_dir():
+                log_file = output / f"llm_conversations_{date_str}.log"
+            else:
+                stem = output.stem
+                suffix = output.suffix
+                log_file = output.with_name(f"{stem}_{date_str}{suffix}")
+            
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            self._stream = log_file.open("a", encoding="utf-8")
+        elif hasattr(output, "write"):
+            self._stream = output
     
     def close(self) -> None:
         if self._stream and isinstance(self._output, Path):
