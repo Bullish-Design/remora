@@ -43,3 +43,42 @@ def create_remora_externals(
     base_externals["get_node_metadata"] = get_node_metadata
 
     return base_externals
+
+
+def create_resume_tool_schema() -> dict[str, Any]:
+    """OpenAI-format tool schema for the built-in ``resume_tool``.
+
+    This tool is injected into the model's tool list when snapshots are
+    enabled, allowing the LLM to resume a previously suspended ``.pym``
+    script execution.
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": "resume_tool",
+            "description": (
+                "Resume a previously suspended tool execution. "
+                "Use this when a tool call returns a 'suspended' status "
+                "with a snapshot_id. Pass the snapshot_id and optionally "
+                "provide additional_context as the return value for the "
+                "external function that caused the suspension."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "snapshot_id": {
+                        "type": "string",
+                        "description": "The snapshot_id returned by the suspended tool.",
+                    },
+                    "additional_context": {
+                        "type": "string",
+                        "description": (
+                            "Optional return value to pass to the suspended "
+                            "external function. If omitted, None is used."
+                        ),
+                    },
+                },
+                "required": ["snapshot_id"],
+            },
+        },
+    }

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
+import logging
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
@@ -22,7 +23,10 @@ from remora.results import AgentResult
 from remora.subagent import SubagentDefinition
 
 if TYPE_CHECKING:
+    from remora.execution import SnapshotManager
     from remora.orchestrator import RemoraAgentContext
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -86,6 +90,7 @@ class FunctionGemmaRunner:
     grail_limits: dict[str, Any] | None = None
     workspace_root: Path | None = None
     stable_root: Path | None = None
+    snapshot_manager: SnapshotManager | None = None
     messages: list[ChatCompletionMessageParam] = field(init=False)
     turn_count: int = field(init=False)
     _http_client: AsyncOpenAI = field(init=False)
@@ -505,6 +510,11 @@ class FunctionGemmaRunner:
                 "status": "ok",
             }
         )
+
+        # Built-in: resume a suspended snapshot
+        if tool_name == "resume_tool":
+            return await self._handle_resume(args)
+
         tool_def = self.definition.tools_by_name.get(tool_name)
         if tool_def is None:
             tool_error = {"error": f"Unknown tool: {tool_name}"}
@@ -578,4 +588,30 @@ class FunctionGemmaRunner:
         self._emit_tool_result(tool_name, tool_result)
         content_parts = context_parts + [json.dumps(tool_result)]
         return "\n".join(content_parts)
+
+    async def _handle_resume(self, args: dict[str, Any]) -> str:
+        """Handle a ``resume_tool`` call from the model."""
+        if self.snapshot_manager is None:
+            result = {
+                "error": True,
+                "code": "SNAPSHOTS_DISABLED",
+                "message": "Snapshot pause/resume is not enabled",
+            }
+            self._emit_tool_result("resume_tool", result)
+            return json.dumps(result)
+
+        snapshot_id = args.get("snapshot_id", "")
+        additional_context = args.get("additional_context")
+        result = self.snapshot_manager.resume_script(
+            snapshot_id=snapshot_id,
+            return_value=additional_context,
+        )
+        self._emit_tool_result("resume_tool", result)
+        if result.get("suspended"):
+            logger.info(
+                "Snapshot %s still suspended (resume %d)",
+                snapshot_id,
+                result.get("resume_count", 0),
+            )
+        return json.dumps(result)
 

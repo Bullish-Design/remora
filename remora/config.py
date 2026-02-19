@@ -90,6 +90,10 @@ class CairnConfig(BaseModel):
     pool_workers: int = 4                # ProcessPoolExecutor max_workers
     max_queue_size: int = 100
     workspace_cache_size: int = 100
+    # Snapshot pause/resume (Phase 6)
+    enable_snapshots: bool = False       # Opt-in: most tools don't need pause/resume
+    max_snapshots: int = 50              # Max concurrent suspended scripts
+    max_resumes_per_script: int = 5      # Safety cap per snapshot
 
 
 class EventStreamConfig(BaseModel):

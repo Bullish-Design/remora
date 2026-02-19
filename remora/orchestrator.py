@@ -16,7 +16,7 @@ from remora.client import build_client
 from remora.config import RemoraConfig, resolve_grail_limits
 from remora.discovery import CSTNode
 from remora.events import EventStreamController, build_event_emitter
-from remora.execution import ProcessIsolatedExecutor
+from remora.execution import ProcessIsolatedExecutor, SnapshotManager
 from remora.results import AgentResult, NodeResult
 from remora.runner import AgentError, CairnClient, FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
@@ -126,6 +126,13 @@ class Coordinator:
             call_timeout=float(config.cairn.timeout),
         )
         self._grail_limits = resolve_grail_limits(config.cairn)
+        # Phase 6: Snapshot pause/resume (opt-in)
+        self._snapshot_manager: SnapshotManager | None = None
+        if config.cairn.enable_snapshots:
+            self._snapshot_manager = SnapshotManager(
+                max_snapshots=config.cairn.max_snapshots,
+                max_resumes=config.cairn.max_resumes_per_script,
+            )
 
     async def __aenter__(self) -> "Coordinator":
         if isinstance(self._event_emitter, EventStreamController):
@@ -148,6 +155,8 @@ class Coordinator:
         await self._workspace_manager.close_all()
         await self._workspace_cache.clear()
         await self._executor.shutdown()
+        if self._snapshot_manager is not None:
+            self._snapshot_manager.clear()
 
     # -- Signal handling (graceful shutdown) --------------------------------
 
@@ -227,6 +236,7 @@ class Coordinator:
                         grail_executor=self._executor,
                         grail_dir=self.config.cairn.home or Path.cwd(),
                         grail_limits=self._grail_limits,
+                        snapshot_manager=self._snapshot_manager,
                     ),
                 )
             except Exception as exc:
@@ -298,6 +308,9 @@ class Coordinator:
                     removed_ws = self._workspace_cache.remove(cache_key)
                     if removed_ws is not None:
                         await removed_ws.close()
+                    # Phase 6: Clean up any dangling snapshots for this agent
+                    if self._snapshot_manager is not None:
+                        self._snapshot_manager.cleanup_agent(ctx.agent_id)
 
         results: dict[str, AgentResult] = {}
         if runners:
