@@ -300,7 +300,7 @@ class Coordinator:
                     cache_key = ctx.agent_id
                     ws = await self._workspace_cache.get(cache_key)
                     if ws is None:
-                        ws = await Fsdantic.open(path=str(workspace_path))
+                        ws = await Fsdantic.open(path=str(workspace_path / "workspace.db"))
                         await self._workspace_cache.put(cache_key, ws)
 
                     ctx.transition(RemoraAgentState.EXECUTING)
