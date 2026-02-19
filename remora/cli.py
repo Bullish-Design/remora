@@ -255,6 +255,9 @@ def watch(
     ),
 ) -> None:
     """Watch files and re-analyze on changes."""
+    from remora.orchestrator import Coordinator
+    from remora.watcher import RemoraFileWatcher
+
     overrides = _build_overrides(
         discovery_language,
         query_pack,
@@ -283,52 +286,50 @@ def watch(
     # Parse operations
     ops = [op.strip() for op in operations.split(",") if op.strip()]
 
+    # CLI --debounce overrides config value
+    effective_debounce = debounce_ms
+
     console.print(f"[bold]Watching {len(paths)} path(s) for changes...[/bold]")
     console.print(f"Operations: {', '.join(ops)}")
-    console.print(f"Debounce: {debounce_ms}ms")
+    console.print(f"Extensions: {', '.join(sorted(config.watch.extensions))}")
+    console.print(f"Debounce: {effective_debounce}ms")
     console.print("Press Ctrl+C to stop\n")
 
     try:
-        from watchfiles import awatch
 
-        async def _watch():
-            pending: set[Path] = set()
-            debounce_task = None
+        async def _watch() -> None:
+            cairn_client = CairnCLIClient(config.cairn)
+            async with Coordinator(
+                config,
+                cairn_client,
+                event_stream_enabled=event_stream,
+                event_stream_output=event_stream_file,
+            ) as coordinator:
 
-            async def run_analysis():
-                files = list(pending)
-                pending.clear()
-                if not files:
-                    return
+                async def on_changes(changes: list) -> None:
+                    changed_paths = [c.path for c in changes]
+                    console.print(
+                        f"\n[bold cyan]Detected {len(changes)} change(s), "
+                        f"re-analyzing...[/bold cyan]"
+                    )
+                    analyzer = RemoraAnalyzer(config, cairn_client)
+                    results = await analyzer.analyze(changed_paths, ops)
+                    presenter = ResultPresenter("table")
+                    presenter.display(results)
 
-                console.print(f"\n[cyan]Analyzing {len(files)} file(s)...[/cyan]")
-                cairn_client = CairnCLIClient(config.cairn)
-                analyzer = RemoraAnalyzer(config, cairn_client)
-                results = await analyzer.analyze(files, ops)
+                watcher = RemoraFileWatcher(
+                    watch_paths=[p.resolve() for p in paths],
+                    on_changes=on_changes,
+                    extensions=config.watch.extensions,
+                    ignore_patterns=config.watch.ignore_patterns,
+                    debounce_ms=effective_debounce,
+                )
 
-                presenter = ResultPresenter("table")
-                presenter.display(results)
-
-            async def debounced_trigger():
-                await asyncio.sleep(debounce_ms / 1000)
-                await run_analysis()
-
-            async for changes in awatch(*paths):
-                for change_type, changed_path in changes:
-                    path_obj = Path(changed_path)
-                    if path_obj.suffix == ".py":
-                        pending.add(path_obj)
-
-                if debounce_task:
-                    debounce_task.cancel()
-                debounce_task = asyncio.create_task(debounced_trigger())
+                await watcher.start()
 
         asyncio.run(_watch())
     except KeyboardInterrupt:
         console.print("\n[yellow]Watch stopped[/yellow]")
-    except ImportError:
-        console.print("[red]Error: watchfiles not installed. Install with: pip install watchfiles[/red]")
-        raise typer.Exit(code=1)
 
 
 @app.command()

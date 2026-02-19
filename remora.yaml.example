@@ -71,3 +71,15 @@ event_stream:
   enabled: false
   include_payloads: true
   max_payload_chars: 4000
+
+watch:
+  extensions: [".py"]
+  ignore_patterns:
+    - "__pycache__"
+    - ".git"
+    - ".jj"
+    - ".venv"
+    - "node_modules"
+    - ".remora_cache"
+    - ".agentfs"
+  debounce_ms: 500

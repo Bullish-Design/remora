@@ -100,6 +100,24 @@ class EventStreamConfig(BaseModel):
     max_payload_chars: int = 4000
 
 
+class WatchConfig(BaseModel):
+    """Configuration for the 'remora watch' command."""
+
+    extensions: set[str] = Field(default={".py"})
+    ignore_patterns: list[str] = Field(
+        default=[
+            "__pycache__",
+            ".git",
+            ".jj",
+            ".venv",
+            "node_modules",
+            ".remora_cache",
+            ".agentfs",
+        ]
+    )
+    debounce_ms: int = 500
+
+
 def _default_operations() -> dict[str, OperationConfig]:
     return {
         "lint": OperationConfig(subagent="lint/lint_subagent.yaml"),
@@ -122,6 +140,7 @@ class RemoraConfig(BaseModel):
     runner: RunnerConfig = Field(default_factory=RunnerConfig)
     cairn: CairnConfig = Field(default_factory=CairnConfig)
     event_stream: EventStreamConfig = Field(default_factory=EventStreamConfig)
+    watch: WatchConfig = Field(default_factory=WatchConfig)
 
 
 def load_config(config_path: Path | None = None, overrides: dict[str, Any] | None = None) -> RemoraConfig:
