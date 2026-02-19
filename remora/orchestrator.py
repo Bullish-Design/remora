@@ -8,9 +8,10 @@ from typing import Any
 from pathlib import Path
 
 from remora.client import build_client
-from remora.config import RemoraConfig
+from remora.config import RemoraConfig, resolve_grail_limits
 from remora.discovery import CSTNode
 from remora.events import EventStreamController, build_event_emitter
+from remora.execution import ProcessIsolatedExecutor
 from remora.results import AgentResult, NodeResult
 from remora.runner import AgentError, CairnClient, FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
@@ -43,6 +44,12 @@ class Coordinator:
             output_override=event_stream_output,
         )
         self._watch_task: asyncio.Task[None] | None = None
+        # Phase 1: in-process Grail execution
+        self._executor = ProcessIsolatedExecutor(
+            max_workers=config.cairn.pool_workers,
+            call_timeout=float(config.cairn.timeout),
+        )
+        self._grail_limits = resolve_grail_limits(config.cairn)
 
     async def __aenter__(self) -> "Coordinator":
         if isinstance(self._event_emitter, EventStreamController):
@@ -55,6 +62,7 @@ class Coordinator:
             with suppress(asyncio.CancelledError):
                 await self._watch_task
         self._event_emitter.close()
+        await self._executor.shutdown()
 
     async def process_node(self, node: CSTNode, operations: list[str]) -> NodeResult:
         runners: dict[str, FunctionGemmaRunner] = {}
@@ -88,6 +96,9 @@ class Coordinator:
                     adapter_name=op_config.model_id,
                     http_client=self._http_client,
                     event_emitter=self._event_emitter,
+                    grail_executor=self._executor,
+                    grail_dir=self.config.cairn.home or Path.cwd(),
+                    grail_limits=self._grail_limits,
                 )
             except Exception as exc:
                 errors.append({"operation": operation, "phase": "init", "error": str(exc)})

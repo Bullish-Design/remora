@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 import concurrent.futures
 import os
 import socket
@@ -71,10 +71,13 @@ class DiscoveryConfig(BaseModel):
 
 
 class CairnConfig(BaseModel):
-    command: str = "cairn"
+    command: str = "cairn"               # DEPRECATED — kept for migration period
     home: Path | None = None
     max_concurrent_agents: int = 16
     timeout: int = 300
+    limits_preset: Literal["strict", "default", "permissive"] = "default"
+    limits_override: dict[str, Any] = Field(default_factory=dict)
+    pool_workers: int = 4                # ProcessPoolExecutor max_workers
 
 
 class EventStreamConfig(BaseModel):
@@ -123,6 +126,20 @@ def load_config(config_path: Path | None = None, overrides: dict[str, Any] | Non
     _warn_missing_subagents(config)
     _warn_unreachable_server(config.server)
     return config
+
+
+def resolve_grail_limits(config: CairnConfig) -> dict[str, Any]:
+    """Resolve Grail resource limits from config preset + overrides."""
+    import grail.limits
+
+    presets: dict[str, dict[str, Any]] = {
+        "strict": grail.limits.STRICT,
+        "default": grail.limits.DEFAULT,
+        "permissive": grail.limits.PERMISSIVE,
+    }
+    base = presets[config.limits_preset].copy()
+    base.update(config.limits_override)
+    return base
 
 
 def serialize_config(config: RemoraConfig) -> dict[str, Any]:

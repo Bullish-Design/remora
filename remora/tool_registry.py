@@ -61,6 +61,33 @@ class GrailToolRegistry:
             grail_summary={"valid": True, "warnings": warnings_list},
         )
 
+    def preflight_check_all(self, tools: Sequence[ToolConfig]) -> list[dict[str, Any]]:
+        """Run GrailScript.check() on every tool's .pym file.
+
+        Raises ToolRegistryError if any tool has check errors.
+        Returns list of warning dicts for logging.
+        """
+        all_warnings: list[dict[str, Any]] = []
+        errors: list[str] = []
+        for tool in tools:
+            try:
+                script = grail.load(tool.pym, grail_dir=self.grail_root / "agents")
+            except Exception as exc:
+                errors.append(f"{tool.name}: failed to load: {exc}")
+                continue
+            check = script.check()
+            if not check.valid:
+                check_errors = [str(e) for e in (check.errors or [])]
+                errors.append(f"{tool.name}: {'; '.join(check_errors)}")
+            for warning in check.warnings or []:
+                all_warnings.append({"tool": tool.name, "message": str(warning)})
+        if errors:
+            raise ToolRegistryError(
+                AGENT_001,
+                f"Preflight check failed for {len(errors)} tool(s):\n" + "\n".join(errors),
+            )
+        return all_warnings
+
     def _build_tool_schema(self, tool: ToolConfig) -> tuple[dict[str, Any], list[str]]:
         try:
             script = grail.load(tool.pym, grail_dir=self.grail_root / "agents")

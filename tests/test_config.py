@@ -7,7 +7,7 @@ import yaml
 from typer.testing import CliRunner
 
 from remora.cli import app
-from remora.config import load_config, serialize_config
+from remora.config import CairnConfig, load_config, resolve_grail_limits, serialize_config
 from remora.errors import CONFIG_003, CONFIG_004
 
 
@@ -90,3 +90,39 @@ def test_missing_agents_dir_returns_config_004(tmp_path: Path) -> None:
     result = runner.invoke(app, ["config", "--config", str(config_path)])
     assert result.exit_code == 1
     assert CONFIG_004 in result.output
+
+
+# ---------------------------------------------------------------------------
+# CairnConfig new fields & resolve_grail_limits
+# ---------------------------------------------------------------------------
+
+
+def test_cairn_config_new_fields_have_defaults() -> None:
+    """New fields should have sensible defaults without any user config."""
+    config = CairnConfig()
+    assert config.limits_preset == "default"
+    assert config.limits_override == {}
+    assert config.pool_workers == 4
+
+
+@pytest.mark.parametrize("preset", ["strict", "default", "permissive"])
+def test_resolve_grail_limits_presets(preset: str) -> None:
+    """Each preset maps to the corresponding grail.limits constant."""
+    import grail.limits
+
+    expected = {
+        "strict": grail.limits.STRICT,
+        "default": grail.limits.DEFAULT,
+        "permissive": grail.limits.PERMISSIVE,
+    }
+    config = CairnConfig(limits_preset=preset)
+    result = resolve_grail_limits(config)
+    assert result == expected[preset]
+
+
+def test_resolve_grail_limits_with_override() -> None:
+    """Overrides merge on top of the preset."""
+    config = CairnConfig(limits_preset="default", limits_override={"max_duration": "60s"})
+    result = resolve_grail_limits(config)
+    assert result["max_duration"] == "60s"
+

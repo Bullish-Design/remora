@@ -23,9 +23,21 @@ from remora.subagent import SubagentDefinition
 
 
 class CairnClient(Protocol):
-    """Protocol for Cairn integration."""
+    """Protocol for Cairn integration (legacy subprocess path)."""
 
     async def run_pym(self, path: Any, workspace_id: str, inputs: dict[str, Any]) -> dict[str, Any] | str: ...
+
+
+class GrailExecutor(Protocol):
+    """Protocol for in-process Grail script execution."""
+
+    async def execute(
+        self,
+        pym_path: Path,
+        grail_dir: Path,
+        inputs: dict[str, Any],
+        limits: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
 
 
 class AgentError(RuntimeError):
@@ -61,6 +73,9 @@ class FunctionGemmaRunner:
     adapter_name: str | None = None
     http_client: AsyncOpenAI | None = None
     event_emitter: EventEmitter = field(default_factory=NullEventEmitter)
+    grail_executor: GrailExecutor | None = None
+    grail_dir: Path | None = None
+    grail_limits: dict[str, Any] | None = None
     messages: list[ChatCompletionMessageParam] = field(init=False)
     turn_count: int = field(init=False)
     _http_client: AsyncOpenAI = field(init=False)
@@ -474,6 +489,61 @@ class FunctionGemmaRunner:
             self._emit_tool_result(tool_name, tool_error)
             return json.dumps(tool_error)
 
+        # --- In-process execution via GrailExecutor (new path) ---
+        if self.grail_executor is not None and self.grail_dir is not None:
+            return await self._dispatch_tool_grail(
+                tool_name, tool_def, tool_inputs,
+            )
+
+        # --- Legacy subprocess execution via CairnClient ---
+        return await self._dispatch_tool_cairn(
+            tool_name, tool_def, tool_inputs,
+        )
+
+    async def _dispatch_tool_grail(
+        self,
+        tool_name: str,
+        tool_def: Any,
+        tool_inputs: dict[str, Any],
+    ) -> str:
+        """Execute a tool via GrailScript.run() in a child process."""
+        assert self.grail_executor is not None
+        assert self.grail_dir is not None
+
+        context_parts: list[str] = []
+        for provider_path in tool_def.context_providers:
+            result = await self.grail_executor.execute(
+                pym_path=provider_path,
+                grail_dir=self.grail_dir,
+                inputs=self._base_tool_inputs(),
+                limits=self.grail_limits,
+            )
+            if result.get("error"):
+                self._emit_tool_result(tool_name, result)
+                return json.dumps(result)
+            context_parts.append(json.dumps(result.get("result", {})))
+
+        result = await self.grail_executor.execute(
+            pym_path=tool_def.pym,
+            grail_dir=self.grail_dir,
+            inputs=tool_inputs,
+            limits=self.grail_limits,
+        )
+        if result.get("error"):
+            self._emit_tool_result(tool_name, result)
+            return json.dumps(result)
+        tool_result = result.get("result", {})
+        self._emit_tool_result(tool_name, tool_result)
+        content_parts = context_parts + [json.dumps(tool_result)]
+        return "\n".join(content_parts)
+
+    async def _dispatch_tool_cairn(
+        self,
+        tool_name: str,
+        tool_def: Any,
+        tool_inputs: dict[str, Any],
+    ) -> str:
+        """Execute a tool via the legacy Cairn CLI subprocess."""
         context_parts: list[str] = []
         for provider_path in tool_def.context_providers:
             try:
