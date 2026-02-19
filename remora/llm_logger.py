@@ -42,7 +42,7 @@ class LlmConversationLogger:
         if self._stream and isinstance(self._output, Path):
             self._stream.close()
     
-    def handle_event(self, payload: dict[str, Any]) -> None:
+    def emit(self, payload: dict[str, Any]) -> None:
         """Route an event payload to the appropriate formatter."""
         event = payload.get("event", "")
         handler = getattr(self, f"_handle_{event}", None)
