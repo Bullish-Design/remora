@@ -6,7 +6,7 @@ import logging
 import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, TextIO, cast
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +51,15 @@ class LlmConversationLogger:
             self._stream = output
     
     def close(self) -> None:
+        self.flush_all()
         if self._stream and isinstance(self._output, Path):
             self._stream.close()
     
+    def flush_all(self) -> None:
+        """Force write all buffered conversations."""
+        for agent_id in list(self._agent_events.keys()):
+            self._flush_agent(agent_id)
+
     def emit(self, payload: dict[str, Any]) -> None:
         """Buffer an event payload for later processing."""
         agent_id = payload.get("agent_id")
@@ -95,28 +101,29 @@ class LlmConversationLogger:
         if last_request is None:
             # Fallback: just print what we have if no request found (unlikely)
             self._write(f"WARNING: No model_request found for {agent_id}")
-            return
-
+            # But we continue to print what we have!
+        
         # 2. Print Header
-        self._write_agent_header(last_request)
+        # If we have a request, use it for metadata. If not, try the first event.
+        header_source: dict[str, Any] = last_request if last_request else events[0]
+        self._write_agent_header(header_source)
 
         # 3. Print History (from last request's messages)
         # This includes System, User, and all previous Turns (Model/Tools)
-        messages = last_request.get("messages", [])
-        if isinstance(messages, list):
-            for msg in messages:
-                if isinstance(msg, dict):
-                    self._print_message(msg)
+        if last_request:
+            messages = last_request.get("messages", [])
+            if isinstance(messages, list):
+                for msg in messages:
+                    if isinstance(msg, dict):
+                        self._print_message(msg)
 
         # 4. Print Subsequent Events (that happened AFTER the last request)
         # This usually includes the final response, tool calls, or errors
         # that weren't part of the history sent in the last request.
         
-        # Find index of last request in the original event list
         subsequent_events: list[dict[str, Any]] = []
-        try:
-            # Manually iterate to find the index to avoid type checker issues with list.index()
-            # on list[dict[str, Any]] vs dict[str, Any] | None
+        if last_request:
+             # Manually find index to avoid list.index type issues
             idx = -1
             for i, evt in enumerate(events):
                 if evt is last_request:
@@ -124,11 +131,12 @@ class LlmConversationLogger:
                     break
             
             if idx != -1:
-                # Use a slice that satisfies the type checker (it might complain about slicing list[dict])
-                # We iterate to build the list manually as a fallback if slicing fails type checking
+                # Use list comprehension for safe slicing
                 subsequent_events = [e for k, e in enumerate(events) if k > idx]
-        except ValueError:
-            subsequent_events = []
+        else:
+            # If no request found, everything is "subsequent" (partial log)
+            self._write(f"\n  (WARNING: No model request history found - partial log)")
+            subsequent_events = events
 
         for event in subsequent_events:
             if not isinstance(event, dict):
@@ -144,12 +152,18 @@ class LlmConversationLogger:
                 self._print_agent_error(event)
             elif event_type == "submit_result":
                 self._print_submit_result(event)
+            elif not last_request and event_type == "model_request":
+                 self._write("\n  (Found model_request but failed to identify it as last_request)")
+            elif getattr(self, f"_print_{event_type}", None):
+                # Fallback for other event types if we have specific printers
+                getattr(self, f"_print_{event_type}")(event)
 
         self._write(f"{'═' * 60}\n")
 
     def _print_message(self, msg: dict[str, Any]) -> None:
         role = str(msg.get("role", "?")).upper()
-        content = str(msg.get("content", ""))
+        # Force conversion to string to satisfy type checker for slicing
+        content = cast(str, str(msg.get("content") or ""))
         
         if role == "SYSTEM":
              self._write(f"\n── System Prompt {'─' * 42}")
@@ -185,11 +199,11 @@ class LlmConversationLogger:
         status = p.get("status", "?")
         duration = p.get("duration_ms", "?")
         tokens = p.get("total_tokens", "?")
-        response = p.get("response_text", "")
+        response = cast(str, str(p.get("response_text") or ""))
         
         self._write(f"\n← MODEL RESPONSE ({duration}ms, {tokens} tokens) [{status}]:")
         if response:
-            self._write(textwrap.indent(str(response)[:2000], "  "))
+            self._write(textwrap.indent(response[:2000], "  "))
         
         if p.get("error"):
             self._write(f"  ERROR: {p['error']}")
@@ -201,10 +215,10 @@ class LlmConversationLogger:
     def _print_tool_result(self, p: dict[str, Any]) -> None:
         tool = p.get("tool_name", "?")
         status = p.get("status", "?")
-        output = p.get("tool_output", "")
+        output = cast(str, str(p.get("tool_output") or ""))
         self._write(f"    → {tool} [{status}]")
         if output:
-            self._write(textwrap.indent(str(output)[:1000], "      "))
+            self._write(textwrap.indent(output[:1000], "      "))
 
     def _print_agent_error(self, p: dict[str, Any]) -> None:
         self._write(f"\n{'!' * 60}")
