@@ -55,3 +55,8 @@ event_stream:
   enabled: true
   include_payloads: true
   max_payload_chars: 40000
+
+llm_log:
+  enabled: true
+  output: .remora_cache/llm_conversations.log
+  include_full_prompts: true

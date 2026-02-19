@@ -126,6 +126,12 @@ class FunctionGemmaRunner:
             max_delay=retry_config.max_delay,
             backoff_factor=retry_config.backoff_factor,
         )
+        logger.info(
+            "Runner initialized for %s (model=%s, turns=%d)",
+            self.workspace_id,
+            self._model_target,
+            self.definition.max_turns,
+        )
 
     def _build_system_prompt(self) -> str:
         return self.definition.initial_context.system_prompt
@@ -196,6 +202,13 @@ class FunctionGemmaRunner:
             tool_choice=tool_choice,
             tools=tools_payload,
         )
+        logger.debug(
+            "Calling model %s (phase=%s, turn=%d, messages=%d)",
+            self._model_target,
+            phase,
+            self.turn_count,
+            len(self.messages),
+        )
 
         async def _attempt() -> Any:
             return await self._http_client.chat.completions.create(
@@ -238,6 +251,12 @@ class FunctionGemmaRunner:
             status="ok",
             usage=getattr(response, "usage", None),
             response_text=response_text,
+        )
+        logger.debug(
+            "Model response (phase=%s, request_id=%s, tool_calls=%d)",
+            phase,
+            request_id,
+            len(message.tool_calls or []),
         )
         return message
 
@@ -484,6 +503,9 @@ class FunctionGemmaRunner:
                 "status": result.status,
             }
         )
+        logger.info(
+            "Agent %s submitted result: status=%s", self.workspace_id, result.status
+        )
         return result
 
     async def _dispatch_tool(self, tool_call: Any) -> str:
@@ -499,6 +521,7 @@ class FunctionGemmaRunner:
         if not isinstance(args, dict):
             args = {}
         tool_inputs = {**self._base_tool_inputs(), **args}
+        logger.debug("Dispatching tool %s for %s", tool_name, self.workspace_id)
         self.event_emitter.emit(
             {
                 "event": "tool_call",

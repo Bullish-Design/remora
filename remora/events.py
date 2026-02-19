@@ -42,6 +42,23 @@ class NullEventEmitter:
 
 
 @dataclass
+class CompositeEventEmitter:
+    """Fans out events to multiple emitters."""
+    emitters: list[EventEmitter]
+    enabled: bool = True
+    include_payloads: bool = True
+    max_payload_chars: int = 4000
+
+    def emit(self, payload: dict[str, Any]) -> None:
+        for emitter in self.emitters:
+            emitter.emit(payload)
+
+    def close(self) -> None:
+        for emitter in self.emitters:
+            emitter.close()
+
+
+@dataclass
 class JsonlEventEmitter:
     stream: TextIO
     enabled: bool = True

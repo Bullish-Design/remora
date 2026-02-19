@@ -104,6 +104,13 @@ class EventStreamConfig(BaseModel):
     max_payload_chars: int = 4000
 
 
+class LlmLogConfig(BaseModel):
+    enabled: bool = False
+    output: Path | None = None  # defaults to .remora_cache/llm_conversations.log
+    include_full_prompts: bool = True
+    max_content_lines: int = 100
+
+
 class WatchConfig(BaseModel):
     """Configuration for the 'remora watch' command."""
 
@@ -144,6 +151,7 @@ class RemoraConfig(BaseModel):
     runner: RunnerConfig = Field(default_factory=RunnerConfig)
     cairn: CairnConfig = Field(default_factory=CairnConfig)
     event_stream: EventStreamConfig = Field(default_factory=EventStreamConfig)
+    llm_log: LlmLogConfig = Field(default_factory=LlmLogConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
 
 

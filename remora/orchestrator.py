@@ -15,11 +15,12 @@ from pydantic import BaseModel, Field, field_validator
 from remora.client import build_client
 from remora.config import RemoraConfig, resolve_grail_limits
 from remora.discovery import CSTNode
-from remora.events import EventStreamController, build_event_emitter
+from remora.events import EventStreamController, build_event_emitter, CompositeEventEmitter
 from remora.execution import ProcessIsolatedExecutor, SnapshotManager
 from remora.results import AgentResult, NodeResult
 from remora.runner import AgentError, FunctionGemmaRunner
 from remora.subagent import load_subagent_definition
+from remora.llm_logger import LlmConversationLogger
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,21 @@ class Coordinator:
             enabled_override=event_stream_enabled,
             output_override=event_stream_output,
         )
+        self._llm_logger: LlmConversationLogger | None = None
+        if config.llm_log.enabled:
+            output_path = config.llm_log.output or (
+                (config.cairn.home or Path.home() / ".cache" / "remora") / "llm_conversations.log"
+            )
+            self._llm_logger = LlmConversationLogger(
+                output=output_path,
+                include_full_prompts=config.llm_log.include_full_prompts,
+                max_content_lines=config.llm_log.max_content_lines,
+            )
+            self._event_emitter = CompositeEventEmitter(
+                emitters=[self._event_emitter, self._llm_logger],
+                enabled=True,
+                include_payloads=True, # Composite needs payloads to pass them down
+            )
         self._watch_task: asyncio.Task[None] | None = None
         self._running_tasks: set[asyncio.Task[Any]] = set()
         self._shutdown_requested: bool = False
@@ -137,6 +153,15 @@ class Coordinator:
     async def __aenter__(self) -> "Coordinator":
         if isinstance(self._event_emitter, EventStreamController):
             self._watch_task = asyncio.create_task(self._event_emitter.watch())
+        elif isinstance(self._event_emitter, CompositeEventEmitter):
+            # Check if one of the children is the controller
+            for child in self._event_emitter.emitters:
+                if isinstance(child, EventStreamController):
+                     self._watch_task = asyncio.create_task(child.watch())
+        
+        if self._llm_logger:
+            self._llm_logger.open()
+            
         self._setup_signal_handlers()
         return self
 
@@ -151,6 +176,8 @@ class Coordinator:
             self._watch_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._watch_task
+        if self._llm_logger:
+            self._llm_logger.close()
         self._event_emitter.close()
         await self._workspace_manager.close_all()
         await self._workspace_cache.clear()
@@ -260,52 +287,57 @@ class Coordinator:
             runner: FunctionGemmaRunner,
         ) -> tuple[str, AgentResult | Exception]:
             async with self._semaphore:
-                # Phase 4: Manage workspace lifecycle
-                cache_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
-                workspace_path = cache_root / "workspaces" / ctx.agent_id
-                workspace_path.mkdir(parents=True, exist_ok=True)
-
-                runner.workspace_root = workspace_path
-                runner.stable_root = Path.cwd()
-
-                # Track workspace via cache for lifecycle management
-                cache_key = ctx.agent_id
-                ws = self._workspace_cache.get(cache_key)
-                if ws is None:
-                    ws = await Fsdantic.open(path=str(workspace_path))
-                    self._workspace_cache.put(cache_key, ws)
-
-                ctx.transition(RemoraAgentState.EXECUTING)
                 try:
-                    result = await runner.run()
-                    ctx.transition(RemoraAgentState.COMPLETED)
-                    return operation, result
-                except Exception as exc:
+                    # Phase 4: Manage workspace lifecycle
+                    cache_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
+                    workspace_path = cache_root / "workspaces" / ctx.agent_id
+                    workspace_path.mkdir(parents=True, exist_ok=True)
+
+                    runner.workspace_root = workspace_path
+                    runner.stable_root = Path.cwd()
+
+                    # Track workspace via cache for lifecycle management
+                    cache_key = ctx.agent_id
+                    ws = self._workspace_cache.get(cache_key)
+                    if ws is None:
+                        ws = await Fsdantic.open(path=str(workspace_path))
+                        self._workspace_cache.put(cache_key, ws)
+
+                    ctx.transition(RemoraAgentState.EXECUTING)
+                    try:
+                        result = await runner.run()
+                        ctx.transition(RemoraAgentState.COMPLETED)
+                        return operation, result
+                    except Exception as exc:
+                        ctx.transition(RemoraAgentState.ERRORED)
+                        raw_phase = getattr(exc, "phase", "run")
+                        phase, step = _normalize_phase(raw_phase)
+                        error_code = getattr(exc, "error_code", None)
+                        payload: dict[str, Any] = {
+                            "event": "agent_error",
+                            "agent_id": ctx.agent_id,
+                            "node_id": node.node_id,
+                            "operation": operation,
+                            "phase": phase,
+                            "error": str(exc),
+                        }
+                        if step is not None:
+                            payload["step"] = step
+                        if error_code is not None:
+                            payload["error_code"] = error_code
+                        self._event_emitter.emit(payload)
+                        return operation, exc
+                    finally:
+                        removed_ws = self._workspace_cache.remove(cache_key)
+                        if removed_ws is not None:
+                            await removed_ws.close()
+                        # Phase 6: Clean up any dangling snapshots for this agent
+                        if self._snapshot_manager is not None:
+                            self._snapshot_manager.cleanup_agent(ctx.agent_id)
+                except Exception as setup_exc:
+                    logger.error("Workspace setup failed for %s: %s", ctx.agent_id, setup_exc, exc_info=True)
                     ctx.transition(RemoraAgentState.ERRORED)
-                    raw_phase = getattr(exc, "phase", "run")
-                    phase, step = _normalize_phase(raw_phase)
-                    error_code = getattr(exc, "error_code", None)
-                    payload: dict[str, Any] = {
-                        "event": "agent_error",
-                        "agent_id": ctx.agent_id,
-                        "node_id": node.node_id,
-                        "operation": operation,
-                        "phase": phase,
-                        "error": str(exc),
-                    }
-                    if step is not None:
-                        payload["step"] = step
-                    if error_code is not None:
-                        payload["error_code"] = error_code
-                    self._event_emitter.emit(payload)
-                    return operation, exc
-                finally:
-                    removed_ws = self._workspace_cache.remove(cache_key)
-                    if removed_ws is not None:
-                        await removed_ws.close()
-                    # Phase 6: Clean up any dangling snapshots for this agent
-                    if self._snapshot_manager is not None:
-                        self._snapshot_manager.cleanup_agent(ctx.agent_id)
+                    return operation, setup_exc
 
         results: dict[str, AgentResult] = {}
         if runners:
