@@ -238,21 +238,10 @@ Using `"unknown"` as a fallback can make debugging difficult when things go wron
 
 **Recommendation**: Either raise an error for missing required fields or use a more descriptive fallback like `f"missing-{uuid.uuid4().hex[:8]}"`.
 
-#### 6. JSON Parsing Without Validation (`run_linter.pym:141-164`)
-
-The `run_linter.pym` script implements manual JSON parsing (`_split_json_objects`, `_get_string`, etc.) instead of using the `json` module.
-
-**Recommendation**: Use `json.loads()` with proper error handling. The manual parser is error-prone and harder to maintain.
-
-#### 7. Missing Type Annotations in Tool Scripts
-
-Tool scripts like `run_linter.pym` have minimal type annotations, making static analysis difficult.
-
-**Recommendation**: Add type annotations to all tool scripts for better IDE support and catching errors early.
 
 ### Medium Priority Issues
 
-#### 8. Duplicate Configuration Logic (`cli.py:41-94`)
+#### 6. Duplicate Configuration Logic (`cli.py:41-94`)
 
 The `_build_overrides` function manually constructs nested dicts from CLI options. This is verbose and error-prone.
 
@@ -265,7 +254,7 @@ OVERRIDE_MAPPING = {
 }
 ```
 
-#### 9. Magic Strings Throughout
+#### 7. Magic Strings Throughout
 
 Many string literals are repeated across the codebase:
 - `"submit_result"` appears in 5+ files
@@ -283,19 +272,19 @@ class AgentStatus:
     SKIPPED = "skipped"
 ```
 
-#### 10. Inconsistent Async Patterns (`discovery/`)
+#### 8. Inconsistent Async Patterns (`discovery/`)
 
 The discovery module is entirely synchronous while the rest of the system is async. This forces `asyncio.run()` or `await asyncio.to_thread()` at integration points.
 
 **Recommendation**: Consider making discovery async for consistency, or document the sync nature clearly.
 
-#### 11. Test Helper Pollution (`tests/helpers.py`)
+#### 9. Test Helper Pollution (`tests/helpers.py`)
 
 Test helpers like `FakeAsyncOpenAI`, `FakeGrailExecutor` are well-designed but tightly coupled to test implementation details.
 
 **Recommendation**: Consider moving these to a `remora.testing` module so they can be reused by downstream projects.
 
-#### 12. Workspace Directory Structure Assumptions (`orchestrator.py:292-297`)
+#### 10. Workspace Directory Structure Assumptions (`orchestrator.py:292-297`)
 
 ```python
 cache_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
@@ -309,13 +298,13 @@ Creates directories without cleaning up old workspaces.
 
 ### Low Priority / Style Issues
 
-#### 13. Inconsistent Docstring Style
+#### 11. Inconsistent Docstring Style
 
 Some modules use Google-style docstrings, others use reStructuredText, and some have minimal documentation.
 
 **Recommendation**: Standardize on Google-style (matches existing majority) and add docstrings to all public APIs.
 
-#### 14. Unused Imports (`orchestrator.py`)
+#### 12. Unused Imports (`orchestrator.py`)
 
 ```python
 from cairn.runtime.workspace_manager import WorkspaceManager
@@ -325,13 +314,13 @@ from cairn.runtime.workspace_manager import WorkspaceManager
 
 **Recommendation**: Move to `TYPE_CHECKING` block or use actual instances.
 
-#### 15. Long Method: `_dispatch_tool_grail` (`runner.py:577-632`)
+#### 13. Long Method: `_dispatch_tool_grail` (`runner.py:577-632`)
 
 This 55-line method handles context providers, tool execution, and result formatting. It does too many things.
 
 **Recommendation**: Extract context provider execution into a separate method.
 
-#### 16. Commented-Out Code (`config.py:84`)
+#### 14. Commented-Out Code (`config.py:84`)
 
 ```python
 # command: str = "cairn"  # REMOVED: In-process execution only
@@ -339,7 +328,7 @@ This 55-line method handles context providers, tool execution, and result format
 
 **Recommendation**: Remove commented-out code. Use git history for archaeology.
 
-#### 17. Inconsistent Logging Levels
+#### 15. Inconsistent Logging Levels
 
 Some modules use `logger.debug()` for important state changes while others use `logger.info()`.
 
@@ -388,35 +377,10 @@ Some modules use `logger.debug()` for important state changes while others use `
 3. **Mock vLLM server** for acceptance tests to enable CI
 4. **Add performance benchmarks** for discovery and execution
 
----
-
-## Part 6: Security Considerations
-
-### Current Security Model
-
-1. **Process isolation**: Grail scripts run in child processes
-2. **Resource limits**: Grail enforces CPU/memory/time limits
-3. **Network isolation**: vLLM only accessible via Tailscale
-4. **No secrets in code**: API key defaults to "EMPTY"
-
-### Potential Concerns
-
-1. **Tool script injection**: If user-controlled input reaches tool script parameters without sanitization, code execution is possible.
-
-2. **Path traversal**: Tool scripts receive `target_file` paths. Ensure these can't escape the workspace.
-
-3. **Denial of service**: Large codebases could spawn many concurrent agents. The semaphore helps but configuration limits should be documented.
-
-### Recommendations
-
-1. Add input validation for all tool script parameters
-2. Validate paths are within expected directories
-3. Document security model and threat boundaries
-4. Consider adding audit logging for workspace modifications
 
 ---
 
-## Part 7: Performance Considerations
+## Part 6: Performance Considerations
 
 ### Current Design
 
@@ -441,7 +405,7 @@ Some modules use `logger.debug()` for important state changes while others use `
 
 ---
 
-## Part 8: Documentation Assessment
+## Part 7: Documentation Assessment
 
 ### Current State
 
@@ -469,7 +433,7 @@ Some modules use `logger.debug()` for important state changes while others use `
 
 ---
 
-## Part 9: Recommendations Summary
+## Part 8: Recommendations Summary
 
 ### Immediate Actions (Critical)
 
@@ -508,7 +472,7 @@ Some modules use `logger.debug()` for important state changes while others use `
 
 ---
 
-## Part 10: Conclusion
+## Part 9: Conclusion
 
 Remora is a well-architected system with clear design principles and solid foundations. The combination of tree-sitter parsing, LLM-driven multi-turn reasoning, and sandboxed execution is innovative and powerful. The codebase demonstrates good software engineering practices including comprehensive testing, type hints, and separation of concerns.
 
