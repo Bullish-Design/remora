@@ -29,9 +29,8 @@ class LlmConversationLogger:
         self._include_full_prompts = include_full_prompts
         self._max_content_lines = max_content_lines
         self._stream: TextIO | None = None
-        self._current_agent: str | None = None
-        # buffer for atomic turn logging: agent_id -> request_payload
-        self._pending_requests: dict[str, dict] = {}
+        # buffer for atomic turn logging: agent_id -> list of event payloads
+        self._agent_events: dict[str, list[dict[str, Any]]] = {}
     
     def open(self) -> None:
         output = self._output
@@ -56,114 +55,170 @@ class LlmConversationLogger:
             self._stream.close()
     
     def emit(self, payload: dict[str, Any]) -> None:
-        """Route an event payload to the appropriate formatter."""
-        event = payload.get("event", "")
-        handler = getattr(self, f"_handle_{event}", None)
-        if handler:
-            handler(payload)
-    
+        """Buffer an event payload for later processing."""
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return
+
+        # Initialize buffer for this agent if needed
+        if agent_id not in self._agent_events:
+            self._agent_events[agent_id] = []
+        
+        # Store a shallow copy to prevent mutation of the original event
+        # which might be used by other emitters.
+        self._agent_events[agent_id].append(payload.copy())
+
+        # Check for completion events to trigger flush
+        event_type = payload.get("event")
+        if event_type in ("submit_result", "agent_error"):
+            self._flush_agent(agent_id)
+
     def _write(self, text: str) -> None:
         if self._stream:
             self._stream.write(text + "\n")
             self._stream.flush()
-    
-    def _handle_model_request(self, p: dict) -> None:
-        # Buffer the request; do not print yet.
-        # This ensures we can print Request + Response atomically later.
-        agent_id = p.get("agent_id", "?")
-        self._pending_requests[agent_id] = p
-    
-    def _print_request_details(self, p: dict) -> None:
-        """Helper to print the request details from a buffered payload."""
-        agent_id = p.get("agent_id", "?")
-        
-        # Always print header when starting a new block
-        if agent_id != self._current_agent:
-            self._current_agent = agent_id
-            self._write_agent_header(p)
-        
-        phase = p.get("step", p.get("phase", "?"))
-        self._write(f"\n── Turn ({phase}) {'─' * 40}")
-        
-        messages = p.get("messages")
-        if messages and isinstance(messages, list):
-            # If NOT including full prompts (default), only show the LAST message
-            if not self._include_full_prompts and len(messages) > 0:
-                messages_to_print = [messages[-1]]
-                if len(messages) > 1:
-                    self._write(f"\n... (hiding {len(messages) - 1} previous messages) ...")
-            else:
-                messages_to_print = messages
 
-            for msg in messages_to_print:
-                role = msg.get("role", "?").upper()
-                content = msg.get("content", "")
-                self._write(f"\n→ {role}:")
-                self._write(textwrap.indent(str(content)[:2000], "  "))
+    def _flush_agent(self, agent_id: str) -> None:
+        """Format and write the full conversation for a completed agent."""
+        events = self._agent_events.pop(agent_id, [])
+        if not events:
+            return
 
-    def _handle_model_response(self, p: dict) -> None:
-        agent_id = p.get("agent_id", "?")
+        # 1. Identify context from the LAST request (contains full history)
+        # We iterate backwards to find the last model_request
+        last_request: dict[str, Any] | None = None
+        for event in reversed(events):
+            if event.get("event") == "model_request":
+                last_request = event
+                break
         
-        # 1. Retrieve and print the buffered request (Atomic Turn)
-        request_payload = self._pending_requests.pop(agent_id, None)
-        if request_payload:
-             self._print_request_details(request_payload)
+        if last_request is None:
+            # Fallback: just print what we have if no request found (unlikely)
+            self._write(f"WARNING: No model_request found for {agent_id}")
+            return
+
+        # 2. Print Header
+        self._write_agent_header(last_request)
+
+        # 3. Print History (from last request's messages)
+        # This includes System, User, and all previous Turns (Model/Tools)
+        messages = last_request.get("messages", [])
+        if isinstance(messages, list):
+            for msg in messages:
+                if isinstance(msg, dict):
+                    self._print_message(msg)
+
+        # 4. Print Subsequent Events (that happened AFTER the last request)
+        # This usually includes the final response, tool calls, or errors
+        # that weren't part of the history sent in the last request.
         
-        # 2. Print the response
+        # Find index of last request in the original event list
+        subsequent_events: list[dict[str, Any]] = []
+        try:
+            # Manually iterate to find the index to avoid type checker issues with list.index()
+            # on list[dict[str, Any]] vs dict[str, Any] | None
+            idx = -1
+            for i, evt in enumerate(events):
+                if evt is last_request:
+                    idx = i
+                    break
+            
+            if idx != -1:
+                # Use a slice that satisfies the type checker (it might complain about slicing list[dict])
+                # We iterate to build the list manually as a fallback if slicing fails type checking
+                subsequent_events = [e for k, e in enumerate(events) if k > idx]
+        except ValueError:
+            subsequent_events = []
+
+        for event in subsequent_events:
+            if not isinstance(event, dict):
+                continue
+            event_type = event.get("event")
+            if event_type == "model_response":
+                self._print_model_response(event)
+            elif event_type == "tool_call":
+                self._print_tool_call(event)
+            elif event_type == "tool_result":
+                self._print_tool_result(event)
+            elif event_type == "agent_error":
+                self._print_agent_error(event)
+            elif event_type == "submit_result":
+                self._print_submit_result(event)
+
+        self._write(f"{'═' * 60}\n")
+
+    def _print_message(self, msg: dict[str, Any]) -> None:
+        role = str(msg.get("role", "?")).upper()
+        content = str(msg.get("content", ""))
+        
+        if role == "SYSTEM":
+             self._write(f"\n── System Prompt {'─' * 42}")
+             self._write(textwrap.indent(content[:2000], "  "))
+        elif role == "USER":
+             self._write(f"\n── Turn (user) {'─' * 44}")
+             self._write(f"→ {role}:")
+             self._write(textwrap.indent(content[:2000], "  "))
+        elif role == "ASSISTANT":
+             # In history, assistant messages are previous turns
+             self._write(f"\n← MODEL (history):")
+             if content:
+                 self._write(textwrap.indent(content[:2000], "  "))
+             
+             tool_calls = msg.get("tool_calls")
+             if tool_calls and isinstance(tool_calls, list):
+                 for tc in tool_calls:
+                     if isinstance(tc, dict):
+                         func = tc.get("function", {})
+                         if isinstance(func, dict):
+                             name = func.get("name", "?")
+                             args = func.get("arguments", "{}")
+                             self._write(f"  ⚙ TOOL CALL: {name}")
+                             self._write(textwrap.indent(f"Args: {args}", "    "))
+
+        elif role == "TOOL":
+            name = msg.get("name", "?")
+            self._write(f"    → {name} [history]")
+            if content:
+                self._write(textwrap.indent(content[:1000], "      "))
+
+    def _print_model_response(self, p: dict[str, Any]) -> None:
         status = p.get("status", "?")
         duration = p.get("duration_ms", "?")
         tokens = p.get("total_tokens", "?")
         response = p.get("response_text", "")
         
-        # Ensure we are logged under the correct agent header if no request was pending
-        # (e.g. if we missed the request event for some reason)
-        if agent_id != self._current_agent:
-            self._current_agent = agent_id
-            self._write_agent_header(p)
-            
         self._write(f"\n← MODEL RESPONSE ({duration}ms, {tokens} tokens) [{status}]:")
         if response:
             self._write(textwrap.indent(str(response)[:2000], "  "))
         
         if p.get("error"):
             self._write(f"  ERROR: {p['error']}")
-    
-    def _handle_tool_call(self, p: dict) -> None:
+
+    def _print_tool_call(self, p: dict[str, Any]) -> None:
         tool = p.get("tool_name", "?")
         self._write(f"\n  ⚙ TOOL CALL: {tool}")
-    
-    def _handle_tool_result(self, p: dict) -> None:
+
+    def _print_tool_result(self, p: dict[str, Any]) -> None:
         tool = p.get("tool_name", "?")
         status = p.get("status", "?")
         output = p.get("tool_output", "")
         self._write(f"    → {tool} [{status}]")
         if output:
             self._write(textwrap.indent(str(output)[:1000], "      "))
-    
-    def _handle_submit_result(self, p: dict) -> None:
-        status = p.get("status", "?")
-        agent_id = p.get("agent_id", "?")
-        self._write(f"\n{'═' * 60}")
-        self._write(f"RESULT: {status} | Agent: {agent_id}")
-        self._write(f"{'═' * 60}\n")
-        self._current_agent = None
-    
-    def _handle_agent_error(self, p: dict) -> None:
-        agent_id = p.get("agent_id", "?")
-        
-        # Flush any pending request for this agent so we see what caused the error
-        request_payload = self._pending_requests.pop(agent_id, None)
-        if request_payload:
-             self._print_request_details(request_payload)
 
+    def _print_agent_error(self, p: dict[str, Any]) -> None:
         self._write(f"\n{'!' * 60}")
         self._write(f"AGENT ERROR: {p.get('error', '?')}")
-        self._write(f"  Agent: {p.get('agent_id')} | Phase: {p.get('phase')}")
+        self._write(f"  Phase: {p.get('phase')}")
         if p.get("error_code"):
             self._write(f"  Code: {p['error_code']}")
-        self._write(f"{'!' * 60}\n")
-    
-    def _write_agent_header(self, p: dict) -> None:
+        self._write(f"{'!' * 60}")
+
+    def _print_submit_result(self, p: dict[str, Any]) -> None:
+        status = p.get("status", "?")
+        self._write(f"\nRESULT: {status}")
+
+    def _write_agent_header(self, p: dict[str, Any]) -> None:
         self._write(f"\n{'═' * 60}")
         self._write(f"AGENT: {p.get('agent_id', '?')} | Op: {p.get('operation', '?')}")
         self._write(f"Model: {p.get('model', '?')}")
