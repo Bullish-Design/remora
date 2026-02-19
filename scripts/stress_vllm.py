@@ -32,9 +32,9 @@ def _build_test_config(base: RemoraConfig, concurrency: int) -> RemoraConfig:
     # Use a single simple operation for the test
     ops: dict[str, OperationConfig] = {}
     if "lint" in base.operations:
-          ops["lint"] = base.operations["lint"]
+        ops["lint"] = base.operations["lint"]
     else:
-          ops["lint"] = OperationConfig(subagent="lint/lint_subagent.yaml")
+        ops["lint"] = OperationConfig(subagent="lint/lint_subagent.yaml")
 
     return base.model_copy(
         update={
@@ -61,13 +61,13 @@ def _collect_nodes(config: RemoraConfig, demo_root: Path) -> list[CSTNode]:
 async def _run_stress_test(concurrency: int, max_nodes: int) -> None:
     demo_root = _demo_root()
     base_config = load_config(None, overrides=None)
-    
+
     # Adjust config for the test
     config = _build_test_config(base_config, concurrency)
 
     # 1. Discover nodes from the demo project
     nodes = _collect_nodes(config, demo_root)
-    
+
     if not nodes:
         logger.error("No nodes found to process!")
         return
@@ -77,10 +77,10 @@ async def _run_stress_test(concurrency: int, max_nodes: int) -> None:
     working_nodes: list[CSTNode] = []
     while len(working_nodes) < max_nodes:
         working_nodes.extend(nodes)
-    
+
     # Truncate to exact count
     working_nodes = working_nodes[:max_nodes]
-    
+
     logger.info("-" * 40)
     logger.info(f"Starting Stress Test")
     logger.info(f"  Concurrency: {concurrency}")
@@ -93,15 +93,12 @@ async def _run_stress_test(concurrency: int, max_nodes: int) -> None:
     # create all the tasks upfront so they can be scheduled.
     async with Coordinator(config=config, event_stream_enabled=False) as coordinator:
         operations = list(config.operations.keys())
-        
+
         # Launch all tasks. The coordinator execution semaphore will queue them.
-        tasks = [
-            asyncio.create_task(coordinator.process_node(node, operations))
-            for node in working_nodes
-        ]
-        
+        tasks = [asyncio.create_task(coordinator.process_node(node, operations)) for node in working_nodes]
+
         logger.info(f"Queued {len(tasks)} tasks...")
-        
+
         # Wait for all to complete
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -111,19 +108,19 @@ async def _run_stress_test(concurrency: int, max_nodes: int) -> None:
     # --- Results Analysis ---
     success_count = 0
     error_count = 0
-    
+
     for res in results:
         if isinstance(res, Exception):
             error_count += 1
         elif isinstance(res, NodeResult):
-             # Check if the node result has internal errors
-             if res.errors:
-                 error_count += 1
-             else:
-                 success_count += 1
+            # Check if the node result has internal errors
+            if res.errors:
+                error_count += 1
+            else:
+                success_count += 1
         else:
-             # Unknown result type
-             error_count += 1
+            # Unknown result type
+            error_count += 1
 
     throughput = len(working_nodes) / duration if duration > 0 else 0
 
@@ -140,8 +137,10 @@ async def _run_stress_test(concurrency: int, max_nodes: int) -> None:
 
 @app.command()
 def main(
-    concurrency: int = typer.Option(1, "--concurrency", "-c", help="Max concurrent agents"),
-    nodes: int = typer.Option(20, "--nodes", "-n", help="Total number of nodes to process (duplicated from demo if needed)"),
+    concurrency: int = typer.Option(5, "--concurrency", "-c", help="Max concurrent agents"),
+    nodes: int = typer.Option(
+        20, "--nodes", "-n", help="Total number of nodes to process (duplicated from demo if needed)"
+    ),
 ) -> None:
     """Run the Remora vLLM stress test."""
     asyncio.run(_run_stress_test(concurrency, nodes))

@@ -2,6 +2,7 @@
 __pycache__/
 *.py[codz]
 *$py.class
+**/training_examples/**
 
 # Personal Dev Environment:
 .devenv/**

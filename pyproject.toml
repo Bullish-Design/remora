@@ -35,6 +35,8 @@ cairn = { git = "https://github.com/Bullish-Design/cairn.git" }
 remora = "remora.cli:app"
 remora-tui = "scripts.remora_tui:app"
 remora-demo = "scripts.remora_demo:app"
+remora-flood = "scripts.stress_vllm:app"
+jsonl-convert = "scripts.jsonl_to_readable:main"
 
 [project.optional-dependencies]
 dev = [

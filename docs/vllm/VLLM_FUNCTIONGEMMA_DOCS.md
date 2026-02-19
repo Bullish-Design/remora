@@ -440,7 +440,7 @@ class FunctionGemmaToolParser(ToolParser):
             logger.exception("Error in streaming tool call extraction")
             return None
 
-Source code in vllm/tool_parsers/functiongemma_tool_parser.py
+Source code in vllm/tool_parsers/functiongemma_tool_parser.py:
 
 class FunctionGemmaToolParser(ToolParser):
     """
