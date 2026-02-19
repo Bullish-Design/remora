@@ -8,7 +8,7 @@ def test_tool_choice_is_always_configured_value_even_on_last_turn(monkeypatch: p
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
-        workspace_id="ws-1",
+        ctx=RemoraAgentContext(agent_id="ws-1", task="test", operation="test", node_id="node-1"),
         cairn_client=FakeCairnClient(),
         server_config=_make_server_config(),
         runner_config=RunnerConfig(tool_choice="auto"),
@@ -67,7 +67,7 @@ def test_runner_retries_on_connection_error(monkeypatch: pytest.MonkeyPatch) -> 
     runner = FunctionGemmaRunner(
         definition=definition,
         node=_make_node(),
-        workspace_id="ws-1",
+        ctx=RemoraAgentContext(agent_id="ws-1", task="test", operation="test", node_id="node-1"),
         cairn_client=FakeCairnClient(),
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),

@@ -16,38 +16,94 @@ def _run_in_child(
     grail_dir: str,
     inputs: dict[str, Any],
     limits: dict[str, Any],
+    agent_id: str | None = None,
+    workspace_path: str | None = None,
+    stable_path: str | None = None,
+    node_source: str | None = None,
+    node_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute a .pym script in a child process.
 
     This function runs in a separate OS process via ProcessPoolExecutor.
     Any crash here (segfault, os._exit) only kills this worker, not Remora.
     """
-    script = grail.load(pym_path, grail_dir=grail_dir)
-    check = script.check()
-    if not check.valid:
-        errors = [str(e) for e in (check.errors or [])]
-        return {"error": True, "code": "GRAIL_CHECK", "message": "; ".join(errors)}
+    import grail
+    from remora.externals import create_remora_externals
+    from fsdantic import Fsdantic
+
+    async def _execute_async() -> dict[str, Any]:
+        script = grail.load(pym_path, grail_dir=grail_dir)
+        check = script.check()
+        if not check.valid:
+            errors = [str(e) for e in (check.errors or [])]
+            return {"error": True, "code": "GRAIL_CHECK", "message": "; ".join(errors)}
+
+        externals = {}
+        if agent_id and workspace_path and node_source and node_metadata:
+            try:
+                # Open the workspace (and stable fs as readonly view of same path for now)
+                # In a full Cairn setup, stable_fs would be distinct. 
+                # Here we map them both to workspace_path for simplicity in Phase 4.
+                # TODO: Pass distinct stable_path if needed.
+                async with (
+                    Fsdantic.open(workspace_path) as agent_fs,
+                    Fsdantic.open(stable_path or workspace_path, readonly=True) as stable_fs,
+                ):
+                    externals = create_remora_externals(
+                        agent_id=agent_id,
+                        node_source=node_source,
+                        node_metadata=node_metadata,
+                        agent_fs=agent_fs,
+                        stable_fs=stable_fs,
+                    )
+                    try:
+                        result = await script.run(inputs=inputs, limits=limits, externals=externals)
+                        return {"error": False, "result": result}
+                    except grail.LimitError as exc:
+                        return {
+                            "error": True,
+                            "code": "LIMIT",
+                            "message": str(exc),
+                            "limit_type": getattr(exc, "limit_type", None),
+                        }
+                    except grail.ExecutionError as exc:
+                        return {
+                            "error": True,
+                            "code": "EXECUTION",
+                            "message": str(exc),
+                            "lineno": getattr(exc, "lineno", None),
+                        }
+                    except grail.GrailError as exc:
+                        return {"error": True, "code": "GRAIL", "message": str(exc)}
+            except Exception as exc:
+                return {"error": True, "code": "INTERNAL", "message": f"{type(exc).__name__}: {exc}"}
+        
+        # Fallback for tools without externals (e.g. simple logic tools)
+        try:
+            # We use script.run even without externals to be consistent
+            result = await script.run(inputs=inputs, limits=limits)
+            return {"error": False, "result": result}
+        except grail.LimitError as exc:
+            return {
+                "error": True,
+                "code": "LIMIT",
+                "message": str(exc),
+                "limit_type": getattr(exc, "limit_type", None),
+            }
+        except grail.ExecutionError as exc:
+            return {
+                "error": True,
+                "code": "EXECUTION",
+                "message": str(exc),
+                "lineno": getattr(exc, "lineno", None),
+            }
+        except Exception as exc:
+            return {"error": True, "code": "INTERNAL", "message": f"{type(exc).__name__}: {exc}"}
+
     try:
-        result = script.run_sync(inputs=inputs, limits=limits)
-        return {"error": False, "result": result}
-    except grail.LimitError as exc:
-        return {
-            "error": True,
-            "code": "LIMIT",
-            "message": str(exc),
-            "limit_type": getattr(exc, "limit_type", None),
-        }
-    except grail.ExecutionError as exc:
-        return {
-            "error": True,
-            "code": "EXECUTION",
-            "message": str(exc),
-            "lineno": getattr(exc, "lineno", None),
-        }
-    except grail.GrailError as exc:
-        return {"error": True, "code": "GRAIL", "message": str(exc)}
+        return asyncio.run(_execute_async())
     except Exception as exc:
-        return {"error": True, "code": "INTERNAL", "message": f"{type(exc).__name__}: {exc}"}
+        return {"error": True, "code": "INTERNAL", "message": f"Process crash wrapper: {exc}"}
 
 
 class ProcessIsolatedExecutor:
@@ -71,6 +127,11 @@ class ProcessIsolatedExecutor:
         grail_dir: Path,
         inputs: dict[str, Any],
         limits: dict[str, Any] | None = None,
+        agent_id: str | None = None,
+        workspace_path: Path | None = None,
+        stable_path: Path | None = None,
+        node_source: str | None = None,
+        node_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute a .pym script in an isolated child process.
 
@@ -95,6 +156,11 @@ class ProcessIsolatedExecutor:
                     str(grail_dir),
                     inputs,
                     resolved_limits,
+                    agent_id,
+                    str(workspace_path) if workspace_path else None,
+                    str(stable_path) if stable_path else None,
+                    node_source,
+                    node_metadata,
                 ),
                 timeout=self._call_timeout,
             )

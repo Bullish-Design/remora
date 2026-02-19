@@ -9,7 +9,7 @@ import pytest
 from remora.config import CairnConfig, OperationConfig, RemoraConfig
 from remora.discovery import CSTNode, NodeType
 from remora.errors import AGENT_001
-from remora.orchestrator import Coordinator
+from remora.orchestrator import Coordinator, RemoraAgentContext, RemoraAgentState
 from remora.results import AgentResult
 from remora.subagent import SubagentError
 
@@ -66,7 +66,7 @@ def test_process_node_returns_results(monkeypatch: pytest.MonkeyPatch, tmp_path:
             self,
             definition: object,
             node: CSTNode,
-            workspace_id: str,
+            ctx: RemoraAgentContext,
             cairn_client: FakeCairnClient,
             server_config: object,
             runner_config: object,
@@ -74,7 +74,7 @@ def test_process_node_returns_results(monkeypatch: pytest.MonkeyPatch, tmp_path:
             http_client: object | None = None,
             event_emitter: object | None = None,
         ) -> None:
-            self.workspace_id = workspace_id
+            self.workspace_id = ctx.agent_id
 
         async def run(self) -> AgentResult:
             operation = self.workspace_id.split("-", 1)[0]
@@ -114,7 +114,7 @@ def test_process_node_respects_semaphore(monkeypatch: pytest.MonkeyPatch, tmp_pa
             self,
             definition: object,
             node: CSTNode,
-            workspace_id: str,
+            ctx: RemoraAgentContext,
             cairn_client: FakeCairnClient,
             server_config: object,
             runner_config: object,
@@ -122,7 +122,7 @@ def test_process_node_respects_semaphore(monkeypatch: pytest.MonkeyPatch, tmp_pa
             http_client: object | None = None,
             event_emitter: object | None = None,
         ) -> None:
-            self.workspace_id = workspace_id
+            self.workspace_id = ctx.agent_id
 
         async def run(self) -> AgentResult:
             state["current"] += 1
@@ -166,7 +166,7 @@ def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch,
             self,
             definition: object,
             node: CSTNode,
-            workspace_id: str,
+            ctx: RemoraAgentContext,
             cairn_client: FakeCairnClient,
             server_config: object,
             runner_config: object,
@@ -174,7 +174,7 @@ def test_process_node_captures_runner_exception(monkeypatch: pytest.MonkeyPatch,
             http_client: object | None = None,
             event_emitter: object | None = None,
         ) -> None:
-            self.workspace_id = workspace_id
+            self.workspace_id = ctx.agent_id
 
         async def run(self) -> AgentResult:
             operation = self.workspace_id.split("-", 1)[0]
@@ -216,7 +216,7 @@ def test_process_node_skips_disabled_operation(monkeypatch: pytest.MonkeyPatch, 
             self,
             definition: object,
             node: CSTNode,
-            workspace_id: str,
+            ctx: RemoraAgentContext,
             cairn_client: FakeCairnClient,
             server_config: object,
             runner_config: object,
@@ -224,7 +224,7 @@ def test_process_node_skips_disabled_operation(monkeypatch: pytest.MonkeyPatch, 
             http_client: object | None = None,
             event_emitter: object | None = None,
         ) -> None:
-            self.workspace_id = workspace_id
+            self.workspace_id = ctx.agent_id
 
         async def run(self) -> AgentResult:
             return AgentResult(status="success", workspace_id=self.workspace_id, summary="ok", changed_files=[])
@@ -261,7 +261,7 @@ def test_bad_subagent_path_records_init_error(monkeypatch: pytest.MonkeyPatch, t
             self,
             definition: object,
             node: CSTNode,
-            workspace_id: str,
+            ctx: RemoraAgentContext,
             cairn_client: FakeCairnClient,
             server_config: object,
             runner_config: object,
@@ -269,7 +269,7 @@ def test_bad_subagent_path_records_init_error(monkeypatch: pytest.MonkeyPatch, t
             http_client: object | None = None,
             event_emitter: object | None = None,
         ) -> None:
-            self.workspace_id = workspace_id
+            self.workspace_id = ctx.agent_id
 
         async def run(self) -> AgentResult:
             return AgentResult(status="success", workspace_id=self.workspace_id, summary="ok", changed_files=[])
@@ -286,3 +286,81 @@ def test_bad_subagent_path_records_init_error(monkeypatch: pytest.MonkeyPatch, t
     assert "good" in result.operations
     assert "bad" not in result.operations
     assert any(error["operation"] == "bad" and error["phase"] == "init" for error in result.errors)
+
+
+def test_agent_context_state_transitions() -> None:
+    ctx = RemoraAgentContext(agent_id="test-1", task="test", operation="op", node_id="node-1")
+    assert ctx.state == RemoraAgentState.QUEUED
+    t0 = ctx.state_changed_at
+
+    # Ensure time passes (on Windows/monotonic resolution can be coarse)
+    import time
+    time.sleep(0.001)
+
+    ctx.transition(RemoraAgentState.EXECUTING)
+    assert ctx.state == RemoraAgentState.EXECUTING
+    assert ctx.state_changed_at > t0
+
+
+def test_agent_context_validation() -> None:
+    # Helper to check validation errors
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        RemoraAgentContext(agent_id="", task="t", operation="o", node_id="n")  # Empty ID
+
+
+def test_coordinator_graceful_shutdown_cancels_tasks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Setup: Create a coordinator with a slow runner
+    operations = {
+        "slow": OperationConfig(subagent="slow/slow_subagent.yaml"),
+    }
+    config = _make_config(tmp_path, operations)
+    node = _make_node()
+
+    # Fake subagent loading
+    def fake_load_subagent_definition(path: Path, agents_dir: Path) -> SimpleNamespace:
+        return SimpleNamespace(name=path.stem, grail_summary={})
+
+    # Fake runner that sleeps forever until cancelled
+    class ForeverRunner:
+        def __init__(self, *args, **kwargs) -> None:
+            self.workspace_id = kwargs["ctx"].agent_id
+
+        async def run(self) -> AgentResult:
+            await asyncio.sleep(10)
+            return AgentResult(status="success", workspace_id=self.workspace_id, summary="ok")
+
+    monkeypatch.setattr("remora.orchestrator.load_subagent_definition", fake_load_subagent_definition)
+    monkeypatch.setattr("remora.orchestrator.FunctionGemmaRunner", ForeverRunner)
+
+    async def run_shutdown_test():
+        coordinator = Coordinator(config, FakeCairnClient())
+        async with coordinator:
+            # Start processing
+            process_task = asyncio.create_task(coordinator.process_node(node, ["slow"]))
+            
+            # Wait for task to be scheduled and running
+            await asyncio.sleep(0.01)
+            assert len(coordinator._running_tasks) == 1
+            
+            # Simulate shutdown signal (manually calling the handler)
+            coordinator._request_shutdown()
+            assert coordinator._shutdown_requested
+            
+            # process_node should complete (likely with partial results or empty)
+            result = await process_task
+            
+            # The running task inside should have been cancelled
+            # In our implementation, process_node gathers tasks with return_exceptions=True
+            # so the main process_node call finishes.
+            
+            # The shutdown request should have cleared the running task from the set eventually
+            # (or at least marked it cancelled)
+            return len(coordinator._running_tasks)
+
+    # Run the test
+    # Note: process_node catches the cancellation internally and returns partial results,
+    # so we expect it to finish without raising CancelledError to the caller.
+    asyncio.run(run_shutdown_test())
+

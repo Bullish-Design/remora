@@ -39,11 +39,20 @@ class ConfigError(RuntimeError):
         self.code = code
 
 
+
+class RetryConfig(BaseModel):
+    max_attempts: int = 3
+    initial_delay: float = 1.0
+    max_delay: float = 30.0
+    backoff_factor: float = 2.0
+
+
 class ServerConfig(BaseModel):
     base_url: str = "http://remora-server:8000/v1"
     api_key: str = "EMPTY"
     timeout: int = 120
     default_adapter: str = "google/functiongemma-270m-it"
+    retry: RetryConfig = Field(default_factory=RetryConfig)
 
 
 class RunnerConfig(BaseModel):
@@ -62,6 +71,7 @@ class OperationConfig(BaseModel):
     auto_accept: bool = False
     subagent: str
     model_id: str | None = None
+    priority: Literal["low", "normal", "high"] = "normal"
 
 
 class DiscoveryConfig(BaseModel):
@@ -78,6 +88,8 @@ class CairnConfig(BaseModel):
     limits_preset: Literal["strict", "default", "permissive"] = "default"
     limits_override: dict[str, Any] = Field(default_factory=dict)
     pool_workers: int = 4                # ProcessPoolExecutor max_workers
+    max_queue_size: int = 100
+    workspace_cache_size: int = 100
 
 
 class EventStreamConfig(BaseModel):
@@ -91,7 +103,7 @@ class EventStreamConfig(BaseModel):
 def _default_operations() -> dict[str, OperationConfig]:
     return {
         "lint": OperationConfig(subagent="lint/lint_subagent.yaml"),
-        "test": OperationConfig(subagent="test/test_subagent.yaml"),
+        "test": OperationConfig(subagent="test/test_subagent.yaml", priority="high"),
         "docstring": OperationConfig.model_validate(
             {"subagent": "docstring/docstring_subagent.yaml", "style": "google"}
         ),

@@ -9,15 +9,22 @@ discovery:
 agents_dir: agents
 
 # vLLM server on your Tailscale network
+# vLLM server on your Tailscale network
 server:
   base_url: "http://remora-server:8000/v1"
   api_key: "EMPTY"
   timeout: 120
   default_adapter: "google/functiongemma-270m-it"
+  retry:
+    max_attempts: 3
+    initial_delay: 1.0
+    max_delay: 30.0
+    backoff_factor: 2.0
 
 operations:
   lint:
     enabled: true
+    priority: "normal"
     auto_accept: false
     subagent: lint/lint_subagent.yaml
     # model_id here is the LoRA adapter name on the server
@@ -26,17 +33,20 @@ operations:
 
   test:
     enabled: true
+    priority: "high"
     auto_accept: false
     subagent: test/test_subagent.yaml
 
   docstring:
     enabled: true
+    priority: "normal"
     auto_accept: false
     subagent: docstring/docstring_subagent.yaml
     style: google
 
   sample_data:
     enabled: false
+    priority: "low"
     auto_accept: false
     subagent: sample_data/sample_data_subagent.yaml
 
@@ -51,6 +61,11 @@ cairn:
   home: null
   max_concurrent_agents: 16
   timeout: 300
+  pool_workers: 4
+  limits_preset: "default"  # strict | default | permissive
+  max_queue_size: 100
+  # limits_override:
+  #   max_memory: "32mb"
 
 event_stream:
   enabled: false

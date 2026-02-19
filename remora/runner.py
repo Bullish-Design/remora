@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import json
 import time
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from pydantic import ValidationError
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
@@ -20,6 +20,9 @@ from remora.events import EventEmitter, NullEventEmitter
 from remora.errors import AGENT_002, AGENT_003, AGENT_004
 from remora.results import AgentResult
 from remora.subagent import SubagentDefinition
+
+if TYPE_CHECKING:
+    from remora.orchestrator import RemoraAgentContext
 
 
 class CairnClient(Protocol):
@@ -37,7 +40,15 @@ class GrailExecutor(Protocol):
         grail_dir: Path,
         inputs: dict[str, Any],
         limits: dict[str, Any] | None = None,
+        agent_id: str | None = None,
+        workspace_path: Path | None = None,
+        stable_path: Path | None = None,
+        node_source: str | None = None,
+        node_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
+
+
+from cairn.utils.retry import RetryStrategy
 
 
 class AgentError(RuntimeError):
@@ -66,7 +77,7 @@ class AgentError(RuntimeError):
 class FunctionGemmaRunner:
     definition: SubagentDefinition
     node: CSTNode
-    workspace_id: str
+    ctx: RemoraAgentContext
     cairn_client: CairnClient
     server_config: ServerConfig
     runner_config: RunnerConfig
@@ -76,12 +87,20 @@ class FunctionGemmaRunner:
     grail_executor: GrailExecutor | None = None
     grail_dir: Path | None = None
     grail_limits: dict[str, Any] | None = None
+    workspace_root: Path | None = None
+    stable_root: Path | None = None
     messages: list[ChatCompletionMessageParam] = field(init=False)
     turn_count: int = field(init=False)
     _http_client: AsyncOpenAI = field(init=False)
     _system_prompt: str = field(init=False)
     _initial_message: str = field(init=False)
     _model_target: str = field(init=False)
+    _retry: RetryStrategy = field(init=False)
+
+    @property
+    def workspace_id(self) -> str:
+        """Backward-compatible alias — returns ``ctx.agent_id``."""
+        return self.ctx.agent_id
 
     def __post_init__(self) -> None:
         self._http_client = self.http_client or AsyncOpenAI(
@@ -96,6 +115,15 @@ class FunctionGemmaRunner:
         self._initial_message = self.definition.initial_context.render(self.node)
         self.messages.append(cast(ChatCompletionMessageParam, {"role": "system", "content": self._system_prompt}))
         self.messages.append(cast(ChatCompletionMessageParam, {"role": "user", "content": self._initial_message}))
+        
+        # Configure retry strategy from config
+        retry_config = self.server_config.retry
+        self._retry = RetryStrategy(
+            max_attempts=retry_config.max_attempts,
+            initial_delay=retry_config.initial_delay,
+            max_delay=retry_config.max_delay,
+            backoff_factor=retry_config.backoff_factor,
+        )
 
     def _build_system_prompt(self) -> str:
         return self.definition.initial_context.system_prompt
@@ -166,41 +194,38 @@ class FunctionGemmaRunner:
             tool_choice=tool_choice,
             tools=tools_payload,
         )
-        retries = 3
-        last_error: Exception | None = None
-        
-        for attempt in range(retries):
-            try:
-                response = await self._http_client.chat.completions.create(
-                    model=self._model_target,
-                    messages=cast(list[ChatCompletionMessageParam], self.messages),
-                    tools=cast(list[ChatCompletionToolParam], tools_payload),
-                    tool_choice=cast(Any, tool_choice),
-                    max_tokens=self.runner_config.max_tokens,
-                    temperature=self.runner_config.temperature,
-                )
-                request_id = getattr(response, "id", None)
-                break
-            except (APIConnectionError, APITimeoutError) as exc:
-                last_error = exc
-                if attempt < retries - 1:
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff: 1, 2, 4s
-                    continue
-                
-                self._emit_model_response(
-                    start,
-                    phase=phase,
-                    request_id=request_id,
-                    status="error",
-                    error=str(exc),
-                )
-                raise AgentError(
-                    node_id=self.node.node_id,
-                    operation=self.definition.name,
-                    phase=phase,
-                    error_code=AGENT_002,
-                    message=f"Cannot reach vLLM server at {self.server_config.base_url}",
-                ) from exc
+
+        async def _attempt() -> Any:
+            return await self._http_client.chat.completions.create(
+                model=self._model_target,
+                messages=cast(list[ChatCompletionMessageParam], self.messages),
+                tools=cast(list[ChatCompletionToolParam], tools_payload),
+                tool_choice=cast(Any, tool_choice),
+                max_tokens=self.runner_config.max_tokens,
+                temperature=self.runner_config.temperature,
+            )
+
+        try:
+            response = await self._retry.with_retry(
+                operation=_attempt,
+                retry_exceptions=(APIConnectionError, APITimeoutError),
+            )
+            request_id = getattr(response, "id", None)
+        except Exception as exc:
+            self._emit_model_response(
+                start,
+                phase=phase,
+                request_id=request_id,
+                status="error",
+                error=str(exc),
+            )
+            raise AgentError(
+                node_id=self.node.node_id,
+                operation=self.definition.name,
+                phase=phase,
+                error_code=AGENT_002,
+                message=f"Cannot reach vLLM server at {self.server_config.base_url}",
+            ) from exc
         message = response.choices[0].message
         response_text = message.content or ""
         self._emit_tool_debug("model_tools_after", tool_choice, request_id=request_id)
@@ -517,6 +542,16 @@ class FunctionGemmaRunner:
                 grail_dir=self.grail_dir,
                 inputs=self._base_tool_inputs(),
                 limits=self.grail_limits,
+                agent_id=self.ctx.agent_id,
+                workspace_path=self.workspace_root,
+                stable_path=self.stable_root,
+                node_source=self.node.text,
+                node_metadata={
+                    "name": self.node.name,
+                    "type": self.node.node_type,
+                    "file_path": str(self.node.file_path),
+                    "node_id": self.node.node_id,
+                },
             )
             if result.get("error"):
                 self._emit_tool_result(tool_name, result)
@@ -528,6 +563,16 @@ class FunctionGemmaRunner:
             grail_dir=self.grail_dir,
             inputs=tool_inputs,
             limits=self.grail_limits,
+            agent_id=self.ctx.agent_id,
+            workspace_path=self.workspace_root,
+            stable_path=self.stable_root,
+            node_source=self.node.text,
+            node_metadata={
+                "name": self.node.name,
+                "type": self.node.node_type,
+                "file_path": str(self.node.file_path),
+                "node_id": self.node.node_id,
+            },
         )
         if result.get("error"):
             self._emit_tool_result(tool_name, result)

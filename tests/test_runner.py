@@ -11,8 +11,18 @@ import pytest
 from remora.config import RunnerConfig, ServerConfig
 from remora.discovery import CSTNode, NodeType
 from remora.errors import AGENT_002, AGENT_003, AGENT_004
+from remora.orchestrator import RemoraAgentContext
 from remora.runner import AgentError, FunctionGemmaRunner
 from remora.subagent import InitialContext, SubagentDefinition, ToolDefinition
+
+
+def _make_ctx(agent_id: str = "ws-1", operation: str = "lint") -> RemoraAgentContext:
+    return RemoraAgentContext(
+        agent_id=agent_id,
+        task=f"{operation} on hello",
+        operation=operation,
+        node_id="node-1",
+    )
 
 
 class FakeToolCallFunction:
@@ -217,7 +227,7 @@ def test_runner_initializes_model_and_messages(monkeypatch: pytest.MonkeyPatch) 
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
-        workspace_id="ws-1",
+        ctx=_make_ctx(),
         cairn_client=FakeCairnClient(),
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),
@@ -244,7 +254,7 @@ def test_missing_model_id_raises_agent_002(monkeypatch: pytest.MonkeyPatch) -> N
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
-        workspace_id="ws-1",
+        ctx=_make_ctx(),
         cairn_client=FakeCairnClient(),
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),
@@ -273,7 +283,7 @@ def test_run_returns_submit_result_on_first_turn(monkeypatch: pytest.MonkeyPatch
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
-        workspace_id="ws-1",
+        ctx=_make_ctx(),
         cairn_client=FakeCairnClient(),
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),
@@ -328,7 +338,7 @@ def test_run_handles_multiple_tool_turns_then_submit(monkeypatch: pytest.MonkeyP
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
-        workspace_id="ws-1",
+        ctx=_make_ctx(),
         cairn_client=cairn,
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),
@@ -370,7 +380,7 @@ def test_run_respects_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
-        workspace_id="ws-1",
+        ctx=_make_ctx(),
         cairn_client=cairn,
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),
@@ -427,7 +437,7 @@ def test_context_providers_injected_before_tool_dispatch(monkeypatch: pytest.Mon
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
-        workspace_id="ws-1",
+        ctx=_make_ctx(),
         cairn_client=cairn,
         server_config=_make_server_config(),
         runner_config=_make_runner_config(),
