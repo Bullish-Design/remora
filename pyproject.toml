@@ -18,9 +18,11 @@ dependencies = [
   "jinja2>=3",
   "watchfiles>=0.21",  # transitive via cairn; kept explicit for watch command
   "openai>=1.0",
-  "cairn",
   "tree-sitter>=0.24",
   "tree-sitter-python>=0.23",
+  "grail",
+  "cairn",
+  
   # cairn added as local or VCS dependency
 ]
 
