@@ -1,7 +1,7 @@
 from grail import Input, external
 from typing import Any
 
-check_only: bool = Input("check_only", default=False)
+check_only: bool = Input("check_only", default=True)
 target_file_input: str | None = Input("target_file", default=None)
 
 

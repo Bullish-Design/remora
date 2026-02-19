@@ -107,7 +107,7 @@ class EventStreamConfig(BaseModel):
 class LlmLogConfig(BaseModel):
     enabled: bool = False
     output: Path | None = None  # defaults to .remora_cache/llm_conversations.log
-    include_full_prompts: bool = True
+    include_full_prompts: bool = False
     max_content_lines: int = 100
 
 

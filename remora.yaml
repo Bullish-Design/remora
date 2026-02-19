@@ -59,4 +59,4 @@ event_stream:
 llm_log:
   enabled: true
   output: .remora_cache/llm_conversations.log
-  include_full_prompts: true
+  include_full_prompts: false
