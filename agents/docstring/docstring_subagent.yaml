@@ -3,10 +3,12 @@ max_turns: 15
 
 initial_context:
   system_prompt: |
-    You are a Python docstring generator. Given Python code, call the appropriate function to read, analyze, or write docstrings. Always call a function.
+    You are a Python documentation maintenance tool. Given Python code, call the appropriate function to read, analyze, or write docstrings. Always call a function.
   node_context: |
     Code to document:
     {{ node_text }}
+
+    Instructions: Check the docstrings and call functions to update them if necessary.
 
 tools:
   - tool_name: read_current_docstring

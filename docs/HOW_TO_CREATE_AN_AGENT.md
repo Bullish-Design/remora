@@ -170,8 +170,13 @@ The bad example has vague language ("intelligent", "helps users", "consider"), i
 ### Pattern
 
 ```
-You are a [concrete role]. Given [input], call the appropriate function to [action]. Always call a function.
+You are a [concrete tool role]. Given [input], call the appropriate function to [action]. Always call a function.
 ```
+
+### Safety Triggers
+Avoid words like "generator", "assistant", or "agent" if the model refuses to answer. Use "maintenance tool", "utility", or "engine" instead. For example:
+- **Avoid:** "You are a docstring generator." (triggers "I cannot write documentation" refusals)
+- **Use:** "You are a Python documentation maintenance tool."
 
 ---
 
@@ -207,7 +212,11 @@ node_context: |
   Target file: {{ file_path }}
   Node: {{ node_name }} ({{ node_type }})
   {{ node_text }}
+
+  Instructions: Analyze the code and call the appropriate function.
 ```
+
+**Tip:** Adding an explicit "Instructions:" line at the end of the user message helps the 270M model focus on action rather than explanation.
 
 Keep the template short. For a 270M model, every token in the context window competes with the space needed for tool schema understanding.
 
