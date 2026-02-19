@@ -48,9 +48,9 @@ class ServerConfig(BaseModel):
 
 class RunnerConfig(BaseModel):
     max_turns: int = 20
-    max_tokens: int = 512
+    max_tokens: int = 4096
     temperature: float = 0.1
-    tool_choice: str = "required"
+    tool_choice: str = "auto"
 
 
 class OperationConfig(BaseModel):

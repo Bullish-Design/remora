@@ -151,31 +151,41 @@ class FunctionGemmaRunner:
             tool_choice=tool_choice,
             tools=tools_payload,
         )
-        try:
-            response = await self._http_client.chat.completions.create(
-                model=self._model_target,
-                messages=cast(list[ChatCompletionMessageParam], self.messages),
-                tools=cast(list[ChatCompletionToolParam], tools_payload),
-                tool_choice=cast(Any, tool_choice),
-                max_tokens=self.runner_config.max_tokens,
-                temperature=self.runner_config.temperature,
-            )
-            request_id = getattr(response, "id", None)
-        except (APIConnectionError, APITimeoutError) as exc:
-            self._emit_model_response(
-                start,
-                phase=phase,
-                request_id=request_id,
-                status="error",
-                error=str(exc),
-            )
-            raise AgentError(
-                node_id=self.node.node_id,
-                operation=self.definition.name,
-                phase=phase,
-                error_code=AGENT_002,
-                message=f"Cannot reach vLLM server at {self.server_config.base_url}",
-            ) from exc
+        retries = 3
+        last_error: Exception | None = None
+        
+        for attempt in range(retries):
+            try:
+                response = await self._http_client.chat.completions.create(
+                    model=self._model_target,
+                    messages=cast(list[ChatCompletionMessageParam], self.messages),
+                    tools=cast(list[ChatCompletionToolParam], tools_payload),
+                    tool_choice=cast(Any, tool_choice),
+                    max_tokens=self.runner_config.max_tokens,
+                    temperature=self.runner_config.temperature,
+                )
+                request_id = getattr(response, "id", None)
+                break
+            except (APIConnectionError, APITimeoutError) as exc:
+                last_error = exc
+                if attempt < retries - 1:
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff: 1, 2, 4s
+                    continue
+                
+                self._emit_model_response(
+                    start,
+                    phase=phase,
+                    request_id=request_id,
+                    status="error",
+                    error=str(exc),
+                )
+                raise AgentError(
+                    node_id=self.node.node_id,
+                    operation=self.definition.name,
+                    phase=phase,
+                    error_code=AGENT_002,
+                    message=f"Cannot reach vLLM server at {self.server_config.base_url}",
+                ) from exc
         message = response.choices[0].message
         response_text = message.content or ""
         self._emit_tool_debug("model_tools_after", tool_choice, request_id=request_id)
@@ -193,12 +203,7 @@ class FunctionGemmaRunner:
         return cast(ChatCompletionMessageParam, message.model_dump(exclude_none=True))
 
     def _tool_choice_for_turn(self, next_turn: int) -> Any:
-        tool_choice: Any = self.runner_config.tool_choice
-        if tool_choice == "none":
-            return tool_choice
-        if next_turn >= self.definition.max_turns:
-            return {"type": "function", "function": {"name": "submit_result"}}
-        return tool_choice
+        return self.runner_config.tool_choice
 
     def _relative_node_path(self) -> str:
         try:

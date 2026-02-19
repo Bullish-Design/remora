@@ -41,9 +41,9 @@ operations:
 
 runner:
   max_turns: 20
-  max_tokens: 512
+  max_tokens: 4096
   temperature: 0.1
-  tool_choice: "required"  # "required" | "auto" | "none"
+  tool_choice: "auto"  # "required" | "auto" | "none"
 
 cairn:
   command: cairn

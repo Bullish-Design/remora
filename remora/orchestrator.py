@@ -108,7 +108,7 @@ class Coordinator:
             async with self._semaphore:
                 try:
                     return operation, await runner.run()
-                except Exception as exc:
+                except AgentError as exc:
                     raw_phase = exc.phase if isinstance(exc, AgentError) else "run"
                     phase, step = _normalize_phase(raw_phase)
                     error_code = exc.error_code if isinstance(exc, AgentError) else None

@@ -169,7 +169,7 @@ def _validate_jinja2_template(definition: SubagentDefinition, path: Path) -> Non
 def _warn_missing_paths(definition: SubagentDefinition) -> None:
     for tool in definition.tools:
         if not tool.pym.exists():
-            warnings.warn(f"Tool script not found: {tool.pym}", stacklevel=2)
+            raise SubagentError(AGENT_001, f"Tool script not found: {tool.pym}")
         for provider in tool.context_providers:
             if not provider.exists():
-                warnings.warn(f"Context provider not found: {provider}", stacklevel=2)
+                raise SubagentError(AGENT_001, f"Context provider not found: {provider}")
