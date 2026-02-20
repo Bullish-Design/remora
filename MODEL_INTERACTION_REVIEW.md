@@ -14,10 +14,13 @@
 - Appends each user message to history.
 - After a tool call is accepted, appends the assistant’s tool call (OpenAI tool_calls format) back into history before the next turn.
 
-**Tool-call parsing**
-- Primary path: reads `response.tool_calls` from the OpenAI-compatible response.
-- Fallback path: if content is JSON, parses `{"name": ..., "parameters": ...}` or `{"tool_calls": ...}` and extracts the first call.
-- Does **not** parse raw FunctionGemma tags directly; relies on the server’s tool-call parser.
+**Tool-call parsing (two-stage)**
+- Stage 1 (client.py): Returns `response.content` if non-empty, otherwise returns `response.tool_calls[0]` as fallback.
+- Stage 2 (parsing.py): `parse_llm_response()` handles the returned value:
+  - If OpenAI tool_call object: extracts `function.name` and `function.arguments`
+  - If JSON string `{"name": ..., "parameters": ...}`: parses directly
+  - If JSON string `{"tool_calls": [...]}`: extracts from tool_calls array
+- Does **not** parse raw FunctionGemma tags directly; relies on the server's tool-call parser.
 
 **Safety and execution**
 - Blocks dangerous `rm` patterns before translating the tool call to bash.
@@ -90,7 +93,8 @@
    - Remora rebuilds only the initial system + user prompt every turn, so tool results are not part of the next prompt.
 
 2. **Tool choice defaults**
-   - Examples force `tool_choice="required"`.
+   - distil-smart-home forces `tool_choice="required"`.
+   - distil-SHELLper does **not** set `tool_choice` (relies on robust parsing instead).
    - Remora defaults to `auto` in config and in the harness CLI.
 
 3. **JSON tool-call fallback**
@@ -111,9 +115,10 @@
 - Track the full `self.messages` history in `FunctionGemmaRunner` and pass it directly to the model.
 - Avoid rebuilding a fresh prompt each time; instead, update the system message once and append new messages.
 
-### 2) Force tool calls in the harness
+### 2) Force tool calls in the harness (optional)
 - Set `tool_choice="required"` by default in `scripts/functiongemma_harness.py`.
 - Keep the core `RunnerConfig` default as `auto` to avoid changing other subagents.
+- Note: distil-SHELLper does not use `tool_choice="required"` and instead relies on robust parsing. Either approach can work.
 
 ### 3) Add JSON tool-call fallback
 - If `message.tool_calls` is empty and `message.content` parses to `{"name":..., "arguments":...}` or `{"parameters":...}`, treat it as a synthetic tool call.

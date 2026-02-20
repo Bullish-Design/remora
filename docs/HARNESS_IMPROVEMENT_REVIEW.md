@@ -4,6 +4,8 @@
 
 This document provides a detailed technical analysis of why the Remora FunctionGemma harness is producing poor tool-call rates compared to the reference implementations (distil-SHELLper and distil-smart-home). The analysis identifies **five critical gaps** and **seven secondary issues** that, when addressed, should bring the harness behavior in line with the successful example projects.
 
+> **Note:** This review was created after verifying the junior dev's MODEL_INTERACTION_REVIEW.md against actual source code. Three errors in that document have been corrected here and in the original file. See [Appendix D: Review Verification](#appendix-d-review-verification) for details.
+
 ---
 
 ## Part 1: Reference Implementation Analysis
@@ -44,16 +46,22 @@ conversation_history.append({
 
 **Critical Observation:** The history grows with each turn and is sent in full to the model every time. Failed messages are removed from history to avoid confusing the model.
 
-#### Tool-Call Parsing (Three-Path Fallback)
-```python
-# From parsing.py - parse_llm_response()
+#### Tool-Call Parsing (Two-Stage Architecture)
 
-# Path 1: OpenAI tool_call object
-if hasattr(llm_response, 'function'):
+**Stage 1: Client Return (client.py:50-51)**
+```python
+# Note: Returns CONTENT first, tool_calls as FALLBACK
+return response.content if response.content and len(response.content.strip('\n')) else response.tool_calls[0]
+```
+
+**Stage 2: Format Parsing (parsing.py - parse_llm_response())**
+```python
+# Path 1: OpenAI tool_call object (when Stage 1 returns tool_calls[0])
+if not isinstance(llm_response, str):
     function_name = llm_response.function.name
     arguments = json.loads(llm_response.function.arguments)
 
-# Path 2: Direct JSON format
+# Path 2: Direct JSON format (when Stage 1 returns content)
 elif isinstance(llm_response, str):
     parsed = json.loads(llm_response)
     if "name" in parsed and "parameters" in parsed:
@@ -67,7 +75,10 @@ elif isinstance(llm_response, str):
         arguments = json.loads(tool_call["function"]["arguments"])
 ```
 
-**Critical Observation:** Multiple parsing paths ensure robust extraction even when the model doesn't return structured `tool_calls`.
+**Critical Observations:**
+1. SHELLper prefers text content over structured tool_calls (opposite of smart-home)
+2. Multiple parsing paths in Stage 2 ensure robust extraction regardless of format
+3. The separation of concerns (client vs. parser) is a clean architecture pattern
 
 #### System Prompt
 ```python
@@ -87,8 +98,9 @@ tool call."
 | Setting | Value |
 |---------|-------|
 | Temperature | **0** |
-| tool_choice | implicit (not forced) |
+| tool_choice | **Not set** (relies on robust parsing instead) |
 | reasoning_effort | "none" |
+| Response preference | Content first, tool_calls as fallback |
 
 ---
 
@@ -282,12 +294,13 @@ def _handle_no_tool_calls(self, message: ChatCompletionMessage) -> AgentResult:
 
 ### 2.4 Current Configuration
 
-| Setting | Remora Default | Example Projects |
-|---------|----------------|------------------|
-| Temperature | **0.1** | **0** |
-| tool_choice | **"auto"** | **"required"** |
-| History sent | **Initial only** | **Full history** |
-| JSON fallback | **submit_result only** | **Full tool call parsing** |
+| Setting | Remora Default | distil-SHELLper | distil-smart-home |
+|---------|----------------|-----------------|-------------------|
+| Temperature | **0.1** | **0** | **0** |
+| tool_choice | **"auto"** | **Not set** | **"required"** |
+| History sent | **Initial only** | **Full history** | **Full history** |
+| JSON fallback | **submit_result only** | **3-path parsing** | **2-path parsing** |
+| Response preference | N/A | Content first | tool_calls first |
 
 ### 2.5 Current System Prompt
 
@@ -334,21 +347,26 @@ Both example projects send `[SYSTEM_PROMPT] + conversation_history` on every cal
 
 #### Gap 2: tool_choice Defaults to "auto"
 
-**Severity:** CRITICAL
+**Severity:** HIGH (not critical)
 
 **Current Behavior:**
 `tool_choice="auto"` in both config and harness CLI default.
 
 **Expected Behavior:**
-`tool_choice="required"` forces the model to always return a tool call.
+Either:
+- `tool_choice="required"` forces the model to always return a tool call (smart-home approach), OR
+- Robust JSON parsing to handle tool calls in content (SHELLper approach)
 
 **Impact:**
 - Model may return plain text instead of tool calls
-- No guarantee of structured output
+- Without robust parsing, these responses are lost
 - Higher variance in behavior
 
 **Reference Implementation:**
-distil-smart-home uses `tool_choice="required"` explicitly.
+- distil-smart-home uses `tool_choice="required"` explicitly
+- distil-SHELLper does **not** set `tool_choice` but has robust multi-format parsing
+
+**Recommendation:** For the harness, use `tool_choice="required"`. However, robust parsing (Gap 3) is equally important and provides resilience even when tool_choice is set.
 
 ---
 
@@ -569,7 +587,7 @@ def _build_prompt_messages(self) -> list[ChatCompletionMessageParam]:
 
 ---
 
-#### 1.2 Force Tool Calls in Harness
+#### 1.2 Force Tool Calls in Harness (Recommended)
 
 **File:** `scripts/functiongemma_harness.py`
 
@@ -583,6 +601,8 @@ tool_choice: str = typer.Option(
 ),
 ```
 
+**Note:** distil-SHELLper works without `tool_choice="required"` by relying on robust parsing. However, for a harness where we want maximum tool-call rate, forcing tool calls is the simpler approach. The JSON fallback (1.3) provides resilience even with `tool_choice="required"`.
+
 ---
 
 #### 1.3 Add JSON Tool-Call Fallback
@@ -590,6 +610,8 @@ tool_choice: str = typer.Option(
 **File:** `src/remora/runner.py`
 
 **Change:** Modify `_handle_no_tool_calls()` to parse JSON tool calls, not just `submit_result`.
+
+**Architecture Note:** Consider following SHELLper's two-stage pattern by extracting parsing logic into a separate function or module. This improves testability and separation of concerns.
 
 ```python
 def _handle_no_tool_calls(self, message: ChatCompletionMessage) -> AgentResult | None:
@@ -843,8 +865,48 @@ The template expects full conversation history in the `messages` array. Currentl
 | Aspect | distil-SHELLper | distil-smart-home | Remora (Current) |
 |--------|-----------------|-------------------|------------------|
 | Temperature | 0 | 0 | 0.1 |
-| tool_choice | implicit | required | auto |
+| tool_choice | **Not set** | required | auto |
 | History sent | Full | Full | Initial only |
-| JSON fallback | 3 paths | 2 paths | submit_result only |
+| JSON fallback | 3 paths (two-stage) | 2 paths | submit_result only |
 | System prompt | Explicit | Explicit | Minimal |
 | Thinking | none | disabled | default |
+| Response preference | Content first | tool_calls first | tool_calls only |
+
+---
+
+## Appendix D: Review Verification
+
+This review was created after verifying the junior developer's `MODEL_INTERACTION_REVIEW.md` against the actual source code. Three errors were identified and corrected:
+
+### Error 1: SHELLper Parsing Order Was Inverted
+
+**Original claim:** Primary path is `response.tool_calls`, fallback is JSON parsing.
+
+**Actual behavior (client.py:50-51):**
+```python
+return response.content if response.content and len(response.content.strip('\n')) else response.tool_calls[0]
+```
+Primary is `response.content`, fallback is `response.tool_calls[0]`.
+
+### Error 2: Two-Stage Parsing Architecture Not Described
+
+The original review implied client.py does JSON parsing. Actually:
+- **Stage 1 (client.py):** Returns raw content OR tool_calls object
+- **Stage 2 (parsing.py):** Handles JSON format variations
+
+### Error 3: Overgeneralization About tool_choice
+
+**Original claim:** "Examples force `tool_choice='required'`"
+
+**Actual behavior:**
+- distil-SHELLper: Does **not** set `tool_choice` at all
+- distil-smart-home: Uses `tool_choice="required"`
+
+Only one of the two examples forces tool calls. SHELLper relies on robust parsing instead.
+
+### Impact on Recommendations
+
+These corrections don't fundamentally change the recommendations, but clarify that:
+1. There are two valid approaches: forcing tool_choice OR robust parsing
+2. SHELLper's two-stage architecture is a cleaner separation of concerns
+3. Preferring content vs. tool_calls is a design choice with trade-offs
