@@ -604,7 +604,7 @@ class AnalysisResults(BaseModel):
 
 ## 5. Tree-sitter Query Files (.scm)
 
-Query files are located in `remora/queries/python/remora_core/`.
+Query files are located in `src/remora/queries/python/remora_core/`.
 
 ### 5.1 `function_def.scm`
 

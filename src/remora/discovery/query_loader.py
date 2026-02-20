@@ -36,7 +36,7 @@ class QueryLoader:
     Usage:
         loader = QueryLoader()
         queries = loader.load_query_pack(
-            query_dir=Path("remora/queries"),
+            query_dir=Path("src/remora/queries"),
             language="python",
             query_pack="remora_core",
         )
@@ -52,7 +52,7 @@ class QueryLoader:
         """Load all .scm files from a query pack directory.
 
         Args:
-            query_dir: Root query directory (e.g. remora/queries/).
+            query_dir: Root query directory (e.g. src/remora/queries/).
             language: Language subdirectory (e.g. "python").
             query_pack: Query pack subdirectory (e.g. "remora_core").
 

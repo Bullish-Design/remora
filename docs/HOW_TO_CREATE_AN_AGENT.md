@@ -72,10 +72,10 @@ The files involved:
 | `agents/<name>/tools/*.pym` | Tool implementations (Grail scripts) |
 | `agents/<name>/context/*.pym` | Context providers (inject config into tools) |
 | `.grail/agents/<tool>/inputs.json` | Auto-generated input schemas (from `grail check`) |
-| `remora/subagent.py` | YAML parser and validator |
-| `remora/tool_registry.py` | Builds OpenAI-format tool schemas from Grail |
-| `remora/runner.py` | LLM call loop, tool dispatch, message management |
-| `remora/config.py` | Operation → subagent mapping |
+| `src/remora/subagent.py` | YAML parser and validator |
+| `src/remora/tool_registry.py` | Builds OpenAI-format tool schemas from Grail |
+| `src/remora/runner.py` | LLM call loop, tool dispatch, message management |
+| `src/remora/config.py` | Operation → subagent mapping |
 
 ---
 

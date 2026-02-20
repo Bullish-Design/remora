@@ -130,7 +130,7 @@ class TestQueryLoader:
     def test_load_query_pack(self) -> None:
         loader = QueryLoader()
         queries = loader.load_query_pack(
-            Path("remora/queries"),
+            Path("src/remora/queries"),
             "python",
             "remora_core",
         )
@@ -142,7 +142,7 @@ class TestQueryLoader:
         loader = QueryLoader()
         with pytest.raises(DiscoveryError) as exc:
             loader.load_query_pack(
-                Path("remora/queries"),
+                Path("src/remora/queries"),
                 "python",
                 "nonexistent",
             )
@@ -167,7 +167,7 @@ class TestMatchExtractor:
 
         tree, source = parser.parse_file(SAMPLE_PY)
         queries = loader.load_query_pack(
-            Path("remora/queries"),
+            Path("src/remora/queries"),
             "python",
             "remora_core",
         )
@@ -188,7 +188,7 @@ class TestMatchExtractor:
 
         tree, source = parser.parse_file(SAMPLE_PY)
         queries = loader.load_query_pack(
-            Path("remora/queries"),
+            Path("src/remora/queries"),
             "python",
             "remora_core",
         )
@@ -206,7 +206,7 @@ class TestMatchExtractor:
 
         tree, source = parser.parse_file(SAMPLE_PY)
         queries = loader.load_query_pack(
-            Path("remora/queries"),
+            Path("src/remora/queries"),
             "python",
             "remora_core",
         )

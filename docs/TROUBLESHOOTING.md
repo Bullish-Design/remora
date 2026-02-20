@@ -22,7 +22,7 @@ Remora uses structured error codes to make failures easier to diagnose.
 | --- | --- | --- | --- |
 | `CONFIG_003` | Configuration file could not be loaded | Missing file or invalid YAML | Check path, validate YAML, run `remora config` |
 | `CONFIG_004` | Agents directory could not be found | `agents_dir` path is wrong | Update `agents_dir` or run from project root |
-| `DISC_001` | Discovery query pack not found | `query_pack` missing | Ensure `remora/queries` exists or set `query_dir` |
+| `DISC_001` | Discovery query pack not found | `query_pack` missing | Ensure `src/remora/queries` exists or set `query_dir` |
 | `DISC_004` | Source file parse failure | Invalid syntax or unreadable file | Fix syntax, rerun analysis |
 | `AGENT_001` | Subagent or tool registry error | Missing `.pym` or invalid tool schema | Check subagent YAML and tool scripts |
 | `AGENT_002` | Model server connection error | vLLM unreachable or timeout | Confirm server is running and reachable |

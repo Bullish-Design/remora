@@ -126,7 +126,7 @@ Uses **watchfiles** for reactive monitoring. Debounces changes, triggers increme
 Uses **tree-sitter** with `.scm` query files to extract `CSTNode` objects.
 
 ```
-remora/queries/python/remora_core/
+src/remora/queries/python/remora_core/
 ├── function_def.scm
 ├── class_def.scm
 └── file.scm

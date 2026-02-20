@@ -60,11 +60,11 @@ requires = ["hatchling>=1.18"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["remora", "scripts"]
+packages = ["src/remora", "scripts"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-  "remora",
+  "src/remora",
   "agents",
   "training",
   "docs",
@@ -102,9 +102,10 @@ disallow_untyped_calls = true
 no_implicit_optional = true
 
 [tool.ruff]
-line-length = 120
+line-length = "120"
 target-version = "py313"
-src = ["remora"]
+src = ["src"]
+
 
 [tool.ruff.lint]
 select = [
