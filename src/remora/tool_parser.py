@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,6 +30,30 @@ class ParsedToolCall:
         return f"parsed-{uuid.uuid4().hex[:8]}"
 
 
+_FUNCTIONGEMMA_CALL_RE = re.compile(
+    r"<start_function_call>call:(\w+)\{(.*?)\}<end_function_call>",
+    re.DOTALL,
+)
+_FUNCTIONGEMMA_ARG_RE = re.compile(
+    r"(\w+):<escape>(.*?)<escape>",
+    re.DOTALL,
+)
+
+
+def _parse_functiongemma_call(content: str) -> ParsedToolCall | None:
+    match = _FUNCTIONGEMMA_CALL_RE.search(content)
+    if not match:
+        return None
+    name, raw_args = match.groups()
+    arguments: dict[str, Any] = {}
+    for key, value in _FUNCTIONGEMMA_ARG_RE.findall(raw_args or ""):
+        try:
+            arguments[key] = json.loads(value)
+        except json.JSONDecodeError:
+            arguments[key] = value
+    return ParsedToolCall(name=name, arguments=arguments)
+
+
 def parse_tool_call_from_content(content: str) -> ParsedToolCall | None:
     """Attempt to parse a tool call from JSON content.
 
@@ -45,6 +70,11 @@ def parse_tool_call_from_content(content: str) -> ParsedToolCall | None:
     """
     if not content or not content.strip():
         return None
+
+    functiongemma_call = _parse_functiongemma_call(content)
+    if functiongemma_call is not None:
+        logger.debug("Parsed FunctionGemma format tool call: %s", functiongemma_call.name)
+        return functiongemma_call
 
     try:
         parsed = json.loads(content.strip())

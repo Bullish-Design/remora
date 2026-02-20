@@ -119,6 +119,10 @@ class FunctionGemmaRunner:
         """Backward-compatible alias — returns ``ctx.agent_id``."""
         return self.ctx.agent_id
 
+    def _uses_functiongemma(self) -> bool:
+        model_name = (self.adapter_name or self.server_config.default_adapter or "").lower()
+        return "functiongemma" in model_name
+
     def __post_init__(self) -> None:
         self._http_client = self.http_client or AsyncOpenAI(
             base_url=self.server_config.base_url,
@@ -128,6 +132,7 @@ class FunctionGemmaRunner:
         self._model_target = self.adapter_name or self.server_config.default_adapter
         self._system_prompt = self.definition.initial_context.system_prompt
         self._initial_message = self.definition.initial_context.render(self.node)
+        self._system_role = "developer" if self._uses_functiongemma() else "system"
         self.context_manager = ContextManager(
             {
                 "agent_id": self.ctx.agent_id,
@@ -141,7 +146,9 @@ class FunctionGemmaRunner:
         self.context_manager.set_hub_client(get_hub_client())
         self.messages = []
         self.turn_count = 0
-        self.messages.append(cast(ChatCompletionMessageParam, {"role": "system", "content": self._system_prompt}))
+        self.messages.append(
+            cast(ChatCompletionMessageParam, {"role": self._system_role, "content": self._system_prompt})
+        )
         self.messages.append(cast(ChatCompletionMessageParam, {"role": "user", "content": self._initial_message}))
 
         self._cached_system_prompt = None
@@ -263,7 +270,7 @@ class FunctionGemmaRunner:
 
         self.messages[0] = cast(
             ChatCompletionMessageParam,
-            {"role": "system", "content": system_content},
+            {"role": self._system_role, "content": system_content},
         )
 
         return list(self.messages)
@@ -318,6 +325,7 @@ class FunctionGemmaRunner:
                 tool_call_id = getattr(tool_call, "id", None) or _missing_identifier("tool-call")
                 tool_name = name or _missing_identifier("tool-name")
                 self._apply_tool_result_event(tool_name, tool_result_content)
+                tool_message_content = self._build_tool_response_content(tool_name, tool_result_content)
                 self.messages.append(
                     cast(
                         ChatCompletionMessageParam,
@@ -325,7 +333,7 @@ class FunctionGemmaRunner:
                             "role": "tool",
                             "tool_call_id": tool_call_id,
                             "name": tool_name,
-                            "content": tool_result_content,
+                            "content": tool_message_content,
                         },
                     )
                 )
@@ -364,6 +372,7 @@ class FunctionGemmaRunner:
         self.event_emitter.emit(payload)
         if tool_choice is None:
             tool_choice = self.runner_config.tool_choice
+        tool_choice = self._normalize_tool_choice(tool_choice)
 
         # Filter out system-injected inputs from the schema sent to the model
         raw_tools = self.definition.tool_schemas
@@ -453,7 +462,39 @@ class FunctionGemmaRunner:
         return cast(ChatCompletionMessageParam, message.model_dump(exclude_none=True))
 
     def _tool_choice_for_turn(self, next_turn: int) -> Any:
-        return self.runner_config.tool_choice
+        tool_choice = self._normalize_tool_choice(self.runner_config.tool_choice)
+        if next_turn == 1:
+            initial_choice = self._initial_tool_choice(tool_choice)
+            if initial_choice is not None:
+                return initial_choice
+        return tool_choice
+
+    def _initial_tool_choice(self, tool_choice: Any) -> Any | None:
+        if not self._uses_functiongemma():
+            return None
+        if tool_choice != "auto":
+            return None
+        for tool in self.definition.tools:
+            name = tool.name
+            if name != SUBMIT_RESULT_TOOL:
+                return {"type": "function", "function": {"name": name}}
+        return None
+
+    def _normalize_tool_choice(self, tool_choice: Any) -> Any:
+        if self._uses_functiongemma() and tool_choice == "required":
+            return "auto"
+        return tool_choice
+
+    def _build_tool_response_content(self, tool_name: str, result_content: Any) -> str:
+        if not self._uses_functiongemma():
+            return result_content if isinstance(result_content, str) else json.dumps(result_content)
+
+        parsed = self._parse_tool_result_content(result_content)
+        if isinstance(parsed, dict) and set(parsed.keys()) == {"raw_output"}:
+            response_value: Any = parsed["raw_output"]
+        else:
+            response_value = parsed
+        return json.dumps({"name": tool_name, "response": response_value}, ensure_ascii=False)
 
     def _relative_node_path(self) -> str:
         try:
@@ -542,6 +583,7 @@ class FunctionGemmaRunner:
         if tool_def is None:
             tool_error = {"error": f"Unknown tool: {tool_name}"}
             self._emit_tool_result(tool_name, tool_error)
+            tool_message_content = self._build_tool_response_content(tool_name, tool_error)
             self.messages.append(
                 cast(
                     ChatCompletionMessageParam,
@@ -549,7 +591,7 @@ class FunctionGemmaRunner:
                         "role": "tool",
                         "tool_call_id": parsed_call.id,
                         "name": tool_name,
-                        "content": json.dumps(tool_error),
+                        "content": tool_message_content,
                     },
                 )
             )
@@ -566,6 +608,7 @@ class FunctionGemmaRunner:
 
         self._apply_tool_result_event(tool_name, tool_result_content)
 
+        tool_message_content = self._build_tool_response_content(tool_name, tool_result_content)
         self.messages.append(
             cast(
                 ChatCompletionMessageParam,
@@ -573,7 +616,7 @@ class FunctionGemmaRunner:
                     "role": "tool",
                     "tool_call_id": parsed_call.id,
                     "name": tool_name,
-                    "content": tool_result_content,
+                    "content": tool_message_content,
                 },
             )
         )

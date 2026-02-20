@@ -32,10 +32,9 @@ class CallResult:
 
 
 PROMPT_VARIANTS = [
-    "Use simple_tool to echo payload ping.",
-    "Call simple_tool with payload ping.",
-    "Invoke simple_tool and echo payload ping.",
-    "Run simple_tool to return the payload ping.",
+    'Call simple_tool. Arguments: {"payload":"ping"}.',
+    "Use simple_tool with payload ping.",
+    "Invoke simple_tool with payload ping.",
 ]
 
 
@@ -262,7 +261,6 @@ async def _run_all(
         llm_logger.close()
 
 
-
 @app.command()
 def main(
     definition_path: str = typer.Option(
@@ -274,16 +272,14 @@ def main(
         help="Path to remora.yaml (defaults to repo root).",
     ),
     tool_choice: str = typer.Option(
-        "required",
-        help="Tool choice mode: required or auto. Default 'required' forces tool calls.",
+        "auto",
+        help="Tool choice mode: auto or a named function (FunctionGemma best practice).",
     ),
-    max_tokens: int = typer.Option(256, help="Max tokens for model responses."),
+    max_tokens: int = typer.Option(128, help="Max tokens for model responses."),
     temperature: float = typer.Option(0.0, help="Sampling temperature (0 for deterministic)."),
-    concurrency: int = typer.Option(25, help="Max concurrent requests."),
-    requests_per_variant: int = typer.Option(40, help="Requests per prompt."),
-    include_tool_guide: bool = typer.Option(
-        True, help="Include a compact tool guide in the system prompt."
-    ),
+    concurrency: int = typer.Option(12, help="Max concurrent requests."),
+    requests_per_variant: int = typer.Option(20, help="Requests per prompt."),
+    include_tool_guide: bool = typer.Option(False, help="Include a compact tool guide in the system prompt."),
 ) -> None:
     """Run a high-concurrency FunctionGemma tool-call sweep via Remora."""
     asyncio.run(
