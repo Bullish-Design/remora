@@ -1,7 +1,9 @@
 from grail import Input
 
 node_text_input: str | None = Input("node_text", default=None)
+node_text: str | None = Input("node_text", default=None)
 target_file_input: str | None = Input("target_file", default=None)
+target_file: str | None = Input("target_file", default=None)
 workspace_id: str | None = Input("workspace_id", default=None)
 
 payload: str = Input("payload", default="ping")

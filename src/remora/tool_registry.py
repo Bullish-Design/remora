@@ -161,6 +161,14 @@ def _build_parameters(
                 stacklevel=2,
             )
 
+    system_inputs = {
+        "node_text",
+        "target_file",
+        "workspace_id",
+        "node_text_input",
+        "target_file_input",
+    }
+
     for input_spec in inputs:
         base_schema, base_type = _schema_for_type(input_spec.type)
         override = overrides.get(input_spec.name, {})
@@ -196,6 +204,8 @@ def _build_parameters(
 
         properties[input_spec.name] = schema
         required_flag = override.get("required", input_spec.required)
+        if input_spec.name in system_inputs:
+            required_flag = False
         if required_flag:
             required.append(input_spec.name)
 
@@ -237,7 +247,7 @@ def _schema_for_single_type(type_name: str) -> tuple[dict[str, Any], str | None]
     if normalized in {"str", "string"}:
         return {"type": "string"}, "string"
     if normalized.startswith("list") or normalized.startswith("set") or normalized.startswith("tuple"):
-        return {"type": "array"}, "array"
+        return {"type": "array", "items": {}}, "array"
     if normalized.startswith("dict") or normalized.startswith("mapping"):
         return {"type": "object"}, "object"
     if normalized == "Any":

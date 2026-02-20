@@ -7,7 +7,19 @@
       "default": null
     },
     {
+      "name": "node_text",
+      "type": "str | None",
+      "required": true,
+      "default": null
+    },
+    {
       "name": "target_file_input",
+      "type": "str | None",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "target_file",
       "type": "str | None",
       "required": true,
       "default": null

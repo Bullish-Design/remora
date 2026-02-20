@@ -5,8 +5,8 @@
   "warnings": [],
   "info": {
     "externals_count": 0,
-    "inputs_count": 5,
-    "lines_of_code": 31,
+    "inputs_count": 7,
+    "lines_of_code": 33,
     "monty_features_used": [
       "list_comprehension"
     ]

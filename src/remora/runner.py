@@ -464,7 +464,9 @@ class FunctionGemmaRunner:
     def _base_tool_inputs(self) -> dict[str, Any]:
         return {
             "node_text": self.node.text,
+            "node_text_input": self.node.text,
             "target_file": self._relative_node_path(),
+            "target_file_input": self._relative_node_path(),
             "workspace_id": self.workspace_id,
         }
 

@@ -5,8 +5,8 @@
   "warnings": [],
   "info": {
     "externals_count": 0,
-    "inputs_count": 4,
-    "lines_of_code": 26,
+    "inputs_count": 6,
+    "lines_of_code": 28,
     "monty_features_used": [
       "f_string"
     ]

@@ -8,8 +8,10 @@ initial_context:
     call the appropriate function from the available tools.</task_description>
 
     Respond to the conversation history by generating an appropriate tool call
-    that satisfies the user request. Generate only the tool call according to
-    the provided tool schema, do not generate anything else. Always respond with a tool call.
+    that satisfies the user request. Call simple_tool once, then submit_result
+    with a short summary and an empty changed_files list. Generate only the tool
+    call according to the provided tool schema, do not generate anything else.
+    Always respond with a tool call.
   node_context: |
     Request:
     {{ node_text }}
