@@ -1,184 +1,157 @@
-"""Extract function/class signatures from a Python file.
-
-This Grail script parses a Python file using AST and extracts
-metadata for all functions and classes.
-
-Inputs:
-    file_path: str - Path to the Python file to analyze
-
-Returns:
-    dict with:
-        - file_path: str
-        - file_hash: str (SHA256)
-        - nodes: list[dict] - Extracted node metadata
-        - error: str | None - Error message if parsing failed
-"""
+"""Extract function/class signatures from a Python file."""
 
 from grail import Input, external
 from typing import Any
-import ast
-import hashlib
 
-
-# === Inputs ===
 file_path: str = Input("file_path")
 
 
-# === External Functions ===
 @external
 async def read_file(path: str) -> str:
     """Read file contents (provided by host)."""
     ...
 
 
-# === Main ===
-async def main() -> dict[str, Any]:
-    """Extract signatures from the file."""
+def _simple_hash(text: str) -> str:
+    value = 0
+    for ch in text:
+        value = (value * 31 + ord(ch)) % 1000000007
+    return str(value)
 
-    # Read file
-    try:
-        content = await read_file(file_path)
-    except Exception as e:
-        return {
-            "file_path": file_path,
-            "error": f"Failed to read file: {e}",
-            "nodes": [],
-        }
 
-    # Compute file hash
-    file_hash = hashlib.sha256(content.encode()).hexdigest()
+def _block_end(lines: list[str], start_index: int, base_indent: int) -> int:
+    for index in range(start_index + 1, len(lines)):
+        line = lines[index]
+        stripped = line.strip()
+        if not stripped:
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= base_indent:
+            return index
+    return len(lines)
 
-    # Parse AST
-    try:
-        tree = ast.parse(content)
-    except SyntaxError as e:
-        return {
-            "file_path": file_path,
-            "file_hash": file_hash,
-            "error": f"Syntax error at line {e.lineno}: {e.msg}",
-            "nodes": [],
-        }
 
-    # Extract nodes
-    nodes: list[dict[str, Any]] = []
-    lines = content.splitlines()
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef):
-            nodes.append(_extract_function(node, lines, is_async=False))
-        elif isinstance(node, ast.AsyncFunctionDef):
-            nodes.append(_extract_function(node, lines, is_async=True))
-        elif isinstance(node, ast.ClassDef):
-            nodes.append(_extract_class(node, lines))
-
-    return {
-        "file_path": file_path,
-        "file_hash": file_hash,
-        "nodes": nodes,
-        "error": None,
-    }
+def _extract_docstring(lines: list[str], start_index: int, base_indent: int) -> str | None:
+    for index in range(start_index + 1, len(lines)):
+        line = lines[index]
+        stripped = line.strip()
+        if not stripped:
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= base_indent:
+            return None
+        if stripped.startswith('"""') or stripped.startswith("'''"):
+            quote = stripped[:3]
+            remainder = stripped[3:]
+            if remainder.endswith(quote):
+                return remainder[:-3].strip()
+            content_lines: list[str] = []
+            if remainder:
+                content_lines.append(remainder)
+            for inner_index in range(index + 1, len(lines)):
+                inner_line = lines[inner_index]
+                if quote in inner_line:
+                    before = inner_line.split(quote, 1)[0]
+                    content_lines.append(before)
+                    return "\n".join(content_lines).strip()
+                content_lines.append(inner_line.strip())
+            return "\n".join(content_lines).strip()
+        return None
+    return None
 
 
 def _extract_function(
-    node: ast.FunctionDef | ast.AsyncFunctionDef,
     lines: list[str],
-    is_async: bool,
+    start_index: int,
+    signature_line: str,
+    decorators: list[str],
 ) -> dict[str, Any]:
-    """Extract function metadata."""
-
-    # Get source lines for this function
-    start = node.lineno - 1
-    end = node.end_lineno or start + 1
-    func_source = "\n".join(lines[start:end])
-    source_hash = hashlib.sha256(func_source.encode()).hexdigest()
-
-    # Build signature
-    args = []
-    for arg in node.args.args:
-        arg_str = arg.arg
-        if arg.annotation:
-            arg_str += f": {ast.unparse(arg.annotation)}"
-        args.append(arg_str)
-
-    # Handle *args, **kwargs
-    if node.args.vararg:
-        vararg = f"*{node.args.vararg.arg}"
-        if node.args.vararg.annotation:
-            vararg += f": {ast.unparse(node.args.vararg.annotation)}"
-        args.append(vararg)
-
-    if node.args.kwarg:
-        kwarg = f"**{node.args.kwarg.arg}"
-        if node.args.kwarg.annotation:
-            kwarg += f": {ast.unparse(node.args.kwarg.annotation)}"
-        args.append(kwarg)
-
-    returns = ""
-    if node.returns:
-        returns = f" -> {ast.unparse(node.returns)}"
-
-    prefix = "async def" if is_async else "def"
-    signature = f"{prefix} {node.name}({', '.join(args)}){returns}"
-
-    # Get docstring (first line only, truncated)
-    docstring = ast.get_docstring(node)
+    base_indent = len(lines[start_index]) - len(lines[start_index].lstrip())
+    end_index = _block_end(lines, start_index, base_indent)
+    func_source = "\n".join(lines[start_index:end_index])
+    source_hash = _simple_hash(func_source)
+    signature = signature_line.rstrip(":")
+    docstring = _extract_docstring(lines, start_index, base_indent)
     if docstring:
         docstring = docstring.split("\n")[0][:100]
-
-    # Get decorators
-    decorators = [f"@{ast.unparse(d)}" for d in node.decorator_list]
-
-    # Check for type hints
-    has_type_hints = (
-        node.returns is not None
-        or any(a.annotation for a in node.args.args)
-    )
-
+    has_type_hints = "->" in signature or ":" in signature
     return {
-        "name": node.name,
+        "name": signature.split("(", 1)[0].split()[-1],
         "type": "function",
         "signature": signature,
         "docstring": docstring,
         "decorators": decorators,
         "source_hash": source_hash,
-        "line_count": end - start,
+        "line_count": end_index - start_index,
         "has_type_hints": has_type_hints,
-        "start_line": node.lineno,
-        "end_line": end,
+        "start_line": start_index + 1,
+        "end_line": end_index,
     }
 
 
-def _extract_class(node: ast.ClassDef, lines: list[str]) -> dict[str, Any]:
-    """Extract class metadata."""
-
-    start = node.lineno - 1
-    end = node.end_lineno or start + 1
-    class_source = "\n".join(lines[start:end])
-    source_hash = hashlib.sha256(class_source.encode()).hexdigest()
-
-    # Build signature
-    bases = [ast.unparse(b) for b in node.bases]
-    signature = f"class {node.name}"
-    if bases:
-        signature += f"({', '.join(bases)})"
-
-    # Get docstring
-    docstring = ast.get_docstring(node)
+def _extract_class(
+    lines: list[str],
+    start_index: int,
+    signature_line: str,
+    decorators: list[str],
+) -> dict[str, Any]:
+    base_indent = len(lines[start_index]) - len(lines[start_index].lstrip())
+    end_index = _block_end(lines, start_index, base_indent)
+    class_source = "\n".join(lines[start_index:end_index])
+    source_hash = _simple_hash(class_source)
+    signature = signature_line.rstrip(":")
+    docstring = _extract_docstring(lines, start_index, base_indent)
     if docstring:
         docstring = docstring.split("\n")[0][:100]
-
-    # Get decorators
-    decorators = [f"@{ast.unparse(d)}" for d in node.decorator_list]
-
+    name = signature.split("(", 1)[0].split()[1]
     return {
-        "name": node.name,
+        "name": name,
         "type": "class",
         "signature": signature,
         "docstring": docstring,
         "decorators": decorators,
         "source_hash": source_hash,
-        "line_count": end - start,
-        "has_type_hints": True,
-        "start_line": node.lineno,
-        "end_line": end,
+        "line_count": end_index - start_index,
+        "has_type_hints": False,
+        "start_line": start_index + 1,
+        "end_line": end_index,
     }
+
+
+try:
+    content = await read_file(file_path)
+    lines = content.splitlines()
+    nodes: list[dict[str, Any]] = []
+    decorators_buffer: list[str] = []
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("@"):
+            decorators_buffer.append(stripped)
+            continue
+        if stripped.startswith("async def ") or stripped.startswith("def "):
+            nodes.append(_extract_function(lines, index, stripped, decorators_buffer))
+            decorators_buffer = []
+            continue
+        if stripped.startswith("class "):
+            nodes.append(_extract_class(lines, index, stripped, decorators_buffer))
+            decorators_buffer = []
+            continue
+        decorators_buffer = []
+
+    result = {
+        "file_path": file_path,
+        "file_hash": _simple_hash(content),
+        "nodes": nodes,
+        "error": None,
+    }
+except Exception as exc:
+    result = {
+        "file_path": file_path,
+        "error": f"Failed to extract signatures: {exc}",
+        "nodes": [],
+    }
+
+result

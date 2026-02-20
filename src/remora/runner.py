@@ -159,20 +159,28 @@ class FunctionGemmaRunner:
 
     def _build_system_prompt(self, prompt_context: dict[str, Any] | None = None) -> str:
         base_prompt = self._system_prompt
+        tool_guide = self._build_tool_guide() if self.runner_config.include_tool_guide else ""
         if not prompt_context:
-            return base_prompt
+            prompt_lines = [base_prompt]
+            if tool_guide:
+                prompt_lines.extend(["", tool_guide])
+            return "\n".join(prompt_lines).strip()
 
         recent_actions = self._format_recent_actions(prompt_context.get("recent_actions", []))
         knowledge = self._format_knowledge(prompt_context.get("knowledge", {}))
-        lines = [
-            base_prompt,
-            "",
-            "## Current State",
-            f"Goal: {prompt_context.get('goal', '')}",
-            f"Operation: {prompt_context.get('operation', '')}",
-            f"Target: {prompt_context.get('node_id', '')}",
-            f"Turn: {prompt_context.get('turn', 0)}",
-        ]
+        lines = [base_prompt]
+        if tool_guide:
+            lines.extend(["", tool_guide])
+        lines.extend(
+            [
+                "",
+                "## Current State",
+                f"Goal: {prompt_context.get('goal', '')}",
+                f"Operation: {prompt_context.get('operation', '')}",
+                f"Target: {prompt_context.get('node_id', '')}",
+                f"Turn: {prompt_context.get('turn', 0)}",
+            ]
+        )
         node_summary = prompt_context.get("node_summary", "")
         if node_summary:
             lines.append(f"Node Summary: {node_summary}")
@@ -198,6 +206,24 @@ class FunctionGemmaRunner:
         node = self.node
         return f"{node.node_type.value} '{node.name}' in {node.file_path.name}"
 
+    def _build_tool_guide(self) -> str:
+        schemas = self.definition.tool_schemas
+        if not schemas:
+            return ""
+        lines = ["Tools:"]
+        for schema in schemas:
+            function = schema.get("function", {})
+            name = function.get("name", "unknown")
+            description = str(function.get("description", "")).strip()
+            parameters = function.get("parameters", {})
+            required = parameters.get("required") or []
+            required_list = ", ".join(required) if required else "none"
+            if description:
+                lines.append(f"- {name}: {description} (required: {required_list})")
+            else:
+                lines.append(f"- {name} (required: {required_list})")
+        return "\n".join(lines)
+
     def _format_recent_actions(self, actions: list[dict[str, Any]]) -> str:
         if not actions:
             return "None"
@@ -218,7 +244,9 @@ class FunctionGemmaRunner:
             return str(knowledge)
 
     def _build_prompt_messages(self) -> list[ChatCompletionMessageParam]:
-        prompt_context = self.context_manager.get_prompt_context()
+        prompt_context = None
+        if self.runner_config.include_prompt_context:
+            prompt_context = self.context_manager.get_prompt_context()
         system_prompt = self._build_system_prompt(prompt_context)
         return [
             cast(ChatCompletionMessageParam, {"role": "system", "content": system_prompt}),

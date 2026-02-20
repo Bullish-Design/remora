@@ -1,0 +1,26 @@
+name: harness_agent
+max_turns: 2
+
+initial_context:
+  system_prompt: |
+    You are a tool invocation tester. Given a request, call the appropriate function. Always call a function.
+  node_context: |
+    Request:
+    {{ node_text }}
+
+tools:
+  - tool_name: simple_tool
+    pym: harness/tools/simple_tool.pym
+    tool_description: Call this tool to echo a payload for tool-call testing.
+    inputs_override:
+      payload:
+        description: "Payload string to echo back."
+
+  - tool_name: submit_result
+    pym: harness/tools/submit.pym
+    tool_description: Submit the final harness result.
+    inputs_override:
+      summary:
+        description: "Short summary of the harness run."
+      changed_files:
+        description: "List of modified files (empty for harness)."

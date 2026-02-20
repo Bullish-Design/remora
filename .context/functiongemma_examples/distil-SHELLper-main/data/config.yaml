@@ -1,0 +1,17 @@
+base:
+  task: multi-turn-tool-calling-closed-book
+  student_model_name: Qwen3-0.6B
+  teacher_model_name: Qwen3-235B-A22B-Instruct-2507 #deepseek.v3.1 #Llama-3.1-405B-Instruct #Qwen3-235B-A22B-Instruct-2507 #openai.gpt-oss-120b
+evaluation:
+  num_few_shot_examples: 3
+  expand_tool_calling_turns: true
+  expand_seed_dataset_turns: true
+synthgen:
+  generation_target: 10
+tuning:
+  num_train_epochs: 4
+  learning_rate: 2e-5
+  learning_rate_scheduler: linear
+  lora_r: 128
+  per_device_train_batch_size: 1
+  expand_train_tool_calling_turns: true

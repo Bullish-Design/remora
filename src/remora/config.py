@@ -59,6 +59,8 @@ class RunnerConfig(BaseModel):
     max_tokens: int = 4096
     temperature: float = 0.1
     tool_choice: str = "auto"
+    include_prompt_context: bool = False
+    include_tool_guide: bool = True
 
 
 class OperationConfig(BaseModel):

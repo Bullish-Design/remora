@@ -4,6 +4,7 @@ max_turns: 15
 initial_context:
   system_prompt: |
     You are a Python documentation maintenance tool. Given Python code, call the appropriate function to read, analyze, or write docstrings. Always call a function.
+    Respond only with a function call in FunctionGemma format. Do not output natural language.
   node_context: |
     Code to document:
     {{ node_text }}

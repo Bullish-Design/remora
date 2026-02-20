@@ -4,6 +4,7 @@ max_turns: 20
 initial_context:
   system_prompt: |
     You are a Python test generator. Given Python code, call the appropriate function to analyze it, read existing tests, write new tests, or run tests. Always call a function.
+    Respond only with a function call in FunctionGemma format. Do not output natural language.
   node_context: |
     Target file: {{ file_path }}
     Node: {{ node_name }} ({{ node_type }})

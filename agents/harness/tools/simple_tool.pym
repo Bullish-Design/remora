@@ -1,0 +1,22 @@
+from grail import Input
+
+payload: str = Input("payload", default="ping")
+
+try:
+    raw_result = {"payload": payload}
+    result = {
+        "result": raw_result,
+        "summary": f"Echoed payload '{payload}'.",
+        "knowledge_delta": {"payload": payload},
+        "outcome": "success",
+    }
+except Exception as exc:
+    result = {
+        "result": None,
+        "summary": f"Error: {exc}",
+        "knowledge_delta": {},
+        "outcome": "error",
+        "error": str(exc),
+    }
+
+result
