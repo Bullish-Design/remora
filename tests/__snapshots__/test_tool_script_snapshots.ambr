@@ -1,0 +1,24 @@
+# serializer version: 1
+# name: TestLintToolSnapshots.test_run_linter_clean_file_output
+  dict({
+    'fixable_count': 0,
+    'issues': list([
+    ]),
+    'total': 0,
+  })
+# ---
+# name: TestLintToolSnapshots.test_run_linter_issues_found_output
+  dict({
+    'fixable_count': 1,
+    'issues': list([
+      dict({
+        'code': 'E225',
+        'col': 10,
+        'fixable': True,
+        'line': 110,
+        'message': 'missing whitespace around operator',
+      }),
+    ]),
+    'total': 1,
+  })
+# ---
