@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Literal
 
 from fsdantic import VersionedKVRecord
-from pydantic import Field
+from pydantic import Field, field_serializer
 
 
 class NodeState(VersionedKVRecord):
@@ -111,6 +111,10 @@ class FileIndex(VersionedKVRecord):
     node_count: int = Field(description="Number of nodes in this file")
     last_scanned: datetime = Field(description="When this file was last indexed")
 
+    @field_serializer("last_scanned")
+    def _serialize_last_scanned(self, value: datetime) -> str:
+        return value.isoformat()
+
 
 class HubStatus(VersionedKVRecord):
     """Hub daemon status information.
@@ -125,3 +129,9 @@ class HubStatus(VersionedKVRecord):
     indexed_nodes: int = Field(default=0, description="Number of nodes indexed")
     started_at: datetime | None = Field(default=None, description="When daemon started")
     last_update: datetime | None = Field(default=None, description="Last index update")
+
+    @field_serializer("started_at", "last_update")
+    def _serialize_optional_datetime(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        return value.isoformat()
