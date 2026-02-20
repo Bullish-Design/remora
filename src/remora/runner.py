@@ -266,7 +266,17 @@ class FunctionGemmaRunner:
             {"role": "system", "content": system_content},
         )
 
-        return list(self.messages)
+        prompt_messages: list[ChatCompletionMessageParam] = []
+        for message in self.messages:
+            formatted = message
+            if isinstance(formatted, dict) and "tool_calls" in formatted:
+                tool_calls = formatted.get("tool_calls")
+                if isinstance(tool_calls, list):
+                    formatted = dict(formatted)
+                    formatted["tool_calls"] = json.dumps(tool_calls)
+            prompt_messages.append(cast(ChatCompletionMessageParam, formatted))
+
+        return prompt_messages
 
     def _trim_history_if_needed(self, max_messages: int = 50) -> None:
         """Trim conversation history to prevent context overflow.
