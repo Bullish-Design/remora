@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from remora.discovery import NodeType
 from remora.runner import FunctionGemmaRunner
 
 
@@ -42,9 +44,8 @@ def _make_runner(*, snapshot_manager: MagicMock | None = None) -> FunctionGemmaR
     node = MagicMock()
     node.node_id = "node-1"
     node.name = "TestNode"
-    node.node_type = "function"
-    node.file_path = MagicMock()
-    node.file_path.__str__ = lambda self: "/test.py"
+    node.node_type = NodeType.FUNCTION
+    node.file_path = Path("/test.py")
     node.text = "def foo(): pass"
 
     ctx = MagicMock()
@@ -72,7 +73,6 @@ def _make_runner(*, snapshot_manager: MagicMock | None = None) -> FunctionGemmaR
         server_config=server_config,
         runner_config=runner_config,
         snapshot_manager=snapshot_manager,
-
     )
     return runner
 
@@ -117,10 +117,13 @@ async def test_dispatch_resume_tool_with_context() -> None:
     }
 
     runner = _make_runner(snapshot_manager=mgr)
-    tc = _make_tool_call("resume_tool", {
-        "snapshot_id": "snap-123",
-        "additional_context": "some extra data",
-    })
+    tc = _make_tool_call(
+        "resume_tool",
+        {
+            "snapshot_id": "snap-123",
+            "additional_context": "some extra data",
+        },
+    )
 
     result_str = await runner._dispatch_tool(tc)
     result = json.loads(result_str)

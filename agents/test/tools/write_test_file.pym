@@ -14,8 +14,20 @@ try:
     if not path_value:
         raise ValueError("Test file path is required.")
     await write_file(path=path_value, content=content)
-    result = {"success": True, "path": path_value}
+    raw_result = {"success": True, "path": path_value}
+    result = {
+        "result": raw_result,
+        "summary": f"Wrote test file {path_value}",
+        "knowledge_delta": {"test_file_written": path_value},
+        "outcome": "success",
+    }
 except Exception as exc:
-    result = {"success": False, "error": str(exc)}
+    result = {
+        "result": {"success": False, "error": str(exc)},
+        "summary": f"Error: {exc}",
+        "knowledge_delta": {},
+        "outcome": "error",
+        "error": str(exc),
+    }
 
 result

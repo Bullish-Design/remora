@@ -73,7 +73,7 @@ LLM decides → calls submit_result.pym → done
 | External functions | Only the ones the tool needs (typically 2–4) |
 | Return value | Dict with result data — fed back to the LLM as a tool response |
 | `submit_result` | A **separate** `.pym` script, not an `@external` call |
-| Error handling | `try/except` wrapper — never crash, return `{"error": ...}` |
+| Error handling | `try/except` wrapper — never crash, return a Two-Track error payload |
 
 ### Standalone Cairn Agent Scripts
 
@@ -301,7 +301,46 @@ In Remora, the return value is JSON-serialized and sent back to the LLM as a too
 - **Be concise.** Large return values waste context tokens.
 - **Use flat dicts.** Avoid deep nesting.
 - **Include actionable data.** Return information the model needs for its next decision.
-- **On errors, return `{"error": "message"}`** so the model can interpret the failure.
+
+#### Two-Track Return Contract (Remora Tools)
+
+When Two-Track Memory is enabled, tools must return a structured dict that supports both tracks:
+
+```python
+{
+    "result": { ... },              # Full raw output (Long Track only)
+    "summary": "Fixed 3 errors",    # Short outcome summary (Short Track)
+    "knowledge_delta": {            # Structured state updates
+        "errors_remaining": 2,
+        "files_modified": ["foo.py"],
+    },
+    "outcome": "success",           # success | error | partial
+    "error": None,                  # Optional error message
+}
+```
+
+**Key points:**
+- `summary`, `knowledge_delta`, and `outcome` are required for the Decision Packet.
+- `result` can be large because it stays in the Long Track.
+- Tools must build this dict inline — `.pym` scripts cannot import helpers from `remora.context.*`.
+
+#### Summarizers (Fallback Path)
+
+Remora can also attach **summarizers** in the runner when a tool does not provide a `summary` or `knowledge_delta`.
+Summarizers live in regular Python modules (not in `.pym` scripts) and are registered in the runner via
+`get_default_summarizers()`.
+
+Use summarizers when:
+- You are migrating legacy tools that still return raw results.
+- You need to keep a `.pym` tool minimal, but its output shape is stable and easy to interpret.
+
+How it works:
+1. The `.pym` tool returns a raw dict (for example `{"passed": 10, "failed": 2}`).
+2. The runner applies a summarizer for that tool name (e.g., `run_tests`).
+3. The summarizer generates `summary` and `knowledge_delta` for the Decision Packet.
+
+**Important:** Tool-side summaries are preferred. Summarizers are a fallback, not the primary path.
+If you rely on summarizers, keep the raw result structure stable so the summarizer can parse it.
 
 ### Return Values in Standalone Cairn Agents
 
@@ -576,9 +615,21 @@ In Remora tools, always wrap the entire executable section so the tool never cra
 ```python
 try:
     # ... do work ...
-    result = {"success": True, "data": processed_data}
+    raw_result = {"success": True, "data": processed_data}
+    result = {
+        "result": raw_result,
+        "summary": "Completed processing",
+        "knowledge_delta": {"items_processed": len(processed_data)},
+        "outcome": "success",
+    }
 except Exception as exc:
-    result = {"error": str(exc)}
+    result = {
+        "result": None,
+        "summary": f"Error: {exc}",
+        "knowledge_delta": {},
+        "outcome": "error",
+        "error": str(exc),
+    }
 
 result
 ```
@@ -699,7 +750,33 @@ except Exception as exc:
 result
 ```
 
-### Pattern 3: Concise, Flat Return Dicts
+### Pattern 3: Two-Track Return Shape
+
+Every Remora tool should return the Two-Track structure so the ContextManager can update the Decision Packet:
+
+```python
+try:
+    # ... do work ...
+    raw_result = {"items": items, "count": len(items)}
+    result = {
+        "result": raw_result,
+        "summary": f"Found {len(items)} items",
+        "knowledge_delta": {"items_found": len(items)},
+        "outcome": "success",
+    }
+except Exception as exc:
+    result = {
+        "result": None,
+        "summary": f"Error: {exc}",
+        "knowledge_delta": {},
+        "outcome": "error",
+        "error": str(exc),
+    }
+
+result
+```
+
+### Pattern 4: Concise, Flat Return Dicts
 
 Return values go into the LLM's context window. Keep them small and flat:
 
@@ -727,7 +804,7 @@ result = {
 }
 ```
 
-### Pattern 4: One Tool, One Job
+### Pattern 5: One Tool, One Job
 
 Each `.pym` tool should either read or write, not both. This gives the LLM clearer choices:
 
@@ -738,7 +815,7 @@ Each `.pym` tool should either read or write, not both. This gives the LLM clear
 | `run_linter.pym` | Runs ruff and returns issues | Apply fixes |
 | `apply_fix.pym` | Applies a specific fix | Run full linting |
 
-### Pattern 5: Use `run_command` for External Tooling
+### Pattern 6: Use `run_command` for External Tooling
 
 When you need to invoke an external tool (linter, test runner, formatter), use the `run_command` external:
 
@@ -760,6 +837,8 @@ Parse the stdout/stderr from the command to build your tool's return dict.
 ## 15. Examples — Remora Tools
 
 These examples show the patterns used in Remora agent tools — small, focused `.pym` scripts that the LLM calls individually.
+
+> **Two-Track note:** Each example’s final `result = {...}` should be wrapped in the Two-Track return shape shown above (Pattern 3). Keep the tool’s core logic the same, but return `{"result": raw_result, "summary": ..., "knowledge_delta": ..., "outcome": ...}` instead of a bare dict.
 
 ---
 
@@ -1586,9 +1665,21 @@ async def file_exists(path: str) -> bool:
 # Your logic here
 try:
     # ... do work with node_text_input or target_file_input ...
-    result = {"success": True}
+    raw_result = {"success": True}
+    result = {
+        "result": raw_result,
+        "summary": "Completed tool operation",
+        "knowledge_delta": {},
+        "outcome": "success",
+    }
 except Exception as exc:
-    result = {"error": str(exc)}
+    result = {
+        "result": None,
+        "summary": f"Error: {exc}",
+        "knowledge_delta": {},
+        "outcome": "error",
+        "error": str(exc),
+    }
 
 result
 ```

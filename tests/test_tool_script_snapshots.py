@@ -1,4 +1,4 @@
-"""Snapshot tests for tool script outputs."""
+"""Tool script output tests."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from tests.utils.grail_runtime import build_file_externals, run_script
+from tests.utils.tool_contract import assert_valid_tool_result
 
 
 def _repo_root() -> Path:
@@ -16,15 +17,9 @@ def _script_path(relative: str) -> Path:
     return _repo_root() / relative
 
 
-def _normalize_lint_output(result: dict) -> dict:
-    if "error" in result:
-        return {"error": result["error"]}
-    return result
-
-
 class TestLintToolSnapshots:
-    def test_run_linter_clean_file_output(self, snapshot, tmp_path: Path) -> None:
-        """Lint tool output for a clean file should match snapshot."""
+    def test_run_linter_clean_file_output(self, tmp_path: Path) -> None:
+        """Lint tool output for a clean file should be structured."""
         path = _script_path("agents/lint/tools/run_linter.pym")
         target = tmp_path / "sample.py"
         target.write_text("def add(a: int, b: int) -> int:\n    return a + b\n", encoding="utf-8")
@@ -42,11 +37,15 @@ class TestLintToolSnapshots:
             grail_dir=grail_dir,
         )
 
-        normalized = _normalize_lint_output(result)
-        assert normalized == snapshot
+        assert_valid_tool_result(result)
+        payload = result["result"]
+        assert payload["total"] == 0
+        assert payload["fixable_count"] == 0
+        assert payload["issues"] == []
+        assert result["outcome"] == "success"
 
-    def test_run_linter_issues_found_output(self, snapshot, tmp_path: Path) -> None:
-        """Lint tool output with issues should match snapshot."""
+    def test_run_linter_issues_found_output(self, tmp_path: Path) -> None:
+        """Lint tool output with issues should be structured."""
         path = _script_path("agents/lint/tools/run_linter.pym")
         target = tmp_path / "sample.py"
         target.write_text("def add(a:int,b:int)->int:\n    return a+b\n", encoding="utf-8")
@@ -73,5 +72,9 @@ class TestLintToolSnapshots:
             grail_dir=grail_dir,
         )
 
-        normalized = _normalize_lint_output(result)
-        assert normalized == snapshot
+        assert_valid_tool_result(result)
+        payload = result["result"]
+        assert payload["total"] == 1
+        assert payload["fixable_count"] == 1
+        assert payload["issues"][0]["code"] == "E225"
+        assert result["outcome"] == "partial"

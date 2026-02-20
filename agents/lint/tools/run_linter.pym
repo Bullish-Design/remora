@@ -154,13 +154,45 @@ try:
     stdout = str(completed.get("stdout", ""))
 
     if exit_code not in {0, 1}:
-        result = {"error": stderr.strip() or f"ruff exit code {exit_code}"}
+        error_message = stderr.strip() or f"ruff exit code {exit_code}"
+        result = {
+            "result": None,
+            "summary": f"Error: {error_message}",
+            "knowledge_delta": {},
+            "outcome": "error",
+            "error": error_message,
+        }
     else:
         issues_raw = _split_json_objects(stdout)
         issues = [_format_issue(issue) for issue in issues_raw]
         fixable_count = sum(1 for issue in issues if issue.get("fixable"))
-        result = {"issues": issues, "total": len(issues), "fixable_count": fixable_count}
+        total = len(issues)
+        raw_result = {"issues": issues, "total": total, "fixable_count": fixable_count}
+        if total == 0:
+            summary = "No lint errors found"
+            outcome = "success"
+        elif fixable_count > 0:
+            summary = f"Found {total} lint errors, {fixable_count} fixable"
+            outcome = "partial"
+        else:
+            summary = f"Found {total} lint errors"
+            outcome = "partial"
+        result = {
+            "result": raw_result,
+            "summary": summary,
+            "knowledge_delta": {
+                "lint_errors_remaining": total,
+                "lint_errors_fixable": fixable_count,
+            },
+            "outcome": outcome,
+        }
 except Exception as exc:
-    result = {"error": str(exc)}
+    result = {
+        "result": None,
+        "summary": f"Error: {exc}",
+        "knowledge_delta": {},
+        "outcome": "error",
+        "error": str(exc),
+    }
 
 result

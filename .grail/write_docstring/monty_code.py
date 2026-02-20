@@ -100,7 +100,9 @@ try:
     if trailing_newline:
         updated_content += '\n'
     await write_file(path=target_file, content=updated_content)
-    result = {'success': True, 'replaced_existing': replaced_existing}
+    raw_result = {'success': True, 'replaced_existing': replaced_existing, 'target_file': target_file}
+    summary = 'Replaced existing docstring' if replaced_existing else 'Inserted new docstring'
+    result = {'result': raw_result, 'summary': summary, 'knowledge_delta': {'docstring_updated': True, 'docstring_replaced': replaced_existing, 'docstring_target_file': target_file}, 'outcome': 'success'}
 except Exception as exc:
-    result = {'success': False, 'error': str(exc)}
+    result = {'result': {'success': False, 'error': str(exc)}, 'summary': f'Error: {exc}', 'knowledge_delta': {}, 'outcome': 'error', 'error': str(exc)}
 result

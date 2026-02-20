@@ -181,6 +181,61 @@ def test_run_handles_multiple_tool_turns_then_submit() -> None:
     assert len(chat_calls) == 3
 
 
+def test_context_manager_tracks_tool_results() -> None:
+    tool_def = ToolDefinition(
+        tool_name="inspect",
+        pym=Path("inspect.pym"),
+        tool_description="Inspect something.",
+        context_providers=[],
+    )
+    submit_def = ToolDefinition(
+        tool_name="submit_result",
+        pym=Path("submit.pym"),
+        tool_description="Submit the result.",
+        context_providers=[],
+    )
+    tool_schemas = [
+        tool_schema(
+            "inspect",
+            "Inspect something.",
+            {"type": "object", "additionalProperties": False, "properties": {}},
+        ),
+        tool_schema(
+            "submit_result",
+            "Submit the result.",
+            {"type": "object", "additionalProperties": False, "properties": {}},
+        ),
+    ]
+    definition = make_definition(tools=[tool_def, submit_def], tool_schemas=tool_schemas)
+    node = make_node()
+    server_config = make_server_config()
+    client = FakeAsyncOpenAI(
+        base_url=server_config.base_url,
+        api_key=server_config.api_key,
+        timeout=server_config.timeout,
+        responses=[
+            tool_call_message("inspect", {}),
+            tool_call_message("submit_result", {"summary": "Done", "changed_files": []}),
+        ],
+    )
+    runner = FunctionGemmaRunner(
+        definition=definition,
+        node=node,
+        ctx=make_ctx(),
+        grail_executor=FakeGrailExecutor(),
+        grail_dir=Path("/tmp"),
+        server_config=server_config,
+        runner_config=make_runner_config(),
+        http_client=cast(Any, client),
+    )
+
+    asyncio.run(runner.run())
+
+    assert runner.context_manager.packet.turn >= 1
+    assert len(runner.context_manager.packet.recent_actions) == 1
+    assert runner.context_manager.packet.recent_actions[0].tool == "inspect"
+
+
 def test_run_respects_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = [
         tool_call_message("inspect", {}),
@@ -279,8 +334,6 @@ def test_context_providers_injected_before_tool_dispatch() -> None:
     chat_calls = client.chat.completions.calls
     assert len(chat_calls) >= 2
     tool_messages = [
-        message
-        for message in chat_calls[1]["messages"]
-        if message.get("role") == "tool" and message.get("name") == "inspect"
+        message for message in runner.messages if message.get("role") == "tool" and message.get("name") == "inspect"
     ]
     assert tool_messages[0]["content"] == '{"ctx": "one"}\n{"ctx": "two"}\n{"ok": true}'

@@ -122,10 +122,23 @@ try:
     totals = _parse_totals(xml)
     failures = _parse_failures(xml)
     passed = totals['tests'] - totals['failures'] - totals['errors'] - totals['skipped']
-    result = {'passed': max(passed, 0), 'failed': totals['failures'], 'errors': totals['errors'], 'failures': failures}
+    passed_count = max(passed, 0)
+    failed_count = totals['failures']
+    error_count = totals['errors']
+    raw_result = {'passed': passed_count, 'failed': failed_count, 'errors': error_count, 'failures': failures}
     if exit_code not in {0, 1}:
-        result['errors'] = max(result.get('errors', 0), 1)
-        result['failures'].append({'test': 'pytest', 'message': stderr.strip() or stdout.strip() or 'Pytest failed to run.'})
+        error_count = max(error_count, 1)
+        raw_result['errors'] = error_count
+        raw_result['failures'].append({'test': 'pytest', 'message': stderr.strip() or stdout.strip() or 'Pytest failed to run.'})
+    total_tests = passed_count + failed_count + error_count
+    failed_total = failed_count + error_count
+    if failed_total == 0:
+        summary = f'All {total_tests} tests passed'
+        outcome = 'success'
+    else:
+        summary = f'{failed_total} of {total_tests} tests failed'
+        outcome = 'partial'
+    result = {'result': raw_result, 'summary': summary, 'knowledge_delta': {'tests_passed': raw_result['passed'], 'tests_failed': raw_result['failed'], 'tests_errors': raw_result['errors']}, 'outcome': outcome}
 except Exception as exc:
-    result = {'error': str(exc), 'passed': 0, 'failed': 0, 'errors': 1, 'failures': []}
+    result = {'result': {'passed': 0, 'failed': 0, 'errors': 1, 'failures': []}, 'summary': f'Error: {exc}', 'knowledge_delta': {}, 'outcome': 'error', 'error': str(exc)}
 result

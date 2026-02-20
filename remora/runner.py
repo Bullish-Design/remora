@@ -17,6 +17,8 @@ from openai.types.chat import ChatCompletionMessage, ChatCompletionMessageParam,
 
 
 from remora.config import RunnerConfig, ServerConfig
+from remora.context import ContextManager, get_hub_client
+from remora.context.summarizers import get_default_summarizers
 from remora.discovery import CSTNode
 from remora.events import EventEmitter, EventName, EventStatus, NullEventEmitter
 from remora.errors import AGENT_002, AGENT_003, AGENT_004
@@ -101,6 +103,7 @@ class FunctionGemmaRunner:
     workspace_root: Path | None = None
     stable_root: Path | None = None
     snapshot_manager: SnapshotManager | None = None
+    context_manager: ContextManager = field(init=False)
     messages: list[ChatCompletionMessageParam] = field(init=False)
     turn_count: int = field(init=False)
     _http_client: AsyncOpenAI = field(init=False)
@@ -121,10 +124,21 @@ class FunctionGemmaRunner:
             timeout=self.server_config.timeout,
         )
         self._model_target = self.adapter_name or self.server_config.default_adapter
+        self._system_prompt = self.definition.initial_context.system_prompt
+        self._initial_message = self.definition.initial_context.render(self.node)
+        self.context_manager = ContextManager(
+            {
+                "agent_id": self.ctx.agent_id,
+                "goal": f"{self.definition.name} on {self.node.name}",
+                "operation": self.definition.name,
+                "node_id": self.node.node_id,
+                "node_summary": self._summarize_node(),
+            },
+            summarizers=get_default_summarizers(),
+        )
+        self.context_manager.set_hub_client(get_hub_client())
         self.messages = []
         self.turn_count = 0
-        self._system_prompt = self._build_system_prompt()
-        self._initial_message = self.definition.initial_context.render(self.node)
         self.messages.append(cast(ChatCompletionMessageParam, {"role": "system", "content": self._system_prompt}))
         self.messages.append(cast(ChatCompletionMessageParam, {"role": "user", "content": self._initial_message}))
 
@@ -143,15 +157,82 @@ class FunctionGemmaRunner:
             self.definition.max_turns,
         )
 
-    def _build_system_prompt(self) -> str:
-        return self.definition.initial_context.system_prompt
+    def _build_system_prompt(self, prompt_context: dict[str, Any] | None = None) -> str:
+        base_prompt = self._system_prompt
+        if not prompt_context:
+            return base_prompt
+
+        recent_actions = self._format_recent_actions(prompt_context.get("recent_actions", []))
+        knowledge = self._format_knowledge(prompt_context.get("knowledge", {}))
+        lines = [
+            base_prompt,
+            "",
+            "## Current State",
+            f"Goal: {prompt_context.get('goal', '')}",
+            f"Operation: {prompt_context.get('operation', '')}",
+            f"Target: {prompt_context.get('node_id', '')}",
+            f"Turn: {prompt_context.get('turn', 0)}",
+        ]
+        node_summary = prompt_context.get("node_summary", "")
+        if node_summary:
+            lines.append(f"Node Summary: {node_summary}")
+        lines.extend(
+            [
+                "",
+                "## Recent Actions",
+                recent_actions,
+                "",
+                "## Working Knowledge",
+                knowledge,
+            ]
+        )
+        last_error = prompt_context.get("last_error")
+        if last_error:
+            lines.extend(["", "## Last Error", str(last_error)])
+        hub_context = prompt_context.get("hub_context")
+        if hub_context:
+            lines.extend(["", "## Hub Context", self._format_knowledge(hub_context)])
+        return "\n".join(lines).strip()
+
+    def _summarize_node(self) -> str:
+        node = self.node
+        return f"{node.node_type.value} '{node.name}' in {node.file_path.name}"
+
+    def _format_recent_actions(self, actions: list[dict[str, Any]]) -> str:
+        if not actions:
+            return "None"
+        lines = []
+        for action in actions:
+            tool = action.get("tool", "unknown")
+            summary = action.get("summary", "")
+            outcome = action.get("outcome", "")
+            lines.append(f"- {tool}: {summary} ({outcome})")
+        return "\n".join(lines)
+
+    def _format_knowledge(self, knowledge: dict[str, Any]) -> str:
+        if not knowledge:
+            return "None"
+        try:
+            return json.dumps(knowledge, ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError):
+            return str(knowledge)
+
+    def _build_prompt_messages(self) -> list[ChatCompletionMessageParam]:
+        prompt_context = self.context_manager.get_prompt_context()
+        system_prompt = self._build_system_prompt(prompt_context)
+        return [
+            cast(ChatCompletionMessageParam, {"role": "system", "content": system_prompt}),
+            cast(ChatCompletionMessageParam, {"role": "user", "content": self._initial_message}),
+        ]
 
     async def run(self) -> AgentResult:
         """Execute the model loop until a result is produced."""
+        await self.context_manager.pull_hub_context()
         message = await self._call_model(phase="model_load", tool_choice=self._tool_choice_for_turn(1))
 
         while self.turn_count < self.definition.max_turns:
             self.turn_count += 1
+            self.context_manager.increment_turn()
             self.messages.append(self._coerce_message_param(message))
             tool_calls = message.tool_calls or []
             if not tool_calls:
@@ -164,6 +245,7 @@ class FunctionGemmaRunner:
                 tool_result_content = await self._dispatch_tool(tool_call)
                 tool_call_id = getattr(tool_call, "id", None) or _missing_identifier("tool-call")
                 tool_name = name or _missing_identifier("tool-name")
+                self._apply_tool_result_event(tool_name, tool_result_content)
                 self.messages.append(
                     cast(
                         ChatCompletionMessageParam,
@@ -175,6 +257,7 @@ class FunctionGemmaRunner:
                         },
                     )
                 )
+            await self.context_manager.pull_hub_context()
             next_turn = self.turn_count + 1
             message = await self._call_model(phase="loop", tool_choice=self._tool_choice_for_turn(next_turn))
 
@@ -194,6 +277,7 @@ class FunctionGemmaRunner:
     ) -> ChatCompletionMessage:
         request_id = None
         start = time.monotonic()
+        prompt_messages = self._build_prompt_messages()
         payload: dict[str, Any] = {
             "event": EventName.MODEL_REQUEST,
             "agent_id": self.workspace_id,
@@ -204,7 +288,7 @@ class FunctionGemmaRunner:
             "model": self._model_target,
         }
         if self._include_payloads():
-            payload.update(self._build_message_payload())
+            payload.update(self._build_message_payload(prompt_messages))
         self.event_emitter.emit(payload)
         if tool_choice is None:
             tool_choice = self.runner_config.tool_choice
@@ -233,19 +317,20 @@ class FunctionGemmaRunner:
             model=self._model_target,
             tool_choice=tool_choice,
             tools=tools_payload,
+            messages=prompt_messages,
         )
         logger.debug(
             "Calling model %s (phase=%s, turn=%d, messages=%d)",
             self._model_target,
             phase,
             self.turn_count,
-            len(self.messages),
+            len(prompt_messages),
         )
 
         async def _attempt() -> Any:
             return await self._http_client.chat.completions.create(
                 model=self._model_target,
-                messages=cast(list[ChatCompletionMessageParam], self.messages),
+                messages=cast(list[ChatCompletionMessageParam], prompt_messages),
                 tools=cast(list[ChatCompletionToolParam], tools_payload),
                 tool_choice=cast(Any, tool_choice),
                 max_tokens=self.runner_config.max_tokens,
@@ -338,6 +423,35 @@ class FunctionGemmaRunner:
         }
         return AgentResult.model_validate(result_data)
 
+    def _apply_tool_result_event(self, tool_name: str, result_content: Any) -> None:
+        data = self._parse_tool_result_content(result_content)
+        self.context_manager.apply_event(
+            {
+                "type": "tool_result",
+                "tool_name": tool_name,
+                "data": data,
+            }
+        )
+
+    def _parse_tool_result_content(self, result_content: Any) -> dict[str, Any]:
+        if isinstance(result_content, dict):
+            return result_content
+        if not result_content:
+            return {}
+        if not isinstance(result_content, str):
+            return {"raw_output": result_content}
+        lines = [line for line in result_content.splitlines() if line.strip()]
+        if not lines:
+            return {}
+        payload = lines[-1]
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            return {"raw_output": result_content}
+        if isinstance(data, dict):
+            return data
+        return {"raw_output": data}
+
     def _emit_tool_debug(self, event: str, tool_choice: Any, *, request_id: str | None = None) -> None:
         tools = self.definition.tool_schemas
         payload: dict[str, Any] = {
@@ -359,7 +473,14 @@ class FunctionGemmaRunner:
             payload["tools"] = self._truncate(tools_text)
         self.event_emitter.emit(payload)
 
-    def _emit_request_debug(self, *, model: str, tool_choice: Any, tools: list[dict[str, Any]]) -> None:
+    def _emit_request_debug(
+        self,
+        *,
+        model: str,
+        tool_choice: Any,
+        tools: list[dict[str, Any]],
+        messages: list[ChatCompletionMessageParam],
+    ) -> None:
         payload: dict[str, Any] = {
             "event": EventName.MODEL_REQUEST_DEBUG,
             "agent_id": self.workspace_id,
@@ -371,11 +492,11 @@ class FunctionGemmaRunner:
             "tools_count": len(tools),
         }
         if self._include_payloads():
-            messages_text = self._serialize_payload(self.messages)
+            messages_text = self._serialize_payload(messages)
             tools_text = self._serialize_payload(tools)
             request_payload = {
                 "model": model,
-                "messages": self.messages,
+                "messages": messages,
                 "tools": tools,
                 "tool_choice": tool_choice,
                 "max_tokens": self.runner_config.max_tokens,
@@ -417,10 +538,10 @@ class FunctionGemmaRunner:
                 return str(value)
         return str(value)
 
-    def _build_message_payload(self) -> dict[str, Any]:
+    def _build_message_payload(self, prompt_messages: list[ChatCompletionMessageParam]) -> dict[str, Any]:
         messages: list[dict[str, Any]] = []
         total_chars = 0
-        for message in self.messages:
+        for message in prompt_messages:
             role = str(message.get("role", "unknown"))
             raw_content = message.get("content")
             content = self._serialize_payload(raw_content if raw_content is not None else "")
@@ -466,7 +587,9 @@ class FunctionGemmaRunner:
         self.event_emitter.emit(payload)
 
     def _emit_tool_result(self, tool_name: str, result: Any) -> None:
-        status = EventStatus.ERROR if isinstance(result, dict) and result.get("error") else EventStatus.OK
+        status = EventStatus.OK
+        if isinstance(result, dict) and (result.get("outcome") == "error" or result.get("error")):
+            status = EventStatus.ERROR
         payload: dict[str, Any] = {
             "event": EventName.TOOL_RESULT,
             "agent_id": self.workspace_id,

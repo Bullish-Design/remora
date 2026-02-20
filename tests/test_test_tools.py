@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from tests.utils.grail_runtime import assert_artifacts, build_file_externals, run_script
+from tests.utils.tool_contract import assert_valid_tool_result
 
 pytestmark = pytest.mark.grail_runtime
 
@@ -45,11 +46,13 @@ def test_analyze_signature_with_types(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "analyze_signature")
-    assert result["function_name"] == "add"
-    assert result["return_type"] == "int"
-    assert result["parameters"][0] == {"name": "a", "type": "int", "default": None}
-    assert result["parameters"][1] == {"name": "b", "type": "int", "default": 1}
-    assert result["is_async"] is False
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["function_name"] == "add"
+    assert payload["return_type"] == "int"
+    assert payload["parameters"][0] == {"name": "a", "type": "int", "default": None}
+    assert payload["parameters"][1] == {"name": "b", "type": "int", "default": 1}
+    assert payload["is_async"] is False
 
 
 def test_analyze_signature_without_types(tmp_path: Path) -> None:
@@ -68,9 +71,11 @@ def test_analyze_signature_without_types(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "analyze_signature")
-    assert result["function_name"] == "greet"
-    assert result["parameters"][0] == {"name": "name", "type": None, "default": "World"}
-    assert result["return_type"] is None
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["function_name"] == "greet"
+    assert payload["parameters"][0] == {"name": "name", "type": None, "default": "World"}
+    assert payload["return_type"] is None
 
 
 def test_read_existing_tests_returns_empty(tmp_path: Path) -> None:
@@ -87,8 +92,10 @@ def test_read_existing_tests_returns_empty(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "read_existing_tests")
-    assert result["content"] == ""
-    assert result["path"] is None
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["content"] == ""
+    assert payload["path"] is None
 
 
 def test_write_test_file_creates_file(tmp_path: Path) -> None:
@@ -108,7 +115,9 @@ def test_write_test_file_creates_file(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "write_test_file")
-    assert result["success"] is True
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["success"] is True
     assert (tmp_path / "tests" / "test_sample.py").exists()
 
 
@@ -158,9 +167,11 @@ def test_run_tests_passing(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "run_tests")
-    assert result["failed"] == 0
-    assert result["errors"] == 0
-    assert result["passed"] >= 1
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["failed"] == 0
+    assert payload["errors"] == 0
+    assert payload["passed"] >= 1
 
 
 def test_run_tests_failing(tmp_path: Path) -> None:
@@ -200,8 +211,10 @@ def test_run_tests_failing(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "run_tests")
-    assert result["failed"] >= 1
-    assert result["failures"]
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["failed"] >= 1
+    assert payload["failures"]
 
 
 def test_submit_builds_agent_result(tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tests.utils.grail_runtime import assert_artifacts, build_file_externals, run_script
+from tests.utils.tool_contract import assert_valid_tool_result
 
 pytestmark = pytest.mark.grail_runtime
 
@@ -34,10 +35,12 @@ def test_sample_data_analyze_signature(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "analyze_signature")
-    assert result["function_name"] == "total"
-    assert result["return_type"] == "float"
-    assert result["parameters"][0] == {"name": "price", "type": "float", "default": None}
-    assert result["parameters"][1] == {"name": "quantity", "type": "int", "default": 1}
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["function_name"] == "total"
+    assert payload["return_type"] == "float"
+    assert payload["parameters"][0] == {"name": "price", "type": "float", "default": None}
+    assert payload["parameters"][1] == {"name": "quantity", "type": "int", "default": 1}
 
 
 def test_write_fixture_file_creates_json(tmp_path: Path) -> None:
@@ -60,8 +63,10 @@ def test_write_fixture_file_creates_json(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "write_fixture_file")
-    assert result["success"] is True
-    assert result["path"] == "fixtures/total_fixtures.json"
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["success"] is True
+    assert payload["path"] == "fixtures/total_fixtures.json"
     content = (tmp_path / "fixtures" / "total_fixtures.json").read_text(encoding="utf-8")
     assert json.loads(content)[0]["price"] == 9.99
 
@@ -79,7 +84,9 @@ def test_write_fixture_file_rejects_empty(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "write_fixture_file")
-    assert result["success"] is False
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["success"] is False
     assert not (tmp_path / "fixtures").exists()
 
 

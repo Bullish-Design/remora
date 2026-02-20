@@ -86,12 +86,34 @@ try:
     lines = source.splitlines()
     definition = _find_definition(lines)
     if not definition:
-        result = {"error": "No docstring-capable node found in node text."}
+        error_message = "No docstring-capable node found in node text."
+        result = {
+            "result": None,
+            "summary": f"Error: {error_message}",
+            "knowledge_delta": {},
+            "outcome": "error",
+            "error": error_message,
+        }
     else:
         index, indent = definition
         docstring = _extract_docstring(lines, index, indent)
-        result = {"docstring": docstring, "has_docstring": bool(docstring)}
+        has_docstring = bool(docstring)
+        raw_result = {"docstring": docstring, "has_docstring": has_docstring}
+        summary = "Found existing docstring" if has_docstring else "No docstring found"
+        outcome = "success" if has_docstring else "partial"
+        result = {
+            "result": raw_result,
+            "summary": summary,
+            "knowledge_delta": {"docstring_present": has_docstring},
+            "outcome": outcome,
+        }
 except Exception as exc:
-    result = {"error": str(exc)}
+    result = {
+        "result": None,
+        "summary": f"Error: {exc}",
+        "knowledge_delta": {},
+        "outcome": "error",
+        "error": str(exc),
+    }
 
 result

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tests.utils.grail_runtime import assert_artifacts, build_file_externals, run_script
+from tests.utils.tool_contract import assert_valid_tool_result
 
 pytestmark = pytest.mark.grail_runtime
 
@@ -54,10 +55,12 @@ def test_run_linter_parses_issues(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "run_linter")
-    assert result["total"] == 1
-    assert result["fixable_count"] == 1
-    assert result["issues"][0]["code"] == "E225"
-    assert result["issues"][0]["fixable"] is True
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["total"] == 1
+    assert payload["fixable_count"] == 1
+    assert payload["issues"][0]["code"] == "E225"
+    assert payload["issues"][0]["fixable"] is True
 
 
 def test_apply_fix_updates_file(tmp_path: Path) -> None:
@@ -84,8 +87,10 @@ def test_apply_fix_updates_file(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "apply_fix")
-    assert result["success"] is True
-    assert "Applied fix" in result["message"]
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["success"] is True
+    assert "Applied fix" in payload["message"]
     assert "1 + 2" in target.read_text(encoding="utf-8")
 
 
@@ -103,8 +108,10 @@ def test_read_file_returns_content_and_lines(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "read_file")
-    assert result["content"] == target.read_text(encoding="utf-8")
-    assert result["lines"] == 2
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["content"] == target.read_text(encoding="utf-8")
+    assert payload["lines"] == 2
 
 
 def test_ruff_config_returns_empty_when_missing(tmp_path: Path) -> None:
@@ -202,7 +209,9 @@ def test_lint_flow_updates_file(tmp_path: Path) -> None:
     assert_artifacts(grail_dir, "run_linter")
     assert_artifacts(grail_dir, "apply_fix")
     assert_artifacts(grail_dir, "submit")
-    assert lint_result["fixable_count"] == 1
-    assert fix_result["success"] is True
+    assert_valid_tool_result(lint_result)
+    assert_valid_tool_result(fix_result)
+    assert lint_result["result"]["fixable_count"] == 1
+    assert fix_result["result"]["success"] is True
     assert submit_result["status"] == "success"
     assert "1 + 2" in target.read_text(encoding="utf-8")

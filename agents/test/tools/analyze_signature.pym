@@ -121,10 +121,36 @@ try:
     source = await _load_node_text()
     signature_line, is_async = _find_signature_line(source)
     if not signature_line:
-        result = {"error": "No function definition found in node text."}
+        error_message = "No function definition found in node text."
+        result = {
+            "result": None,
+            "summary": f"Error: {error_message}",
+            "knowledge_delta": {},
+            "outcome": "error",
+            "error": error_message,
+        }
     else:
-        result = _parse_signature(signature_line, is_async)
+        raw_result = _parse_signature(signature_line, is_async)
+        param_count = len(raw_result.get("parameters", []))
+        summary = f"Parsed signature for {raw_result.get('function_name', 'function')}"
+        result = {
+            "result": raw_result,
+            "summary": summary,
+            "knowledge_delta": {
+                "function_name": raw_result.get("function_name"),
+                "parameter_count": param_count,
+                "return_type": raw_result.get("return_type"),
+                "is_async": raw_result.get("is_async"),
+            },
+            "outcome": "success",
+        }
 except Exception as exc:
-    result = {"error": str(exc)}
+    result = {
+        "result": None,
+        "summary": f"Error: {exc}",
+        "knowledge_delta": {},
+        "outcome": "error",
+        "error": str(exc),
+    }
 
 result

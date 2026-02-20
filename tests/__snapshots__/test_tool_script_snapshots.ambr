@@ -1,24 +1,39 @@
-# serializer version: 1
 # name: TestLintToolSnapshots.test_run_linter_clean_file_output
   dict({
-    'fixable_count': 0,
-    'issues': list([
-    ]),
-    'total': 0,
+    'result': dict({
+      'issues': list([
+      ]),
+      'total': 0,
+      'fixable_count': 0,
+    }),
+    'summary': 'No lint errors found',
+    'knowledge_delta': dict({
+      'lint_errors_remaining': 0,
+      'lint_errors_fixable': 0,
+    }),
+    'outcome': 'success',
   })
 # ---
 # name: TestLintToolSnapshots.test_run_linter_issues_found_output
   dict({
-    'fixable_count': 1,
-    'issues': list([
-      dict({
-        'code': 'E225',
-        'col': 10,
-        'fixable': True,
-        'line': 110,
-        'message': 'missing whitespace around operator',
-      }),
-    ]),
-    'total': 1,
+    'result': dict({
+      'issues': list([
+        dict({
+          'code': 'E225',
+          'col': 10,
+          'fixable': True,
+          'line': 110,
+          'message': 'missing whitespace around operator',
+        }),
+      ]),
+      'total': 1,
+      'fixable_count': 1,
+    }),
+    'summary': 'Found 1 lint errors, 1 fixable',
+    'knowledge_delta': dict({
+      'lint_errors_remaining': 1,
+      'lint_errors_fixable': 1,
+    }),
+    'outcome': 'partial',
   })
 # ---

@@ -16,7 +16,8 @@ async def _resolve_target_file() -> str | None:
     return None
 try:
     if not issue_code or line_number <= 0:
-        result = {'success': False, 'message': 'issue_code and line_number are required.'}
+        error_message = 'issue_code and line_number are required.'
+        result = {'result': {'success': False, 'message': error_message}, 'summary': f'Error: {error_message}', 'knowledge_delta': {}, 'outcome': 'error', 'error': error_message}
     else:
         target_file = await _resolve_target_file()
         if not target_file:
@@ -27,13 +28,21 @@ try:
         exit_code = int(completed.get('exit_code', 0) or 0)
         stderr = str(completed.get('stderr', ''))
         if exit_code not in {0, 1}:
-            result = {'success': False, 'message': stderr.strip() or f'ruff exit code {exit_code}'}
+            error_message = stderr.strip() or f'ruff exit code {exit_code}'
+            result = {'result': {'success': False, 'message': error_message}, 'summary': f'Error: {error_message}', 'knowledge_delta': {}, 'outcome': 'error', 'error': error_message}
         else:
             after = await read_file(path=target_file)
             if before == after:
-                result = {'success': False, 'message': 'No fixable issue at that location'}
+                success = False
+                message = 'No fixable issue at that location'
+                summary = f'No fixable issue for {issue_code} at line {line_number}'
+                outcome = 'partial'
             else:
-                result = {'success': True, 'message': f'Applied fix for {issue_code} at line {line_number}'}
+                success = True
+                message = f'Applied fix for {issue_code} at line {line_number}'
+                summary = message
+                outcome = 'success'
+            result = {'result': {'success': success, 'message': message}, 'summary': summary, 'knowledge_delta': {'fix_applied': success, 'last_fix_issue_code': issue_code, 'last_fix_line': line_number}, 'outcome': outcome}
 except Exception as exc:
-    result = {'success': False, 'message': str(exc)}
+    result = {'result': {'success': False, 'message': str(exc)}, 'summary': f'Error: {exc}', 'knowledge_delta': {}, 'outcome': 'error', 'error': str(exc)}
 result

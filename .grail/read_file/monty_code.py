@@ -22,7 +22,9 @@ try:
     if not target_file:
         raise ValueError('Target file not found for linting.')
     content = await read_file(path=target_file)
-    result = {'content': content, 'lines': _line_count(content)}
+    line_count = _line_count(content)
+    raw_result = {'content': content, 'lines': line_count}
+    result = {'result': raw_result, 'summary': f'Read {line_count} lines from {target_file}', 'knowledge_delta': {'last_read_file': target_file, 'last_read_lines': line_count}, 'outcome': 'success'}
 except Exception as exc:
-    result = {'error': str(exc)}
+    result = {'result': None, 'summary': f'Error: {exc}', 'knowledge_delta': {}, 'outcome': 'error', 'error': str(exc)}
 result

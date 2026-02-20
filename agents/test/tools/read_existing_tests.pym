@@ -44,11 +44,35 @@ try:
         raise ValueError("Target file not found for tests.")
     test_path = _default_test_path(target_file)
     if not await file_exists(path=test_path):
-        result = {"content": "", "path": None}
+        raw_result = {"content": "", "path": None}
+        result = {
+            "result": raw_result,
+            "summary": "No existing tests found",
+            "knowledge_delta": {
+                "existing_tests_present": False,
+                "existing_tests_path": None,
+            },
+            "outcome": "partial",
+        }
     else:
         content = await read_file(path=test_path)
-        result = {"content": content, "path": test_path}
+        raw_result = {"content": content, "path": test_path}
+        result = {
+            "result": raw_result,
+            "summary": f"Loaded existing tests from {test_path}",
+            "knowledge_delta": {
+                "existing_tests_present": True,
+                "existing_tests_path": test_path,
+            },
+            "outcome": "success",
+        }
 except Exception as exc:
-    result = {"error": str(exc)}
+    result = {
+        "result": None,
+        "summary": f"Error: {exc}",
+        "knowledge_delta": {},
+        "outcome": "error",
+        "error": str(exc),
+    }
 
 result

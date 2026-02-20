@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from tests.utils.grail_runtime import assert_artifacts, build_file_externals, run_script
+from tests.utils.tool_contract import assert_valid_tool_result
 
 pytestmark = pytest.mark.grail_runtime
 
@@ -39,8 +40,10 @@ def test_read_current_docstring_returns_text(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "read_current_docstring")
-    assert result["docstring"] == "Adds numbers."
-    assert result["has_docstring"] is True
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["docstring"] == "Adds numbers."
+    assert payload["has_docstring"] is True
 
 
 def test_read_current_docstring_returns_none(tmp_path: Path) -> None:
@@ -56,8 +59,10 @@ def test_read_current_docstring_returns_none(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "read_current_docstring")
-    assert result["docstring"] is None
-    assert result["has_docstring"] is False
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["docstring"] is None
+    assert payload["has_docstring"] is False
 
 
 def test_read_type_hints_with_annotations(tmp_path: Path) -> None:
@@ -76,12 +81,14 @@ def test_read_type_hints_with_annotations(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "read_type_hints")
-    assert result["parameters"] == [
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["parameters"] == [
         {"name": "price", "annotation": "float"},
         {"name": "quantity", "annotation": "int"},
     ]
-    assert result["return_annotation"] == "float"
-    assert result["has_annotations"] is True
+    assert payload["return_annotation"] == "float"
+    assert payload["has_annotations"] is True
 
 
 def test_read_type_hints_without_annotations(tmp_path: Path) -> None:
@@ -97,9 +104,11 @@ def test_read_type_hints_without_annotations(tmp_path: Path) -> None:
     )
 
     assert_artifacts(grail_dir, "read_type_hints")
-    assert result["parameters"] == []
-    assert result["return_annotation"] is None
-    assert result["has_annotations"] is False
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["parameters"] == []
+    assert payload["return_annotation"] is None
+    assert payload["has_annotations"] is False
 
 
 def test_write_docstring_inserts_after_definition(tmp_path: Path) -> None:
@@ -122,7 +131,9 @@ def test_write_docstring_inserts_after_definition(tmp_path: Path) -> None:
 
     updated = (tmp_path / "sample.py").read_text(encoding="utf-8")
     assert_artifacts(grail_dir, "write_docstring")
-    assert result["success"] is True
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["success"] is True
     assert '"""Adds numbers."""' in updated.splitlines()[1]
 
 
@@ -149,8 +160,10 @@ def test_write_docstring_replaces_existing(tmp_path: Path) -> None:
 
     updated = (tmp_path / "sample.py").read_text(encoding="utf-8")
     assert_artifacts(grail_dir, "write_docstring")
-    assert result["success"] is True
-    assert result["replaced_existing"] is True
+    assert_valid_tool_result(result)
+    payload = result["result"]
+    assert payload["success"] is True
+    assert payload["replaced_existing"] is True
     assert "Old docstring." not in updated
     assert "New docstring." in updated
     assert updated.count('"""') == 2

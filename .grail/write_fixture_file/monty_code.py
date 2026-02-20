@@ -91,7 +91,8 @@ try:
     function_name = _find_function_name(node_text) if node_text else 'fixture'
     target_path = f'fixtures/{function_name}_fixtures.{extension}'
     await write_file(path=target_path, content=content)
-    result = {'success': True, 'path': target_path}
+    raw_result = {'success': True, 'path': target_path, 'format': extension}
+    result = {'result': raw_result, 'summary': f'Wrote fixture file {target_path}', 'knowledge_delta': {'fixture_path': target_path, 'fixture_format': extension, 'fixtures_count': len(fixtures)}, 'outcome': 'success'}
 except Exception as exc:
-    result = {'success': False, 'error': str(exc)}
+    result = {'result': {'success': False, 'error': str(exc)}, 'summary': f'Error: {exc}', 'knowledge_delta': {}, 'outcome': 'error', 'error': str(exc)}
 result
