@@ -1,5 +1,10 @@
 """Tests for Two-Track Memory models."""
 
+from remora.context.contracts import (
+    make_error_result,
+    make_partial_result,
+    make_success_result,
+)
 from remora.context.models import DecisionPacket
 
 
@@ -71,3 +76,35 @@ class TestDecisionPacket:
         packet.clear_error()
         assert packet.last_error is None
         assert packet.error_count == 2
+
+
+class TestToolResult:
+    def test_success_result_helper(self):
+        """make_success_result creates valid structure."""
+        result = make_success_result(
+            result={"errors": []},
+            summary="No errors found",
+            knowledge_delta={"lint_clean": True},
+        )
+
+        assert result["summary"] == "No errors found"
+        assert result["outcome"] == "success"
+        assert result["knowledge_delta"]["lint_clean"] is True
+
+    def test_error_result_helper(self):
+        """make_error_result creates valid structure."""
+        result = make_error_result("File not found")
+
+        assert result["outcome"] == "error"
+        assert result["error"] == "File not found"
+        assert "Error:" in result["summary"]
+
+    def test_partial_result_helper(self):
+        """make_partial_result creates valid structure."""
+        result = make_partial_result(
+            result={"fixed": 2, "remaining": 1},
+            summary="Fixed 2 of 3 errors",
+        )
+
+        assert result["outcome"] == "partial"
+        assert result["summary"] == "Fixed 2 of 3 errors"
