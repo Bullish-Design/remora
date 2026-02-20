@@ -209,9 +209,11 @@ def _build_parameters(
         if required_flag:
             required.append(input_spec.name)
 
+    # NOTE: Do NOT include additionalProperties: false here.
+    # vLLM has a bug where multiple tools with additionalProperties: false
+    # causes a "Invalid JSON: EOF while parsing a list" validation error.
     parameters: dict[str, Any] = {
         "type": "object",
-        "additionalProperties": False,
         "properties": properties,
     }
     if required:
