@@ -6,7 +6,7 @@
   "info": {
     "externals_count": 3,
     "inputs_count": 2,
-    "lines_of_code": 166,
+    "lines_of_code": 198,
     "monty_features_used": [
       "async_await",
       "f_string",
