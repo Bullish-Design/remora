@@ -14,7 +14,7 @@ The system uses a multi-model approach where specialized models handle distinct 
 A Language Pack consists of five synchronized components:
 
 ### A. The Orchestrator: FunctionGemma
-*   **Model**: FunctionGemma (270M/7B)
+*   **Model**: FunctionGemma (270M) - *Ultra-Low Latency*
 *   **Role**: Decision Engine & Tool Caller.
 *   **Responsibility**:
     *   Parses user intent from natural language or code context.
@@ -24,22 +24,26 @@ A Language Pack consists of five synchronized components:
     *   Delegates complex generation tasks to the LoRA-equipped CodeGemma model.
 
 ### B. The Semantic Layer: EmbeddingGemma
-*   **Model**: Fine-tuned EmbeddingGemma
+*   **Model**: Fine-tuned EmbeddingGemma (270M)
+*   **Feature**: **Matrioshka Representation Learning (MRL)**
 *   **Training Data**: Library documentation, source code, and "Gold Standard" usage examples.
 *   **Responsibility**:
-    *   **Semantic Search (RAG)**: Retrieves relevant docs and code snippets based on user query or code context.
-    *   **Contextual Type Inference**: Matches variable usage patterns (e.g., `s.commit()`) to vector clusters of known types (e.g., `sqlalchemy.Session`), enabling type suggestion even in dynamic contexts.
+    *   **Adaptive Retrieval**: Thanks to MRL, the model produces "nesting doll" vectors.
+        *   *Fast Pass*: Use the first 64 dimensions for ultra-low-memory pre-filtering of millions of chunks.
+        *   *Precise Pass*: Use the full 768 dimensions to re-rank the top 100 candidates.
+    *   **Value**: Allows the vector index to fit entirely in CPU L3 cache or edge-device RAM while maintaining high precision for the final selection.
+    *   **Contextual Type Inference**: Matches variable usage patterns to vector clusters.
 
 ### C. The Generative Layer: CodeGemma LoRA
-*   **Model**: CodeGemma (2B/7B) with Low-Rank Adapters (LoRA)
+*   **Model**: CodeGemma (2B) with Low-Rank Adapters (LoRA)
 *   **Training Data**: Library source code and high-quality dependent repositories.
 *   **Responsibility**:
     *   **Context-Aware Completion**: Generates method bodies and complex logic.
     *   **Idiomatic Usage**: The LoRA ensures generation adheres to specific library versions/patterns.
-    *   **Dynamic Serving (vLLM)**: Leverages vLLM's continuous batching to serve hundreds of different fine-tuned adapters from a single base model. Adapters are hot-swapped per-request with negligible latency.
+    *   **Dynamic Serving (vLLM)**: Leverages vLLM's continuous batching to serve hundreds of different fine-tuned adapters from a single base model.
 
 ### D. The Transformational Layer: T5Gemma 2
-*   **Model**: T5Gemma 2 (270M/1B) - Encoder-Decoder
+*   **Model**: T5Gemma 2 (270M or 1B) - Encoder-Decoder
 *   **Capabilities**: 128k context window, Multimodal (SigLIP encoder).
 *   **Responsibility**:
     *   **Deterministic Transformation**: Code refactoring, style enforcement, and docstring generation.
