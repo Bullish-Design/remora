@@ -247,7 +247,14 @@ def _schema_for_single_type(type_name: str) -> tuple[dict[str, Any], str | None]
     if normalized in {"str", "string"}:
         return {"type": "string"}, "string"
     if normalized.startswith("list") or normalized.startswith("set") or normalized.startswith("tuple"):
-        return {"type": "array", "items": {}}, "array"
+        inner_type = None
+        if "[" in normalized and normalized.endswith("]"):
+            inner_type = normalized[normalized.find("[") + 1 : -1].strip()
+        if inner_type:
+            item_schema, _ = _schema_for_single_type(inner_type)
+        else:
+            item_schema = {}
+        return {"type": "array", "items": item_schema}, "array"
     if normalized.startswith("dict") or normalized.startswith("mapping"):
         return {"type": "object"}, "object"
     if normalized == "Any":
