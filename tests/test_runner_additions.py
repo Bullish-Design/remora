@@ -10,7 +10,7 @@ from remora.config import RunnerConfig
 from remora.orchestrator import RemoraAgentContext
 from remora.runner import FunctionGemmaRunner
 
-from tests.helpers import (
+from remora.testing import (
     FakeAsyncOpenAI,
     FakeChatCompletions,
     make_definition,
@@ -25,7 +25,7 @@ from tests.helpers import (
 def test_tool_choice_is_always_configured_value_even_on_last_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     # Setup response (doesn't matter much for this test, but need something)
     patch_openai(monkeypatch, responses=[tool_call_message("submit_result", {})])
-    
+
     definition = make_definition(max_turns=2)
     node = make_node()
     runner = FunctionGemmaRunner(
@@ -35,7 +35,7 @@ def test_tool_choice_is_always_configured_value_even_on_last_turn(monkeypatch: p
         server_config=make_server_config(),
         runner_config=RunnerConfig(tool_choice="auto"),
     )
-    
+
     # Check turn 1
     assert runner._tool_choice_for_turn(1) == "auto"
     # Check turn 100 (way past max_turns)
@@ -69,8 +69,8 @@ def test_runner_retries_on_connection_error(monkeypatch: pytest.MonkeyPatch) -> 
         )
         client.chat.completions = FlakyChatCompletions(
             responses=[tool_call_message("submit_result", {})],
-            fail_times=2, # Fail twice, succeed third time
-            error=APIConnectionError(message="connection refused", request=cast(Any, None))
+            fail_times=2,  # Fail twice, succeed third time
+            error=APIConnectionError(message="connection refused", request=cast(Any, None)),
         )
         return client
 
@@ -86,7 +86,9 @@ def test_runner_retries_on_connection_error(monkeypatch: pytest.MonkeyPatch) -> 
     )
 
     # fast forward retry usage of asyncio.sleep so test is fast
-    async def _fake_sleep(_: float) -> None: pass
+    async def _fake_sleep(_: float) -> None:
+        pass
+
     monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
 
     result = asyncio.run(runner.run())

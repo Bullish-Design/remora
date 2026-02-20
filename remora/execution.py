@@ -33,9 +33,12 @@ def _run_in_child(
     async def _execute_async() -> dict[str, Any]:
         # Check if file exists (skipped if mocked)
         if not Path(pym_path).exists():
-            return {"error": True, "code": "INTERNAL", "message": f".pym file not found: {pym_path}"}
+            return {"error": True, "code": "FILE_NOT_FOUND", "message": f".pym file not found: {pym_path}"}
 
-        script = grail.load(pym_path, grail_dir=grail_dir)
+        try:
+            script = grail.load(pym_path, grail_dir=grail_dir)
+        except Exception as exc:
+            return {"error": True, "code": "LOAD_ERROR", "message": f"{type(exc).__name__}: {exc}"}
         check = script.check()
         if not check.valid:
             errors = [str(e) for e in (check.errors or [])]

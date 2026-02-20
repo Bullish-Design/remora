@@ -12,7 +12,7 @@ from remora.errors import AGENT_002, AGENT_003, AGENT_004
 from remora.runner import AgentError, FunctionGemmaRunner
 from remora.subagent import ToolDefinition
 
-from tests.helpers import (
+from remora.testing import (
     FakeAsyncOpenAI,
     FakeChatCompletions,
     FakeCompletionMessage,
@@ -253,4 +253,3 @@ def test_context_providers_injected_before_tool_dispatch(monkeypatch: pytest.Mon
         and cast(dict[str, Any], message).get("name") == "inspect"
     ]
     assert tool_messages[0]["content"] == '{"ctx": "one"}\n{"ctx": "two"}\n{"ok": true}'
-
