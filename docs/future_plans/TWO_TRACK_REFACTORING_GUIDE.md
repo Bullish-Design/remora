@@ -29,7 +29,7 @@ This guide provides step-by-step instructions for implementing the Two-Track Mem
 ### Required Knowledge
 
 - Python 3.11+ (async/await, type hints)
-- Pydantic v2 (BaseModel, Field, validation)
+- Pydantic v2.10+ (BaseModel, Field, validation)
 - Basic understanding of event sourcing patterns
 
 ### Codebase Orientation
