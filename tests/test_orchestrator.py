@@ -59,9 +59,9 @@ def _mock_cairn_components(monkeypatch: pytest.MonkeyPatch, max_concurrent: int 
     monkeypatch.setattr("remora.orchestrator.WorkspaceManager", lambda: mock_workspace_manager)
 
     mock_workspace_cache = MagicMock()
-    mock_workspace_cache.get = MagicMock(return_value=None)
-    mock_workspace_cache.put = MagicMock()
-    mock_workspace_cache.remove = MagicMock(return_value=None)
+    mock_workspace_cache.get = AsyncMock(return_value=None)
+    mock_workspace_cache.put = AsyncMock()
+    mock_workspace_cache.remove = AsyncMock()
     mock_workspace_cache.clear = AsyncMock()
     monkeypatch.setattr("remora.orchestrator.WorkspaceCache", lambda **kwargs: mock_workspace_cache)
 

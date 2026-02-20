@@ -13,6 +13,7 @@ import urllib.request
 import pytest
 
 from remora.config import ServerConfig
+from remora.testing.mock_vllm_server import MockVLLMServer
 
 SERVER_URL = os.environ.get("REMORA_SERVER_URL", "http://remora-server:8000/v1")
 SERVER = ServerConfig(base_url=SERVER_URL)
@@ -56,17 +57,17 @@ class LocalGrailExecutor:
         env["REMORA_WORKSPACE_DIR"] = str(workspace_dir)
         env["REMORA_WORKSPACE_ID"] = agent_id or "default"
         env["REMORA_TARGET_FILE"] = str(self.target_relpath)
-        
+
         if node_source:
-             env["REMORA_NODE_TEXT"] = node_source
-             remora_dir = workspace_dir / ".remora"
-             remora_dir.mkdir(parents=True, exist_ok=True)
-             (remora_dir / "node_text").write_text(node_source, encoding="utf-8")
-        
+            env["REMORA_NODE_TEXT"] = node_source
+            remora_dir = workspace_dir / ".remora"
+            remora_dir.mkdir(parents=True, exist_ok=True)
+            (remora_dir / "node_text").write_text(node_source, encoding="utf-8")
+
         env["REMORA_INPUT"] = json.dumps(inputs)
-        
+
         cmd = [sys.executable, str(pym_path)]
-        
+
         completed = subprocess.run(
             cmd,
             cwd=str(workspace_dir),
@@ -75,17 +76,17 @@ class LocalGrailExecutor:
             env=env,
             check=False,
         )
-        
+
         if completed.returncode != 0:
             return {"error": completed.stderr.strip() or f"tool exit code {completed.returncode}"}
-        
+
         output = completed.stdout.strip()
         if not output:
-             return {}
+            return {}
         try:
-             return json.loads(output)
+            return json.loads(output)
         except json.JSONDecodeError:
-             return {"error": "Invalid JSON output", "output": output}
+            return {"error": "Invalid JSON output", "output": output}
 
     def setup_workspace(self, workspace_dir: Path, node_text: str | None = None) -> None:
         """Helper to populate a workspace from the stable directory."""
@@ -93,13 +94,13 @@ class LocalGrailExecutor:
             shutil.rmtree(workspace_dir)
         stable_dir = self.base_dir / "stable"
         shutil.copytree(stable_dir, workspace_dir)
-        
+
         remora_dir = workspace_dir / ".remora"
         remora_dir.mkdir(parents=True, exist_ok=True)
         (remora_dir / "target_file").write_text(str(self.target_relpath), encoding="utf-8")
         if node_text:
             (remora_dir / "node_text").write_text(node_text, encoding="utf-8")
-        
+
     def get_workspace_dir(self, workspace_id: str) -> Path:
         """Stub for compatibility if needed, but tests should manage dirs."""
         return self.base_dir / workspace_id
@@ -142,8 +143,33 @@ def skip_integration_if_unavailable(vllm_available: bool, request: pytest.Fixtur
 
 
 @pytest.fixture
+async def mock_vllm_server():
+    """Fixture that provides a running mock vLLM server."""
+    server = MockVLLMServer()
+    url = await server.start()
+
+    yield server, url
+
+    await server.stop()
+
+
+@pytest.fixture
+def mock_server_config(mock_vllm_server):
+    """Fixture that provides a ServerConfig pointing to the mock server."""
+    server, url = mock_vllm_server
+
+    return ServerConfig(
+        base_url=url,
+        api_key="mock-key",
+        timeout=30,
+        default_adapter=server.default_model,
+    )
+
+
+@pytest.fixture
 def llm_logger(tmp_path: Path):
     from remora.llm_logger import LlmConversationLogger
+
     logger = LlmConversationLogger(output=tmp_path / "llm_conversations.log")
     logger.open()
     yield logger
