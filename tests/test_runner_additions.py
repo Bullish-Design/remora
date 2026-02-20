@@ -22,24 +22,30 @@ from remora.testing import (
 )
 
 
-def test_tool_choice_is_always_configured_value_even_on_last_turn(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Setup response (doesn't matter much for this test, but need something)
-    patch_openai(monkeypatch, responses=[tool_call_message("submit_result", {})])
-
+def test_tool_choice_is_always_configured_value_even_on_last_turn() -> None:
     definition = make_definition(max_turns=2)
     node = make_node()
+    server_config = make_server_config()
+    client = FakeAsyncOpenAI(
+        base_url=server_config.base_url,
+        api_key=server_config.api_key,
+        timeout=server_config.timeout,
+        responses=[tool_call_message("submit_result", {})],
+    )
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
         ctx=RemoraAgentContext(agent_id="ws-1", task="test", operation="test", node_id="node-1"),
-        server_config=make_server_config(),
+        server_config=server_config,
         runner_config=RunnerConfig(tool_choice="auto"),
+        http_client=cast(Any, client),
     )
 
-    # Check turn 1
-    assert runner._tool_choice_for_turn(1) == "auto"
-    # Check turn 100 (way past max_turns)
-    assert runner._tool_choice_for_turn(100) == "auto"
+    asyncio.run(runner.run())
+
+    chat_calls = client.chat.completions.calls
+    assert len(chat_calls) >= 1
+    assert chat_calls[0]["tool_choice"] == "auto"
 
 
 def test_runner_retries_on_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:

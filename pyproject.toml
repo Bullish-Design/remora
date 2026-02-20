@@ -45,6 +45,9 @@ dev = [
   "pytest-asyncio>=0.23",
   "mypy>=1.10",
   "ruff>=0.5.0",
+  "hypothesis>=6.0.0",
+  "pytest-snapshot",
+  "syrupy",
 ]
 
 #[project.urls]

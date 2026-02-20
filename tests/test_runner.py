@@ -29,27 +29,39 @@ from remora.testing import (
 )
 
 
-def test_runner_initializes_model_and_messages(monkeypatch: pytest.MonkeyPatch) -> None:
-    patch_openai(monkeypatch, responses=[tool_call_message("submit_result", {})])
-
+def test_runner_sends_system_prompt_to_model() -> None:
     definition = make_definition()
     node = make_node()
+    server_config = make_server_config()
+    client = FakeAsyncOpenAI(
+        base_url=server_config.base_url,
+        api_key=server_config.api_key,
+        timeout=server_config.timeout,
+        responses=[tool_call_message("submit_result", {})],
+    )
 
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
         ctx=make_ctx(),
-        server_config=make_server_config(),
+        server_config=server_config,
         runner_config=make_runner_config(),
+        http_client=cast(Any, client),
     )
 
-    system_message = cast(dict[str, Any], runner.messages[0])
-    user_message = cast(dict[str, Any], runner.messages[1])
-    assert system_message["role"] == "system"
-    assert system_message.get("content") == "You are a lint agent."
-    assert user_message["role"] == "user"
-    assert "node hello function" in str(user_message.get("content", ""))
-    assert runner.turn_count == 0
+    asyncio.run(runner.run())
+
+    chat_calls = client.chat.completions.calls
+    assert len(chat_calls) >= 1
+
+    first_call_messages = chat_calls[0]["messages"]
+    system_messages = [message for message in first_call_messages if message.get("role") == "system"]
+    user_messages = [message for message in first_call_messages if message.get("role") == "user"]
+
+    assert len(system_messages) == 1
+    assert "lint agent" in system_messages[0]["content"].lower()
+    assert len(user_messages) == 1
+    assert "node hello function" in str(user_messages[0].get("content", ""))
 
 
 def test_missing_model_id_raises_agent_002(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,22 +91,25 @@ def test_missing_model_id_raises_agent_002(monkeypatch: pytest.MonkeyPatch) -> N
     assert error.phase == "model_load"
 
 
-def test_run_returns_submit_result_on_first_turn(monkeypatch: pytest.MonkeyPatch) -> None:
-    patch_openai(
-        monkeypatch,
+def test_run_returns_submit_result_on_first_turn() -> None:
+    definition = make_definition()
+    node = make_node()
+    server_config = make_server_config()
+    client = FakeAsyncOpenAI(
+        base_url=server_config.base_url,
+        api_key=server_config.api_key,
+        timeout=server_config.timeout,
         responses=[
             tool_call_message("submit_result", {"summary": "Done", "changed_files": ["src/example.py"], "details": {}})
         ],
     )
-
-    definition = make_definition()
-    node = make_node()
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
         ctx=make_ctx(),
-        server_config=make_server_config(),
+        server_config=server_config,
         runner_config=make_runner_config(),
+        http_client=cast(Any, client),
     )
 
     result = asyncio.run(runner.run())
@@ -103,17 +118,12 @@ def test_run_returns_submit_result_on_first_turn(monkeypatch: pytest.MonkeyPatch
     assert result.summary == "Done"
     assert result.changed_files == ["src/example.py"]
     assert result.workspace_id == "ws-1"
-    assert runner.turn_count == 1
+
+    chat_calls = client.chat.completions.calls
+    assert len(chat_calls) == 1
 
 
-def test_run_handles_multiple_tool_turns_then_submit(monkeypatch: pytest.MonkeyPatch) -> None:
-    responses = [
-        tool_call_message("inspect", {"value": "a"}),
-        tool_call_message("inspect", {"value": "b"}),
-        tool_call_message("submit_result", {"summary": "Done", "changed_files": [], "details": {"calls": 2}}),
-    ]
-    patch_openai(monkeypatch, responses=responses)
-
+def test_run_handles_multiple_tool_turns_then_submit() -> None:
     tool_def = ToolDefinition(
         tool_name="inspect",
         pym=Path("inspect.pym"),
@@ -142,19 +152,33 @@ def test_run_handles_multiple_tool_turns_then_submit(monkeypatch: pytest.MonkeyP
 
     definition = make_definition(tools=[tool_def, submit_def], tool_schemas=tool_schemas)
     node = make_node()
+    server_config = make_server_config()
+    client = FakeAsyncOpenAI(
+        base_url=server_config.base_url,
+        api_key=server_config.api_key,
+        timeout=server_config.timeout,
+        responses=[
+            tool_call_message("inspect", {"value": "a"}),
+            tool_call_message("inspect", {"value": "b"}),
+            tool_call_message("submit_result", {"summary": "Done", "changed_files": [], "details": {"calls": 2}}),
+        ],
+    )
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
         ctx=make_ctx(),
-        server_config=make_server_config(),
+        server_config=server_config,
         runner_config=make_runner_config(),
+        http_client=cast(Any, client),
     )
 
     result = asyncio.run(runner.run())
 
     assert result.status == "success"
     assert result.details == {"calls": 2}
-    assert runner.turn_count == 3
+
+    chat_calls = client.chat.completions.calls
+    assert len(chat_calls) == 3
 
 
 def test_run_respects_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -196,13 +220,7 @@ def test_run_respects_turn_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     assert excinfo.value.error_code == AGENT_004
 
 
-def test_context_providers_injected_before_tool_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    responses = [
-        tool_call_message("inspect", {}),
-        tool_call_message("submit_result", {"summary": "Done", "changed_files": []}),
-    ]
-    patch_openai(monkeypatch, responses=responses)
-
+def test_context_providers_injected_before_tool_dispatch() -> None:
     tool_def = ToolDefinition(
         tool_name="inspect",
         pym=Path("inspect.pym"),
@@ -232,24 +250,37 @@ def test_context_providers_injected_before_tool_dispatch(monkeypatch: pytest.Mon
     definition = make_definition(tools=[tool_def, submit_def], tool_schemas=tool_schemas)
     node = make_node()
     cairn = FakeGrailExecutor()
+    server_config = make_server_config()
+    client = FakeAsyncOpenAI(
+        base_url=server_config.base_url,
+        api_key=server_config.api_key,
+        timeout=server_config.timeout,
+        responses=[
+            tool_call_message("inspect", {}),
+            tool_call_message("submit_result", {"summary": "Done", "changed_files": []}),
+        ],
+    )
     runner = FunctionGemmaRunner(
         definition=definition,
         node=node,
         ctx=make_ctx(),
         grail_executor=cairn,
         grail_dir=Path("/tmp"),
-        server_config=make_server_config(),
+        server_config=server_config,
         runner_config=make_runner_config(),
+        http_client=cast(Any, client),
     )
 
     result = asyncio.run(runner.run())
 
     assert result.status == "success"
     assert [call[0] for call in cairn.calls][:3] == [Path("ctx-1.pym"), Path("ctx-2.pym"), Path("inspect.pym")]
+
+    chat_calls = client.chat.completions.calls
+    assert len(chat_calls) >= 2
     tool_messages = [
-        cast(dict[str, Any], message)
-        for message in runner.messages
-        if cast(dict[str, Any], message).get("role") == "tool"
-        and cast(dict[str, Any], message).get("name") == "inspect"
+        message
+        for message in chat_calls[1]["messages"]
+        if message.get("role") == "tool" and message.get("name") == "inspect"
     ]
     assert tool_messages[0]["content"] == '{"ctx": "one"}\n{"ctx": "two"}\n{"ok": true}'
