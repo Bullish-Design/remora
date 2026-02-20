@@ -318,13 +318,225 @@ system_prompt: |
 
 ---
 
-## Part 3: Identified Gaps
+## Part 3: Production Agent Analysis
+
+The harness agent (`agents/harness/`) is a minimal test tool with `max_turns=2`. The **real agents** that Remora uses for production workloads are significantly more complex and would be **severely impacted** by the identified issues.
+
+### 3.1 Agent Overview
+
+| Agent | max_turns | Tools | Multi-Turn Required | Conversation History Critical |
+|-------|-----------|-------|---------------------|-------------------------------|
+| **harness** | 2 | 2 | No | Low |
+| **docstring** | 15 | 4 | Yes | **CRITICAL** |
+| **lint** | 15 | 4 | Yes | **CRITICAL** |
+| **test** | 20 | 5 | Yes | **CRITICAL** |
+| **sample_data** | 12 | 3 | Yes | **HIGH** |
+
+### 3.2 Docstring Agent (`agents/docstring/`)
+
+**Purpose:** Analyze Python code and generate/update docstrings.
+
+**System Prompt:**
+```
+You are a Python documentation maintenance tool. Given Python code, call the
+appropriate function to read, analyze, or write docstrings. Always call a function.
+Respond only with a function call in FunctionGemma format. Do not output natural language.
+```
+
+**Tools:**
+- `read_current_docstring` - Parse existing docstrings from code
+- `read_type_hints` - Extract type annotations from function signatures
+- `write_docstring` - Write/replace docstrings in files
+- `submit_result` - Submit final result
+
+**Expected Multi-Turn Pattern:**
+```
+Turn 1: read_current_docstring → Get existing docs
+Turn 2: read_type_hints → Get parameter types
+Turn 3-14: write_docstring → Generate documentation
+Turn 15: submit_result → Complete
+```
+
+**Impact of Missing History:**
+- Agent forgets what docstrings were read
+- Agent forgets type hint analysis
+- Agent cannot correlate reads with writes
+- **Result:** Agent restarts analysis every turn, never completes coherently
+
+---
+
+### 3.3 Lint Agent (`agents/lint/`)
+
+**Purpose:** Run linter, identify issues, and apply fixes iteratively.
+
+**System Prompt:**
+```
+You are a Python code maintenance tool. Given Python code, call the appropriate
+function to lint it, fix issues, or read the file. Always call a function.
+Respond only with a function call in FunctionGemma format. Do not output natural language.
+```
+
+**Tools:**
+- `run_linter` - Execute ruff with JSON output (**has custom JSON parser**)
+- `apply_fix` - Apply specific fix by issue code and line number
+- `read_current_file` - Read file contents
+- `submit_result` - Submit with issues_fixed/issues_remaining counts
+
+**Expected Multi-Turn Pattern:**
+```
+Turn 1: run_linter → Identify 10 issues
+Turn 2: apply_fix(issue_code="E501", line=42) → Fix first issue
+Turn 3: apply_fix(issue_code="F401", line=7) → Fix second issue
+...
+Turn 14: run_linter → Verify fixes
+Turn 15: submit_result(issues_fixed=10, issues_remaining=0)
+```
+
+**Notable:** `run_linter.pym` implements a **custom JSON parser** (lines 41-127) to avoid stdlib JSON parsing failures. This defensive pattern suggests awareness of parsing fragility.
+
+**Impact of Missing History:**
+- Agent forgets which issues were identified
+- Agent forgets which issues were already fixed
+- Agent may re-fix the same issue repeatedly
+- Agent cannot track progress toward completion
+- **Result:** Infinite loop or premature termination
+
+---
+
+### 3.4 Test Agent (`agents/test/`)
+
+**Purpose:** Analyze code, generate tests, run them, iterate until passing.
+
+**System Prompt:**
+```
+You are a Python test generator. Given Python code, call the appropriate function
+to analyze it, read existing tests, write new tests, or run tests. Always call a
+function. Respond only with a function call in FunctionGemma format. Do not output
+natural language.
+```
+
+**Tools:**
+- `analyze_signature` - Parse function signature for parameters/types
+- `read_existing_tests` - Find and read existing test files
+- `write_test_file` - Write complete test file content
+- `run_tests` - Execute pytest with JUnit XML parsing (**custom XML parser**)
+- `submit_result` - Submit with tests_generated/tests_passing counts
+
+**Expected Multi-Turn Pattern:**
+```
+Turn 1: analyze_signature → Extract function metadata
+Turn 2: read_existing_tests → Check for existing coverage
+Turn 3: write_test_file → Generate initial tests
+Turn 4: run_tests → 3 passed, 2 failed
+Turn 5: write_test_file → Fix failing tests
+Turn 6: run_tests → 4 passed, 1 failed
+...
+Turn 19: run_tests → 5 passed, 0 failed
+Turn 20: submit_result(tests_generated=5, tests_passing=5)
+```
+
+**Notable:** `run_tests.pym` implements a **custom XML parser** (lines 47-136) to parse JUnit reports without an XML library.
+
+**Impact of Missing History:**
+- Agent forgets function signature analysis
+- Agent forgets which tests were written
+- Agent forgets which tests passed/failed
+- Agent cannot iterate to fix failing tests
+- **Result:** Agent writes same tests repeatedly, never achieves passing suite
+
+---
+
+### 3.5 Sample Data Agent (`agents/sample_data/`)
+
+**Purpose:** Generate fixture data for function parameters.
+
+**System Prompt:**
+```
+You are a Python fixture generator. Given Python code, call the appropriate
+function to analyze the function signature or write fixture data. Always call a function.
+```
+
+**Tools:**
+- `analyze_signature` - Extract parameters and types
+- `write_fixture_file` - Write fixtures in JSON or YAML (**custom serializers**)
+- `submit_result` - Submit with fixtures_generated count
+
+**Notable:** `write_fixture_file.pym` implements **custom JSON and YAML serializers** (lines 37-87) without using json/yaml libraries.
+
+**Impact of Missing History:**
+- Agent forgets parameter analysis
+- Agent may generate incomplete fixtures
+- **Result:** Less severe than other agents (simpler 3-tool pattern)
+
+---
+
+### 3.6 Critical Findings
+
+#### Finding 1: All Production Agents Are Multi-Turn
+
+The harness with `max_turns=2` is **not representative** of real workloads. Production agents have 12-20 turns and absolutely require conversation history to function.
+
+| Agent | max_turns | Single-Turn Viable? |
+|-------|-----------|---------------------|
+| harness | 2 | Yes |
+| docstring | 15 | **No** |
+| lint | 15 | **No** |
+| test | 20 | **No** |
+| sample_data | 12 | **No** |
+
+#### Finding 2: Format Enforcement Creates Fragility
+
+All production agents enforce:
+- "Always call a function"
+- "Respond only with a function call in FunctionGemma format"
+- "Do not output natural language"
+
+This means if JSON parsing fails or the model returns unexpected format, **the agent cannot explain what went wrong**. There's no graceful degradation.
+
+#### Finding 3: Tools Already Implement Defensive Parsing
+
+Three production agents implement custom parsers to avoid stdlib failures:
+
+| Agent | Tool | Custom Parser |
+|-------|------|---------------|
+| lint | run_linter.pym | JSON parser (90 lines) |
+| test | run_tests.pym | XML parser (90 lines) |
+| sample_data | write_fixture_file.pym | JSON+YAML serializers (50 lines) |
+
+This pattern suggests the team already encountered parsing fragility and worked around it at the tool level. **The same defense is needed at the runner level.**
+
+#### Finding 4: Knowledge Accumulation Is Essential
+
+All production tools use `knowledge_delta` to build context:
+- `read_current_docstring` → adds docstring content to knowledge
+- `run_linter` → adds `lint_errors_remaining`, `lint_errors_fixable`
+- `run_tests` → adds `tests_passed`, `tests_failed`, `tests_errors`
+
+Without conversation history, **this accumulated knowledge is lost** between turns.
+
+---
+
+### 3.7 Impact Assessment
+
+| Issue | Harness Impact | Production Impact |
+|-------|----------------|-------------------|
+| Missing history | Low (2 turns) | **CRITICAL** (12-20 turns) |
+| No JSON fallback | Medium | **HIGH** (tools already defensive) |
+| tool_choice=auto | Medium | Medium (prompts enforce) |
+| Temperature 0.1 | Low | Medium (creative tasks need tuning) |
+| Minimal prompts | High | Medium (production prompts better) |
+
+**Conclusion:** The missing conversation history bug is **far more severe** for production agents than for the harness. A harness fix that doesn't address this will not translate to improved production performance.
+
+---
+
+## Part 4: Identified Gaps (Updated with Production Context)
 
 ### Critical Gaps (High Impact)
 
 #### Gap 1: Conversation History Not Sent to Model
 
-**Severity:** CRITICAL
+**Severity:** CRITICAL (BLOCKER FOR PRODUCTION)
 
 **Current Behavior:**
 Every model call receives only `[system_prompt, initial_user_message]`. Previous assistant responses and tool results are stored in `self.messages` but never sent.
@@ -335,10 +547,16 @@ Full conversation history should be sent on every turn, allowing the model to se
 - Results from executed tools
 - Context from earlier turns
 
-**Impact:**
-- Multi-turn tool calling is broken
-- Model cannot learn from tool execution results
-- Model cannot maintain context across turns
+**Impact on Harness (2 turns):**
+- Minimal impact for simple echo tests
+
+**Impact on Production Agents (12-20 turns):**
+- **docstring:** Cannot correlate read_type_hints with write_docstring
+- **lint:** Cannot track which issues were fixed vs remaining
+- **test:** Cannot iterate on failing tests (restarts every turn)
+- **sample_data:** Cannot remember parameter analysis when writing fixtures
+
+**This is not just a harness bug—it fundamentally breaks all multi-turn agents.**
 
 **Reference Implementation:**
 Both example projects send `[SYSTEM_PROMPT] + conversation_history` on every call.
@@ -553,7 +771,7 @@ Override harness defaults to match example projects: `temperature=0`, `tool_choi
 
 ---
 
-## Part 4: Recommended Changes
+## Part 5: Recommended Changes
 
 ### Priority 1: Critical Fixes (Immediate)
 
@@ -772,9 +990,9 @@ def _trim_history_if_needed(self, max_messages: int = 50) -> None:
 
 ---
 
-## Part 5: Verification Plan
+## Part 6: Verification Plan
 
-### Step 1: Baseline Measurement
+### Step 1: Baseline Measurement (Harness)
 
 Run the current harness and record tool-call rates:
 ```bash
@@ -790,7 +1008,7 @@ python scripts/functiongemma_harness.py \
 3. Add JSON fallback parsing
 4. Set `temperature=0` in harness
 
-### Step 3: Post-Fix Measurement
+### Step 3: Post-Fix Measurement (Harness)
 
 ```bash
 python scripts/functiongemma_harness.py \
@@ -798,25 +1016,53 @@ python scripts/functiongemma_harness.py \
     --requests-per-variant 100
 ```
 
-### Step 4: Expected Outcome
+### Step 4: Production Agent Verification
 
+**Critical:** The harness only validates single-turn behavior. After harness improvements, test production agents:
+
+```bash
+# Test multi-turn lint agent on a real file
+remora lint path/to/python_file.py --verbose
+
+# Verify conversation history is sent (check logs for message count)
+# Expected: Messages should grow with each turn (3, 5, 7, ...)
+# Current bug: Messages stay at 2 every turn
+
+# Test docstring agent
+remora docstring path/to/function.py --verbose
+
+# Test test agent (longest at 20 turns)
+remora test path/to/module.py --verbose
+```
+
+### Step 5: Expected Outcomes
+
+**Harness:**
 | Metric | Before | After |
 |--------|--------|-------|
 | Tool call rate | ~40-60% | ~95%+ |
 | OK responses | Variable | Consistent |
 | Errors | Frequent | Rare |
 
+**Production Agents:**
+| Metric | Before | After |
+|--------|--------|-------|
+| Lint issues fixed | 0-1 (restarts each turn) | All fixable issues |
+| Test iterations | None (no memory) | Converges to passing |
+| Docstring coherence | Random (no context) | Consistent with analysis |
+| Average turns to completion | max_turns (timeout) | 3-8 turns |
+
 ---
 
-## Part 6: Summary of Changes
+## Part 7: Summary of Changes
 
 ### Files to Modify
 
-| File | Changes |
-|------|---------|
-| `src/remora/runner.py` | Fix `_build_prompt_messages()`, add JSON fallback, cache system prompt |
-| `scripts/functiongemma_harness.py` | Default `tool_choice="required"`, `temperature=0` |
-| `agents/harness/harness_subagent.yaml` | Expand system prompt with explicit directives |
+| File | Changes | Impact |
+|------|---------|--------|
+| `src/remora/runner.py` | Fix `_build_prompt_messages()`, add JSON fallback, cache system prompt | **All agents** |
+| `scripts/functiongemma_harness.py` | Default `tool_choice="required"`, `temperature=0` | Harness only |
+| `agents/harness/harness_subagent.yaml` | Expand system prompt with explicit directives | Harness only |
 
 ### Configuration Changes
 
@@ -828,11 +1074,20 @@ python scripts/functiongemma_harness.py \
 
 ### Behavioral Changes
 
-| Behavior | Before | After |
-|----------|--------|-------|
-| History sent | Initial only | Full history |
-| Tool call parsing | tool_calls field only | tool_calls + JSON fallback |
-| System prompt | Minimal | Explicit directives |
+| Behavior | Before | After | Affected Agents |
+|----------|--------|-------|-----------------|
+| History sent | Initial only | Full history | **All (critical fix)** |
+| Tool call parsing | tool_calls field only | tool_calls + JSON fallback | All |
+| System prompt | Minimal | Explicit directives | Harness |
+
+### Production Agent Impact
+
+| Agent | Before Fix | After Fix |
+|-------|------------|-----------|
+| **lint** | Forgets issues each turn, can't track fixes | Iterates through all issues, tracks progress |
+| **test** | Can't iterate on failing tests | Converges to passing test suite |
+| **docstring** | Forgets type analysis when writing | Coherent documentation from analysis |
+| **sample_data** | May generate incomplete fixtures | Complete fixtures from signature |
 
 ---
 
@@ -910,3 +1165,52 @@ These corrections don't fundamentally change the recommendations, but clarify th
 1. There are two valid approaches: forcing tool_choice OR robust parsing
 2. SHELLper's two-stage architecture is a cleaner separation of concerns
 3. Preferring content vs. tool_calls is a design choice with trade-offs
+
+---
+
+## Appendix E: Production Agent Tool Summary
+
+### Agent: docstring (15 turns)
+
+| Tool | Complexity | External Deps | Custom Parsing |
+|------|------------|---------------|----------------|
+| read_current_docstring | Moderate | read_file, file_exists | Quote-based docstring extraction |
+| read_type_hints | Moderate | None | Regex-like signature parsing |
+| write_docstring | High | read_file, write_file | Indentation handling |
+| submit_result | Trivial | None | None |
+
+### Agent: lint (15 turns)
+
+| Tool | Complexity | External Deps | Custom Parsing |
+|------|------------|---------------|----------------|
+| run_linter | **Very High** | run_command (ruff) | **Custom JSON parser (90 lines)** |
+| apply_fix | Moderate | run_command, read_file | Diff detection |
+| read_current_file | Trivial | read_file | None |
+| submit_result | Trivial | None | None |
+
+### Agent: test (20 turns)
+
+| Tool | Complexity | External Deps | Custom Parsing |
+|------|------------|---------------|----------------|
+| analyze_signature | Moderate-High | None | Default value conversion |
+| read_existing_tests | Low | read_file, file_exists | Path inference |
+| write_test_file | Trivial | write_file | None |
+| run_tests | **Very High** | run_command (pytest) | **Custom XML parser (90 lines)** |
+| submit_result | Trivial | None | None |
+
+### Agent: sample_data (12 turns)
+
+| Tool | Complexity | External Deps | Custom Parsing |
+|------|------------|---------------|----------------|
+| analyze_signature | Moderate-High | None | Default value conversion |
+| write_fixture_file | **Very High** | write_file | **Custom JSON+YAML serializers** |
+| submit_result | Trivial | None | None |
+
+### Key Observation
+
+Three of four production agents implement custom parsers/serializers at the tool level:
+- `lint/run_linter.pym` - JSON parsing without json.loads()
+- `test/run_tests.pym` - XML parsing without xml.etree
+- `sample_data/write_fixture_file.pym` - JSON/YAML without json.dumps()/yaml.dump()
+
+This defensive pattern demonstrates awareness of parsing fragility. **The same robustness is needed in the runner's tool-call parsing.**
