@@ -14,7 +14,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from remora.hub.store import NodeStateStore
@@ -45,13 +45,27 @@ class ActionContext:
         Returns:
             Script output as dict
         """
-        return await self.grail_executor.run(
-            script_path=script_path,
+        if self.grail_executor is not None:
+            return await self.grail_executor.run(
+                script_path=script_path,
+                inputs=inputs,
+                externals={
+                    "read_file": self._read_file,
+                },
+            )
+
+        import grail
+
+        grail_dir = self.project_root / ".grail"
+        script_file = grail_dir / script_path
+        script = grail.load(str(script_file), grail_dir=str(grail_dir))
+        result = await script.run(
             inputs=inputs,
             externals={
                 "read_file": self._read_file,
             },
         )
+        return result
 
     async def _read_file(self, path: str) -> str:
         """External function for Grail scripts to read files."""
@@ -116,7 +130,7 @@ class UpdateNodeState(UpdateAction):
     file_path: Path
     node_data: dict[str, Any]
     file_hash: str
-    update_source: str
+    update_source: Literal["file_change", "cold_start", "manual", "adhoc"]
 
     async def execute(self, context: ActionContext) -> dict[str, Any]:
         """Create/update NodeState from extracted data."""

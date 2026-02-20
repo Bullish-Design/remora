@@ -12,6 +12,7 @@ Key design:
 from __future__ import annotations
 
 from datetime import datetime
+import time
 from typing import Literal
 
 from fsdantic import VersionedKVRecord
@@ -31,6 +32,7 @@ class NodeState(VersionedKVRecord):
     """
 
     # === Identity ===
+    updated_at: float = Field(default_factory=time.time, description="Last update timestamp (Unix epoch)")
     key: str = Field(description="Unique key: 'node:{file_path}:{node_name}'")
     file_path: str = Field(description="Absolute path to the source file")
     node_name: str = Field(description="Name of the function, class, or module")
@@ -106,6 +108,7 @@ class FileIndex(VersionedKVRecord):
     Stored with prefix "file:" in repository.
     """
 
+    updated_at: float = Field(default_factory=time.time, description="Last update timestamp (Unix epoch)")
     file_path: str = Field(description="Absolute path to the file")
     file_hash: str = Field(description="SHA256 of file contents")
     node_count: int = Field(description="Number of nodes in this file")
@@ -122,6 +125,7 @@ class HubStatus(VersionedKVRecord):
     Stored as a singleton with key "status".
     """
 
+    updated_at: float = Field(default_factory=time.time, description="Last update timestamp (Unix epoch)")
     running: bool = Field(description="Whether daemon is currently running")
     pid: int | None = Field(default=None, description="Daemon process ID")
     project_root: str = Field(description="Project root being watched")

@@ -33,6 +33,7 @@ cairn = { git = "https://github.com/Bullish-Design/cairn.git" }
 
 [project.scripts]
 remora = "remora.cli:app"
+remora-hub = "remora.hub.cli:main"
 remora-tui = "scripts.remora_tui:app"
 remora-demo = "scripts.remora_demo:app"
 remora-flood = "scripts.stress_vllm:app"

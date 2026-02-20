@@ -92,13 +92,28 @@ class ContextManager:
         to inject external context into the Decision Packet.
         """
         if self._hub_client is None:
-            return
+            from remora.context.hub_client import get_hub_client
+
+            self._hub_client = get_hub_client()
 
         try:
             context = await self._hub_client.get_context([self.packet.node_id])
             if context:
-                self.packet.hub_context = context
-                self.packet.hub_freshness = datetime.now(timezone.utc)
+                node_state = context.get(self.packet.node_id)
+                if node_state:
+                    self.packet.hub_context = {
+                        "signature": node_state.signature,
+                        "docstring": node_state.docstring,
+                        "decorators": node_state.decorators,
+                        "related_tests": node_state.related_tests,
+                        "complexity": node_state.complexity,
+                        "callers": node_state.callers,
+                        "has_type_hints": node_state.has_type_hints,
+                    }
+                    self.packet.hub_freshness = datetime.fromtimestamp(
+                        node_state.updated_at,
+                        tz=timezone.utc,
+                    )
         except Exception:
             pass
 
