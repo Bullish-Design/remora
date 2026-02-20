@@ -1,12 +1,12 @@
 {
-  "file": "/home/andrew/Documents/Projects/remora/agents/lint/tools/submit.pym",
+  "file": "/home/andrew/Documents/Projects/remora/agents/harness/tools/submit.pym",
   "valid": true,
   "errors": [],
   "warnings": [],
   "info": {
     "externals_count": 0,
     "inputs_count": 5,
-    "lines_of_code": 34,
+    "lines_of_code": 31,
     "monty_features_used": [
       "list_comprehension"
     ]

@@ -24,6 +24,7 @@ from remora.events import EventEmitter, EventName, EventStatus, NullEventEmitter
 from remora.errors import AGENT_002, AGENT_003, AGENT_004
 from remora.results import AgentResult, AgentStatus
 from remora.subagent import SUBMIT_RESULT_TOOL, SubagentDefinition
+from remora.tool_parser import ParsedToolCall, parse_tool_call_from_content
 
 if TYPE_CHECKING:
     from remora.execution import SnapshotManager
@@ -111,6 +112,7 @@ class FunctionGemmaRunner:
     _initial_message: str = field(init=False)
     _model_target: str = field(init=False)
     _retry: RetryStrategy = field(init=False)
+    _cached_system_prompt: str | None = field(init=False)
 
     @property
     def workspace_id(self) -> str:
@@ -141,6 +143,10 @@ class FunctionGemmaRunner:
         self.turn_count = 0
         self.messages.append(cast(ChatCompletionMessageParam, {"role": "system", "content": self._system_prompt}))
         self.messages.append(cast(ChatCompletionMessageParam, {"role": "user", "content": self._initial_message}))
+
+        self._cached_system_prompt = None
+        if not self.runner_config.include_prompt_context:
+            self._cached_system_prompt = self._build_system_prompt(None)
 
         # Configure retry strategy from config
         retry_config = self.server_config.retry
@@ -244,14 +250,42 @@ class FunctionGemmaRunner:
             return str(knowledge)
 
     def _build_prompt_messages(self) -> list[ChatCompletionMessageParam]:
-        prompt_context = None
-        if self.runner_config.include_prompt_context:
+        """Return the full accumulated conversation history.
+
+        The system prompt (messages[0]) is updated in-place if include_prompt_context
+        is enabled, allowing dynamic context injection while preserving history.
+        """
+        if self._cached_system_prompt is not None:
+            system_content = self._cached_system_prompt
+        else:
             prompt_context = self.context_manager.get_prompt_context()
-        system_prompt = self._build_system_prompt(prompt_context)
-        return [
-            cast(ChatCompletionMessageParam, {"role": "system", "content": system_prompt}),
-            cast(ChatCompletionMessageParam, {"role": "user", "content": self._initial_message}),
-        ]
+            system_content = self._build_system_prompt(prompt_context)
+
+        self.messages[0] = cast(
+            ChatCompletionMessageParam,
+            {"role": "system", "content": system_content},
+        )
+
+        return list(self.messages)
+
+    def _trim_history_if_needed(self, max_messages: int = 50) -> None:
+        """Trim conversation history to prevent context overflow.
+
+        Keeps the system prompt and the most recent messages. This is a
+        simple sliding window approach — more sophisticated summarization
+        could be added later.
+
+        Args:
+            max_messages: Maximum number of messages to retain.
+        """
+        if len(self.messages) <= max_messages:
+            return
+
+        system_message = self.messages[0]
+        recent_messages = self.messages[-(max_messages - 1) :]
+        self.messages = [system_message] + recent_messages
+
+        logger.debug("Trimmed conversation history to %d messages", len(self.messages))
 
     async def run(self) -> AgentResult:
         """Execute the model loop until a result is produced."""
@@ -261,10 +295,20 @@ class FunctionGemmaRunner:
         while self.turn_count < self.definition.max_turns:
             self.turn_count += 1
             self.context_manager.increment_turn()
+            self._trim_history_if_needed(max_messages=40)
             self.messages.append(self._coerce_message_param(message))
             tool_calls = message.tool_calls or []
             if not tool_calls:
-                return self._handle_no_tool_calls(message)
+                result = await self._handle_no_tool_calls(message)
+                if result is not None:
+                    return result
+                await self.context_manager.pull_hub_context()
+                next_turn = self.turn_count + 1
+                message = await self._call_model(
+                    phase="loop",
+                    tool_choice=self._tool_choice_for_turn(next_turn),
+                )
+                continue
             for tool_call in tool_calls:
                 tool_function = getattr(tool_call, "function", None)
                 name = getattr(tool_function, "name", None)
@@ -424,7 +468,19 @@ class FunctionGemmaRunner:
             "workspace_id": self.workspace_id,
         }
 
-    def _handle_no_tool_calls(self, message: ChatCompletionMessage) -> AgentResult:
+    async def _handle_no_tool_calls(self, message: ChatCompletionMessage) -> AgentResult | None:
+        """Handle a model response with no structured tool_calls.
+
+        Attempts to parse tool calls from JSON content. If parsing fails
+        and tool_choice is "required", raises an error. Otherwise, treats
+        the content as a final result.
+        """
+        content = message.content or ""
+
+        parsed_call = parse_tool_call_from_content(content)
+        if parsed_call is not None:
+            return await self._dispatch_parsed_tool_call(parsed_call)
+
         if self.runner_config.tool_choice == "required":
             raise AgentError(
                 node_id=self.node.node_id,
@@ -433,14 +489,15 @@ class FunctionGemmaRunner:
                 error_code=AGENT_003,
                 message=f"Model stopped without calling {SUBMIT_RESULT_TOOL}",
             )
-        content = message.content or ""
+
         if content:
             try:
                 parsed = json.loads(content)
+                if isinstance(parsed, dict):
+                    return self._build_submit_result(parsed)
             except json.JSONDecodeError:
-                parsed = None
-            if isinstance(parsed, dict):
-                return self._build_submit_result(parsed)
+                pass
+
         result_data = {
             "status": AgentStatus.SUCCESS,
             "workspace_id": self.workspace_id,
@@ -450,6 +507,76 @@ class FunctionGemmaRunner:
             "error": None,
         }
         return AgentResult.model_validate(result_data)
+
+    async def _dispatch_parsed_tool_call(self, parsed_call: ParsedToolCall) -> AgentResult | None:
+        """Dispatch a tool call parsed from JSON content.
+
+        This method handles tool calls that were extracted from message.content
+        instead of message.tool_calls. It synthesizes the necessary fields and
+        delegates to the standard dispatch flow.
+        """
+        tool_name = parsed_call.name
+        arguments = parsed_call.arguments
+
+        if tool_name == SUBMIT_RESULT_TOOL:
+            return self._build_submit_result(arguments)
+
+        self.event_emitter.emit(
+            {
+                "event": EventName.TOOL_CALL,
+                "agent_id": self.workspace_id,
+                "node_id": self.node.node_id,
+                "operation": self.definition.name,
+                "tool_name": tool_name,
+                "phase": "execution",
+                "status": EventStatus.OK,
+                "parsed_from_content": True,
+            }
+        )
+
+        tool_inputs = {**self._base_tool_inputs(), **arguments}
+
+        tool_def = self.definition.tools_by_name.get(tool_name)
+        if tool_def is None:
+            tool_error = {"error": f"Unknown tool: {tool_name}"}
+            self._emit_tool_result(tool_name, tool_error)
+            self.messages.append(
+                cast(
+                    ChatCompletionMessageParam,
+                    {
+                        "role": "tool",
+                        "tool_call_id": parsed_call.id,
+                        "name": tool_name,
+                        "content": json.dumps(tool_error),
+                    },
+                )
+            )
+            return None
+
+        if self.grail_executor is not None and self.grail_dir is not None:
+            tool_result_content = await self._dispatch_tool_grail(
+                tool_name,
+                tool_def,
+                tool_inputs,
+            )
+        else:
+            tool_result_content = json.dumps({"error": "No execution backend configured"})
+
+        self._apply_tool_result_event(tool_name, tool_result_content)
+
+        self.messages.append(
+            cast(
+                ChatCompletionMessageParam,
+                {
+                    "role": "tool",
+                    "tool_call_id": parsed_call.id,
+                    "name": tool_name,
+                    "content": tool_result_content,
+                },
+            )
+        )
+
+        return None
 
     def _apply_tool_result_event(self, tool_name: str, result_content: Any) -> None:
         data = self._parse_tool_result_content(result_content)
@@ -462,23 +589,43 @@ class FunctionGemmaRunner:
         )
 
     def _parse_tool_result_content(self, result_content: Any) -> dict[str, Any]:
+        """Parse tool result content into a dict.
+
+        Tries to parse the entire content as JSON first, then falls back
+        to extracting JSON from the last non-empty line.
+        """
         if isinstance(result_content, dict):
             return result_content
+
         if not result_content:
             return {}
+
         if not isinstance(result_content, str):
             return {"raw_output": result_content}
-        lines = [line for line in result_content.splitlines() if line.strip()]
+
+        content = result_content.strip()
+        if not content:
+            return {}
+
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict):
+                return data
+            return {"raw_output": data}
+        except json.JSONDecodeError:
+            pass
+
+        lines = [line for line in content.splitlines() if line.strip()]
         if not lines:
             return {}
-        payload = lines[-1]
+
         try:
-            data = json.loads(payload)
+            data = json.loads(lines[-1])
+            if isinstance(data, dict):
+                return data
+            return {"raw_output": data}
         except json.JSONDecodeError:
-            return {"raw_output": result_content}
-        if isinstance(data, dict):
-            return data
-        return {"raw_output": data}
+            return {"raw_output": content}
 
     def _emit_tool_debug(self, event: str, tool_choice: Any, *, request_id: str | None = None) -> None:
         tools = self.definition.tool_schemas

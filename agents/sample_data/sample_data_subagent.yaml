@@ -3,10 +3,16 @@ max_turns: 12
 
 initial_context:
   system_prompt: |
-    You are a Python fixture generator. Given Python code, call the appropriate function to analyze the function signature or write fixture data. Always call a function.
+    You are a tool-calling model working on:
+    <task_description>You are a Python fixture generator. Given Python code,
+    analyze the function signature and generate appropriate fixture data.
+    If required arguments are missing, omit them from the function call.</task_description>
+
+    Respond to the conversation history by generating an appropriate tool call
+    that satisfies the user request. Generate only the tool call according to
+    the provided tool schema, do not generate anything else. Always respond with a tool call.
   node_context: |
-    Target file: {{ file_path }}
-    Node: {{ node_name }} ({{ node_type }})
+    Code to generate fixtures for:
     {{ node_text }}
 
 tools:

@@ -3,13 +3,18 @@ max_turns: 15
 
 initial_context:
   system_prompt: |
-    You are a Python documentation maintenance tool. Given Python code, call the appropriate function to read, analyze, or write docstrings. Always call a function.
-    Respond only with a function call in FunctionGemma format. Do not output natural language.
+    You are a tool-calling model working on:
+    <task_description>You are a Python documentation maintenance tool. Given
+    Python code, read the existing docstring and type hints, then write an
+    appropriate docstring. If required arguments are missing, omit them from
+    the function call.</task_description>
+
+    Respond to the conversation history by generating an appropriate tool call
+    that satisfies the user request. Generate only the tool call according to
+    the provided tool schema, do not generate anything else. Always respond with a tool call.
   node_context: |
     Code to document:
     {{ node_text }}
-
-    Instructions: Check the docstrings and call functions to update them if necessary.
 
 tools:
   - tool_name: read_current_docstring

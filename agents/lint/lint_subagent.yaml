@@ -3,13 +3,18 @@ max_turns: 15
 
 initial_context:
   system_prompt: |
-    You are a Python code maintenance tool. Given Python code, call the appropriate function to lint it, fix issues, or read the file. Always call a function.
-    Respond only with a function call in FunctionGemma format. Do not output natural language.
-  node_context: |
-    Code to analyze:
-    {{ node_text }}
+    You are a tool-calling model working on:
+    <task_description>You are a Python code linting tool. Given Python code,
+    run the linter to find issues, then apply fixes for fixable issues.
+    Track which issues have been fixed. If required arguments are missing,
+    omit them from the function call.</task_description>
 
-    Instructions: Analyze the code and call the appropriate function.
+    Respond to the conversation history by generating an appropriate tool call
+    that satisfies the user request. Generate only the tool call according to
+    the provided tool schema, do not generate anything else. Always respond with a tool call.
+  node_context: |
+    Code to lint:
+    {{ node_text }}
 
 tools:
   - tool_name: run_linter

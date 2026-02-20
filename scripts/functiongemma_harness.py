@@ -183,6 +183,7 @@ async def _run_all(
     config_path: Path | None,
     tool_choice: str,
     max_tokens: int,
+    temperature: float,
     concurrency: int,
     requests_per_variant: int,
     include_tool_guide: bool,
@@ -193,6 +194,7 @@ async def _run_all(
         update={
             "tool_choice": tool_choice,
             "max_tokens": max_tokens,
+            "temperature": temperature,
             "include_prompt_context": False,
             "include_tool_guide": include_tool_guide,
         }
@@ -272,10 +274,11 @@ def main(
         help="Path to remora.yaml (defaults to repo root).",
     ),
     tool_choice: str = typer.Option(
-        "auto",
-        help="Tool choice mode: required or auto.",
+        "required",
+        help="Tool choice mode: required or auto. Default 'required' forces tool calls.",
     ),
     max_tokens: int = typer.Option(256, help="Max tokens for model responses."),
+    temperature: float = typer.Option(0.0, help="Sampling temperature (0 for deterministic)."),
     concurrency: int = typer.Option(25, help="Max concurrent requests."),
     requests_per_variant: int = typer.Option(40, help="Requests per prompt."),
     include_tool_guide: bool = typer.Option(
@@ -289,6 +292,7 @@ def main(
             Path(config_path) if config_path else None,
             tool_choice,
             max_tokens,
+            temperature,
             concurrency,
             requests_per_variant,
             include_tool_guide,

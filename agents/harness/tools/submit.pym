@@ -1,8 +1,11 @@
 from grail import Input
 
+node_text_input: str | None = Input("node_text", default=None)
+target_file_input: str | None = Input("target_file", default=None)
+workspace_id: str | None = Input("workspace_id", default=None)
+
 summary: str = Input("summary")
 changed_files: list[str] = Input("changed_files")
-workspace_id: str | None = Input("workspace_id", default=None)
 
 workspace_value = workspace_id or "unknown"
 
