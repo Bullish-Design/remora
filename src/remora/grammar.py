@@ -27,16 +27,15 @@ def build_functiongemma_grammar(tools: list[dict[str, Any]]) -> str:
 
     tool_alternatives = " | ".join(f'"{esc(name)}"' for name in tool_names)
 
+    # Strict grammar per XGRAMMAR_REFACTOR_PLAN.md - no whitespace between call: and tool_name
     return "\n".join(
         [
-            'root ::= ws? "<start_function_call>" "call:" tool_name "{" arg_body "}" "<end_function_call>" ws?',
+            'root ::= "<start_function_call>" "call:" tool_name "{" arg_body "}" "<end_function_call>"',
             "",
             f"tool_name ::= {tool_alternatives}",
             "",
             "arg_body ::= arg_char*",
             "arg_char ::= [^}]",
-            "",
-            "ws ::= [ \t\r\n]+",
             "",
         ]
     )

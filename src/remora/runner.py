@@ -400,7 +400,8 @@ class FunctionGemmaRunner:
                     "grammar": grammar,
                 }
             }
-            effective_tool_choice = "none"
+            # Keep tool_choice as-is (usually "auto") - vLLM's FunctionGemma parser
+            # will extract tool_calls from grammar-constrained output
 
         self._emit_tool_debug("model_tools_before", effective_tool_choice)
         self._emit_request_debug(
