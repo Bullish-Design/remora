@@ -58,6 +58,7 @@ async def main() -> int:
     print("Validating production agents...\n")
 
     config = load_config(None)
+    config.agents_dir = "agents"
     agents_dir = Path(config.agents_dir)
 
     agents = ["harness", "docstring", "lint", "test", "sample_data"]
