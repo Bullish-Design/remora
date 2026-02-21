@@ -6,7 +6,7 @@ from typing import Any
 
 
 def build_functiongemma_grammar(tools: list[dict[str, Any]]) -> str:
-    """Build a strict JSON EBNF grammar for FunctionGemma tool calls.
+    """Build a permissive EBNF grammar for FunctionGemma tool calls.
 
     Args:
         tools: OpenAI-format tool schemas
@@ -26,30 +26,15 @@ def build_functiongemma_grammar(tools: list[dict[str, Any]]) -> str:
         return value.replace("\\", "\\\\").replace('"', '\\"')
 
     tool_alternatives = " | ".join(f'"{esc(name)}"' for name in tool_names)
-    quote = '"\\""'
 
     return "\n".join(
         [
-            'root ::= ws? "<start_function_call>" "call:" tool_name ws? obj "<end_function_call>" ws?',
+            'root ::= ws? "<start_function_call>" "call:" tool_name "{" arg_body "}" "<end_function_call>" ws?',
             "",
             f"tool_name ::= {tool_alternatives}",
             "",
-            'obj ::= "{" ws? members? ws? "}"',
-            'members ::= member (ws? "," ws? member)*',
-            'member ::= string ws? ":" ws? value',
-            "",
-            'value ::= string | number | boolean | "null" | obj | array',
-            'array ::= "[" ws? (value (ws? "," ws? value)*)? ws? "]"',
-            "",
-            f"string ::= {quote} str_char* {quote}",
-            'str_char ::= [^"\\\\]',
-            "",
-            'number ::= "-"? int frac? exp?',
-            'int    ::= "0" | [1-9] [0-9]*',
-            'frac   ::= "." [0-9]+',
-            'exp    ::= ("e"|"E") ("+"|"-")? [0-9]+',
-            "",
-            'boolean ::= "true" | "false"',
+            "arg_body ::= arg_char*",
+            "arg_char ::= [^}]",
             "",
             "ws ::= [ \t\r\n]+",
             "",

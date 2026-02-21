@@ -288,8 +288,8 @@ def main(
     requests_per_variant: int = typer.Option(20, help="Requests per prompt."),
     include_tool_guide: bool = typer.Option(False, help="Include a compact tool guide in the system prompt."),
     use_grammar: bool = typer.Option(
-        False,
-        "--use-grammar",
+        True,
+        "--use-grammar/--no-use-grammar",
         help="Use XGrammar structured outputs for guaranteed tool call format.",
     ),
 ) -> None:

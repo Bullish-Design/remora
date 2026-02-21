@@ -61,7 +61,7 @@ class RunnerConfig(BaseModel):
     tool_choice: str = "auto"
     include_prompt_context: bool = False
     include_tool_guide: bool = True
-    use_grammar_enforcement: bool = False
+    use_grammar_enforcement: bool = True
 
 
 class OperationConfig(BaseModel):

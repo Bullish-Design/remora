@@ -55,6 +55,7 @@ runner:
   max_tokens: 512
   temperature: 0.1
   tool_choice: "required"  # "required" | "auto" | "none"
+  use_grammar_enforcement: true
 
 cairn:
   # command: cairn  # Removed (using in-process execution)

@@ -25,7 +25,7 @@ from remora.errors import AGENT_002, AGENT_003, AGENT_004
 from remora.grammar import build_functiongemma_grammar
 from remora.results import AgentResult, AgentStatus
 from remora.subagent import SUBMIT_RESULT_TOOL, SubagentDefinition
-from remora.tool_parser import ParsedToolCall, parse_functiongemma_arguments, parse_tool_call_from_content
+from remora.tool_parser import parse_functiongemma_arguments
 
 if TYPE_CHECKING:
     from remora.execution import SnapshotManager
@@ -120,10 +120,6 @@ class FunctionGemmaRunner:
         """Backward-compatible alias — returns ``ctx.agent_id``."""
         return self.ctx.agent_id
 
-    def _uses_functiongemma(self) -> bool:
-        model_name = (self.adapter_name or self.server_config.default_adapter or "").lower()
-        return "functiongemma" in model_name
-
     def __post_init__(self) -> None:
         self._http_client = self.http_client or AsyncOpenAI(
             base_url=self.server_config.base_url,
@@ -133,7 +129,7 @@ class FunctionGemmaRunner:
         self._model_target = self.adapter_name or self.server_config.default_adapter
         self._system_prompt = self.definition.initial_context.system_prompt
         self._initial_message = self.definition.initial_context.render(self.node)
-        self._system_role = "developer" if self._uses_functiongemma() else "system"
+        self._system_role = "system"
         self.context_manager = ContextManager(
             {
                 "agent_id": self.ctx.agent_id,
@@ -298,7 +294,7 @@ class FunctionGemmaRunner:
     async def run(self) -> AgentResult:
         """Execute the model loop until a result is produced."""
         await self.context_manager.pull_hub_context()
-        message = await self._call_model(phase="model_load", tool_choice=self._tool_choice_for_turn(1))
+        message = await self._call_model(phase="model_load", tool_choice=self.runner_config.tool_choice)
 
         while self.turn_count < self.definition.max_turns:
             self.turn_count += 1
@@ -311,10 +307,9 @@ class FunctionGemmaRunner:
                 if result is not None:
                     return result
                 await self.context_manager.pull_hub_context()
-                next_turn = self.turn_count + 1
                 message = await self._call_model(
                     phase="loop",
-                    tool_choice=self._tool_choice_for_turn(next_turn),
+                    tool_choice=self.runner_config.tool_choice,
                 )
                 continue
             for tool_call in tool_calls:
@@ -339,8 +334,10 @@ class FunctionGemmaRunner:
                     )
                 )
             await self.context_manager.pull_hub_context()
-            next_turn = self.turn_count + 1
-            message = await self._call_model(phase="loop", tool_choice=self._tool_choice_for_turn(next_turn))
+            message = await self._call_model(
+                phase="loop",
+                tool_choice=self.runner_config.tool_choice,
+            )
 
         raise AgentError(
             node_id=self.node.node_id,
@@ -373,7 +370,6 @@ class FunctionGemmaRunner:
         self.event_emitter.emit(payload)
         if tool_choice is None:
             tool_choice = self.runner_config.tool_choice
-        tool_choice = self._normalize_tool_choice(tool_choice)
 
         # Filter out system-injected inputs from the schema sent to the model
         raw_tools = self.definition.tool_schemas
@@ -526,40 +522,8 @@ class FunctionGemmaRunner:
                     function["arguments"] = json.dumps(arguments, ensure_ascii=False)
         return cast(ChatCompletionMessageParam, payload)
 
-    def _tool_choice_for_turn(self, next_turn: int) -> Any:
-        tool_choice = self._normalize_tool_choice(self.runner_config.tool_choice)
-        if next_turn == 1:
-            initial_choice = self._initial_tool_choice(tool_choice)
-            if initial_choice is not None:
-                return initial_choice
-        return tool_choice
-
-    def _initial_tool_choice(self, tool_choice: Any) -> Any | None:
-        if not self._uses_functiongemma():
-            return None
-        if tool_choice != "auto":
-            return None
-        for tool in self.definition.tools:
-            name = tool.name
-            if name != SUBMIT_RESULT_TOOL:
-                return {"type": "function", "function": {"name": name}}
-        return None
-
-    def _normalize_tool_choice(self, tool_choice: Any) -> Any:
-        if self._uses_functiongemma() and tool_choice == "required":
-            return "auto"
-        return tool_choice
-
     def _build_tool_response_content(self, tool_name: str, result_content: Any) -> str:
-        if not self._uses_functiongemma():
-            return result_content if isinstance(result_content, str) else json.dumps(result_content)
-
-        parsed = self._parse_tool_result_content(result_content)
-        if isinstance(parsed, dict) and set(parsed.keys()) == {"raw_output"}:
-            response_value: Any = parsed["raw_output"]
-        else:
-            response_value = parsed
-        return json.dumps({"name": tool_name, "response": response_value}, ensure_ascii=False)
+        return result_content if isinstance(result_content, str) else json.dumps(result_content)
 
     def _relative_node_path(self) -> str:
         try:
@@ -577,35 +541,8 @@ class FunctionGemmaRunner:
         }
 
     async def _handle_no_tool_calls(self, message: ChatCompletionMessage) -> AgentResult | None:
-        """Handle a model response with no structured tool_calls.
-
-        Attempts to parse tool calls from JSON content. If parsing fails
-        and tool_choice is "required", raises an error. Otherwise, treats
-        the content as a final result.
-        """
+        """Return a success result when no tool calls are present."""
         content = message.content or ""
-
-        parsed_call = parse_tool_call_from_content(content)
-        if parsed_call is not None:
-            return await self._dispatch_parsed_tool_call(parsed_call)
-
-        if self.runner_config.tool_choice == "required":
-            raise AgentError(
-                node_id=self.node.node_id,
-                operation=self.definition.name,
-                phase="loop",
-                error_code=AGENT_003,
-                message=f"Model stopped without calling {SUBMIT_RESULT_TOOL}",
-            )
-
-        if content:
-            try:
-                parsed = json.loads(content)
-                if isinstance(parsed, dict):
-                    return self._build_submit_result(parsed)
-            except json.JSONDecodeError:
-                pass
-
         result_data = {
             "status": AgentStatus.SUCCESS,
             "workspace_id": self.workspace_id,
@@ -615,78 +552,6 @@ class FunctionGemmaRunner:
             "error": None,
         }
         return AgentResult.model_validate(result_data)
-
-    async def _dispatch_parsed_tool_call(self, parsed_call: ParsedToolCall) -> AgentResult | None:
-        """Dispatch a tool call parsed from JSON content.
-
-        This method handles tool calls that were extracted from message.content
-        instead of message.tool_calls. It synthesizes the necessary fields and
-        delegates to the standard dispatch flow.
-        """
-        tool_name = parsed_call.name
-        arguments = parsed_call.arguments
-
-        if tool_name == SUBMIT_RESULT_TOOL:
-            return self._build_submit_result(arguments)
-
-        self.event_emitter.emit(
-            {
-                "event": EventName.TOOL_CALL,
-                "agent_id": self.workspace_id,
-                "node_id": self.node.node_id,
-                "operation": self.definition.name,
-                "tool_name": tool_name,
-                "phase": "execution",
-                "status": EventStatus.OK,
-                "parsed_from_content": True,
-            }
-        )
-
-        tool_inputs = {**self._base_tool_inputs(), **arguments}
-
-        tool_def = self.definition.tools_by_name.get(tool_name)
-        if tool_def is None:
-            tool_error = {"error": f"Unknown tool: {tool_name}"}
-            self._emit_tool_result(tool_name, tool_error)
-            tool_message_content = self._build_tool_response_content(tool_name, tool_error)
-            self.messages.append(
-                cast(
-                    ChatCompletionMessageParam,
-                    {
-                        "role": "tool",
-                        "tool_call_id": parsed_call.id,
-                        "name": tool_name,
-                        "content": tool_message_content,
-                    },
-                )
-            )
-            return None
-
-        if self.grail_executor is not None and self.grail_dir is not None:
-            tool_result_content = await self._dispatch_tool_grail(
-                tool_name,
-                tool_def,
-                tool_inputs,
-            )
-        else:
-            tool_result_content = json.dumps({"error": "No execution backend configured"})
-
-        self._apply_tool_result_event(tool_name, tool_result_content)
-
-        tool_message_content = self._build_tool_response_content(tool_name, tool_result_content)
-        self.messages.append(
-            cast(
-                ChatCompletionMessageParam,
-                {
-                    "role": "tool",
-                    "tool_call_id": parsed_call.id,
-                    "name": tool_name,
-                    "content": tool_message_content,
-                },
-            )
-        )
-
-        return None
 
     def _apply_tool_result_event(self, tool_name: str, result_content: Any) -> None:
         data = self._parse_tool_result_content(result_content)
@@ -955,7 +820,8 @@ class FunctionGemmaRunner:
             try:
                 args = json.loads(arguments) if arguments else {}
             except json.JSONDecodeError:
-                args = {}
+                parsed = parse_functiongemma_arguments(arguments)
+                args = parsed if parsed is not None else {}
         if not isinstance(args, dict):
             args = {}
         tool_inputs = {**self._base_tool_inputs(), **args}
