@@ -4,67 +4,61 @@ Date: 2026-02-21
 
 This document explores a two-part refactor:
 
-1. Extract a standalone vLLM runtime library with pluggable model integrations.
-2. Refactor Remora to depend on that library and simplify its architecture.
+1. Extract a standalone structured tool orchestration core that integrates XGrammar + `.pym` execution and owns vLLM configuration.
+2. Refactor Remora to depend on this core and simplify its architecture.
 
-The goal is to reduce developer cognitive overhead, clarify boundaries, and make Remora easier to compose into custom agent workflows.
+The goal is to reduce developer cognitive overhead, clarify responsibilities, and make Remora easier to compose into custom agent workflows.
 
 ---
 
-## Part 1: New Runtime Library Proposal
+## Part 1: Structured Tool Orchestration Core
 
-### 1.1 Goals
+### 1.1 Concept and Goals
 
-- Provide an opinionated, high-level runtime for vLLM that supports XGrammar EBNF structured outputs.
-- Make model-specific behavior pluggable (prompt format, tool-call parsing, grammar strategy, default options).
-- Offer a clean, stable Python API that Remora and other projects can depend on.
-- Keep the surface area narrow: “run a model with tools + grammar, get tool calls + text.”
+This new library is not a generic “model runtime.” Instead, it is an opinionated core for **structured tool execution**:
 
-### 1.2 Recommended Packaging
+- Guarantees model output format via XGrammar.
+- Parses tool calls and executes them via `.pym` scripts by default.
+- Allows alternative tool backends when needed.
+- Owns vLLM configuration defaults and schema.
+- Exposes a small API centered on “run prompt + tools → tool calls + results.”
 
-- Package name: `remora-runtime` or `remora-vllm-runtime`.
+The emphasis is on turning a model into a reliable tool-call generator and executor.
+
+### 1.2 Packaging Proposal
+
+- Package name: `remora-toolcore` or `remora-structured-tools`.
 - Optional extras:
-  - `remora-runtime[vllm]` for server management.
-  - `remora-runtime[xgrammar]` for grammar validation helpers.
-  - `remora-runtime[harness]` for optional `.pym` harness integration.
+  - `remora-toolcore[vllm]` for server launcher helpers.
+  - `remora-toolcore[xgrammar]` for grammar validation utilities.
 
-### 1.3 Core Capabilities
-
-**Runtime client API**
-
-- Single, opinionated entry point for model execution.
-- Encapsulates grammar enforcement, tool schemas, and model-specific quirks.
-
-Example API sketch:
+### 1.3 Core API Sketch
 
 ```python
-from remora_runtime import RuntimeClient, RuntimeConfig
-from remora_runtime.plugins import FunctionGemmaPlugin
+from remora_toolcore import ToolKernel, KernelConfig
+from remora_toolcore.plugins import FunctionGemmaPlugin
 
-client = RuntimeClient(
-    config=RuntimeConfig(model="function-gemma", base_url="http://localhost:8000"),
+kernel = ToolKernel(
+    config=KernelConfig(
+        model="function-gemma",
+        base_url="http://localhost:8000",
+    ),
     plugin=FunctionGemmaPlugin(grammar_strategy="permissive"),
 )
 
-result = await client.run(
+result = await kernel.run(
     prompt="Summarize this file...",
     tools=tool_schemas,
 )
 
 print(result.text)
 print(result.tool_calls)
+print(result.tool_results)
 ```
 
-**Plugin system**
+### 1.4 Plugin System (Model-Specific Behavior)
 
-- Model behaviors are isolated in plugins.
-- Plugins define how to:
-  - Build the chat prompt format
-  - Choose tool-choice strategy
-  - Parse tool calls
-  - Provide default grammar strategy
-
-Example plugin protocol:
+Plugins define model- and grammar-specific behavior:
 
 ```python
 class ModelPlugin(Protocol):
@@ -76,10 +70,27 @@ class ModelPlugin(Protocol):
     def parse_response(self, response: dict) -> ModelResult: ...
 ```
 
-**Grammar strategies**
+The core owns the orchestration; plugins handle model quirks.
 
-- Grammar builder registry.
-- EBNF strategies named and versioned.
+### 1.5 Tool Backends (Default `.pym` Executor)
+
+The core should ship with a default `.pym` tool backend, but allow alternates:
+
+```python
+class ToolBackend(Protocol):
+    async def execute(self, tool_call: ToolCall, inputs: dict) -> ToolResult: ...
+```
+
+**Default backend**: `.pym` execution with process isolation and input shaping.
+
+**Alternate backends** (optional):
+- Direct Python function registry
+- RPC or sandboxed runner
+- External tool service
+
+This keeps `.pym` as the first-class experience without blocking future needs.
+
+### 1.6 Grammar Strategy Registry
 
 ```python
 GRAMMAR_STRATEGIES = {
@@ -89,90 +100,199 @@ GRAMMAR_STRATEGIES = {
 }
 ```
 
-**Server management**
+The core decides when to apply grammar, caching, and tool-choice strategy.
 
-- Optional server launcher and health checks.
-- Designed to be opinionated: “run this model with these settings.”
+### 1.7 vLLM Configuration Ownership
+
+The core owns vLLM defaults and configuration schema, but does not force orchestration.
+Remora can load and pass configuration through:
 
 ```python
-from remora_runtime.server import VllmServer
+from remora_toolcore import VllmConfig
 
-server = VllmServer(model="function-gemma", port=8000)
-server.start()
-server.wait_until_healthy()
+config = VllmConfig(
+    model="function-gemma",
+    dtype="bfloat16",
+    max_model_len=4096,
+)
 ```
 
-### 1.4 Optional Harness Integration
+**Optional**: a lightweight server helper that Remora can call, but not required.
 
-The `.pym` harness and execution model are unique to Remora and might be better kept in Remora, but there are two viable options:
+### 1.8 Concrete Data Contracts (Sketch)
 
-**Option A: Keep harness in Remora (recommended)**
+**Tool and result types**
 
-- Runtime stays generic and focused on model interaction.
-- Remora stays the place for Grail scripts and tool execution.
-- Lower coupling and a clearer boundary.
+```python
+@dataclass(frozen=True)
+class ToolCall:
+    name: str
+    arguments: dict[str, Any]
+    call_id: str | None = None
 
-**Option B: Put harness in runtime as an optional extra**
+@dataclass(frozen=True)
+class ToolResult:
+    name: str
+    output: dict[str, Any] | str
+    call_id: str | None = None
+    is_error: bool = False
+```
 
-- Makes the runtime more opinionated and Remora-like.
-- Might help other projects that want to reuse `.pym` tools.
-- Increases complexity and surface area of runtime.
+**Model response**
 
-Recommendation: keep harness in Remora, but define a clean adapter interface so Remora can use the runtime without leaking tool-execution details into it.
+```python
+@dataclass(frozen=True)
+class ModelResult:
+    text: str
+    tool_calls: list[ToolCall]
+```
 
-### 1.5 Capability Matrix
+**Kernel run result**
 
-| Capability | Runtime Library | Remora |
-|------------|------------------|--------|
+```python
+@dataclass(frozen=True)
+class KernelResult:
+    text: str
+    tool_calls: list[ToolCall]
+    tool_results: list[ToolResult]
+```
+
+**Kernel configuration**
+
+```python
+@dataclass(frozen=True)
+class KernelConfig:
+    model: str
+    base_url: str
+    timeout_s: float = 60
+    max_retries: int = 2
+    vllm: VllmConfig | None = None
+```
+
+**Tool backend protocol**
+
+```python
+class ToolBackend(Protocol):
+    async def execute(
+        self,
+        tool_call: ToolCall,
+        inputs: dict[str, Any],
+    ) -> ToolResult: ...
+```
+
+**Model plugin protocol**
+
+```python
+class ModelPlugin(Protocol):
+    name: str
+
+    def build_messages(
+        self,
+        prompt: str,
+        system: str | None,
+        context: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]: ...
+
+    def tool_choice(self, tools: list[dict[str, Any]]) -> str | dict: ...
+
+    def grammar_strategy(self) -> str | None: ...
+
+    def parse_response(self, response: dict[str, Any]) -> ModelResult: ...
+```
+
+### 1.9 Capability Matrix
+
+| Capability | Tool Core | Remora |
+|------------|-----------|--------|
 | vLLM request/response | ✅ | ❌ |
-| Grammar generation | ✅ | ❌ |
-| Model prompt formats | ✅ | ❌ |
-| Tool call parsing | ✅ | ❌ |
-| vLLM server lifecycle | ✅ | ❌ |
-| `.pym` tool execution | ❌ | ✅ |
-| Tree-sitter discovery | ❌ | ✅ |
+| XGrammar enforcement | ✅ | ❌ |
+| Tool-call parsing | ✅ | ❌ |
+| `.pym` execution backend | ✅ | ❌ |
+| Alternate tool backends | ✅ | ❌ |
+| vLLM config schema | ✅ | ❌ |
 | Orchestration + events | ❌ | ✅ |
+| Tree-sitter discovery | ❌ | ✅ |
 | Context management | ❌ | ✅ |
+
+### 1.10 Open Questions, Options, and Recommendations
+
+- **Boundary pressure**
+  - Options:
+    - Keep events in Remora only and treat the core as a pure kernel.
+    - Add a small, optional callback interface in the core for progress updates.
+  - Recommendation: keep events in Remora; add optional callbacks only if needed.
+
+- **Plugin explosion**
+  - Options:
+    - Support a single “first‑class” plugin (FunctionGemma) in core, push others to contrib.
+    - Support 2–3 plugins with a strict compatibility matrix.
+  - Recommendation: ship FunctionGemma + one additional plugin to validate the interface.
+
+- **`.pym` portability**
+  - Options:
+    - Require POSIX + Python, document constraints.
+    - Add optional sandbox backends for Windows or containerized execution.
+  - Recommendation: start with current POSIX model, design the backend interface for future portability.
+
+- **Config ownership**
+  - Options:
+    - Core owns all vLLM config models and defaults.
+    - Core owns schema, Remora owns defaults.
+  - Recommendation: core owns schema and defaults; Remora overrides per workflow.
+
+- **Testing strategy**
+  - Options:
+    - Unit test plugins + tool core; integration tests only in Remora.
+    - Full end‑to‑end tests in core that start vLLM.
+  - Recommendation: unit tests in core, E2E in Remora to avoid heavy infra in core.
+
+- **Versioning**
+  - Options:
+    - Strict semver for core, Remora pins a compatible range.
+    - Loose compatibility with fast iteration.
+  - Recommendation: strict semver for core, Remora pins minor range.
 
 ---
 
-## Part 2: Remora Refactor Around the Runtime
+## Part 2: Remora Refactor Around the Core
 
 ### 2.1 Core Architecture Changes
 
 **Before (today)**
 
-- Remora owns vLLM request construction, grammar enforcement, and FunctionGemma-specific handling.
-- `runner.py` handles tool parsing + execution + prompt assembly + events.
-- Context manager is tightly coupled to the runner.
+- Remora owns model request formatting, grammar enforcement, and tool parsing.
+- `runner.py` mixes model interaction, tool dispatch, and event emission.
+- Context manager and runner are tightly coupled.
 
 **After (future)**
 
-- Remora delegates all model interactions to the runtime library.
-- `Runner` becomes a thin orchestration layer.
-- Model-specific details move into runtime plugins.
+- Remora delegates model interaction and tool execution to the core.
+- Remora focuses on orchestration, context, and developer UX.
+- Tool parsing and `.pym` execution logic are removed from Remora.
 
 ### 2.2 Module-Level Refactor Plan
 
 **New Remora dependencies**
 
-- `remora_runtime.RuntimeClient`
-- `remora_runtime.plugins.ModelPlugin`
-- `remora_runtime.server.VllmServer` (optional)
+- `remora_toolcore.ToolKernel`
+- `remora_toolcore.plugins.ModelPlugin`
+- `remora_toolcore.backends.ToolBackend` (optional override)
+- `remora_toolcore.VllmConfig`
 
 **Remora changes**
 
-- Replace `FunctionGemmaRunner` with `RuntimeRunner` that:
+- Replace `FunctionGemmaRunner` with `KernelRunner` that:
   - Builds prompt context
-  - Sends to runtime
-  - Dispatches tool calls
-  - Emits events
+  - Sends to the tool core
+  - Streams events
+  - Aggregates tool results
 
-- Delete or move all grammar/tool-choice/prompt-format logic out of Remora.
+- Remove all grammar/tool-choice/prompt-format logic from Remora.
+- Remove `.pym` execution code from Remora (now owned by core).
 
 ### 2.3 Before/After Developer Experience
 
-**Before: manual runner setup**
+**Before: Remora-owned tool execution**
 
 ```python
 from remora.runner import FunctionGemmaRunner
@@ -188,22 +308,21 @@ runner = FunctionGemmaRunner(
 result = await runner.run()
 ```
 
-**After: runtime-backed runner**
+**After: Tool core–backed runner**
 
 ```python
-from remora.runtime import RuntimeRunner
-from remora_runtime import RuntimeClient, RuntimeConfig
-from remora_runtime.plugins import FunctionGemmaPlugin
+from remora.runtime import KernelRunner
+from remora_toolcore import ToolKernel, KernelConfig
+from remora_toolcore.plugins import FunctionGemmaPlugin
 
-client = RuntimeClient(
-    config=RuntimeConfig(model="function-gemma", base_url="http://localhost:8000"),
+kernel = ToolKernel(
+    config=KernelConfig(model="function-gemma", base_url="http://localhost:8000"),
     plugin=FunctionGemmaPlugin(grammar_strategy="permissive"),
 )
 
-runner = RuntimeRunner(
-    runtime_client=client,
+runner = KernelRunner(
+    kernel=kernel,
     definition=definition,
-    tool_registry=tool_registry,
     node=node,
     workspace_id=workspace_id,
 )
@@ -211,18 +330,17 @@ runner = RuntimeRunner(
 result = await runner.run()
 ```
 
-**Before: implicit model choices**
+**Before: implicit model handling**
 
 ```python
-# Prompt formatting and tool choice are buried in FunctionGemmaRunner
+# Model formatting and tool parsing are buried in FunctionGemmaRunner
 runner = FunctionGemmaRunner(...)
 ```
 
-**After: explicit model plugin**
+**After: explicit plugin selection**
 
 ```python
-# Explicit model behavior via plugin
-client = RuntimeClient(..., plugin=FunctionGemmaPlugin())
+kernel = ToolKernel(..., plugin=FunctionGemmaPlugin())
 ```
 
 ### 2.4 Additional Simplifications Enabled
@@ -231,52 +349,40 @@ client = RuntimeClient(..., plugin=FunctionGemmaPlugin())
 
 - Split into small components:
   - `PromptBuilder`
-  - `ToolDispatcher`
   - `EventEmitter`
-  - `RuntimeRunner`
+  - `KernelRunner`
 
 **2) Context system simplification**
 
-- Convert to a single “recent actions” list by default.
+- Default to a single “recent actions” list.
 - Make hub integration opt-in.
 - Keep summarization optional.
 
-**3) Tool dispatch refactor**
+**3) Remove redundant tool parsing**
 
-- Extract to its own class with a clean interface:
-
-```python
-class ToolDispatcher:
-    async def dispatch(self, tool_call: ToolCall, inputs: dict) -> ToolResult: ...
-```
+- Tool parsing is owned by the tool core.
+- Remora no longer has duplicated parsing logic.
 
 **4) Event emission consolidation**
 
-- Replace multiple `_emit_*` methods with a small event builder.
-
-**5) Remove legacy and defensive code paths**
-
-- Delete tool parsing logic duplicated across runner methods.
-- Remove “no tool calls” fallback if grammar enforcement is the standard.
+- Replace multiple `_emit_*` methods with a generic emitter.
 
 ### 2.5 Developer Experience Goals
 
-- “Model interaction” is not a Remora concern.
-- Developers only need to understand:
-  - How to define tools and operations
-  - How to construct a `RuntimeClient`
-  - How to run Remora orchestration
+- Developers think in terms of “use Remora to orchestrate agents.”
+- Tool execution and structured outputs are handled by the core.
+- Remora remains a clean, composable orchestration layer.
 
-### 2.6 Migration Phases (high-level)
+### 2.6 Migration Phases (High-Level)
 
-1. Extract runtime library with a minimal plugin interface.
-2. Create a `RuntimeRunner` that replaces `FunctionGemmaRunner`.
-3. Delete FunctionGemma-specific grammar and prompt logic from Remora.
-4. Refactor context and tool execution layers for simplicity.
-5. Add simple integration tests for runtime + Remora interaction.
+1. Extract the tool core with `.pym` backend and plugin system.
+2. Create `KernelRunner` to replace `FunctionGemmaRunner`.
+3. Remove grammar/tool parsing and `.pym` execution from Remora.
+4. Simplify context and event emission logic.
+5. Add integration tests for Remora + tool core.
 
 ---
 
 ## Summary
 
-A standalone runtime library with a plugin system cleanly separates model-specific behavior from Remora’s orchestration and tool execution. This should reduce cognitive overhead by giving developers a smaller, more consistent surface area to learn, while making it easy to adopt new models and grammar strategies. The most important design decision is keeping the runtime’s API small and opinionated, with Remora retaining the harness/tool execution pieces.
+A standalone structured tool orchestration core provides a clear contract: enforce grammar, parse tool calls, and execute `.pym` tools by default. Remora then becomes a pure orchestration layer that depends on this core. This makes the system easier to reason about, reduces cognitive overhead, and keeps model- and tool-specific logic out of Remora’s main codebase.
