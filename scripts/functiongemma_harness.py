@@ -153,7 +153,7 @@ async def _run_variant(
     requests_per_variant: int,
     executor: ProcessIsolatedExecutor,
     event_emitter: EventEmitter,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, list[str]]:
     semaphore = asyncio.Semaphore(concurrency)
     tasks = [
         _run_once(
@@ -174,7 +174,8 @@ async def _run_variant(
     ok_count = sum(1 for result in results if result.ok)
     tool_count = sum(1 for result in results if result.tool_called)
     error_count = len(results) - ok_count
-    return ok_count, tool_count, error_count
+    error_samples = sorted({result.error for result in results if result.error})[:3]
+    return ok_count, tool_count, error_count, error_samples
 
 
 async def _run_all(
@@ -186,6 +187,7 @@ async def _run_all(
     concurrency: int,
     requests_per_variant: int,
     include_tool_guide: bool,
+    use_grammar: bool,
 ) -> None:
     config = load_config(config_path)
     definition = load_subagent_definition(definition_path, config.agents_dir)
@@ -196,6 +198,7 @@ async def _run_all(
             "temperature": temperature,
             "include_prompt_context": False,
             "include_tool_guide": include_tool_guide,
+            "use_grammar_enforcement": use_grammar,
         }
     )
     grail_dir = Path(".grail")
@@ -234,7 +237,7 @@ async def _run_all(
     start = time.monotonic()
 
     for prompt in PROMPT_VARIANTS:
-        ok_count, tool_count, error_count = await _run_variant(
+        ok_count, tool_count, error_count, error_samples = await _run_variant(
             definition,
             config,
             runner_config,
@@ -251,6 +254,10 @@ async def _run_all(
         typer.echo(f"Prompt: {prompt}")
         typer.echo(f"Tool calls: {tool_count}/{requests_per_variant} ({success_rate:.1f}%)")
         typer.echo(f"OK responses: {ok_count} | Errors: {error_count}")
+        if error_samples:
+            typer.echo("Sample errors:")
+            for error in error_samples:
+                typer.echo(f"- {error}")
 
     elapsed = time.monotonic() - start
     typer.echo("-")
@@ -280,6 +287,11 @@ def main(
     concurrency: int = typer.Option(12, help="Max concurrent requests."),
     requests_per_variant: int = typer.Option(20, help="Requests per prompt."),
     include_tool_guide: bool = typer.Option(False, help="Include a compact tool guide in the system prompt."),
+    use_grammar: bool = typer.Option(
+        False,
+        "--use-grammar",
+        help="Use XGrammar structured outputs for guaranteed tool call format.",
+    ),
 ) -> None:
     """Run a high-concurrency FunctionGemma tool-call sweep via Remora."""
     asyncio.run(
@@ -292,6 +304,7 @@ def main(
             concurrency,
             requests_per_variant,
             include_tool_guide,
+            use_grammar,
         )
     )
 

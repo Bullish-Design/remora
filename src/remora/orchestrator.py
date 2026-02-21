@@ -322,15 +322,16 @@ class Coordinator:
                     cache_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
                     workspace_path = cache_root / "workspaces" / ctx.agent_id
                     workspace_path.mkdir(parents=True, exist_ok=True)
+                    workspace_db = workspace_path / "workspace.db"
 
-                    runner.workspace_root = workspace_path
-                    runner.stable_root = Path.cwd()
+                    runner.workspace_root = workspace_db
+                    runner.stable_root = workspace_db
 
                     # Track workspace via cache for lifecycle management
                     cache_key = ctx.agent_id
                     ws = await self._workspace_cache.get(cache_key)
                     if ws is None:
-                        ws = await Fsdantic.open(path=str(workspace_path / "workspace.db"))
+                        ws = await Fsdantic.open(path=str(workspace_db))
                         await self._workspace_cache.put(cache_key, ws)
 
                     ctx.transition(RemoraAgentState.EXECUTING)

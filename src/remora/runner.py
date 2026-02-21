@@ -22,6 +22,7 @@ from remora.context.summarizers import get_default_summarizers
 from remora.discovery import CSTNode
 from remora.events import EventEmitter, EventName, EventStatus, NullEventEmitter
 from remora.errors import AGENT_002, AGENT_003, AGENT_004
+from remora.grammar import build_functiongemma_grammar
 from remora.results import AgentResult, AgentStatus
 from remora.subagent import SUBMIT_RESULT_TOOL, SubagentDefinition
 from remora.tool_parser import ParsedToolCall, parse_tool_call_from_content
@@ -393,10 +394,22 @@ class FunctionGemmaRunner:
 
             tools_payload.append(tool_copy)
 
-        self._emit_tool_debug("model_tools_before", tool_choice)
+        extra_body: dict[str, Any] | None = None
+        effective_tool_choice: Any = tool_choice
+        if self.runner_config.use_grammar_enforcement and tools_payload:
+            grammar = build_functiongemma_grammar(tools_payload)
+            extra_body = {
+                "structured_outputs": {
+                    "type": "grammar",
+                    "grammar": grammar,
+                }
+            }
+            effective_tool_choice = "none"
+
+        self._emit_tool_debug("model_tools_before", effective_tool_choice)
         self._emit_request_debug(
             model=self._model_target,
-            tool_choice=tool_choice,
+            tool_choice=effective_tool_choice,
             tools=tools_payload,
             messages=prompt_messages,
         )
@@ -413,9 +426,10 @@ class FunctionGemmaRunner:
                 model=self._model_target,
                 messages=cast(list[ChatCompletionMessageParam], prompt_messages),
                 tools=cast(list[ChatCompletionToolParam], tools_payload),
-                tool_choice=cast(Any, tool_choice),
+                tool_choice=cast(Any, effective_tool_choice),
                 max_tokens=self.runner_config.max_tokens,
                 temperature=self.runner_config.temperature,
+                extra_body=extra_body,
             )
 
         try:
@@ -424,7 +438,7 @@ class FunctionGemmaRunner:
                 retry_exceptions=(APIConnectionError, APITimeoutError),
             )
             request_id = getattr(response, "id", None)
-        except Exception as exc:
+        except (APIConnectionError, APITimeoutError) as exc:
             self._emit_model_response(
                 start,
                 phase=phase,
@@ -439,9 +453,39 @@ class FunctionGemmaRunner:
                 error_code=AGENT_002,
                 message=f"Cannot reach vLLM server at {self.server_config.base_url}",
             ) from exc
+        except Exception as exc:
+            self._emit_model_response(
+                start,
+                phase=phase,
+                request_id=request_id,
+                status=EventStatus.ERROR,
+                error=str(exc),
+            )
+            raise AgentError(
+                node_id=self.node.node_id,
+                operation=self.definition.name,
+                phase=phase,
+                error_code=AGENT_003,
+                message=f"Model request failed: {exc}",
+            ) from exc
+        if response is None or not getattr(response, "choices", None):
+            self._emit_model_response(
+                start,
+                phase=phase,
+                request_id=request_id,
+                status=EventStatus.ERROR,
+                error="Model response missing choices.",
+            )
+            raise AgentError(
+                node_id=self.node.node_id,
+                operation=self.definition.name,
+                phase=phase,
+                error_code=AGENT_003,
+                message="Model response missing choices; check structured output backend.",
+            )
         message = response.choices[0].message
         response_text = message.content or ""
-        self._emit_tool_debug("model_tools_after", tool_choice, request_id=request_id)
+        self._emit_tool_debug("model_tools_after", effective_tool_choice, request_id=request_id)
         self._emit_model_response(
             start,
             phase=phase,

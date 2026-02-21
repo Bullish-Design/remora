@@ -52,7 +52,11 @@ def _run_in_child(
                 # Here we map them both to workspace_path for simplicity in Phase 4.
                 # TODO: Pass distinct stable_path if needed.
                 agent_fs = await Fsdantic.open(path=workspace_path)
-                stable_fs = await Fsdantic.open(path=(stable_path or workspace_path))
+                resolved_stable_path = stable_path or workspace_path
+                stable_fs = agent_fs
+                reuse_workspace = resolved_stable_path == workspace_path
+                if not reuse_workspace:
+                    stable_fs = await Fsdantic.open(path=resolved_stable_path)
                 try:
                     externals = create_remora_externals(
                         agent_id=agent_id,
@@ -82,7 +86,8 @@ def _run_in_child(
                         return {"error": True, "code": "GRAIL", "message": str(exc)}
                 finally:
                     await agent_fs.close()
-                    await stable_fs.close()
+                    if not reuse_workspace:
+                        await stable_fs.close()
             except Exception as exc:
                 return {"error": True, "code": "INTERNAL", "message": f"{type(exc).__name__}: {exc}"}
 

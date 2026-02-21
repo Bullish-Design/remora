@@ -44,6 +44,7 @@ runner:
   max_tokens: 4096
   temperature: 0.1
   tool_choice: "auto"  # "required" | "auto" | "none"
+  use_grammar_enforcement: false
 
 cairn:
   command: cairn

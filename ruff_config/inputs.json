@@ -1,0 +1,10 @@
+{
+  "inputs": [
+    {
+      "name": "noop",
+      "type": "bool",
+      "required": false,
+      "default": false
+    }
+  ]
+}
