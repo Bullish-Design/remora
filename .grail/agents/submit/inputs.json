@@ -1,44 +1,32 @@
 {
   "inputs": [
     {
-      "name": "node_text_input",
-      "type": "str | None",
-      "required": true,
-      "default": null
-    },
-    {
-      "name": "node_text",
-      "type": "str | None",
-      "required": true,
-      "default": null
-    },
-    {
-      "name": "target_file_input",
-      "type": "str | None",
-      "required": true,
-      "default": null
-    },
-    {
-      "name": "target_file",
-      "type": "str | None",
-      "required": true,
-      "default": null
-    },
-    {
-      "name": "workspace_id",
-      "type": "str | None",
-      "required": true,
-      "default": null
-    },
-    {
       "name": "summary",
       "type": "str",
       "required": true,
       "default": null
     },
     {
+      "name": "issues_fixed",
+      "type": "int",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "issues_remaining",
+      "type": "int",
+      "required": true,
+      "default": null
+    },
+    {
       "name": "changed_files",
       "type": "list[str]",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "workspace_id",
+      "type": "str | None",
       "required": true,
       "default": null
     }
