@@ -40,17 +40,35 @@ _FUNCTIONGEMMA_ARG_RE = re.compile(
 )
 
 
+def parse_functiongemma_arguments(raw_args: str) -> dict[str, Any] | None:
+    """Parse FunctionGemma-style arguments into a dict.
+
+    Args:
+        raw_args: Argument content inside the FunctionGemma braces.
+
+    Returns:
+        Parsed arguments dict, or None if not parseable.
+    """
+    if not raw_args:
+        return {}
+    matches = _FUNCTIONGEMMA_ARG_RE.findall(raw_args)
+    if not matches:
+        return None
+    arguments: dict[str, Any] = {}
+    for key, value in matches:
+        try:
+            arguments[key] = json.loads(value)
+        except json.JSONDecodeError:
+            arguments[key] = value
+    return arguments
+
+
 def _parse_functiongemma_call(content: str) -> ParsedToolCall | None:
     match = _FUNCTIONGEMMA_CALL_RE.search(content)
     if not match:
         return None
     name, raw_args = match.groups()
-    arguments: dict[str, Any] = {}
-    for key, value in _FUNCTIONGEMMA_ARG_RE.findall(raw_args or ""):
-        try:
-            arguments[key] = json.loads(value)
-        except json.JSONDecodeError:
-            arguments[key] = value
+    arguments = parse_functiongemma_arguments(raw_args or "") or {}
     return ParsedToolCall(name=name, arguments=arguments)
 
 

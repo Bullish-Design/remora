@@ -25,7 +25,7 @@ from remora.errors import AGENT_002, AGENT_003, AGENT_004
 from remora.grammar import build_functiongemma_grammar
 from remora.results import AgentResult, AgentStatus
 from remora.subagent import SUBMIT_RESULT_TOOL, SubagentDefinition
-from remora.tool_parser import ParsedToolCall, parse_tool_call_from_content
+from remora.tool_parser import ParsedToolCall, parse_functiongemma_arguments, parse_tool_call_from_content
 
 if TYPE_CHECKING:
     from remora.execution import SnapshotManager
@@ -503,7 +503,28 @@ class FunctionGemmaRunner:
         return message
 
     def _coerce_message_param(self, message: ChatCompletionMessage) -> ChatCompletionMessageParam:
-        return cast(ChatCompletionMessageParam, message.model_dump(exclude_none=True))
+        payload = message.model_dump(exclude_none=True)
+        tool_calls = payload.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    continue
+                function = tool_call.get("function")
+                if not isinstance(function, dict):
+                    continue
+                arguments = function.get("arguments")
+                if isinstance(arguments, str):
+                    try:
+                        json.loads(arguments)
+                    except json.JSONDecodeError:
+                        parsed = parse_functiongemma_arguments(arguments)
+                        if parsed is not None:
+                            function["arguments"] = json.dumps(parsed, ensure_ascii=False)
+                        else:
+                            function["arguments"] = "{}"
+                elif arguments is not None:
+                    function["arguments"] = json.dumps(arguments, ensure_ascii=False)
+        return cast(ChatCompletionMessageParam, payload)
 
     def _tool_choice_for_turn(self, next_turn: int) -> Any:
         tool_choice = self._normalize_tool_choice(self.runner_config.tool_choice)

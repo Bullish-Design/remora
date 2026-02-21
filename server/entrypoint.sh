@@ -20,6 +20,7 @@ vllm serve google/functiongemma-270m-it \
     --enable-auto-tool-choice \
     --tool-call-parser functiongemma \
     --chat-template /app/tool_chat_template_functiongemma.jinja \
+    --structured-outputs-config.backend xgrammar \
     --max-num-seqs 32 \
     --max-model-len 32768 \
     --enable-prefix-caching
