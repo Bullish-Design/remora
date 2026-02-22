@@ -19,6 +19,7 @@ from remora.discovery import CSTNode, TreeSitterDiscoverer
 from remora.events import EventEmitter, EventName, EventStatus, JsonlEventEmitter, NullEventEmitter
 from remora.orchestrator import Coordinator
 from remora.results import AgentResult, AgentStatus, AnalysisResults, NodeResult
+from remora.workspace_bridge import CairnWorkspaceBridge
 
 
 class WorkspaceState(Enum):
@@ -67,6 +68,13 @@ class RemoraAnalyzer:
         self._workspace_manager = workspace_manager or WorkspaceManager()
         self._discoverer_factory = discoverer_factory or TreeSitterDiscoverer
         self._coordinator_cls = coordinator_cls
+        
+        cache_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
+        self._bridge = CairnWorkspaceBridge(
+            workspace_manager=self._workspace_manager,
+            project_root=self.config.agents_dir.parent.resolve(),
+            cache_root=cache_root
+        )
 
     async def analyze(
         self,
@@ -149,10 +157,8 @@ class RemoraAnalyzer:
         targets = self._filter_workspaces(node_id, operation, WorkspaceState.PENDING)
 
         for key, info in targets:
-            # Call Cairn CLI to merge workspace
-            merge_result = self._cairn_merge(info.workspace_id)
-            if inspect.isawaitable(merge_result):
-                await merge_result
+            # Call bridge to merge workspace
+            await self._bridge.merge(info.workspace_id)
             info.state = WorkspaceState.ACCEPTED
             self._event_emitter.emit(
                 {
@@ -174,10 +180,8 @@ class RemoraAnalyzer:
         targets = self._filter_workspaces(node_id, operation, WorkspaceState.PENDING)
 
         for key, info in targets:
-            # Call Cairn CLI to discard workspace
-            discard_result = self._cairn_discard(info.workspace_id)
-            if inspect.isawaitable(discard_result):
-                await discard_result
+            # Call bridge to discard workspace
+            await self._bridge.discard(info.workspace_id)
             info.state = WorkspaceState.REJECTED
             self._event_emitter.emit(
                 {
@@ -293,61 +297,6 @@ class RemoraAnalyzer:
             results.append((key, info))
         return results
 
-    def _workspace_db_path(self, workspace_id: str) -> Path:
-        cache_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
-        return cache_root / "workspaces" / workspace_id / "workspace.db"
-
-    def _workspace_root(self, workspace_id: str) -> Path:
-        return self._workspace_db_path(workspace_id).parent
-
-    def _project_root(self) -> Path:
-        return self.config.agents_dir.parent.resolve()
-
-    @staticmethod
-    def _write_workspace_file(target_path: Path, content: bytes | str) -> None:
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(content, bytes):
-            target_path.write_bytes(content)
-        else:
-            target_path.write_text(content, encoding="utf-8")
-
-    @staticmethod
-    def _remove_workspace_dir(workspace_root: Path) -> None:
-        if workspace_root.exists():
-            shutil.rmtree(workspace_root)
-
-    async def _cairn_merge(self, workspace_id: str) -> None:
-        """Merge a workspace into stable."""
-        workspace_db = self._workspace_db_path(workspace_id)
-        if not workspace_db.exists():
-            raise FileNotFoundError(f"Workspace database not found: {workspace_db}")
-
-        project_root = self._project_root()
-        async with self._workspace_manager.open_workspace(workspace_db) as workspace:
-            changed_paths = await workspace.overlay.list_changes("/")
-            for overlay_path in changed_paths:
-                relative_path = overlay_path.lstrip("/")
-                target_path = (project_root / relative_path).resolve()
-                if project_root not in target_path.parents and target_path != project_root:
-                    raise ValueError(f"Refusing to write outside project root: {target_path}")
-                content = await workspace.files.read(overlay_path, mode="binary", encoding=None)
-                await asyncio.to_thread(self._write_workspace_file, target_path, content)
-
-            await workspace.overlay.reset()
-
-        await asyncio.to_thread(self._remove_workspace_dir, self._workspace_root(workspace_id))
-
-    async def _cairn_discard(self, workspace_id: str) -> None:
-        """Discard a workspace."""
-        workspace_db = self._workspace_db_path(workspace_id)
-        if not workspace_db.exists():
-            raise FileNotFoundError(f"Workspace database not found: {workspace_db}")
-
-        async with self._workspace_manager.open_workspace(workspace_db) as workspace:
-            await workspace.overlay.reset()
-
-        await asyncio.to_thread(self._remove_workspace_dir, self._workspace_root(workspace_id))
-
     def _apply_config_override(self, overrides: dict[str, Any]) -> RemoraConfig:
         """Apply config overrides and return new config."""
         # Serialize current config
@@ -368,137 +317,3 @@ class RemoraAnalyzer:
         return RemoraConfig.model_validate(data)
 
 
-class ResultPresenter:
-    """Presents analysis results in various formats."""
-
-    def __init__(self, format_type: str = "table"):
-        """Initialize presenter.
-
-        Args:
-            format_type: Output format - "table", "json", or "interactive"
-        """
-        self.format_type = format_type.lower()
-        self.console = Console()
-
-    def display(self, results: AnalysisResults) -> None:
-        """Display results in the configured format."""
-        if self.format_type == "table":
-            self._display_table(results)
-        elif self.format_type == "json":
-            self._display_json(results)
-        elif self.format_type == "interactive":
-            self._display_interactive(results)
-        else:
-            raise ValueError(f"Unknown format: {self.format_type}")
-
-    def _display_table(self, results: AnalysisResults) -> None:
-        """Display results as a table."""
-        # Summary
-        self.console.print(f"\n[bold]Remora Analysis Results[/bold]")
-        self.console.print(f"Total nodes: {results.total_nodes}")
-        self.console.print(f"Successful: {results.successful_operations}")
-        self.console.print(f"Failed: {results.failed_operations}")
-        self.console.print(f"Skipped: {results.skipped_operations}\n")
-
-        # Build operation columns
-        all_operations: set[str] = set()
-        for node in results.nodes:
-            all_operations.update(node.operations.keys())
-        operations = sorted(all_operations)
-
-        if not operations:
-            self.console.print("[yellow]No operations run[/yellow]")
-            return
-
-        # Create table
-        table = Table(show_header=True, header_style="bold magenta")
-        table.add_column("Node", style="cyan", no_wrap=True)
-        for op in operations:
-            table.add_column(op, justify="center")
-
-        # Add rows
-        for node in results.nodes:
-            row = [f"{node.file_path.name}::{node.node_name}"]
-            for op in operations:
-                if op in node.operations:
-                    result = node.operations[op]
-                    if result.status == AgentStatus.SUCCESS:
-                        symbol = "[green]✓[/green]"
-                    elif result.status == AgentStatus.FAILED:
-                        symbol = "[red]✗[/red]"
-                    else:
-                        symbol = "[yellow]-[/yellow]"
-                else:
-                    symbol = "[dim]-[/dim]"
-                row.append(symbol)
-            table.add_row(*row)
-
-        self.console.print(table)
-
-    def _display_json(self, results: AnalysisResults) -> None:
-        """Display results as JSON."""
-        import json
-
-        self.console.print(json.dumps(results.model_dump(mode="json"), indent=2))
-
-    def _display_interactive(self, results: AnalysisResults) -> None:
-        """Display results interactively."""
-        self._display_table(results)
-
-    async def interactive_review(
-        self,
-        analyzer: RemoraAnalyzer,
-        results: AnalysisResults,
-    ) -> None:
-        """Run interactive review session.
-
-        Args:
-            analyzer: RemoraAnalyzer instance
-            results: Analysis results to review
-        """
-        self.console.print("\n[bold]Interactive Review Mode[/bold]\n")
-        self.console.print("Commands: [a]ccept, [r]eject, [s]kip, [d]iff, [q]uit\n")
-
-        for node in results.nodes:
-            for op_name, result in node.operations.items():
-                if result.status != AgentStatus.SUCCESS:
-                    continue
-
-                self.console.print(f"\n[cyan]{node.file_path.name}::{node.node_name}[/cyan]")
-                self.console.print(f"  {op_name}: {result.summary}")
-
-                while True:
-                    choice = input("  [a/r/s/d/q]? ").lower().strip()
-
-                    if choice == "a":
-                        await analyzer.accept(node.node_id, op_name)
-                        self.console.print("  [green]✓ Accepted[/green]")
-                        break
-                    elif choice == "r":
-                        await analyzer.reject(node.node_id, op_name)
-                        self.console.print("  [red]✓ Rejected[/red]")
-                        break
-                    elif choice == "s":
-                        self.console.print("  [yellow]Skipped[/yellow]")
-                        break
-                    elif choice == "d":
-                        self.console.print("  [dim]Changes in workspace:[/dim]")
-                        workspace_id = analyzer._get_workspace_id(node.node_id, op_name)
-                        workspace_db = analyzer._workspace_db_path(workspace_id)
-                        if not workspace_db.exists():
-                            self.console.print("  [yellow]No workspace database found.[/yellow]")
-                            continue
-
-                        async def _show_changes() -> None:
-                            async with analyzer._workspace_manager.open_workspace(workspace_db) as workspace:
-                                changed_paths = await workspace.overlay.list_changes("/")
-                                for path in changed_paths:
-                                    self.console.print(f"    [green]modified/new:[/green] {path}")
-                                if not changed_paths:
-                                    self.console.print("    [yellow]No changes detected.[/yellow]")
-
-                        await _show_changes()
-                    elif choice == "q":
-                        return
-                    else:
-                        self.console.print("  [yellow]Invalid choice[/yellow]")

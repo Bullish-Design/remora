@@ -15,7 +15,8 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
-from remora.analyzer import RemoraAnalyzer, ResultPresenter
+from remora.analyzer import RemoraAnalyzer
+from remora.presenter import ResultPresenter
 from remora.config import ConfigError, RemoraConfig, load_config, serialize_config
 from remora.constants import DEFAULT_OPERATIONS
 from structured_agents import load_bundle
