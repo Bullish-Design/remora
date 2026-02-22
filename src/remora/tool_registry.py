@@ -71,7 +71,7 @@ class GrailToolRegistry:
         errors: list[str] = []
         for tool in tools:
             try:
-                script = grail.load(tool.pym, grail_dir=self.grail_root / "agents")
+                script = grail.load(tool.pym, grail_dir=self.grail_root)
             except Exception as exc:
                 errors.append(f"{tool.name}: failed to load: {exc}")
                 continue
@@ -90,7 +90,7 @@ class GrailToolRegistry:
 
     def _build_tool_schema(self, tool: ToolConfig) -> tuple[dict[str, Any], list[str]]:
         try:
-            script = grail.load(tool.pym, grail_dir=self.grail_root / "agents")
+            script = grail.load(tool.pym, grail_dir=self.grail_root)
         except Exception as exc:
             raise ToolRegistryError(AGENT_001, f"Failed to load Grail script {tool.pym}: {exc}") from exc
         check = script.check()
@@ -103,7 +103,7 @@ class GrailToolRegistry:
                 AGENT_001,
                 f"Grail check failed for {tool.pym}: {joined}",
             )
-        artifact_dir = self.grail_root / "agents" / script.name
+        artifact_dir = self.grail_root / script.name
         inputs = _load_inputs(artifact_dir / "inputs.json", tool.pym)
         parameters = _build_parameters(inputs, tool.inputs_override, tool.pym)
         return (

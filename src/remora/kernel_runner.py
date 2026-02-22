@@ -105,7 +105,7 @@ class KernelRunner:
         )
 
         backend_config = GrailBackendConfig(
-            grail_dir=self.config.cairn.home or Path.cwd(),
+            grail_dir=self.config.cairn.home or self.config.agents_dir,
             max_workers=self.config.cairn.pool_workers,
             timeout=float(self.config.cairn.timeout),
             limits={

@@ -127,8 +127,7 @@ def _resolve_paths(data: dict[str, Any], agents_dir: Path) -> dict[str, Any]:
 
 
 def _apply_tool_registry(definition: SubagentDefinition, agents_dir: Path, path: Path) -> None:
-    grail_root = agents_dir.parent / ".grail"
-    registry = GrailToolRegistry(grail_root)
+    registry = GrailToolRegistry(agents_dir)
     try:
         catalog = registry.build_tool_catalog(definition.tools)
         definition._tool_schemas = catalog.schemas
