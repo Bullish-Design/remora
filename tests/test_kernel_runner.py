@@ -7,6 +7,7 @@ import pytest
 
 from remora.kernel_runner import KernelRunner
 from remora.results import AgentStatus
+from remora.constants import TERMINATION_TOOL
 
 
 class TestKernelRunner:
@@ -64,13 +65,13 @@ model:
 
 initial_context:
   system_prompt: Test
-  user_template: "{{ node_text }}"
+  user_template: "{{{{ node_text }}}}"
 
 max_turns: 5
-termination_tool: submit_result
+termination_tool: {TERMINATION_TOOL}
 
 tools:
-  - name: submit_result
+  - name: {TERMINATION_TOOL}
     registry: grail
     description: Submit result
 
@@ -86,7 +87,7 @@ registries:
             mock_bundle.name = "test_agent"
             mock_bundle.manifest.model.adapter = None
             mock_bundle.max_turns = 5
-            mock_bundle.termination_tool = "submit_result"
+            mock_bundle.termination_tool = TERMINATION_TOOL
             mock_bundle.tool_schemas = []
             mock_bundle.get_plugin.return_value = MagicMock()
             mock_bundle.get_grammar_config.return_value = MagicMock()
@@ -118,11 +119,11 @@ model:
   plugin: function_gemma
 initial_context:
   system_prompt: Test
-  user_template: "{{ node_text }}"
+  user_template: "{{{{ node_text }}}}"
 max_turns: 5
-termination_tool: submit_result
+termination_tool: {TERMINATION_TOOL}
 tools:
-  - name: submit_result
+  - name: {TERMINATION_TOOL}
     registry: grail
     description: Submit result
 registries:
@@ -137,7 +138,7 @@ registries:
             mock_bundle.name = "test_agent"
             mock_bundle.manifest.model.adapter = None
             mock_bundle.max_turns = 5
-            mock_bundle.termination_tool = "submit_result"
+            mock_bundle.termination_tool = TERMINATION_TOOL
             mock_bundle.tool_schemas = []
             mock_bundle.get_plugin.return_value = MagicMock()
             mock_bundle.get_grammar_config.return_value = MagicMock()

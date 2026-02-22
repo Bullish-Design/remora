@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 from fsdantic import Fsdantic, Workspace
 
+from remora.constants import HUB_DB_NAME
+
 if TYPE_CHECKING:
     from remora.hub.models import NodeState
     from remora.hub.store import NodeStateStore
@@ -43,7 +45,7 @@ class HubClient:
         """Initialize the client.
 
         Args:
-            hub_db_path: Path to hub.db (default: auto-discover)
+            hub_db_path: Path to {HUB_DB_NAME} (default: auto-discover)
             project_root: Project root for ad-hoc indexing
         """
         self.hub_db_path = hub_db_path
@@ -186,7 +188,7 @@ class HubClient:
     def _discover_db_path(self) -> Path | None:
         current = Path.cwd()
         for parent in [current] + list(current.parents):
-            candidate = parent / ".remora" / "hub.db"
+            candidate = parent / ".remora" / HUB_DB_NAME
             if candidate.exists():
                 return candidate
         return None

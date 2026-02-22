@@ -18,6 +18,8 @@ from typing import Any, Awaitable, Callable, Literal
 
 from watchfiles import Change, awatch
 
+from remora.constants import CACHE_DIR
+
 logger = logging.getLogger(__name__)
 
 # Map watchfiles Change enum → human-readable string
@@ -33,7 +35,7 @@ DEFAULT_IGNORE_PATTERNS: list[str] = [
     ".jj",
     ".venv",
     "node_modules",
-    ".remora_cache",
+    CACHE_DIR,
     ".agentfs",
 ]
 

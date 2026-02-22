@@ -13,8 +13,9 @@ from pydantic import BaseModel, Field, PrivateAttr
 from remora.discovery import CSTNode
 from remora.errors import SubagentError as BaseSubagentError
 from remora.tool_registry import GrailToolRegistry, ToolRegistryError
+from remora.constants import TERMINATION_TOOL
 
-SUBMIT_RESULT_TOOL = "submit_result"
+SUBMIT_RESULT_TOOL = TERMINATION_TOOL
 
 
 class SubagentError(BaseSubagentError):

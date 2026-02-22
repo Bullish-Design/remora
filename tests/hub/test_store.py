@@ -7,13 +7,14 @@ import pytest
 from fsdantic import Fsdantic
 
 from remora.hub.models import FileIndex, NodeState
+from remora.constants import HUB_DB_NAME
 from remora.hub.store import NodeStateStore
 
 
 @pytest.fixture
 async def store(tmp_path: Path):
     """Create a temporary store for testing."""
-    db_path = tmp_path / "test_hub.db"
+    db_path = tmp_path / f"test_{HUB_DB_NAME}"
     workspace = await Fsdantic.open(path=str(db_path))
     store = NodeStateStore(workspace)
     yield store

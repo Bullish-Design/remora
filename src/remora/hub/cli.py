@@ -17,6 +17,7 @@ from pathlib import Path
 
 import click
 
+from remora.constants import HUB_DB_NAME
 from remora.hub.daemon import HubDaemon
 
 
@@ -36,7 +37,7 @@ def cli() -> None:
     "--db-path",
     type=click.Path(path_type=Path),
     default=None,
-    help="Path to hub.db (default: {project-root}/.remora/hub.db)",
+    help=f"Path to {HUB_DB_NAME} (default: {{project-root}}/.remora/{HUB_DB_NAME})",
 )
 @click.option(
     "--log-level",
@@ -88,7 +89,7 @@ def status(project_root: Path) -> None:
 
     from remora.hub.store import NodeStateStore
 
-    hub_path = project_root / ".remora" / "hub.db"
+    hub_path = project_root / ".remora" / HUB_DB_NAME
     pid_file = project_root / ".remora" / "hub.pid"
 
     if not hub_path.exists():

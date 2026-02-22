@@ -7,6 +7,7 @@ import pytest
 
 from tests.utils.grail_runtime import assert_artifacts, build_file_externals, run_script
 from tests.utils.tool_contract import assert_valid_tool_result
+from remora.constants import TERMINATION_TOOL
 
 pytestmark = pytest.mark.grail_runtime
 
@@ -130,7 +131,7 @@ def test_existing_fixtures_lists_files(tmp_path: Path) -> None:
 
 
 def test_submit_builds_agent_result(tmp_path: Path) -> None:
-    path = _script_path("agents/sample_data/tools/submit_result.pym")
+    path = _script_path(f"agents/sample_data/tools/{TERMINATION_TOOL}.pym")
     grail_dir = tmp_path / ".grail"
 
     result = run_script(
@@ -145,7 +146,7 @@ def test_submit_builds_agent_result(tmp_path: Path) -> None:
         grail_dir=grail_dir,
     )
 
-    assert_artifacts(grail_dir, "submit_result")
+    assert_artifacts(grail_dir, TERMINATION_TOOL)
     assert result["status"] == "success"
     assert result["workspace_id"] == "sample-123"
     assert result["details"]["fixtures_generated"] == 2

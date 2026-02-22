@@ -8,6 +8,7 @@ import yaml
 from remora.discovery import CSTNode, NodeType
 from remora.errors import AGENT_001
 from remora.subagent import SubagentError, load_subagent_definition
+from remora.constants import TERMINATION_TOOL
 
 
 def _write_subagent_yaml(agents_dir: Path, *, include_submit: bool = True) -> Path:
@@ -45,7 +46,7 @@ def _write_subagent_yaml(agents_dir: Path, *, include_submit: bool = True) -> Pa
     if include_submit:
         tools.append(
             {
-                "tool_name": "submit_result",
+                "tool_name": TERMINATION_TOOL,
                 "pym": "lint/tools/submit.pym",
                 "tool_description": "Submit the result.",
             }
@@ -133,6 +134,6 @@ def test_tools_by_name_lookup_returns_tool(tmp_path: Path) -> None:
     subagent_path = _write_subagent_yaml(agents_dir)
     definition = load_subagent_definition(subagent_path, agents_dir)
 
-    tool = definition.tools_by_name["submit_result"]
+    tool = definition.tools_by_name[TERMINATION_TOOL]
 
     assert tool.tool_description == "Submit the result."

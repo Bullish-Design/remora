@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from remora.config import RunnerConfig, ServerConfig
+from remora.constants import TERMINATION_TOOL
 from remora.discovery import CSTNode, NodeType
 from remora.orchestrator import RemoraAgentContext
 from remora.subagent import InitialContext, SubagentDefinition, ToolDefinition
@@ -33,7 +34,7 @@ def make_definition(
     if tools is None:
         tools = [
             ToolDefinition(
-                tool_name="submit_result",
+                tool_name=TERMINATION_TOOL,
                 pym=Path("submit.pym"),
                 tool_description="Submit the result.",
                 context_providers=[],

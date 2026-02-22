@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from remora.context.hub_client import HubClient
+from remora.constants import HUB_DB_NAME
 from remora.hub.daemon import HubDaemon
 from remora.hub.models import NodeState
 
@@ -173,7 +174,7 @@ async def test_end_to_end_indexing(tmp_path: Path) -> None:
     daemon_task = asyncio.create_task(daemon.run())
 
     client = HubClient(
-        hub_db_path=tmp_path / ".remora" / "hub.db",
+        hub_db_path=tmp_path / ".remora" / HUB_DB_NAME,
         project_root=tmp_path,
     )
 

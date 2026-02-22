@@ -8,6 +8,7 @@ import pytest
 
 from remora.analyzer import RemoraAnalyzer
 from remora.config import load_config
+from remora.constants import TERMINATION_TOOL
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.acceptance_mock]
 
@@ -69,7 +70,7 @@ async def test_docstring_scenario_with_mock(
         pattern=".*",
     )
     server.add_tool_call_response(
-        "submit_result",
+        TERMINATION_TOOL,
         {"summary": "Docstring written", "action": "updated", "changed_files": []},
     )
 

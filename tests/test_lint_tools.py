@@ -7,6 +7,7 @@ import pytest
 
 from tests.utils.grail_runtime import assert_artifacts, build_file_externals, run_script
 from tests.utils.tool_contract import assert_valid_tool_result
+from remora.constants import TERMINATION_TOOL
 
 pytestmark = pytest.mark.grail_runtime
 
@@ -117,7 +118,7 @@ def test_ruff_config_returns_empty_when_missing(tmp_path: Path) -> None:
 
 
 def test_submit_builds_agent_result(tmp_path: Path) -> None:
-    path = _script_path("agents/lint/tools/submit_result.pym")
+    path = _script_path(f"agents/lint/tools/{TERMINATION_TOOL}.pym")
     grail_dir = tmp_path / ".grail"
 
     result = run_script(
@@ -133,7 +134,7 @@ def test_submit_builds_agent_result(tmp_path: Path) -> None:
         grail_dir=grail_dir,
     )
 
-    assert_artifacts(grail_dir, "submit_result")
+    assert_artifacts(grail_dir, TERMINATION_TOOL)
     assert result["status"] == "success"
     assert result["workspace_id"] == "lint-123"
     assert result["details"]["issues_fixed"] == 2
@@ -142,7 +143,7 @@ def test_submit_builds_agent_result(tmp_path: Path) -> None:
 def test_lint_flow_updates_file(tmp_path: Path) -> None:
     run_linter_path = _script_path("agents/lint/tools/run_linter.pym")
     apply_fix_path = _script_path("agents/lint/tools/apply_fix.pym")
-    submit_path = _script_path("agents/lint/tools/submit_result.pym")
+    submit_path = _script_path(f"agents/lint/tools/{TERMINATION_TOOL}.pym")
 
     target = _write_sample(tmp_path)
 
@@ -185,7 +186,7 @@ def test_lint_flow_updates_file(tmp_path: Path) -> None:
 
     assert_artifacts(grail_dir, "run_linter")
     assert_artifacts(grail_dir, "apply_fix")
-    assert_artifacts(grail_dir, "submit_result")
+    assert_artifacts(grail_dir, TERMINATION_TOOL)
     assert_valid_tool_result(lint_result)
     assert_valid_tool_result(fix_result)
     assert lint_result["result"]["fixable_count"] == 1

@@ -17,6 +17,7 @@ from typing import Any, Literal
 
 from fsdantic import Fsdantic, Workspace
 
+from remora.constants import HUB_DB_NAME
 from remora.hub.models import FileIndex, HubStatus, NodeState
 from remora.hub.rules import ActionContext, ExtractSignatures, RulesEngine
 from remora.hub.store import NodeStateStore
@@ -45,11 +46,11 @@ class HubDaemon:
 
         Args:
             project_root: Root directory to watch
-            db_path: Path to hub.db (default: {project_root}/.remora/hub.db)
+            db_path: Path to {HUB_DB_NAME} (default: {{project_root}}/.remora/{HUB_DB_NAME})
             grail_executor: Grail script executor (optional)
         """
         self.project_root = project_root.resolve()
-        self.db_path = db_path or (self.project_root / ".remora" / "hub.db")
+        self.db_path = db_path or (self.project_root / ".remora" / HUB_DB_NAME)
         self.grail_executor = grail_executor
 
         self.workspace: Workspace | None = None

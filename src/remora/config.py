@@ -1,4 +1,15 @@
-"""Configuration management for Remora."""
+"""
+src/remora/config.py
+
+Remora Configuration Module.
+
+Configuration Precedence (Highest to Lowest):
+1. CLI Arguments (e.g., --max-turns 5)
+2. Operation-Specific Configs in remora.yaml (e.g., operations.lint.model_id)
+3. Global Setting in remora.yaml (e.g., server.default_adapter)
+4. Bundle Defaults (bundle.yaml in agent folder)
+5. Pydantic Default Values
+"""
 
 from __future__ import annotations
 
@@ -11,9 +22,10 @@ import warnings
 from urllib.parse import urlparse
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from remora.errors import ConfigurationError
+from remora.constants import CACHE_DIR
 DEFAULT_CONFIG_FILENAME = "remora.yaml"
 
 
@@ -102,7 +114,7 @@ class EventStreamConfig(BaseModel):
 
 class LlmLogConfig(BaseModel):
     enabled: bool = False
-    output: Path | None = None  # defaults to .remora_cache/llm_conversations.log
+    output: Path | None = None  # defaults to {CACHE_DIR}/llm_conversations.log
     include_full_prompts: bool = False
     max_content_lines: int = 100
 
@@ -118,7 +130,7 @@ class WatchConfig(BaseModel):
             ".jj",
             ".venv",
             "node_modules",
-            ".remora_cache",
+            CACHE_DIR,
             ".agentfs",
         ]
     )
@@ -147,6 +159,23 @@ class RemoraConfig(BaseModel):
     event_stream: EventStreamConfig = Field(default_factory=EventStreamConfig)
     llm_log: LlmLogConfig = Field(default_factory=LlmLogConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
+
+    @model_validator(mode='after')
+    def validate_and_resolve_precedence(self) -> "RemoraConfig":
+        # 1. Resolve cairn.home vs agents_dir overrides
+        # Ensure cairn has a home directory even if not explicitly provided, routing it 
+        # to a hidden folder inside the agents_dir.
+        if hasattr(self, 'cairn') and not self.cairn.home and hasattr(self, 'agents_dir') and self.agents_dir:
+            self.cairn.home = self.agents_dir / ".cairn"
+            
+        # 2. Model Adapter precedence
+        # For each operation, if it doesn't specify a model_id, inherit from server.default_adapter
+        if hasattr(self, 'operations') and hasattr(self, 'server'):
+            for op_name, op_config in self.operations.items():
+                if getattr(op_config, 'model_id', None) is None:
+                    op_config.model_id = self.server.default_adapter
+                    
+        return self
 
 
 def load_config(config_path: Path | None = None, overrides: dict[str, Any] | None = None) -> RemoraConfig:

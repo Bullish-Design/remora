@@ -8,6 +8,8 @@ from typing import Any
 
 from aiohttp import web
 
+from remora.constants import TERMINATION_TOOL
+
 
 @dataclass
 class MockResponse:
@@ -113,7 +115,7 @@ class MockVLLMServer:
                                     "id": "call_default",
                                     "type": "function",
                                     "function": {
-                                        "name": "submit_result",
+                                        "name": TERMINATION_TOOL,
                                         "arguments": json.dumps(
                                             {
                                                 "summary": "Mock completion",

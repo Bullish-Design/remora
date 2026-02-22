@@ -7,6 +7,7 @@ import pytest
 
 from remora.kernel_runner import KernelRunner
 from remora.results import AgentStatus
+from remora.constants import TERMINATION_TOOL
 
 
 class TestE2ERefactor:
@@ -34,14 +35,14 @@ initial_context:
   user_template: "Process: {{ node_text }}"
 
 max_turns: 5
-termination_tool: submit_result
+termination_tool: {TERMINATION_TOOL}
 
 tools:
   - name: analyze
     registry: grail
     description: Analyze code
 
-  - name: submit_result
+  - name: {TERMINATION_TOOL}
     registry: grail
     description: Submit result
     inputs_override:
@@ -97,7 +98,7 @@ registries:
                 mock_result = MagicMock()
                 mock_result.termination_reason = "termination_tool"
                 mock_result.final_tool_result = MagicMock()
-                mock_result.final_tool_result.name = "submit_result"
+                mock_result.final_tool_result.name = TERMINATION_TOOL
                 mock_result.final_tool_result.output = '{"status": "success", "summary": "Done"}'
                 mock_kernel.run.return_value = mock_result
                 mock_kernel.close = AsyncMock()
@@ -108,7 +109,7 @@ registries:
                     mock_bundle.name = "test_agent"
                     mock_bundle.manifest.model.adapter = None
                     mock_bundle.max_turns = 5
-                    mock_bundle.termination_tool = "submit_result"
+                    mock_bundle.termination_tool = TERMINATION_TOOL
                     mock_bundle.tool_schemas = []
                     mock_bundle.get_plugin.return_value = MagicMock()
                     mock_bundle.get_grammar_config.return_value = MagicMock()

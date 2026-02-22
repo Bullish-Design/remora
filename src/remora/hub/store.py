@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from fsdantic import Workspace, TypedKVRepository
 
+from remora.constants import HUB_DB_NAME
 from remora.hub.models import FileIndex, HubStatus, NodeState
 
 if TYPE_CHECKING:
@@ -28,10 +29,10 @@ class NodeStateStore:
     """FSdantic-backed storage for NodeState and FileIndex.
 
     Provides type-safe CRUD operations using TypedKVRepository.
-    All data is stored in a single AgentFS workspace (hub.db).
+    All data is stored in a single AgentFS workspace ({HUB_DB_NAME}).
 
     Usage:
-        workspace = await Fsdantic.open(path="hub.db")
+        workspace = await Fsdantic.open(path=HUB_DB_NAME)
         store = NodeStateStore(workspace)
 
         await store.set(node_state)

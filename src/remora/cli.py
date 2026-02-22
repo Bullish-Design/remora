@@ -18,6 +18,7 @@ from rich.table import Table
 from remora.analyzer import RemoraAnalyzer, ResultPresenter
 from remora.config import ConfigError, RemoraConfig, load_config, serialize_config
 from remora.errors import CONFIG_003
+from remora.constants import DEFAULT_OPERATIONS
 from remora.subagent import load_subagent_definition
 
 app = typer.Typer(help="Remora CLI.")
@@ -120,7 +121,7 @@ def analyze(
         help="Files or directories to analyze",
     ),
     operations: str = typer.Option(
-        "lint,test,docstring",
+        DEFAULT_OPERATIONS,
         "--operations",
         "-o",
         help="Comma-separated list of operations to run",
@@ -220,7 +221,7 @@ def watch(
         help="Directories to watch",
     ),
     operations: str = typer.Option(
-        "lint,test,docstring",
+        DEFAULT_OPERATIONS,
         "--operations",
         "-o",
         help="Comma-separated list of operations to run",
