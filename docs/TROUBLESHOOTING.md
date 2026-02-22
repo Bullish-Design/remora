@@ -4,78 +4,62 @@ This guide covers common failures, error codes, and where to look for diagnostic
 
 ## Quick Checks
 
-1. Verify your configuration:
-   - `remora config` to print the merged config.
-   - Ensure `agents_dir` points to the correct `agents/` directory.
-2. Confirm server reachability:
-   - Check `server.base_url` in `remora.yaml`.
-   - Ensure the vLLM server is reachable on your network.
-3. Enable event logging for more context:
-   - Set `event_stream.enabled: true` or `REMORA_EVENT_STREAM=true`.
-   - Output defaults to `~/.cache/remora/events.jsonl` (XDG cache respected).
+1. Verify configuration:
+   - Run `remora config` to inspect resolved values.
+   - Confirm `agents_dir` points to the bundle directory.
+2. Check inference server reachability:
+   - Validate `server.base_url` and network connectivity.
+3. Enable logs for more context:
+   - Set `event_stream.enabled: true` for JSONL events.
+   - Set `llm_log.enabled: true` for readable transcripts.
 
 ## Error Codes
 
-Remora uses structured error codes to make failures easier to diagnose.
+Remora uses structured error codes from `remora.errors`.
 
 | Code | Meaning | Typical Causes | Suggested Fix |
 | --- | --- | --- | --- |
-| `CONFIG_003` | Configuration file could not be loaded | Missing file or invalid YAML | Check path, validate YAML, run `remora config` |
-| `CONFIG_004` | Agents directory could not be found | `agents_dir` path is wrong | Update `agents_dir` or run from project root |
-| `DISC_001` | Discovery query pack not found | `query_pack` missing | Ensure `src/remora/queries` exists or set `query_dir` |
-| `DISC_004` | Source file parse failure | Invalid syntax or unreadable file | Fix syntax, rerun analysis |
-| `AGENT_001` | Subagent or tool registry error | Missing `.pym` or invalid tool schema | Check subagent YAML and tool scripts |
-| `AGENT_002` | Model server connection error | vLLM unreachable or timeout | Confirm server is running and reachable |
-| `AGENT_003` | Runner validation failure | Malformed `submit_result` payload | Check tool outputs and subagent definitions |
-| `AGENT_004` | Turn limit exceeded | Model loop never submitted result | Increase `runner.max_turns` or adjust prompts |
+| `CONFIG_001` | Missing/unreadable configuration | Bad path or permissions | Fix path, run `remora config` |
+| `CONFIG_003` | Config file could not be loaded | Invalid YAML | Validate YAML syntax |
+| `CONFIG_004` | Agents directory not found | `agents_dir` wrong | Fix path or run from repo root |
+| `DISC_001` | Query pack not found | Missing `.scm` files | Verify `src/remora/queries` or set `query_dir` |
+| `DISC_004` | Source file parse error | Syntax error | Fix file or exclude it |
+| `AGENT_001` | Bundle/tool validation error | Missing `bundle.yaml` or tool script | Check bundle layout |
+| `AGENT_002` | Model server connection error | vLLM unreachable | Verify server and base URL |
+| `AGENT_004` | Turn limit exceeded | Agent never terminated | Increase `runner.max_turns` or adjust prompts |
 
 ## Common Scenarios
 
-### Server Connection Failures
+### Bundle Not Found
 
 Symptoms:
-- Agent errors with `AGENT_002`.
-- Event stream shows `model_response` with `status=error`.
+- Warnings about missing bundles.
+- `AGENT_001` during initialization.
 
 Fixes:
-- Check `server.base_url` and network connectivity.
-- Increase `server.timeout` if responses are slow.
+- Ensure `operations.*.subagent` points to a directory with `bundle.yaml`.
+- Confirm tool scripts exist in `agents/<op>/tools`.
 
-### Missing Subagent Definitions
-
-Symptoms:
-- Warning: `Subagent definition missing`.
-- `AGENT_001` errors during initialization.
-
-Fixes:
-- Confirm `agents_dir` and `operations.*.subagent` paths.
-- Ensure subagent YAML files exist and are valid YAML.
-
-### Tool Execution Errors
-
-Symptoms:
-- Tool results with `error` fields.
-- `AGENT_003` on validation failure.
-
-Fixes:
-- Check the tool script for invalid JSON or missing fields.
-- Make sure the tool returns a valid `submit_result` payload when required.
-
-### Discovery Returns No Nodes
+### No Nodes Discovered
 
 Symptoms:
 - Empty results or `No operations run` output.
 
 Fixes:
-- Verify the `paths` you pass to `remora analyze`.
-- Confirm `discovery.language` and `query_pack` match available queries.
+- Verify the paths passed to `remora analyze`.
+- Confirm the query pack is available and matches the language.
+
+### Event Stream Empty
+
+Symptoms:
+- `remora-tui` shows no events.
+
+Fixes:
+- Ensure `event_stream.enabled` is true.
+- Verify the output path is writable.
 
 ## Logging and Diagnostics
 
-- Event stream: `event_stream.enabled`, output in `event_stream.output`.
-- LLM logs: `llm_log.enabled`, output in `llm_log.output`.
-- Control file: `event_stream.control_file` can toggle logging at runtime.
-
-Environment overrides:
-- `REMORA_EVENT_STREAM=true|false`
-- `REMORA_EVENT_STREAM_FILE=/path/to/events.jsonl`
+- Event stream output: `event_stream.output`.
+- Control file: `event_stream.control_file` (used by `remora-tui`).
+- LLM transcripts: `llm_log.output`.

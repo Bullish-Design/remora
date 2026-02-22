@@ -9,7 +9,6 @@ discovery:
 agents_dir: agents
 
 # vLLM server on your Tailscale network
-# vLLM server on your Tailscale network
 server:
   base_url: "http://remora-server:8000/v1"
   api_key: "EMPTY"
@@ -52,26 +51,34 @@ operations:
 
 runner:
   max_turns: 20
-  max_tokens: 512
+  max_tokens: 4096
   temperature: 0.1
-  tool_choice: "required"  # "required" | "auto" | "none"
+  tool_choice: "auto"  # "required" | "auto" | "none"
   max_history_messages: 50
 
 cairn:
-  # command: cairn  # Removed (using in-process execution)
   home: null
   max_concurrent_agents: 16
   timeout: 300
   pool_workers: 4
   limits_preset: "default"  # strict | default | permissive
   max_queue_size: 100
+  workspace_cache_size: 100
   # limits_override:
-  #   max_memory: "32mb"
+  #   max_memory_mb: 512
 
 event_stream:
   enabled: false
+  output: null
+  control_file: null
   include_payloads: true
   max_payload_chars: 4000
+
+llm_log:
+  enabled: false
+  output: null
+  include_full_prompts: false
+  max_content_lines: 100
 
 watch:
   extensions: [".py"]

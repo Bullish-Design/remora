@@ -189,10 +189,10 @@ Recommended approach:
 **Verification**
 
 - **Linux Dev Machine (client test):**
-  - `curl http://remora-server:8001/agents/lint/lint_subagent.yaml`
+  - `curl http://remora-server:8001/agents/lint/bundle.yaml`
 
 - **Windows Host (PowerShell):**
-  - `Invoke-WebRequest http://remora-server:8001/agents/lint/lint_subagent.yaml`
+  - `Invoke-WebRequest http://remora-server:8001/agents/lint/bundle.yaml`
 
 Confirm the response matches the source YAML file.
 

@@ -1,26 +1,28 @@
 # Test Writing Guidelines
 
 ## DO: Test Observable Behavior
-- Test public method return values
-- Test that correct events are emitted
-- Test that correct results are produced
-- Test error conditions via exceptions or error return values
+
+- Verify public method return values (`RemoraAnalyzer.analyze`, `Coordinator.process_node`).
+- Assert event payloads emitted by `EventEmitter` implementations.
+- Validate configuration merging and overrides.
+- Use `TreeSitterDiscoverer` to confirm node extraction.
 
 ## DON'T: Test Implementation Details
-- Avoid accessing private attributes (prefixed with `_`)
-- Avoid asserting exact internal data structures
-- Avoid counting exact method calls unless call count is the behavior
-- Avoid testing intermediate states
+
+- Avoid private attributes (prefixed with `_`).
+- Avoid asserting internal task scheduling or queue sizes.
+- Avoid coupling tests to internal logging output.
 
 ## Example: Testing Event Emission
 
 ```python
-# Good: Verify the event was emitted with expected data
-events = []
-runner.add_event_handler(lambda e: events.append(e))
-await runner.run()
-assert any(e.type == "tool_call" for e in events)
+# Good: verify an event was emitted
+emitted = []
+emitter = lambda payload: emitted.append(payload)
 
-# Bad: Check internal event queue state
-assert len(runner._event_queue) == 3
+# ... run a coordinator / kernel runner ...
+assert any(e["event"] == "tool_call" for e in emitted)
+
+# Bad: assert internal event buffer length
+# assert len(runner._event_queue) == 3
 ```

@@ -1,5 +1,5 @@
 {
-  "file": "/home/andrew/Documents/Projects/remora/agents/lint/context/ruff_config.pym",
+  "file": "/run/user/1000/pytest-of-andrew/pytest-23/test_lint_scenario_with_mock0/sample_project/agents/lint/context/ruff_config.pym",
   "valid": true,
   "errors": [],
   "warnings": [],

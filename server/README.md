@@ -1,7 +1,6 @@
 # Remora Inference Server (Quick Reference)
 
-vLLM running `google/functiongemma-270m-it`, exposed to your Tailscale network.
-For the full setup guide, see `docs/SERVER_SETUP.md`.
+This directory hosts the vLLM server stack used by Remora. It exposes an OpenAI-compatible API on your Tailscale network and optionally serves the `agents/` directory for bundle distribution.
 
 ## Prerequisites
 
@@ -31,10 +30,12 @@ Connecting to vLLM at http://remora-server:8000/v1...
 SUCCESS: Connection successful.
 ```
 
-## Agents Definitions
+## Agents Server (Optional)
+
+The optional `agents-server` container serves the `agents/` directory for remote clients.
 
 ```bash
-curl http://remora-server:8001/agents/lint/lint_subagent.yaml
+curl http://remora-server:8001/agents/lint/bundle.yaml
 ```
 
 ## Hot-load Adapters

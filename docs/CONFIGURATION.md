@@ -32,25 +32,31 @@ operations:
   lint:
     enabled: true
     auto_accept: false
-    subagent: lint/lint_subagent.yaml
+    subagent: lint
     priority: normal
   test:
     enabled: true
     auto_accept: false
-    subagent: test/test_subagent.yaml
+    subagent: test
     priority: high
   docstring:
     enabled: true
     auto_accept: false
-    subagent: docstring/docstring_subagent.yaml
+    subagent: docstring
     priority: normal
     style: google
+  sample_data:
+    enabled: false
+    auto_accept: false
+    subagent: sample_data
+    priority: low
 
 runner:
   max_turns: 20
   max_tokens: 4096
   temperature: 0.1
   tool_choice: auto
+  max_history_messages: 50
 
 cairn:
   home: null
@@ -94,18 +100,21 @@ watch:
 ## Top-Level Keys
 
 ### `agents_dir`
-Path to the `agents/` directory containing subagent definitions. Relative paths are resolved against the config file directory.
+
+Path to the `agents/` directory containing bundle definitions. Relative paths are resolved against the config file directory.
 
 ### `server`
-Settings for the vLLM/OpenAI-compatible server.
+
+Settings for the OpenAI-compatible inference server.
 
 - `base_url`: Server base URL.
-- `api_key`: API token (can be `EMPTY` for local servers).
+- `api_key`: API token (use `EMPTY` for local servers).
 - `timeout`: Request timeout in seconds.
 - `default_adapter`: Default model/adapter identifier.
-- `retry`: Retry policy for transient connection failures.
+- `retry`: Retry policy for transient failures (used by downstream tooling).
 
 ### `discovery`
+
 Tree-sitter discovery settings.
 
 - `language`: Language identifier (default `python`).
@@ -113,31 +122,35 @@ Tree-sitter discovery settings.
 - `query_dir`: Optional custom query directory; `null` uses built-in queries.
 
 ### `operations`
-Mapping of operation name → operation config. Additional keys are allowed and forwarded to the subagent.
+
+Mapping of operation name → operation config. Additional keys are allowed and forwarded to the bundle context.
 
 Common fields:
 - `enabled`: Enable/disable the operation.
 - `auto_accept`: Auto-merge successful workspaces.
-- `subagent`: Path to the subagent YAML relative to `agents_dir`.
+- `subagent`: Directory containing `bundle.yaml` (relative to `agents_dir`).
 - `model_id`: Optional adapter override.
 - `priority`: `low`, `normal`, or `high`.
 
 ### `runner`
-LLM runner settings.
+
+Model runner settings.
 
 - `max_turns`: Maximum turns before aborting.
 - `max_tokens`: Completion token cap.
 - `temperature`: Sampling temperature.
-- `tool_choice`: `auto` or `required`.
+- `tool_choice`: `auto`, `required`, or `none` (passed to structured-agents).
+- `max_history_messages`: Maximum conversation history retained by the kernel.
 
 ### `cairn`
-Execution/runtime settings.
 
-- `home`: Cairn cache directory (defaults to `~/.cache/remora`).
+Grail/Cairn execution settings.
+
+- `home`: Cache directory (defaults to `~/.cache/remora`).
 - `max_concurrent_agents`: Concurrency limit.
 - `timeout`: Tool execution timeout (seconds).
 - `limits_preset`: `strict`, `default`, or `permissive`.
-- `limits_override`: Dict merged into the preset limits.
+- `limits_override`: Dict merged into preset limits.
 - `pool_workers`: Process pool size for tool execution.
 - `max_queue_size`: Task queue capacity.
 - `workspace_cache_size`: Workspace LRU cache size.
@@ -146,27 +159,26 @@ Execution/runtime settings.
 - `max_resumes_per_script`: Resume attempts per snapshot.
 
 ### `event_stream`
+
 Structured event streaming (JSONL).
 
 - `enabled`: Enable event stream output.
 - `output`: JSONL output path (defaults to `~/.cache/remora/events.jsonl`).
-- `control_file`: Optional control file for runtime toggling.
+- `control_file`: Optional control file used by `remora-tui`.
 - `include_payloads`: Include full payloads when true.
 - `max_payload_chars`: Truncation limit per payload.
 
-Environment overrides:
-- `REMORA_EVENT_STREAM`: `true`/`false` to enable/disable.
-- `REMORA_EVENT_STREAM_FILE`: Override output path.
-
 ### `llm_log`
+
 Human-readable conversation logs.
 
-- `enabled`: Enable LLM transcript logs.
-- `output`: File or directory path (default is cache dir).
+- `enabled`: Enable transcript logs.
+- `output`: File or directory path (defaults to cache dir).
 - `include_full_prompts`: Include full prompt text.
 - `max_content_lines`: Output line limit per message.
 
 ### `watch`
+
 Settings for `remora watch`.
 
 - `extensions`: File extensions to monitor.

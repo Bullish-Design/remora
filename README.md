@@ -1,46 +1,71 @@
 # Remora
 
-Local code analysis and enhancement using FunctionGemma subagents.
+Local code analysis and enhancement using FunctionGemma-style agent bundles, tree-sitter discovery, and Grail tool execution.
 
-## Documentation
+Remora scans Python projects into CST nodes, runs specialized agent bundles (lint, test, docstring, sample_data) against each node, and lets you review or auto-merge changes produced inside isolated Cairn workspaces. Inference is performed via an OpenAI-compatible server (typically vLLM).
 
-- `docs/CONFIGURATION.md`
-- `docs/TROUBLESHOOTING.md`
-- `docs/API_REFERENCE.md`
+## Quick Start
 
-## vLLM setup
-
-Remora uses a vLLM server on your Tailscale network. Follow the server bring-up guide, then point `remora.yaml` at the server.
+1. Start a vLLM server reachable at `server.base_url` (default: `http://remora-server:8000/v1`).
+2. Copy `remora.yaml.example` to `remora.yaml` and adjust `server` + `agents_dir`.
+3. Run an analysis:
 
 ```bash
-uv run server/test_connection.py
+remora analyze src/
 ```
 
-Once the server is reachable, set `server.base_url` in your config and run `remora analyze <path>`.
+To auto-accept successful changes:
 
-## Demo dashboard
+```bash
+remora analyze src/ --auto-accept
+```
 
-Run the Rich TUI to monitor agent activity and throughput. It toggles the event stream on start and restores the previous state on exit.
+## CLI Overview
+
+- `remora analyze [PATHS...]` — run analysis and report results.
+- `remora watch [PATHS...]` — watch for changes and re-run analysis.
+- `remora list-agents` — verify bundle availability and model adapters.
+- `remora config` — print the merged configuration.
+- `remora-hub start|status|stop` — manage the optional Hub daemon.
+- `remora-tui` — live dashboard for the JSONL event stream.
+- `remora-demo` — generate demo traffic for the dashboard.
+- `remora-flood` — stress-test the vLLM endpoint.
+
+## Agent Bundles
+
+Each operation is a structured-agents bundle stored under `agents/<operation>/`:
+
+```
+agents/lint/
+├── bundle.yaml
+├── tools/            # Grail .pym tools
+└── context/          # Optional context providers
+```
+
+`bundle.yaml` declares the model adapter, tool catalog, termination tool, and prompt templates. Tools run through Grail and Cairn inside per-agent workspaces.
+
+## Event Streaming & Logs
+
+Enable event streaming to capture agent progress as JSONL:
+
+```yaml
+event_stream:
+  enabled: true
+```
+
+Then run:
 
 ```bash
 remora-tui
 ```
 
-To generate demo traffic in another pane:
+Human-readable transcripts are available via `llm_log.enabled`.
 
-```bash
-remora-demo
-```
+## Documentation
 
-The demo enables `lint`, `docstring`, and a placeholder `type_check` operation (currently mapped to the lint subagent).
-
-By default the dashboard uses `~/.cache/remora/events.jsonl` and `~/.cache/remora/events.control` (XDG cache override respected). Payload logging is enabled by default and truncated to a few thousand characters.
-
-You can still run Remora with explicit streaming settings:
-
-```bash
-REMORA_EVENT_STREAM=1 REMORA_EVENT_STREAM_FILE=remora-events.jsonl remora ...
-remora-tui --input remora-events.jsonl
-```
-
-CLI overrides (when wired into runtime) should take precedence over the env vars: `--event-stream/--no-event-stream` and `--event-stream-file`.
+- `docs/CONCEPT.md` — conceptual overview
+- `docs/ARCHITECTURE.md` — architecture and data flow
+- `docs/CONFIGURATION.md` — `remora.yaml` reference
+- `docs/API_REFERENCE.md` — CLI + Python APIs
+- `docs/SPEC.md` — technical spec
+- `docs/TROUBLESHOOTING.md` — diagnostics

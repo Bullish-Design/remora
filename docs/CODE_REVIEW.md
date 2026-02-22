@@ -1,580 +1,674 @@
-# Code Review: XGrammar Integration and Remora Library Analysis
-
-**Reviewer**: Claude Code
-**Date**: 2026-02-21
-**Scope**: XGrammar integration implementation + general library review
-**Status**: Issues resolved - see CUSTOM_XGRAMMAR_GUIDE.md for current implementation
-
----
+# Remora Code Review
 
 ## Executive Summary
 
-The junior developer's XGrammar integration followed the refactor plan structure but contained **critical bugs** that have now been fixed:
+Remora is a local orchestration layer for running structured, tool-calling code agents on Python projects. It combines tree-sitter code discovery, multi-turn LLM agent loops, sandboxed tool execution, and isolated workspace management into a cohesive pipeline for automated code analysis and enhancement.
 
-1. **Invalid EBNF character class** - Used complex escaping instead of simple `[^}]`
-2. **Wrong tool_choice setting** - Used `"none"` instead of `"auto"`
-3. **Optional whitespace causing degenerate output** - Removed `ws?` patterns
+**Overall Assessment**: Remora demonstrates solid architectural thinking and clean separation of concerns. The codebase is well-structured with clear module boundaries. However, there are concerns around complexity management, error handling consistency, incomplete features, and testing depth that should be addressed before production use.
 
-The Remora library overall is well-architected but shows opportunities for simplification, particularly around the dual-track context system and some redundant code paths.
+**Rating**: 3.5/5 - Good foundation with room for improvement
 
 ---
 
-## Part 1: XGrammar Integration Review
+## Part 1: Library Overview
 
-### 1.1 Critical Bug: Invalid EBNF Grammar
+### What is Remora?
 
-**File**: `src/remora/grammar.py:37`
+Remora is a CLI tool and Python library that:
 
-**Current (Broken)**:
-```python
-'arg_char ::= [A-Za-z0-9_:\\-\\"\\., ]'
-```
+1. **Discovers** code nodes (files, classes, functions, methods) using tree-sitter CST parsing
+2. **Orchestrates** specialized AI agents to run operations (lint, test, docstring, sample_data) against each node
+3. **Executes** tools in isolated Cairn workspaces via Grail sandboxed scripts
+4. **Manages** results with manual or automatic acceptance of changes
 
-**Problem**: The EBNF character class syntax is incorrect:
-1. **Escaped characters are wrong** - In EBNF, character classes don't need Python-style escaping
-2. **Missing essential characters** - JSON arguments need `{}[]:"` and other punctuation
-3. **Backslash handling** - Double-escaping `\\-` and `\\"` is invalid in EBNF
+### The Tech Stack
 
-**Reference from CUSTOM_XGRAMMAR_GUIDE.md (working grammar)**:
-```ebnf
-arg_char ::= [^}]
-```
+Remora sits atop four custom libraries (in `.context/`):
 
-The plan document at line 101-102 clearly specifies:
-```ebnf
-arg_body ::= arg_char*
-arg_char ::= [^}]
-```
+| Library | Purpose |
+|---------|---------|
+| **structured-agents** | Agent kernel with multi-turn tool calling, grammar-constrained decoding |
+| **grail** | `.pym` script execution via Monty (Rust-based Python interpreter) |
+| **cairn** | Workspace/sandbox management with overlay filesystems |
+| **fsdantic** | SQLite-backed virtual filesystem for workspaces |
 
-**Fix Required**: Change to the permissive negated character class:
-```python
-"arg_char ::= [^}]"
-```
+The inference backend is an OpenAI-compatible server (typically vLLM) running FunctionGemma adapters.
 
-This allows any character except `}` which terminates the argument body.
-
-### 1.2 Grammar Builder Analysis
-
-**File**: `src/remora/grammar.py`
-
-| Aspect | Assessment |
-|--------|------------|
-| Function signature | Correct - accepts `list[dict[str, Any]]` |
-| Tool name extraction | Correct - filters for `type: "function"` |
-| Escaping for EBNF | Correct - handles `\` and `"` in tool names |
-| Error handling | Good - raises `ValueError` if no tools found |
-| Return format | Correct - returns multi-line EBNF string |
-
-**Issues Found**:
-
-1. **Line 37**: Invalid character class (see above)
-
-2. **Missing whitespace flexibility** - The grammar doesn't allow optional whitespace between `call:` and the tool name, which FunctionGemma sometimes emits:
-   ```ebnf
-   # Current (strict)
-   root ::= ... "call:" tool_name "{" ...
-
-   # Better (flexible)
-   root ::= ... "call:" ws? tool_name ws? "{" ...
-   ```
-
-3. **No multi-call support** - The plan mentions this as optional, but it's not implemented
-
-### 1.3 Config Integration
-
-**File**: `src/remora/config.py:64`
-
-```python
-use_grammar_enforcement: bool = True
-```
-
-**Assessment**: Correctly added to `RunnerConfig`. Default of `True` is appropriate since grammar enforcement is now the primary mode.
-
-### 1.4 Runner Integration
-
-**File**: `src/remora/runner.py:393-403`
-
-```python
-extra_body: dict[str, Any] | None = None
-effective_tool_choice: Any = tool_choice
-if self.runner_config.use_grammar_enforcement and tools_payload:
-    grammar = build_functiongemma_grammar(tools_payload)
-    extra_body = {
-        "structured_outputs": {
-            "type": "grammar",
-            "grammar": grammar,
-        }
-    }
-    effective_tool_choice = "none"
-```
-
-**Assessment**:
-- Correctly builds grammar from filtered tools payload
-- Correctly sets `tool_choice="none"` when grammar enforcement is on
-- Passes `extra_body` to the API call correctly
-
-**Issues Found**:
-
-1. **No grammar caching** - Grammar is rebuilt on every `_call_model()` invocation. Since tools don't change within a run, the grammar should be built once and cached:
-   ```python
-   # In __post_init__ or as a lazy property
-   self._grammar_cache: str | None = None
-
-   def _get_grammar(self, tools: list[dict]) -> str:
-       if self._grammar_cache is None:
-           self._grammar_cache = build_functiongemma_grammar(tools)
-       return self._grammar_cache
-   ```
-
-2. **Missing error handling** - If `build_functiongemma_grammar()` raises (no tools), the error isn't caught and will crash the run
-
-### 1.5 Harness CLI Integration
-
-**File**: `scripts/functiongemma_harness.py:290-294`
-
-```python
-use_grammar: bool = typer.Option(
-    True,
-    "--use-grammar/--no-use-grammar",
-    help="Use XGrammar structured outputs for guaranteed tool call format.",
-),
-```
-
-**Assessment**: Correctly integrated. The option:
-- Defaults to `True` (consistent with config)
-- Uses Typer's boolean flag syntax
-- Passes through to `runner_config.use_grammar_enforcement`
-
----
-
-## Part 2: Remora Library Deep Review
-
-### 2.1 Architecture Overview
-
-The library follows a clean layered architecture:
+### Core Data Flow
 
 ```
-CLI (cli.py)
+remora analyze src/
     ↓
-RemoraAnalyzer (analyzer.py)
-    ├→ TreeSitterDiscoverer (discovery/)
-    └→ Coordinator (orchestrator.py)
-        └→ FunctionGemmaRunner (runner.py)
-            ├→ GrailToolRegistry (tool_registry.py)
-            ├→ ContextManager (context/)
-            └→ ProcessIsolatedExecutor (execution.py)
-```
-
-**Strengths**:
-- Clear separation of concerns
-- Good use of protocols for dependency injection
-- Process isolation for Grail scripts
-- Comprehensive event streaming
-
-**Weaknesses**:
-- Some modules are over-complicated (see sections below)
-- Redundant code paths remain from pre-grammar enforcement era
-- Deep coupling between runner and context manager
-
-### 2.2 Code Quality Issues by Module
-
-#### 2.2.1 runner.py (~950 lines)
-
-**Complexity**: The runner is the largest module and handles too many responsibilities.
-
-**Issues**:
-
-1. **Argument parsing duplication** (lines 501-523, 819-826):
-   ```python
-   # _coerce_message_param
-   parsed = parse_functiongemma_arguments(arguments)
-
-   # _dispatch_tool
-   parsed = parse_functiongemma_arguments(arguments)
-   ```
-   Same parsing logic appears twice. Should be extracted.
-
-2. **Base tool inputs repeated** (line 534-541):
-   ```python
-   def _base_tool_inputs(self) -> dict[str, Any]:
-       return {
-           "node_text": self.node.text,
-           "node_text_input": self.node.text,  # Duplicate!
-           "target_file": self._relative_node_path(),
-           "target_file_input": self._relative_node_path(),  # Duplicate!
-           "workspace_id": self.workspace_id,
-       }
-   ```
-   Why both `node_text` AND `node_text_input`? This suggests legacy compatibility that should be cleaned up.
-
-3. **Event emission methods are verbose** (lines 605-759):
-   Seven separate `_emit_*` methods with similar patterns. Could be consolidated into a generic emitter.
-
-4. **`_handle_no_tool_calls` is now trivial** (lines 543-554):
-   With grammar enforcement, this path is rarely hit. The method could be simplified or removed per the refactor plan.
-
-#### 2.2.2 tool_parser.py (~45 lines)
-
-**Status**: Correctly simplified per refactor plan.
-
-The `parse_tool_call_from_content()` function is now a no-op stub. However, `parse_functiongemma_arguments()` is still needed for parsing arguments in `<escape>...<escape>` format.
-
-**Recommendation**: Rename to `argument_parser.py` to better reflect its purpose.
-
-#### 2.2.3 config.py (~264 lines)
-
-**Good**: Clean Pydantic models with sensible defaults.
-
-**Issue**: The `_warn_unreachable_server()` function uses a synchronous thread pool for DNS lookup, which is awkward in an async codebase:
-
-```python
-with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-    future = pool.submit(socket.getaddrinfo, hostname, None)
-```
-
-This could cause startup delays. Consider making it lazy or async.
-
-#### 2.2.4 subagent.py (~178 lines)
-
-**Good**: Clean YAML loading and validation.
-
-**Issue**: Private attributes pattern is verbose:
-```python
-_tools_by_name: dict[str, ToolDefinition] = PrivateAttr(default_factory=dict)
-_tool_schemas: list[dict[str, Any]] = PrivateAttr(default_factory=list)
-_grail_summary: dict[str, Any] = PrivateAttr(default_factory=dict)
-```
-
-Consider using a nested dataclass or separate `ToolCatalog` class returned by `load_subagent_definition()`.
-
-#### 2.2.5 execution.py (~424 lines)
-
-**Good**: Clean process isolation pattern.
-
-**Issue**: The `_run_in_child` function is 110 lines with deeply nested try/except blocks. Could be refactored into smaller helpers:
-
-```python
-async def _execute_async() -> dict[str, Any]:
-    script = _load_script(pym_path, grail_dir)
-    if isinstance(script, dict):  # Error case
-        return script
-
-    externals = await _setup_externals(agent_id, workspace_path, ...)
-    if isinstance(externals, dict):  # Error case
-        return externals
-
-    return await _run_with_limits(script, inputs, limits, externals)
-```
-
-#### 2.2.6 orchestrator.py (~412 lines)
-
-**Issue**: `process_node()` method is 165 lines long with complex nested async logic. Should be split:
-
-```python
-async def process_node(self, node: CSTNode, operations: list[str]) -> NodeResult:
-    runners = await self._prepare_runners(node, operations)
-    results = await self._execute_runners(runners)
-    return self._aggregate_results(node, results)
-```
-
-#### 2.2.7 context/ subpackage
-
-**Complexity**: The two-track memory system (`DecisionPacket`, `ContextManager`) adds significant complexity for questionable benefit with small models like FunctionGemma.
-
-**Files**:
-- `models.py` (63 lines) - `DecisionPacket`, `RecentAction`, `KnowledgeEntry`
-- `manager.py` (150+ lines) - `ContextManager`
-- `summarizers.py` - Tool-specific summarizers
-- `hub_client.py` - External context fetching
-
-**Recommendation**: For FunctionGemma (270M parameters), this elaborate context system may be over-engineered. Consider:
-1. Simplifying to just recent actions list
-2. Making the hub integration opt-in and lazy
-3. Removing knowledge compression for small models
-
-### 2.3 Redundant Code (Per Refactor Plan Phase 4)
-
-The refactor plan identifies code that can be removed once grammar enforcement is standard:
-
-| File | Lines | Candidate for Removal |
-|------|-------|----------------------|
-| `tool_parser.py` | ~40 | `_FUNCTIONGEMMA_CALL_RE` regex (unused) |
-| `runner.py` | ~50 | `_dispatch_parsed_tool_call()` (if it existed) |
-| `runner.py` | ~10 | `_handle_no_tool_calls` complexity |
-
-**Current Status**: The developer correctly simplified `tool_parser.py` but left some defensive code in `runner.py` that could be removed.
-
-### 2.4 Testing Gaps
-
-**Missing Tests**:
-1. No unit tests for `grammar.py`
-2. No grammar validation tests (would have caught the bug!)
-3. Integration tests don't cover grammar-enforced responses
-
-**Recommendation**: Add `tests/test_grammar.py` with:
-- Grammar generation for various tool sets
-- EBNF syntax validation
-- Edge cases (empty tools, special characters in names)
-
----
-
-## Part 3: Specific Recommendations
-
-### 3.1 Immediate Fixes (Critical)
-
-1. **Fix the grammar character class**:
-   ```python
-   # src/remora/grammar.py:36-37
-   "arg_body ::= arg_char*",
-   "arg_char ::= [^}]",  # Changed from broken escaping
-   ```
-
-2. **Add grammar error handling in runner**:
-   ```python
-   try:
-       grammar = build_functiongemma_grammar(tools_payload)
-   except ValueError as exc:
-       logger.warning("Grammar build failed: %s, falling back to no grammar", exc)
-       extra_body = None
-       effective_tool_choice = tool_choice
-   ```
-
-### 3.2 Short-term Improvements
-
-1. **Cache grammar in runner**:
-   ```python
-   @functools.cached_property
-   def _grammar(self) -> str | None:
-       if not self.runner_config.use_grammar_enforcement:
-           return None
-       try:
-           return build_functiongemma_grammar(self.definition.tool_schemas)
-       except ValueError:
-           return None
-   ```
-
-2. **Add whitespace flexibility to grammar**:
-   ```python
-   return "\n".join([
-       'root ::= ws? "<start_function_call>" "call:" ws? tool_name ws? "{" arg_body "}" "<end_function_call>" ws?',
-       "",
-       f"tool_name ::= {tool_alternatives}",
-       "",
-       "arg_body ::= arg_char*",
-       "arg_char ::= [^}]",
-       "",
-       "ws ::= [ \\t\\r\\n]+",
-       "",
-   ])
-   ```
-
-3. **Create grammar test harness** (see Part 4 below)
-
-### 3.3 Medium-term Refactoring
-
-1. **Extract tool dispatch from runner**:
-   Create `ToolDispatcher` class to handle:
-   - Argument parsing
-   - Grail execution
-   - Context provider execution
-   - Result formatting
-
-2. **Simplify context manager** for FunctionGemma:
-   - Remove knowledge compression
-   - Simplify to recent actions + current state
-   - Make hub integration opt-in
-
-3. **Consolidate event emission**:
-   ```python
-   class EventBuilder:
-       def __init__(self, emitter: EventEmitter, agent_id: str, node_id: str, operation: str):
-           self.base = {...}
-
-       def emit(self, event: EventName, **extra) -> None:
-           self.emitter.emit({**self.base, "event": event, **extra})
-   ```
-
-### 3.4 Long-term Architecture
-
-1. **Plugin system for tool backends**:
-   Instead of hardcoding Grail, support pluggable backends:
-   ```python
-   class ToolBackend(Protocol):
-       async def execute(self, tool_name: str, inputs: dict) -> dict: ...
-   ```
-
-2. **Grammar builder registry**:
-   Support different grammar strategies:
-   ```python
-   GRAMMAR_STRATEGIES = {
-       "permissive": build_permissive_grammar,  # Current
-       "strict_json": build_strict_json_grammar,  # From plan
-       "typed": build_typed_grammar,  # Future: per-tool schemas
-   }
-   ```
-
----
-
-## Part 4: Grammar Test Harness
-
-A separate grammar test harness should be created to validate EBNF grammars without needing the vLLM server.
-
-**Recommended Location**: `scripts/test_grammar.py`
-
-**Purpose**:
-1. Validate EBNF syntax before sending to vLLM
-2. Test grammar against sample inputs
-3. Detect regressions early
-
-**Key Features**:
-- Uses `xgrammar` Python package directly (if available)
-- Falls back to regex-based validation
-- Generates sample valid/invalid strings
-
-See the attached `scripts/test_grammar.py` file for implementation.
-
----
-
-## Part 5: Summary of Findings
-
-### Critical Issues (Must Fix)
-| Issue | File | Line | Impact |
-|-------|------|------|--------|
-| Invalid EBNF character class | `grammar.py` | 37 | Grammar rejected by vLLM |
-
-### High Priority (Should Fix)
-| Issue | File | Impact |
-|-------|------|--------|
-| No grammar caching | `runner.py` | Performance overhead |
-| No grammar error handling | `runner.py` | Uncaught exceptions |
-| Missing whitespace flexibility | `grammar.py` | May reject valid outputs |
-
-### Medium Priority (Consider)
-| Issue | File | Impact |
-|-------|------|--------|
-| Duplicate `_base_tool_inputs` keys | `runner.py` | Technical debt |
-| Complex event emission | `runner.py` | Maintainability |
-| No grammar tests | `tests/` | Regression risk |
-
-### Low Priority (Future)
-| Issue | File | Impact |
-|-------|------|--------|
-| Over-engineered context system | `context/` | Complexity |
-| Sync DNS lookup at startup | `config.py` | Startup latency |
-
----
-
-## Appendix A: Corrected Grammar Implementation
-
-```python
-"""FunctionGemma grammar builder for vLLM structured outputs."""
-
-from __future__ import annotations
-
-from typing import Any
-
-
-def build_functiongemma_grammar(tools: list[dict[str, Any]]) -> str:
-    """Build a strict EBNF grammar for FunctionGemma tool calls.
-
-    Args:
-        tools: OpenAI-format tool schemas
-
-    Returns:
-        EBNF grammar string for vLLM structured outputs
-    """
-    tool_names = [
-        tool["function"]["name"]
-        for tool in tools
-        if tool.get("type") == "function"
-        and isinstance(tool.get("function"), dict)
-        and "name" in tool["function"]
-    ]
-    if not tool_names:
-        raise ValueError("No function tools found in schema")
-
-    def esc(value: str) -> str:
-        """Escape special characters for EBNF string literals."""
-        return value.replace("\\", "\\\\").replace('"', '\\"')
-
-    tool_alternatives = " | ".join(f'"{esc(name)}"' for name in tool_names)
-
-    # Strict grammar - no whitespace flexibility to prevent degenerate outputs
-    return "\n".join([
-        'root ::= "<start_function_call>" "call:" tool_name "{" arg_body "}" "<end_function_call>"',
-        "",
-        f"tool_name ::= {tool_alternatives}",
-        "",
-        "arg_body ::= arg_char*",
-        "arg_char ::= [^}]",
-        "",
-    ])
-```
-
-**Note on `tool_choice`**: The original plan suggested using `tool_choice="none"` with grammar enforcement. However, testing revealed that `tool_choice="auto"` works better because:
-- vLLM's FunctionGemma parser only extracts `tool_calls` when `tool_choice` is NOT `"none"`
-- With `tool_choice="none"`, the grammar-constrained output appears in `message.content` but not `message.tool_calls`
-- With `tool_choice="auto"` + grammar, we get both format guarantees AND proper tool_calls extraction
-
----
-
-## Appendix B: Test Recommendations
-
-```python
-# tests/test_grammar.py
-
-import pytest
-from remora.grammar import build_functiongemma_grammar
-
-
-class TestBuildFunctiongemmaGrammar:
-    def test_single_tool(self):
-        tools = [
-            {"type": "function", "function": {"name": "simple_tool", "description": "..."}}
-        ]
-        grammar = build_functiongemma_grammar(tools)
-        assert 'tool_name ::= "simple_tool"' in grammar
-        assert "arg_char ::= [^}]" in grammar
-
-    def test_multiple_tools(self):
-        tools = [
-            {"type": "function", "function": {"name": "tool_a", "description": "..."}},
-            {"type": "function", "function": {"name": "tool_b", "description": "..."}},
-        ]
-        grammar = build_functiongemma_grammar(tools)
-        assert 'tool_name ::= "tool_a" | "tool_b"' in grammar
-
-    def test_empty_tools_raises(self):
-        with pytest.raises(ValueError, match="No function tools found"):
-            build_functiongemma_grammar([])
-
-    def test_special_characters_escaped(self):
-        tools = [
-            {"type": "function", "function": {"name": 'tool"name', "description": "..."}}
-        ]
-        grammar = build_functiongemma_grammar(tools)
-        assert r'tool\"name' in grammar
-
-    def test_non_function_tools_filtered(self):
-        tools = [
-            {"type": "other", "function": {"name": "ignored"}},
-            {"type": "function", "function": {"name": "included", "description": "..."}},
-        ]
-        grammar = build_functiongemma_grammar(tools)
-        assert "ignored" not in grammar
-        assert "included" in grammar
+┌─────────────────────────────────────────────────────────────┐
+│ 1. Discovery (tree-sitter)                                  │
+│    Parse Python files → Extract CSTNode list                │
+└─────────────────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 2. Orchestration (Coordinator)                              │
+│    For each node × operation:                               │
+│      - Create workspace                                     │
+│      - Load bundle                                          │
+│      - Run KernelRunner                                     │
+└─────────────────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 3. Agent Execution (structured-agents)                      │
+│    Multi-turn loop:                                         │
+│      - LLM generates tool call                              │
+│      - Tool executes in Grail sandbox                       │
+│      - Result added to context                              │
+│      - Repeat until submit_result or max_turns              │
+└─────────────────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 4. Results + Review                                         │
+│    - Aggregate NodeResults                                  │
+│    - Display table/json                                     │
+│    - Accept/reject workspace changes                        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Conclusion
+## Part 2: How to Use Remora
 
-The XGrammar integration follows the refactor plan correctly in structure but contains a critical EBNF syntax bug that must be fixed before testing can proceed. The fix is straightforward: replace the overly-specific character class with the permissive `[^}]` pattern from the plan.
+### Installation
 
-Beyond the immediate fix, the Remora library would benefit from:
-1. Grammar caching and error handling
-2. Test coverage for grammar generation
-3. Gradual simplification of the context management system
-4. Extraction of tool dispatch logic from the runner
+```bash
+# Clone the repository
+git clone https://github.com/Bullish-Design/remora.git
+cd remora
 
-The codebase overall is well-organized and follows good practices, but has accumulated some complexity that could be reduced as grammar enforcement becomes the standard path.
+# Install with uv (recommended)
+uv sync
+
+# Or with pip
+pip install -e .
+```
+
+### Prerequisites
+
+1. **vLLM Server**: Remora requires an OpenAI-compatible inference server running FunctionGemma:
+   ```bash
+   # See server/README.md for Docker setup
+   docker-compose -f server/docker-compose.yml up
+   ```
+
+2. **Configuration**: Create `remora.yaml` in your project root:
+   ```yaml
+   server:
+     base_url: http://localhost:8000/v1
+     default_adapter: google/functiongemma-270m-it
+
+   operations:
+     lint:
+       enabled: true
+       subagent: lint
+     docstring:
+       enabled: true
+       subagent: docstring
+     test:
+       enabled: false  # Disable if not needed
+   ```
+
+### Basic Usage
+
+**Analyze code**:
+```bash
+# Analyze current directory
+remora analyze .
+
+# Analyze specific path with operations
+remora analyze src/mymodule.py --operations lint,docstring
+
+# Output as JSON
+remora analyze . --format json
+
+# Auto-accept all successful changes
+remora analyze . --auto-accept
+```
+
+**Watch mode** (continuous analysis):
+```bash
+remora watch src/ --operations lint --debounce 1000
+```
+
+**Inspect configuration**:
+```bash
+remora config --format yaml
+remora list-agents
+```
+
+### Programmatic API
+
+```python
+import asyncio
+from pathlib import Path
+from remora.analyzer import RemoraAnalyzer
+from remora.config import load_config
+
+async def main():
+    config = load_config()
+    analyzer = RemoraAnalyzer(config)
+
+    results = await analyzer.analyze(
+        paths=[Path("src/")],
+        operations=["lint", "docstring"]
+    )
+
+    print(f"Analyzed {results.total_nodes} nodes")
+    print(f"Success: {results.successful_operations}")
+    print(f"Failed: {results.failed_operations}")
+
+    # Accept all successful changes
+    await analyzer.bulk_accept()
+
+asyncio.run(main())
+```
+
+### Agent Bundle Structure
+
+Each operation is defined as a bundle in `agents/<op>/`:
+
+```
+agents/lint/
+├── bundle.yaml       # Agent manifest
+├── tools/            # Grail .pym scripts
+│   ├── run_linter.pym
+│   ├── apply_fix.pym
+│   └── submit_result.pym
+└── context/          # Optional context providers
+    └── ruff_config.pym
+```
+
+**bundle.yaml** defines:
+- Model adapter and grammar settings
+- System/user prompt templates
+- Tool catalog with descriptions
+- Termination tool (typically `submit_result`)
+
+---
+
+## Part 3: Code Review
+
+### Strengths
+
+#### 1. Clean Architecture with Clear Boundaries
+
+The codebase demonstrates excellent separation of concerns:
+
+- **Discovery** is isolated in `remora/discovery/` with pure tree-sitter logic
+- **Orchestration** handles coordination without knowing tool internals
+- **Kernel execution** wraps structured-agents cleanly
+- **Event emission** is protocol-based and pluggable
+
+This modularity enables testing each layer independently.
+
+#### 2. Strong Typing with Pydantic
+
+Configuration and data models use Pydantic throughout:
+
+```python
+# config.py
+class RemoraConfig(BaseModel):
+    discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
+    operations: dict[str, OperationConfig] = Field(default_factory=_default_operations)
+```
+
+This provides runtime validation, serialization, and excellent IDE support.
+
+#### 3. Comprehensive Event System
+
+The event bridge (`event_bridge.py`) translates structured-agents events to Remora's format, enabling:
+
+- JSONL event streams for dashboards
+- Human-readable conversation logs
+- Context manager updates for prompt injection
+
+The composite emitter pattern allows multiple outputs without coupling.
+
+#### 4. Well-Designed Context Management
+
+The Decision Packet system (`context/manager.py`) provides intelligent context compression:
+
+```python
+class ContextManager:
+    MAX_RECENT_ACTIONS = 10
+
+    def apply_event(self, event: dict[str, Any]) -> None:
+        # Routes events to appropriate handlers
+        # Maintains bounded recent_actions list
+        # Tracks knowledge_delta from tools
+```
+
+This prevents prompt bloat while preserving recent context.
+
+#### 5. Graceful Shutdown Handling
+
+Signal handling in `orchestrator.py` is well-implemented:
+
+```python
+def _setup_signal_handlers(self) -> None:
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, self._request_shutdown)
+        except NotImplementedError:
+            pass  # Windows fallback
+```
+
+Running tasks are tracked and cancelled cleanly on shutdown.
+
+---
+
+### Concerns
+
+#### 1. Inconsistent Error Handling Strategy
+
+**Problem**: Error handling varies between modules without a unified strategy.
+
+**Examples**:
+
+```python
+# config.py - Custom exception
+class ConfigError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+# tool_registry.py - Different custom exception
+class ToolRegistryError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        # Same pattern, different class
+
+# kernel_runner.py - Silent exception swallowing
+except Exception as exc:
+    logger.exception("KernelRunner failed for %s", self.node.node_id)
+    return AgentResult(status=AgentStatus.FAILED, ...)
+```
+
+The error codes in `errors.py` are defined but not consistently used:
+
+```python
+# errors.py
+CONFIG_003 = "REMORA-CONFIG-003"
+CONFIG_004 = "REMORA-CONFIG-004"
+AGENT_001 = "REMORA-AGENT-001"
+# Only 3 codes defined, yet many error scenarios exist
+```
+
+**Recommendation**: Create a unified error hierarchy with proper error codes covering all failure modes:
+
+```python
+class RemoraError(Exception):
+    """Base exception for all Remora errors."""
+    code: str = "REMORA-UNKNOWN"
+    recoverable: bool = False
+
+class ConfigurationError(RemoraError):
+    code = "REMORA-CONFIG"
+
+class DiscoveryError(RemoraError):
+    code = "REMORA-DISCOVERY"
+
+class ExecutionError(RemoraError):
+    code = "REMORA-EXEC"
+    recoverable = True  # Can retry
+```
+
+---
+
+#### 2. Missing Abstractions for Testability
+
+**Problem**: Several components are hard to test in isolation due to concrete dependencies.
+
+**Example** - `KernelRunner` directly instantiates `GrailBackend`:
+
+```python
+# kernel_runner.py
+def _build_kernel(self) -> AgentKernel:
+    backend_config = GrailBackendConfig(...)
+    self._backend = GrailBackend(  # Hard-coded concrete class
+        config=backend_config,
+        externals_factory=self._create_externals,
+    )
+```
+
+**Example** - `TreeSitterDiscoverer` creates its own components:
+
+```python
+# discoverer.py
+def __init__(self, ...):
+    self._parser = SourceParser()  # No injection
+    self._loader = QueryLoader()   # No injection
+    self._extractor = MatchExtractor()  # No injection
+```
+
+**Recommendation**: Use dependency injection or factory patterns:
+
+```python
+class KernelRunner:
+    def __init__(
+        self,
+        ...,
+        backend_factory: Callable[[GrailBackendConfig], GrailBackend] | None = None,
+    ):
+        self._backend_factory = backend_factory or GrailBackend
+```
+
+---
+
+#### 3. Incomplete Feature Implementation
+
+**Problem**: Several features are stubbed or incomplete.
+
+**Interactive mode not implemented**:
+```python
+# analyzer.py:434
+def _display_interactive(self, results: AnalysisResults) -> None:
+    """Display results interactively (placeholder)."""
+    self.console.print("[yellow]Interactive mode not yet implemented...[/yellow]")
+    self._display_table(results)
+```
+
+**Diff not implemented in review**:
+```python
+# analyzer.py:476
+elif choice == "d":
+    self.console.print("  [dim](Diff not yet implemented)[/dim]")
+```
+
+**Hub integration partially complete**:
+```python
+# context/manager.py:117
+except Exception:
+    pass  # Silent failure on Hub context pull
+```
+
+**Recommendation**: Either complete these features or remove them from the public API. Stub features create confusion and technical debt.
+
+---
+
+#### 4. Configuration Complexity
+
+**Problem**: Configuration has grown complex with many nested options and implicit defaults.
+
+```python
+# config.py - 8 config classes, 50+ settings
+class RemoraConfig(BaseModel):
+    discovery: DiscoveryConfig
+    agents_dir: Path
+    server: ServerConfig
+    operations: dict[str, OperationConfig]
+    runner: RunnerConfig
+    cairn: CairnConfig
+    event_stream: EventStreamConfig
+    llm_log: LlmLogConfig
+    watch: WatchConfig
+```
+
+Many settings interact in non-obvious ways:
+- `cairn.home` vs `agents_dir` vs workspace paths
+- `runner.max_turns` vs `bundle.max_turns`
+- `server.default_adapter` vs `operations.*.model_id` vs `bundle.model.adapter`
+
+**Recommendation**:
+1. Document configuration precedence clearly
+2. Add validation for conflicting settings
+3. Consider a simplified "profiles" system for common configurations
+
+---
+
+#### 5. Tight Coupling to FunctionGemma
+
+**Problem**: The codebase assumes FunctionGemma throughout, limiting flexibility.
+
+**Examples**:
+```yaml
+# bundle.yaml - hardcoded plugin
+model:
+  plugin: function_gemma
+  adapter: google/functiongemma-270m-it
+```
+
+```python
+# config.py
+default_adapter: str = "google/functiongemma-270m-it"
+```
+
+**Recommendation**: The plugin system in structured-agents supports other models. Expose this flexibility in Remora's configuration rather than hardcoding FunctionGemma.
+
+---
+
+#### 6. Synchronous Discovery in Async Context
+
+**Problem**: Discovery is synchronous but called from async code without proper handling.
+
+```python
+# analyzer.py
+async def analyze(self, paths, operations):
+    # ... async setup ...
+    self._nodes = discoverer.discover()  # Synchronous call blocking event loop
+```
+
+The docstring acknowledges this but doesn't fix it:
+```python
+# discoverer.py
+"""Note:
+    Discovery is synchronous; use ``asyncio.to_thread`` if calling from
+    an async workflow.
+"""
+```
+
+**Recommendation**: Either make discovery async or wrap it properly:
+
+```python
+async def analyze(self, paths, operations):
+    self._nodes = await asyncio.to_thread(discoverer.discover)
+```
+
+---
+
+#### 7. Resource Leak Potential in Workspaces
+
+**Problem**: Workspace cleanup depends on proper context manager usage, but error paths may leave orphaned workspaces.
+
+```python
+# orchestrator.py
+workspace_path = workspace_root / "workspaces" / agent_id
+workspace_path.mkdir(parents=True, exist_ok=True)
+
+try:
+    runner = KernelRunner(...)
+except Exception as exc:
+    # Workspace directory was created but may not be cleaned up
+    errors.append(...)
+```
+
+**Recommendation**: Use a more robust cleanup strategy:
+
+```python
+@contextlib.asynccontextmanager
+async def managed_workspace(path: Path):
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        yield path
+    finally:
+        if path.exists():
+            await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
+```
+
+---
+
+#### 8. Insufficient Test Coverage for Critical Paths
+
+**Problem**: While there are 25+ test files, critical integration paths have gaps.
+
+**Missing coverage**:
+- End-to-end workspace merge/discard operations
+- Concurrent operation execution and race conditions
+- Error recovery and retry behavior
+- Hub daemon lifecycle and recovery
+
+**Test anti-patterns observed**:
+```python
+# test_cli.py - Heavy mocking obscures real behavior
+monkeypatch.setattr(cli, "load_config", lambda *_args, **_kwargs: config)
+monkeypatch.setattr(cli, "_fetch_models", lambda *_args, **_kwargs: {"demo"})
+monkeypatch.setattr(cli, "load_subagent_definition", lambda *_args, **_kwargs: fake_definition)
+```
+
+**Recommendation**:
+1. Add integration tests with a mock vLLM server
+2. Test workspace operations against real filesystem
+3. Add property-based tests for parsers and formatters
+
+---
+
+#### 9. Documentation Drift
+
+**Problem**: Documentation doesn't always match implementation.
+
+**Example** - `subagent.py` defines `InitialContext` differently than bundles use it:
+
+```python
+# subagent.py
+class InitialContext(BaseModel):
+    system_prompt: str
+    node_context: str  # Expected field
+```
+
+But bundle.yaml uses:
+```yaml
+initial_context:
+  system_prompt: '...'
+  user_template: '...'  # Different field name!
+```
+
+This is because `subagent.py` appears to be a deprecated/parallel implementation alongside `structured-agents/bundles/`.
+
+**Recommendation**: Remove or consolidate duplicate implementations. Ensure documentation matches code.
+
+---
+
+#### 10. Magic Strings and Constants
+
+**Problem**: Many magic strings are scattered throughout:
+
+```python
+# Various files
+"submit_result"  # Termination tool name
+".remora"        # Config directory
+"hub.db"         # Database filename
+"lint,test,docstring"  # Default operations
+```
+
+**Recommendation**: Centralize constants:
+
+```python
+# constants.py
+TERMINATION_TOOL = "submit_result"
+CONFIG_DIR = ".remora"
+HUB_DB_NAME = "hub.db"
+DEFAULT_OPERATIONS = ["lint", "test", "docstring"]
+```
+
+---
+
+### Security Considerations
+
+#### Positive
+
+1. **Sandboxed execution**: Grail tools run in Monty's sandboxed interpreter
+2. **Path validation**: `externals.py` validates paths to prevent traversal
+3. **Resource limits**: CPU, memory, and time limits are enforced
+
+#### Concerns
+
+1. **Command injection surface**: `run_linter.pym` calls external commands:
+   ```python
+   completed = await run_command(cmd="ruff", args=command_args)
+   ```
+   While `run_command` is presumably safe, the pattern bears watching.
+
+2. **Workspace isolation**: Agent workspaces are isolated but all share the same filesystem namespace. A malicious agent could potentially write to predictable paths.
+
+3. **Hub daemon runs with full privileges**: The Hub indexes the entire project root, which could expose sensitive files in `.remora/hub.db`.
+
+---
+
+### Performance Observations
+
+#### Positive
+
+1. **Concurrent execution**: Semaphore-based concurrency control allows parallel agent runs
+2. **Workspace caching**: LRU cache prevents repeated workspace creation overhead
+3. **Debounced watch mode**: Prevents thrashing on rapid file changes
+
+#### Concerns
+
+1. **Synchronous discovery**: Blocks event loop during tree-sitter parsing
+2. **No streaming results**: All results collected before display
+3. **Per-node workspace creation**: Heavy I/O for large codebases
+
+---
+
+### Code Quality Metrics
+
+| Metric | Observation |
+|--------|-------------|
+| **Type coverage** | Good - Strict mypy config, most code typed |
+| **Docstrings** | Mixed - Core classes documented, utilities sparse |
+| **Line length** | Good - 120 char limit enforced |
+| **Complexity** | Moderate - Some methods exceed 30 lines |
+| **Import organization** | Good - Consistent `from __future__ import annotations` |
+
+---
+
+## Part 4: Recommendations
+
+### High Priority
+
+1. **Unify error handling**: Create a proper exception hierarchy with error codes
+2. **Fix sync/async mismatch**: Wrap synchronous operations in `to_thread`
+3. **Complete or remove stubs**: Interactive mode, diff view, etc.
+4. **Add integration tests**: Test real workflows without excessive mocking
+
+### Medium Priority
+
+5. **Refactor for testability**: Add dependency injection for backends
+6. **Simplify configuration**: Document precedence, add validation
+7. **Centralize constants**: Eliminate magic strings
+8. **Improve cleanup**: Use context managers for all resources
+
+### Low Priority
+
+9. **Model flexibility**: Allow non-FunctionGemma models
+10. **Documentation sync**: Ensure docs match implementation
+11. **Performance profiling**: Identify bottlenecks in large codebases
+
+---
+
+## Part 5: Conclusion
+
+Remora is an ambitious project that successfully integrates multiple complex subsystems (tree-sitter, LLM agents, sandboxed execution, workspace management) into a coherent tool. The architecture is sound and the code quality is generally good.
+
+The main risks are:
+- **Complexity**: Many moving parts increase the surface area for bugs
+- **Incomplete features**: Stub implementations may confuse users
+- **Testing gaps**: Critical paths lack integration test coverage
+
+For production use, I recommend:
+1. Completing the error handling unification
+2. Adding integration tests for workspace operations
+3. Resolving the sync/async mismatch in discovery
+
+The underlying libraries (structured-agents, grail, cairn) are well-designed and provide a solid foundation. With the recommended improvements, Remora could become a powerful tool for automated code analysis and enhancement.
+
+---
+
+*Review conducted: 2026-02-21*
+*Remora version: 0.1.0*
+*Reviewer: Code Review Agent*
