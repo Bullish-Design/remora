@@ -30,6 +30,7 @@ class LLMClient(Protocol):
         max_tokens: int = 4096,
         temperature: float = 0.1,
         extra_body: dict[str, Any] | None = None,
+        model: str | None = None,
     ) -> CompletionResponse:
         """Make a chat completion request.
 
@@ -40,6 +41,7 @@ class LLMClient(Protocol):
             max_tokens: Maximum completion tokens.
             temperature: Sampling temperature.
             extra_body: Additional request body parameters (e.g., for grammar).
+            model: Optional model name override.
 
         Returns:
             CompletionResponse with the result.

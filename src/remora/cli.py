@@ -17,7 +17,6 @@ from rich.table import Table
 
 from remora.analyzer import RemoraAnalyzer, ResultPresenter
 from remora.config import ConfigError, RemoraConfig, load_config, serialize_config
-from remora.errors import CONFIG_003
 from remora.constants import DEFAULT_OPERATIONS
 from structured_agents import load_bundle
 
@@ -191,7 +190,7 @@ def analyze(
         _print_config_error(exc.code, str(exc))
         raise typer.Exit(code=1) from exc
     except ValidationError as exc:
-        _print_config_error(CONFIG_003, str(exc))
+        _print_config_error(ConfigError.code, str(exc))
         raise typer.Exit(code=1) from exc
 
     # Parse operations
@@ -222,15 +221,15 @@ def analyze(
         console.print("[yellow]Running with performance profiling enabled...[/yellow]")
         profiler = cProfile.Profile()
         profiler.enable()
-        
+
         results = asyncio.run(_run())
-        
+
         profiler.disable()
         # Save profile data
         profile_path = Path(".remora/profile.prof")
         profile_path.parent.mkdir(parents=True, exist_ok=True)
         profiler.dump_stats(profile_path)
-        
+
         console.print(f"\n[bold green]Profile saved to {profile_path}[/bold green]")
         console.print("View it using: [cyan]snakeviz .remora/profile.prof[/cyan]")
         raise typer.Exit(_exit_code(results))
@@ -308,7 +307,7 @@ def watch(
         _print_config_error(exc.code, str(exc))
         raise typer.Exit(code=1) from exc
     except ValidationError as exc:
-        _print_config_error(CONFIG_003, str(exc))
+        _print_config_error(ConfigError.code, str(exc))
         raise typer.Exit(code=1) from exc
 
     # Parse operations
@@ -406,7 +405,7 @@ def config(
         _print_config_error(exc.code, str(exc))
         raise typer.Exit(code=1) from exc
     except ValidationError as exc:
-        _print_config_error(CONFIG_003, str(exc))
+        _print_config_error(ConfigError.code, str(exc))
         raise typer.Exit(code=1) from exc
     payload = serialize_config(config_data)
     output_format_normalized = output_format.lower()
@@ -453,7 +452,7 @@ def list_agents(
         _print_config_error(exc.code, str(exc))
         raise typer.Exit(code=1) from exc
     except ValidationError as exc:
-        _print_config_error(CONFIG_003, str(exc))
+        _print_config_error(ConfigError.code, str(exc))
         raise typer.Exit(code=1) from exc
 
     # Fetch available models
@@ -477,7 +476,7 @@ def list_agents(
 
                 from dataclasses import dataclass
                 from remora.tool_registry import GrailToolRegistry
-                
+
                 @dataclass
                 class _CliToolConfig:
                     name: str
@@ -487,12 +486,12 @@ def list_agents(
 
                 tool_configs = []
                 schema_map = {s.name: s for s in bundle.tool_schemas}
-                
+
                 for tool_ref in bundle.manifest.tools:
                     schema = schema_map.get(tool_ref.name)
                     if not schema or not schema.script_path:
                         continue
-                        
+
                     tool_configs.append(
                         _CliToolConfig(
                             name=tool_ref.name,

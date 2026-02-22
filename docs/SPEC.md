@@ -147,7 +147,7 @@ Each agent run uses a unique workspace located under `~/.cache/remora/workspaces
 
 Remora uses standardized error codes from `remora.errors`:
 
-- `CONFIG_001`–`CONFIG_004` for configuration issues.
-- `DISC_001`–`DISC_004` for discovery issues.
-- `AGENT_001`–`AGENT_004` for bundle/runner issues.
-- `SERVER_001`–`SERVER_002` for server errors.
+- `REMORA-CONFIG` for configuration issues.
+- `REMORA-DISCOVERY` for discovery issues.
+- `REMORA-AGENT` for bundle/tool issues.
+- `REMORA-EXEC` for execution/runtime issues.

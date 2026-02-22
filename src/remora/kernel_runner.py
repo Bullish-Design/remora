@@ -98,15 +98,34 @@ class KernelRunner:
     def _build_kernel(self) -> AgentKernel:
         """Build the structured-agents kernel with Remora configuration."""
         # Resolve model configuration
-        op_config = self.config.operations.get(self.bundle.name)
-        
-        # Override bundle manifest if the Remora config explicitly defines them
-        bundled_adapter = self.bundle.manifest.model.adapter
-        model_id = op_config.model_id if op_config and op_config.model_id else (bundled_adapter or self.config.server.default_adapter)
-        
-        bundled_plugin = self.bundle.manifest.model.plugin
-        model_plugin_name = op_config.model_plugin if op_config and op_config.model_plugin else (bundled_plugin or self.config.server.default_plugin)
-        
+        operations = self.config.operations if isinstance(self.config.operations, dict) else {}
+        op_config = operations.get(self.bundle.name) if isinstance(operations, dict) else None
+
+        default_adapter = getattr(self.config.server, "default_adapter", None)
+        if not isinstance(default_adapter, str):
+            default_adapter = None
+
+        default_plugin = getattr(self.config.server, "default_plugin", None)
+        if not isinstance(default_plugin, str):
+            default_plugin = "function_gemma"
+
+        op_model_id = getattr(op_config, "model_id", None) if op_config else None
+        model_id = op_model_id if isinstance(op_model_id, str) and op_model_id else None
+
+        op_plugin = getattr(op_config, "model_plugin", None) if op_config else None
+        model_plugin_name = op_plugin if isinstance(op_plugin, str) and op_plugin else None
+
+        bundled_adapter = getattr(self.bundle.manifest.model, "adapter", None)
+        if not isinstance(bundled_adapter, str):
+            bundled_adapter = None
+
+        bundled_plugin = getattr(self.bundle.manifest.model, "plugin", None)
+        if not isinstance(bundled_plugin, str):
+            bundled_plugin = None
+
+        model_id = model_id or bundled_adapter or default_adapter or ""
+        model_plugin_name = model_plugin_name or bundled_plugin or default_plugin
+
         kernel_config = KernelConfig(
             base_url=self.config.server.base_url,
             model=model_id,
@@ -137,7 +156,10 @@ class KernelRunner:
 
         tool_source = self.bundle.build_tool_source(self._backend)
         grammar_config = self.bundle.get_grammar_config()
-        plugin = self.bundle.get_plugin(model_plugin_name)
+        try:
+            plugin = self.bundle.get_plugin(model_plugin_name)
+        except TypeError:
+            plugin = self.bundle.get_plugin()
 
         return AgentKernel(
             config=kernel_config,
@@ -252,6 +274,7 @@ class KernelRunner:
 
         except Exception as exc:
             from remora.errors import ExecutionError
+
             logger.exception("KernelRunner failed for %s", self.node.node_id)
             return AgentResult(
                 status=AgentStatus.FAILED,

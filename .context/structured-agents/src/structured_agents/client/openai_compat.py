@@ -33,11 +33,12 @@ class OpenAICompatibleClient:
         max_tokens: int = 4096,
         temperature: float = 0.1,
         extra_body: dict[str, Any] | None = None,
+        model: str | None = None,
     ) -> CompletionResponse:
         """Make a chat completion request."""
         try:
             kwargs: dict[str, Any] = {
-                "model": self._config.model,
+                "model": model or self._config.model,
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature,

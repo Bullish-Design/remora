@@ -94,7 +94,7 @@ async def test_retry_replaces_operation_result(monkeypatch) -> None:
                 operations={operations[0]: replacement},
             )
 
-    monkeypatch.setattr("remora.analyzer.Coordinator", FakeCoordinator)
+    analyzer._coordinator_cls = FakeCoordinator
 
     result = await analyzer.retry("node-3", "lint")
 

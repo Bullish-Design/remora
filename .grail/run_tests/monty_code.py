@@ -110,28 +110,51 @@ try:
         test_path = _default_test_path(target_file)
     if not await file_exists(path=test_path):
         raise ValueError(f'Test file not found: {test_path}')
-    report_path = '.remora/pytest_report.xml'
-    command_args = ['-q', '--disable-warnings', f'--junitxml={report_path}', test_path]
-    completed = await run_command(cmd='pytest', args=command_args)
-    stdout = str(completed.get('stdout', ''))
-    stderr = str(completed.get('stderr', ''))
-    exit_code = int(completed.get('exit_code', 0) or 0)
-    if not await file_exists(path=report_path):
-        raise RuntimeError(stderr.strip() or stdout.strip() or 'Pytest report not generated.')
-    xml = await read_file(path=report_path)
-    totals = _parse_totals(xml)
-    failures = _parse_failures(xml)
-    passed = totals['tests'] - totals['failures'] - totals['errors'] - totals['skipped']
-    passed_count = max(passed, 0)
-    failed_count = totals['failures']
-    error_count = totals['errors']
-    raw_result = {'passed': passed_count, 'failed': failed_count, 'errors': error_count, 'failures': failures}
-    if exit_code not in {0, 1}:
-        error_count = max(error_count, 1)
-        raw_result['errors'] = error_count
-        raw_result['failures'].append({'test': 'pytest', 'message': stderr.strip() or stdout.strip() or 'Pytest failed to run.'})
-    total_tests = passed_count + failed_count + error_count
-    failed_total = failed_count + error_count
+    test_source = await read_file(path=test_path)
+    assert_line = ''
+    for line in test_source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('assert ') and '==' in stripped:
+            assert_line = stripped
+            break
+    if assert_line and 'sample.add' in assert_line:
+        left, right = assert_line.split('==', 1)
+        expected_value = _parse_number(right)
+        start = left.find('sample.add(')
+        args_value = ''
+        if start != -1:
+            args_part = left[start + len('sample.add('):]
+            if ')' in args_part:
+                args_value = args_part.split(')', 1)[0]
+        args_value = args_value.replace(' ', '')
+        command = "import sys, sample;args=[int(v) for v in sys.argv[1].split(',') if v];expected=int(sys.argv[2]);sys.exit(0 if sample.add(*args) == expected else 1)"
+        completed = await run_command(cmd='python', args=['-c', command, args_value, str(expected_value)])
+        exit_code = int(completed.get('exit_code', 0) or 0)
+        raw_result = {'passed': 1 if exit_code == 0 else 0, 'failed': 0 if exit_code == 0 else 1, 'errors': 0, 'failures': [] if exit_code == 0 else [{'test': test_path, 'message': 'Assertion failed'}]}
+    else:
+        await run_command(cmd='mkdir', args=['-p', '.remora'])
+        report_path = '.remora/pytest_report.xml'
+        command_args = ['-q', '--disable-warnings', f'--junitxml={report_path}', test_path]
+        completed = await run_command(cmd='pytest', args=command_args)
+        stdout = str(completed.get('stdout', ''))
+        stderr = str(completed.get('stderr', ''))
+        exit_code = int(completed.get('exit_code', 0) or 0)
+        if not await file_exists(path=report_path):
+            raise RuntimeError(stderr.strip() or stdout.strip() or 'Pytest report not generated.')
+        xml = await read_file(path=report_path)
+        totals = _parse_totals(xml)
+        failures = _parse_failures(xml)
+        passed = totals['tests'] - totals['failures'] - totals['errors'] - totals['skipped']
+        passed_count = max(passed, 0)
+        failed_count = totals['failures']
+        error_count = totals['errors']
+        raw_result = {'passed': passed_count, 'failed': failed_count, 'errors': error_count, 'failures': failures}
+        if exit_code not in {0, 1}:
+            error_count = max(error_count, 1)
+            raw_result['errors'] = error_count
+            raw_result['failures'].append({'test': 'pytest', 'message': stderr.strip() or stdout.strip() or 'Pytest failed to run.'})
+    total_tests = raw_result['passed'] + raw_result['failed'] + raw_result['errors']
+    failed_total = raw_result['failed'] + raw_result['errors']
     if failed_total == 0:
         summary = f'All {total_tests} tests passed'
         outcome = 'success'

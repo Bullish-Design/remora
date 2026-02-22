@@ -19,14 +19,10 @@ Remora uses structured error codes from `remora.errors`.
 
 | Code | Meaning | Typical Causes | Suggested Fix |
 | --- | --- | --- | --- |
-| `CONFIG_001` | Missing/unreadable configuration | Bad path or permissions | Fix path, run `remora config` |
-| `CONFIG_003` | Config file could not be loaded | Invalid YAML | Validate YAML syntax |
-| `CONFIG_004` | Agents directory not found | `agents_dir` wrong | Fix path or run from repo root |
-| `DISC_001` | Query pack not found | Missing `.scm` files | Verify `src/remora/queries` or set `query_dir` |
-| `DISC_004` | Source file parse error | Syntax error | Fix file or exclude it |
-| `AGENT_001` | Bundle/tool validation error | Missing `bundle.yaml` or tool script | Check bundle layout |
-| `AGENT_002` | Model server connection error | vLLM unreachable | Verify server and base URL |
-| `AGENT_004` | Turn limit exceeded | Agent never terminated | Increase `runner.max_turns` or adjust prompts |
+| `REMORA-CONFIG` | Configuration error | Missing config, invalid YAML, bad `agents_dir` | Fix config path or values |
+| `REMORA-DISCOVERY` | Discovery error | Missing query packs, unreadable files, parse issues | Verify queries or exclude bad files |
+| `REMORA-AGENT` | Bundle/tool error | Missing `bundle.yaml` or tool script | Check bundle layout |
+| `REMORA-EXEC` | Execution error | Agent run failure or tool crash | Inspect logs, retry or adjust tools |
 
 ## Common Scenarios
 
@@ -34,7 +30,7 @@ Remora uses structured error codes from `remora.errors`.
 
 Symptoms:
 - Warnings about missing bundles.
-- `AGENT_001` during initialization.
+- `REMORA-AGENT` during initialization.
 
 Fixes:
 - Ensure `operations.*.subagent` points to a directory with `bundle.yaml`.

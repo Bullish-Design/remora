@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from remora.errors import AGENT_001
 from remora.tool_registry import (
     GrailInputSpec,
     GrailToolRegistry,
@@ -77,7 +76,7 @@ def test_preflight_check_all_raises_on_invalid(monkeypatch, tmp_path: Path) -> N
     with pytest.raises(ToolRegistryError) as excinfo:
         registry.preflight_check_all([tool])
 
-    assert excinfo.value.code == AGENT_001
+    assert excinfo.value.code == ToolRegistryError.code
 
 
 def test_load_inputs_invalid_json(tmp_path: Path) -> None:

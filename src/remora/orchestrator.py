@@ -209,7 +209,7 @@ class Coordinator:
     # -- Node processing ----------------------------------------------------
 
     async def process_node(self, node: CSTNode, operations: list[str]) -> NodeResult:
-        runners: dict[str, tuple[RemoraAgentContext, KernelRunner]] = {}
+        runners: dict[str, tuple[RemoraAgentContext, KernelRunner, Path]] = {}
         errors: list[dict[str, Any]] = []
 
         for operation in operations:
@@ -242,9 +242,10 @@ class Coordinator:
                     workspace_path=workspace_path,
                     stable_path=None,
                 )
-                runners[operation] = (ctx, runner)
+                runners[operation] = (ctx, runner, workspace_path)
             except Exception as exc:
                 from remora.errors import RemoraError
+
                 if isinstance(exc, RemoraError) and not getattr(exc, "recoverable", False):
                     raise
                 ctx.transition(RemoraAgentState.ERRORED)
@@ -254,18 +255,20 @@ class Coordinator:
             operation: str,
             ctx: RemoraAgentContext,
             runner: KernelRunner,
+            workspace_path: Path,
         ) -> tuple[str, AgentResult]:
             async with self._semaphore:
                 ctx.transition(RemoraAgentState.EXECUTING)
                 try:
                     from remora.utils.fs import managed_workspace
-                    
-                    async with managed_workspace(runner.workspace_path):
+
+                    async with managed_workspace(workspace_path, cleanup=False):
                         result = await runner.run()
                     ctx.transition(RemoraAgentState.COMPLETED)
                     return operation, result
                 except Exception as exc:
                     from remora.errors import RemoraError
+
                     if isinstance(exc, RemoraError) and not getattr(exc, "recoverable", False):
                         raise
                     ctx.transition(RemoraAgentState.ERRORED)
@@ -284,7 +287,11 @@ class Coordinator:
 
         results: dict[str, AgentResult] = {}
         if runners:
-            tasks = [asyncio.create_task(run_with_limit(op, ctx, runner)) for op, (ctx, runner) in runners.items()]
+            tasks = [
+                asyncio.create_task(run_with_limit(op, ctx, runner, workspace_path))
+                for op, (ctx, runner, workspace_path) in runners.items()
+            ]
+
             self._running_tasks.update(tasks)
             try:
                 raw_results = await asyncio.gather(*tasks)

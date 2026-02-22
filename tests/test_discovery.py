@@ -16,7 +16,6 @@ from remora.discovery import (
     TreeSitterDiscoverer,
     compute_node_id,
 )
-from remora.errors import DISC_001, DISC_003, DISC_004
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 SAMPLE_PY = FIXTURE_DIR / "sample.py"
@@ -123,7 +122,7 @@ class TestSourceParser:
         parser = SourceParser()
         with pytest.raises(DiscoveryError) as exc:
             parser.parse_file(Path("nonexistent_12345.py"))
-        assert exc.value.code == DISC_004
+        assert exc.value.code == DiscoveryError.code
 
 
 class TestQueryLoader:
@@ -146,7 +145,7 @@ class TestQueryLoader:
                 "python",
                 "nonexistent",
             )
-        assert exc.value.code == DISC_001
+        assert exc.value.code == DiscoveryError.code
 
     def test_bad_query_syntax(self, tmp_path: Path) -> None:
         loader = QueryLoader()
@@ -156,7 +155,7 @@ class TestQueryLoader:
 
         with pytest.raises(DiscoveryError) as exc:
             loader.load_query_pack(tmp_path, "python", "test_pack")
-        assert exc.value.code == DISC_003
+        assert exc.value.code == DiscoveryError.code
 
 
 class TestMatchExtractor:

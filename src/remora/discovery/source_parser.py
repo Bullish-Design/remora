@@ -9,7 +9,6 @@ import tree_sitter_python as tspython
 from tree_sitter import Language, Parser, Tree
 
 from remora.discovery.models import DiscoveryError
-from remora.errors import DISC_004
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +44,7 @@ class SourceParser:
         try:
             source_bytes = resolved.read_bytes()
         except OSError as exc:
-            raise DiscoveryError(DISC_004, f"Failed to read source file: {resolved}") from exc
+            raise DiscoveryError(f"Failed to read source file: {resolved}") from exc
 
         tree = self._parser.parse(source_bytes)
         if tree.root_node.has_error:

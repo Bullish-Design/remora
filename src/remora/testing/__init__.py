@@ -16,7 +16,6 @@ from remora.testing.fakes import (
 )
 from remora.testing.factories import (
     make_ctx,
-    make_definition,
     make_node,
     make_runner_config,
     make_server_config,
@@ -37,7 +36,6 @@ __all__ = [
     "FakeToolCallFunction",
     # Factories
     "make_ctx",
-    "make_definition",
     "make_node",
     "make_runner_config",
     "make_server_config",

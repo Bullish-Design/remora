@@ -111,6 +111,7 @@ class AgentKernel:
         tools: Sequence[ToolSchema] | Sequence[str],
         context: dict[str, Any] | None = None,
         turn: int = 1,
+        model: str | None = None,
     ) -> StepResult:
         """Execute a single turn: model call + tool execution.
 
@@ -119,6 +120,7 @@ class AgentKernel:
             tools: Available tool schemas.
             context: Per-step context to pass to tool execution.
             turn: Current turn number (for events).
+            model: Optional model override for this turn.
 
         Returns:
             StepResult with response, tool calls, and results.
@@ -138,13 +140,14 @@ class AgentKernel:
             else None
         )
         extra_body = self.plugin.to_extra_body(grammar)
+        model_to_use = model or self.config.model
 
         await self.observer.on_model_request(
             ModelRequestEvent(
                 turn=turn,
                 messages_count=len(messages),
                 tools_count=len(resolved_tools),
-                model=self.config.model,
+                model=model_to_use,
             )
         )
 
@@ -156,6 +159,7 @@ class AgentKernel:
             max_tokens=self.config.max_tokens,
             temperature=self.config.temperature,
             extra_body=extra_body,
+            model=model,
         )
         duration_ms = int((time.monotonic() - start_time) * 1000)
 
@@ -326,6 +330,12 @@ class AgentKernel:
                 turn_count += 1
 
                 context = await self._build_context(context_provider)
+                step_model_override_value = context.get("model_override")
+                step_model_override = (
+                    step_model_override_value
+                    if isinstance(step_model_override_value, str)
+                    else None
+                )
 
                 messages = self.history_strategy.trim(
                     messages, self.max_history_messages
@@ -336,6 +346,7 @@ class AgentKernel:
                     tools=resolved_tools,
                     context=context,
                     turn=turn_count,
+                    model=step_model_override,
                 )
 
                 if step_result.usage:

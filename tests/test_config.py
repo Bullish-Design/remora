@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from remora.cli import app
 from remora.config import CairnConfig, load_config, resolve_grail_limits, serialize_config
-from remora.errors import CONFIG_003, CONFIG_004
+from remora.errors import ConfigurationError
 
 
 def _write_subagent_files(agents_dir: Path) -> None:
@@ -56,7 +56,7 @@ def test_invalid_yaml_type_exits_with_config_003(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["config", "--config", str(config_path)])
     assert result.exit_code == 1
-    assert CONFIG_003 in result.output
+    assert ConfigurationError.code in result.output
 
 
 def test_config_command_outputs_yaml(tmp_path: Path) -> None:
@@ -89,7 +89,7 @@ def test_missing_agents_dir_returns_config_004(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["config", "--config", str(config_path)])
     assert result.exit_code == 1
-    assert CONFIG_004 in result.output
+    assert ConfigurationError.code in result.output
 
 
 # ---------------------------------------------------------------------------

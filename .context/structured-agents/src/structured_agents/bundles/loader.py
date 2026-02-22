@@ -51,9 +51,14 @@ class AgentBundle:
     def termination_tool(self) -> str:
         return self.manifest.termination_tool
 
-    def get_plugin(self) -> ModelPlugin:
-        """Get the appropriate model plugin for this bundle."""
-        return get_plugin(self.manifest.model.plugin)
+    def get_plugin(self, override_name: str | None = None) -> ModelPlugin:
+        """Get the appropriate model plugin for this bundle.
+
+        Args:
+            override_name: Optional plugin name to use instead of the manifest.
+        """
+        plugin_name = override_name or self.manifest.model.plugin
+        return get_plugin(plugin_name)
 
     def get_grammar_config(self) -> GrammarConfig:
         """Build GrammarConfig from bundle settings."""

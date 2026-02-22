@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import shutil
 from dataclasses import dataclass, field
 from enum import Enum
@@ -108,7 +109,7 @@ class RemoraAnalyzer:
 
                 # Track workspaces
                 for op_name, op_result in node_result.operations.items():
-                    workspace_id = f"{op_name}-{node.node_id}"
+                    workspace_id = op_result.workspace_id or f"{op_name}-{node.node_id}"
                     self._workspaces[(node.node_id, op_name)] = WorkspaceInfo(
                         workspace_id=workspace_id,
                         node_id=node.node_id,
@@ -149,7 +150,9 @@ class RemoraAnalyzer:
 
         for key, info in targets:
             # Call Cairn CLI to merge workspace
-            await self._cairn_merge(info.workspace_id)
+            merge_result = self._cairn_merge(info.workspace_id)
+            if inspect.isawaitable(merge_result):
+                await merge_result
             info.state = WorkspaceState.ACCEPTED
             self._event_emitter.emit(
                 {
@@ -172,7 +175,9 @@ class RemoraAnalyzer:
 
         for key, info in targets:
             # Call Cairn CLI to discard workspace
-            await self._cairn_discard(info.workspace_id)
+            discard_result = self._cairn_discard(info.workspace_id)
+            if inspect.isawaitable(discard_result):
+                await discard_result
             info.state = WorkspaceState.REJECTED
             self._event_emitter.emit(
                 {
@@ -483,7 +488,7 @@ class ResultPresenter:
                         if not workspace_db.exists():
                             self.console.print("  [yellow]No workspace database found.[/yellow]")
                             continue
-                        
+
                         async def _show_changes() -> None:
                             async with analyzer._workspace_manager.open_workspace(workspace_db) as workspace:
                                 changed_paths = await workspace.overlay.list_changes("/")
@@ -491,7 +496,7 @@ class ResultPresenter:
                                     self.console.print(f"    [green]modified/new:[/green] {path}")
                                 if not changed_paths:
                                     self.console.print("    [yellow]No changes detected.[/yellow]")
-                        
+
                         await _show_changes()
                     elif choice == "q":
                         return

@@ -62,27 +62,6 @@ def _parse_number(text: str) -> int:
     digits = [ch for ch in text if ch.isdigit()]
     return int(''.join(digits)) if digits else 0
 
-def _extract_object(text: str) -> str:
-    if not text.startswith('{'):
-        return ''
-    depth, in_string, escape = (0, False, False)
-    for idx, ch in enumerate(text):
-        if in_string:
-            escape = not escape and ch == '\\'
-            if ch == '"' and (not escape):
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-            continue
-        if ch == '{':
-            depth += 1
-        elif ch == '}':
-            depth -= 1
-            if depth == 0:
-                return text[:idx + 1]
-    return ''
-
 def _get_string(obj: str, key: str) -> str:
     start = _find_value_start(obj, key)
     return _parse_string(obj[start:].lstrip()) if start else ''
@@ -91,19 +70,24 @@ def _get_int(obj: str, key: str) -> int:
     start = _find_value_start(obj, key)
     return _parse_number(obj[start:].lstrip()) if start else 0
 
-def _get_object(obj: str, key: str) -> str:
-    start = _find_value_start(obj, key)
-    return _extract_object(obj[start:].lstrip()) if start else ''
+def _extract_code(issue: str) -> str:
+    start = _find_value_start(issue, 'code')
+    if not start:
+        return ''
+    remainder = issue[start:].lstrip()
+    if remainder.startswith('{'):
+        value_start = _find_value_start(remainder, 'value')
+        return _parse_string(remainder[value_start:].lstrip()) if value_start else ''
+    return _parse_string(remainder)
 
 def _format_issue(issue: str) -> dict[str, Any]:
-    location, fix = (_get_object(issue, 'location'), _get_object(issue, 'fix'))
-    applicability = _get_string(fix, 'applicability') if fix else ''
-    return {'code': _get_string(issue, 'code'), 'line': _get_int(location, 'row'), 'col': _get_int(location, 'column'), 'message': _get_string(issue, 'message'), 'fixable': bool(fix and applicability != 'unfixable')}
+    fixable = '"fix"' in issue and '"applicability":"unfixable"' not in issue
+    return {'code': _extract_code(issue), 'line': _get_int(issue, 'row'), 'col': _get_int(issue, 'column'), 'message': _get_string(issue, 'message'), 'fixable': fixable}
 try:
     target_file = await _resolve_target_file()
     if not target_file:
         raise ValueError('Target file not found for linting.')
-    command_args = ['check', '--output-format', 'json']
+    command_args = ['check', '--output-format', 'json', '--select', 'E,W,F']
     if not check_only:
         command_args.append('--fix')
     command_args.append(target_file)
@@ -111,12 +95,27 @@ try:
     exit_code = int(completed.get('exit_code', 0) or 0)
     stderr = str(completed.get('stderr', ''))
     stdout = str(completed.get('stdout', ''))
+    output = stdout.strip() or stderr.strip()
     if exit_code not in {0, 1}:
         error_message = stderr.strip() or f'ruff exit code {exit_code}'
         result = {'result': None, 'summary': f'Error: {error_message}', 'knowledge_delta': {}, 'outcome': 'error', 'error': error_message}
     else:
-        issues_raw = _split_json_objects(stdout)
+        issues_raw = _split_json_objects(output)
         issues = [_format_issue(issue) for issue in issues_raw]
+        if not issues and exit_code == 1:
+            concise = await run_command(cmd='ruff', args=['check', '--select', 'E,W,F', '--format', 'concise', target_file])
+            concise_output = str(concise.get('stdout', ''))
+            for line in concise_output.splitlines():
+                if ':' not in line:
+                    continue
+                parts = line.split(':')
+                if len(parts) < 4:
+                    continue
+                code_part = parts[3].strip()
+                code = code_part.split(' ', 1)[0] if code_part else ''
+                if not code:
+                    continue
+                issues.append({'code': code, 'line': _parse_number(parts[1]), 'col': _parse_number(parts[2]), 'message': code_part, 'fixable': code.startswith('E') or code.startswith('W')})
         fixable_count = sum((1 for issue in issues if issue.get('fixable')))
         total = len(issues)
         raw_result = {'issues': issues, 'total': total, 'fixable_count': fixable_count}

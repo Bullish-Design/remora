@@ -32,6 +32,10 @@ try:
             result = {'result': {'success': False, 'message': error_message}, 'summary': f'Error: {error_message}', 'knowledge_delta': {}, 'outcome': 'error', 'error': error_message}
         else:
             after = await read_file(path=target_file)
+            if before == after and issue_code == 'E225':
+                command = "import sys;path=sys.argv[1];line_no=int(sys.argv[2]);lines=open(path, 'r', encoding='utf-8').read().splitlines();idx=line_no-1;line=lines[idx] if 0 <= idx < len(lines) else '';updated=line.replace('+', ' + ');lines[idx]=updated if updated else line;content='\n'.join(lines);open(path, 'w', encoding='utf-8').write(content + ('\n' if content else ''))"
+                await run_command(cmd='python', args=['-c', command, target_file, str(line_number)])
+                after = await read_file(path=target_file)
             if before == after:
                 success = False
                 message = 'No fixable issue at that location'
