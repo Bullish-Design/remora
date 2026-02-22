@@ -241,6 +241,9 @@ class Coordinator:
                 )
                 runners[operation] = (ctx, runner)
             except Exception as exc:
+                from remora.errors import RemoraError
+                if isinstance(exc, RemoraError) and not getattr(exc, "recoverable", False):
+                    raise
                 ctx.transition(RemoraAgentState.ERRORED)
                 errors.append({"operation": operation, "phase": "init", "error": str(exc)})
 
@@ -256,6 +259,9 @@ class Coordinator:
                     ctx.transition(RemoraAgentState.COMPLETED)
                     return operation, result
                 except Exception as exc:
+                    from remora.errors import RemoraError
+                    if isinstance(exc, RemoraError) and not getattr(exc, "recoverable", False):
+                        raise
                     ctx.transition(RemoraAgentState.ERRORED)
                     logger.exception("Runner failed for %s", operation)
                     return (

@@ -143,18 +143,12 @@ def test_run_tests_passing(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    def fake_run(_: str, __: list[str]) -> dict[str, object]:
-        xml = (
-            '<testsuite tests="1" failures="0" errors="0" skipped="0">'
-            '<testcase classname="test_sample" name="test_add"></testcase>'
-            "</testsuite>"
-        )
-        _write_report(tmp_path, xml)
-        return {"exit_code": 0, "stdout": "", "stderr": ""}
+    import shutil
+    if not shutil.which("pytest"):
+        pytest.skip("pytest not installed")
 
     externals = build_file_externals(
         tmp_path,
-        run_command=fake_run,
         include_write_file=False,
     )
     grail_dir = tmp_path / ".grail"
@@ -185,20 +179,12 @@ def test_run_tests_failing(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    def fake_run(_: str, __: list[str]) -> dict[str, object]:
-        xml = (
-            '<testsuite tests="1" failures="1" errors="0" skipped="0">'
-            '<testcase classname="test_sample" name="test_add">'
-            '<failure message="boom">boom</failure>'
-            "</testcase>"
-            "</testsuite>"
-        )
-        _write_report(tmp_path, xml)
-        return {"exit_code": 1, "stdout": "", "stderr": ""}
+    import shutil
+    if not shutil.which("pytest"):
+        pytest.skip("pytest not installed")
 
     externals = build_file_externals(
         tmp_path,
-        run_command=fake_run,
         include_write_file=False,
     )
     grail_dir = tmp_path / ".grail"

@@ -114,8 +114,12 @@ class ContextManager:
                         node_state.updated_at,
                         tz=timezone.utc,
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception("Failed to pull hub context")
+            # We want to bubble this error up so the system knows the hub is failing.
+            # Do not swallow it.
+            raise RuntimeError(f"Hub context pull failed: {e}") from e
 
     def get_prompt_context(self) -> dict[str, Any]:
         """Get the current packet state for prompt building."""

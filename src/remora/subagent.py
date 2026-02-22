@@ -11,16 +11,14 @@ import yaml
 from pydantic import BaseModel, Field, PrivateAttr
 
 from remora.discovery import CSTNode
-from remora.errors import AGENT_001
+from remora.errors import SubagentError as BaseSubagentError
 from remora.tool_registry import GrailToolRegistry, ToolRegistryError
 
 SUBMIT_RESULT_TOOL = "submit_result"
 
 
-class SubagentError(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class SubagentError(BaseSubagentError):
+    pass
 
 
 def resolve_path(base: Path, relative: str | Path) -> Path:
@@ -99,15 +97,15 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     try:
         content = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise SubagentError(AGENT_001, f"Failed to read subagent definition: {path}") from exc
+        raise SubagentError(f"Failed to read subagent definition: {path}") from exc
     try:
         data = yaml.safe_load(content)
     except yaml.YAMLError as exc:
-        raise SubagentError(AGENT_001, f"Invalid YAML in subagent definition: {path}") from exc
+        raise SubagentError(f"Invalid YAML in subagent definition: {path}") from exc
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise SubagentError(AGENT_001, f"Subagent definition must be a mapping: {path}")
+        raise SubagentError(f"Subagent definition must be a mapping: {path}")
     return data
 
 
@@ -133,14 +131,13 @@ def _apply_tool_registry(definition: SubagentDefinition, agents_dir: Path, path:
         definition._tool_schemas = catalog.schemas
         definition._grail_summary = catalog.grail_summary
     except ToolRegistryError as exc:
-        raise SubagentError(exc.code, f"{path}: {exc}") from exc
+        raise SubagentError(f"{path}: {exc}", code=exc.code) from exc
 
 
 def _validate_submit_result(definition: SubagentDefinition, path: Path) -> None:
     submit_tools = [tool for tool in definition.tools if tool.name == SUBMIT_RESULT_TOOL]
     if len(submit_tools) != 1:
         raise SubagentError(
-            AGENT_001,
             f"Subagent definition must include exactly one {SUBMIT_RESULT_TOOL} tool: {path}",
         )
 
@@ -150,7 +147,6 @@ def _validate_tool_names(definition: SubagentDefinition, path: Path) -> None:
     for tool in definition.tools:
         if tool.name in seen:
             raise SubagentError(
-                AGENT_001,
                 f"Duplicate tool name '{tool.name}' in subagent definition: {path}",
             )
         seen.add(tool.name)
@@ -162,7 +158,6 @@ def _validate_jinja2_template(definition: SubagentDefinition, path: Path) -> Non
         env.parse(definition.initial_context.node_context)
     except jinja2.TemplateSyntaxError as exc:
         raise SubagentError(
-            AGENT_001,
             f"Invalid Jinja2 template in node_context of {path}: {exc}",
         ) from exc
 
@@ -170,7 +165,7 @@ def _validate_jinja2_template(definition: SubagentDefinition, path: Path) -> Non
 def _warn_missing_paths(definition: SubagentDefinition) -> None:
     for tool in definition.tools:
         if not tool.pym.exists():
-            raise SubagentError(AGENT_001, f"Tool script not found: {tool.pym}")
+            raise SubagentError(f"Tool script not found: {tool.pym}")
         for provider in tool.context_providers:
             if not provider.exists():
-                raise SubagentError(AGENT_001, f"Context provider not found: {provider}")
+                raise SubagentError(f"Context provider not found: {provider}")

@@ -94,7 +94,13 @@ class JsonlEventEmitter:
         if not self._include_payloads:
             payload = {key: value for key, value in payload.items() if key != "response_preview"}
 
-        line = json.dumps(payload, default=str)
+        try:
+            line = json.dumps(payload, default=str)
+        except (TypeError, ValueError) as exc:
+            import logging
+            logging.getLogger(__name__).warning("Failed to serialize event: %s", exc)
+            return
+
         if len(line) > self._max_chars:
             line = line[: self._max_chars] + "..."
 
@@ -116,8 +122,9 @@ class CompositeEventEmitter:
         for emitter in self._emitters:
             try:
                 emitter.emit(payload)
-            except Exception:
-                pass
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).exception("CompositeEventEmitter failed to emit")
 
     def close(self) -> None:
         for emitter in self._emitters:

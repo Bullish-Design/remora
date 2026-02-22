@@ -13,8 +13,7 @@ from urllib.parse import urlparse
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from remora.errors import CONFIG_003, CONFIG_004
-
+from remora.errors import ConfigurationError
 DEFAULT_CONFIG_FILENAME = "remora.yaml"
 
 
@@ -33,10 +32,8 @@ def _default_event_control() -> Path:
     return _default_cache_dir() / "events.control"
 
 
-class ConfigError(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class ConfigError(ConfigurationError):
+    pass
 
 
 class RetryConfig(BaseModel):
@@ -189,7 +186,7 @@ def serialize_config(config: RemoraConfig) -> dict[str, Any]:
 def _resolve_config_path(config_path: Path | None) -> Path | None:
     if config_path is not None:
         if not config_path.exists():
-            raise ConfigError(CONFIG_003, f"Config file not found: {config_path}")
+            raise ConfigError(f"Config file not found: {config_path}")
         return config_path
     default_path = Path.cwd() / DEFAULT_CONFIG_FILENAME
     return default_path if default_path.exists() else None
@@ -199,15 +196,15 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     try:
         content = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise ConfigError(CONFIG_003, f"Failed to read config file: {path}") from exc
+        raise ConfigError(f"Failed to read config file: {path}") from exc
     try:
         data = yaml.safe_load(content)
     except yaml.YAMLError as exc:
-        raise ConfigError(CONFIG_003, f"Invalid YAML in config file: {path}") from exc
+        raise ConfigError(f"Invalid YAML in config file: {path}") from exc
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise ConfigError(CONFIG_003, "Config file must define a mapping.")
+        raise ConfigError("Config file must define a mapping.")
     return data
 
 
@@ -230,7 +227,7 @@ def _resolve_agents_dir(config: RemoraConfig, base_dir: Path) -> RemoraConfig:
 
 def _ensure_agents_dir(agents_dir: Path) -> None:
     if not agents_dir.exists():
-        raise ConfigError(CONFIG_004, f"Agents directory not found: {agents_dir}")
+        raise ConfigError(f"Agents directory not found: {agents_dir}")
 
 
 def _warn_missing_subagents(config: RemoraConfig) -> None:

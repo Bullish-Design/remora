@@ -10,13 +10,10 @@ import warnings
 
 import grail
 
-from remora.errors import AGENT_001
+from remora.errors import SubagentError
 
-
-class ToolRegistryError(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class ToolRegistryError(SubagentError):
+    pass
 
 
 class ToolConfig(Protocol):
@@ -83,7 +80,6 @@ class GrailToolRegistry:
                 all_warnings.append({"tool": tool.name, "message": str(warning)})
         if errors:
             raise ToolRegistryError(
-                AGENT_001,
                 f"Preflight check failed for {len(errors)} tool(s):\n" + "\n".join(errors),
             )
         return all_warnings
@@ -92,7 +88,7 @@ class GrailToolRegistry:
         try:
             script = grail.load(tool.pym, grail_dir=self.grail_root)
         except Exception as exc:
-            raise ToolRegistryError(AGENT_001, f"Failed to load Grail script {tool.pym}: {exc}") from exc
+            raise ToolRegistryError(f"Failed to load Grail script {tool.pym}: {exc}") from exc
         check = script.check()
         if not check.valid or (self.strict and check.warnings):
             errors = [msg.message for msg in check.errors]
@@ -100,7 +96,6 @@ class GrailToolRegistry:
                 errors.extend(msg.message for msg in check.warnings)
             joined = "; ".join(errors) if errors else "Unknown validation error"
             raise ToolRegistryError(
-                AGENT_001,
                 f"Grail check failed for {tool.pym}: {joined}",
             )
         artifact_dir = self.grail_root / script.name
@@ -123,12 +118,12 @@ def _load_inputs(path: Path, source_path: Path) -> list[GrailInputSpec]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
-        raise ToolRegistryError(AGENT_001, f"Missing Grail inputs.json for {source_path}: {path}") from exc
+        raise ToolRegistryError(f"Missing Grail inputs.json for {source_path}: {path}") from exc
     except json.JSONDecodeError as exc:
-        raise ToolRegistryError(AGENT_001, f"Invalid inputs.json for {source_path}: {exc}") from exc
+        raise ToolRegistryError(f"Invalid inputs.json for {source_path}: {exc}") from exc
     raw_inputs = data.get("inputs")
     if not isinstance(raw_inputs, list):
-        raise ToolRegistryError(AGENT_001, f"Invalid inputs.json format for {source_path}: {path}")
+        raise ToolRegistryError(f"Invalid inputs.json format for {source_path}: {path}")
     specs: list[GrailInputSpec] = []
     for item in raw_inputs:
         if not isinstance(item, dict):

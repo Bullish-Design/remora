@@ -17,12 +17,10 @@ class NodeType(str, Enum):
     METHOD = "method"
 
 
-class DiscoveryError(RuntimeError):
-    """Base exception for discovery errors."""
+from remora.errors import DiscoveryError as BaseDiscoveryError
 
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
+class DiscoveryError(BaseDiscoveryError):
+    pass
 
 
 def compute_node_id(file_path: Path, node_type: NodeType, name: str) -> str:

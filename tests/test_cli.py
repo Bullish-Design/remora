@@ -42,21 +42,41 @@ def test_fetch_models_returns_ids(monkeypatch) -> None:
 
 
 def test_list_agents_outputs_table(monkeypatch, tmp_path) -> None:
-    config = RemoraConfig()
-    config.agents_dir = tmp_path / "agents"
-    config.agents_dir.mkdir()
-    config.server.default_adapter = "demo"
-    config.operations = {"lint": OperationConfig(subagent="lint.yaml")}
-    (config.agents_dir / "lint.yaml").write_text("name: lint", encoding="utf-8")
+    config_file = tmp_path / "remora.yaml"
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir()
 
-    fake_definition = SimpleNamespace(grail_summary={"valid": True, "warnings": []})
+    config_content = f"""
+agents_dir: "{agents_dir.resolve().as_posix()}"
+server:
+  default_adapter: "demo"
+operations:
+  lint:
+    enabled: true
+    subagent: "lint.yaml"
+"""
+    config_file.write_text(config_content, encoding="utf-8")
 
-    monkeypatch.setattr(cli, "load_config", lambda *_args, **_kwargs: config)
+    lint_agent = agents_dir / "lint.yaml"
+    lint_agent_content = """
+name: lint
+version: "1.0"
+model:
+  plugin: function_gemma
+initial_context:
+  system_prompt: ""
+  user_template: ""
+max_turns: 5
+termination_tool: submit_result
+tools: []
+registries: []
+"""
+    lint_agent.write_text(lint_agent_content, encoding="utf-8")
+
     monkeypatch.setattr(cli, "_fetch_models", lambda *_args, **_kwargs: {"demo"})
-    monkeypatch.setattr(cli, "load_subagent_definition", lambda *_args, **_kwargs: fake_definition)
 
     runner = CliRunner()
-    result = runner.invoke(app, ["list-agents"])
+    result = runner.invoke(app, ["list-agents", "--config", str(config_file)])
 
     assert result.exit_code == 0
     assert "lint" in result.output

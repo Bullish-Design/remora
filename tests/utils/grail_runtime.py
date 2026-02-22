@@ -85,5 +85,25 @@ def build_file_externals(
             return run_command(cmd, args)
 
         externals["run_command"] = run_command_external
+    else:
+
+        async def run_command_external(cmd: str, args: list[str]) -> dict[str, Any]:
+            import asyncio
+            import subprocess
+            process = await asyncio.create_subprocess_exec(
+                cmd,
+                *args,
+                cwd=root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
+            return {
+                "exit_code": process.returncode,
+                "stdout": stdout.decode("utf-8") if stdout else "",
+                "stderr": stderr.decode("utf-8") if stderr else "",
+            }
+
+        externals["run_command"] = run_command_external
 
     return externals

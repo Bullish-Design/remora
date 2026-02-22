@@ -9,7 +9,6 @@ import tree_sitter_python as tspython
 from tree_sitter import Language, Query
 
 from remora.discovery.models import DiscoveryError
-from remora.errors import DISC_001, DISC_003
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +64,12 @@ class QueryLoader:
         pack_dir = query_dir / language / query_pack
         if not pack_dir.is_dir():
             raise DiscoveryError(
-                DISC_001,
                 f"Query pack directory not found: {pack_dir}",
             )
 
         scm_files = sorted(pack_dir.glob("*.scm"))
         if not scm_files:
             raise DiscoveryError(
-                DISC_001,
                 f"No .scm query files found in: {pack_dir}",
             )
 
@@ -94,17 +91,11 @@ class QueryLoader:
         try:
             query_text = scm_file.read_text(encoding="utf-8")
         except OSError as exc:
-            raise DiscoveryError(
-                DISC_003,
-                f"Failed to read query file: {scm_file}",
-            ) from exc
+            raise DiscoveryError(f"Failed to read query file: {scm_file}") from exc
 
         try:
             query = Query(PY_LANGUAGE, query_text)
         except Exception as exc:
-            raise DiscoveryError(
-                DISC_003,
-                f"Query syntax error in {scm_file.name}: {exc}",
-            ) from exc
+            raise DiscoveryError(f"Query syntax error in {scm_file.name}: {exc}") from exc
 
         return CompiledQuery(query=query, source_file=scm_file, query_text=query_text)

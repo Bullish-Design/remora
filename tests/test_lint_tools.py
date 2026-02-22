@@ -29,20 +29,13 @@ def test_run_linter_parses_issues(tmp_path: Path) -> None:
     path = _script_path("agents/lint/tools/run_linter.pym")
     _write_sample(tmp_path)
 
-    def fake_run(_: str, __: list[str]) -> dict[str, object]:
-        payload = [
-            {
-                "code": "E225",
-                "message": "missing whitespace around operator",
-                "location": {"row": 2, "column": 12},
-                "fix": {"applicability": "safe"},
-            }
-        ]
-        return {"exit_code": 1, "stdout": json.dumps(payload), "stderr": ""}
+    # ensure ruff is available
+    import shutil
+    if not shutil.which("ruff"):
+        pytest.skip("ruff not installed")
 
     externals = build_file_externals(
         tmp_path,
-        run_command=fake_run,
         include_write_file=False,
     )
     grail_dir = tmp_path / ".grail"
@@ -67,14 +60,12 @@ def test_apply_fix_updates_file(tmp_path: Path) -> None:
     path = _script_path("agents/lint/tools/apply_fix.pym")
     target = _write_sample(tmp_path)
 
-    def fake_run(_: str, args: list[str]) -> dict[str, object]:
-        target_path = args[-1]
-        (tmp_path / target_path).write_text("def add():\n    return 1 + 2\n", encoding="utf-8")
-        return {"exit_code": 0, "stdout": "", "stderr": ""}
+    import shutil
+    if not shutil.which("ruff"):
+        pytest.skip("ruff not installed")
 
     externals = build_file_externals(
         tmp_path,
-        run_command=fake_run,
         include_write_file=False,
     )
     grail_dir = tmp_path / ".grail"
@@ -155,21 +146,9 @@ def test_lint_flow_updates_file(tmp_path: Path) -> None:
 
     target = _write_sample(tmp_path)
 
-    def fake_check(_: str, __: list[str]) -> dict[str, object]:
-        payload = [
-            {
-                "code": "E225",
-                "message": "missing whitespace around operator",
-                "location": {"row": 2, "column": 12},
-                "fix": {"applicability": "safe"},
-            }
-        ]
-        return {"exit_code": 1, "stdout": json.dumps(payload), "stderr": ""}
-
-    def fake_fix(_: str, args: list[str]) -> dict[str, object]:
-        target_path = args[-1]
-        (tmp_path / target_path).write_text("def add():\n    return 1 + 2\n", encoding="utf-8")
-        return {"exit_code": 0, "stdout": "", "stderr": ""}
+    import shutil
+    if not shutil.which("ruff"):
+        pytest.skip("ruff not installed")
 
     grail_dir = tmp_path / ".grail"
 
@@ -178,7 +157,6 @@ def test_lint_flow_updates_file(tmp_path: Path) -> None:
         inputs={"check_only": True, "target_file_input": "sample.py"},
         externals=build_file_externals(
             tmp_path,
-            run_command=fake_check,
             include_write_file=False,
         ),
         grail_dir=grail_dir,
@@ -188,7 +166,6 @@ def test_lint_flow_updates_file(tmp_path: Path) -> None:
         inputs={"issue_code": "E225", "line_number": 2, "target_file_input": "sample.py"},
         externals=build_file_externals(
             tmp_path,
-            run_command=fake_fix,
             include_write_file=False,
         ),
         grail_dir=grail_dir,

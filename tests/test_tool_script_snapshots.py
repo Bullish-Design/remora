@@ -24,10 +24,11 @@ class TestLintToolSnapshots:
         target = tmp_path / "sample.py"
         target.write_text("def add(a: int, b: int) -> int:\n    return a + b\n", encoding="utf-8")
 
-        def fake_run(_: str, __: list[str]) -> dict[str, object]:
-            return {"exit_code": 0, "stdout": "", "stderr": ""}
+        import shutil
+        if not shutil.which("ruff"):
+            pytest.skip("ruff not installed")
 
-        externals = build_file_externals(tmp_path, run_command=fake_run, include_write_file=False)
+        externals = build_file_externals(tmp_path, include_write_file=False)
         grail_dir = tmp_path / ".grail"
 
         result = run_script(
@@ -59,10 +60,11 @@ class TestLintToolSnapshots:
             }
         ]
 
-        def fake_run(_: str, __: list[str]) -> dict[str, object]:
-            return {"exit_code": 1, "stdout": json.dumps(payload), "stderr": ""}
+        import shutil
+        if not shutil.which("ruff"):
+            pytest.skip("ruff not installed")
 
-        externals = build_file_externals(tmp_path, run_command=fake_run, include_write_file=False)
+        externals = build_file_externals(tmp_path, include_write_file=False)
         grail_dir = tmp_path / ".grail"
 
         result = run_script(

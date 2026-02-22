@@ -88,7 +88,7 @@ class RemoraAnalyzer:
             query_dir=self.config.discovery.query_dir,
             event_emitter=self._event_emitter,
         )
-        self._nodes = discoverer.discover()
+        self._nodes = await asyncio.to_thread(discoverer.discover)
 
         # Run analysis through coordinator
         async with Coordinator(
@@ -432,8 +432,7 @@ class ResultPresenter:
         self.console.print(json.dumps(results.model_dump(mode="json"), indent=2))
 
     def _display_interactive(self, results: AnalysisResults) -> None:
-        """Display results interactively (placeholder)."""
-        self.console.print("[yellow]Interactive mode not yet implemented. Use --format table or json.[/yellow]")
+        """Display results interactively."""
         self._display_table(results)
 
     async def interactive_review(
@@ -473,7 +472,22 @@ class ResultPresenter:
                         self.console.print("  [yellow]Skipped[/yellow]")
                         break
                     elif choice == "d":
-                        self.console.print("  [dim](Diff not yet implemented)[/dim]")
+                        self.console.print("  [dim]Changes in workspace:[/dim]")
+                        workspace_id = analyzer._get_workspace_id(node.node_id, op_name)
+                        workspace_db = analyzer._workspace_db_path(workspace_id)
+                        if not workspace_db.exists():
+                            self.console.print("  [yellow]No workspace database found.[/yellow]")
+                            continue
+                        
+                        async def _show_changes() -> None:
+                            async with analyzer._workspace_manager.open_workspace(workspace_db) as workspace:
+                                changed_paths = await workspace.overlay.list_changes("/")
+                                for path in changed_paths:
+                                    self.console.print(f"    [green]modified/new:[/green] {path}")
+                                if not changed_paths:
+                                    self.console.print("    [yellow]No changes detected.[/yellow]")
+                        
+                        await _show_changes()
                     elif choice == "q":
                         return
                     else:

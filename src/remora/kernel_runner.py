@@ -233,12 +233,13 @@ class KernelRunner:
             return self._format_result(result)
 
         except Exception as exc:
+            from remora.errors import ExecutionError
             logger.exception("KernelRunner failed for %s", self.node.node_id)
             return AgentResult(
                 status=AgentStatus.FAILED,
                 workspace_id=self.ctx.agent_id,
                 changed_files=[],
-                summary="",
+                summary=f"KernelRunner failed with {type(exc).__name__}: {str(exc)}",
                 details={},
                 error=str(exc),
             )

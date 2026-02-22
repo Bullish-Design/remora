@@ -122,7 +122,7 @@ class HubDaemon:
                 indexed += 1
 
             except Exception as exc:
-                logger.warning("Failed to index %s: %s", py_file, exc)
+                logger.exception("Failed to index %s", py_file)
                 errors += 1
 
         stats = await store.stats()
@@ -171,7 +171,7 @@ class HubDaemon:
                     )
 
             except Exception as exc:
-                logger.error("Action failed for %s: %s", path, exc, exc_info=True)
+                logger.exception("Action failed for %s", path)
 
         await self._update_status(running=True)
 
