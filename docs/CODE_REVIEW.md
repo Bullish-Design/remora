@@ -32,7 +32,7 @@ Remora sits atop four custom libraries (in `.context/`):
 | **cairn** | Workspace/sandbox management with overlay filesystems |
 | **fsdantic** | SQLite-backed virtual filesystem for workspaces |
 
-The inference backend is an OpenAI-compatible server (typically vLLM) running FunctionGemma adapters.
+The inference backend is an OpenAI-compatible server (currently specifically designed for vLLM) running FunctionGemma adapters.
 
 ### Core Data Flow
 
@@ -417,7 +417,7 @@ Many settings interact in non-obvious ways:
 **Recommendation**:
 1. Document configuration precedence clearly
 2. Add validation for conflicting settings
-3. Consider a simplified "profiles" system for common configurations
+3. Implement a simplified "profiles" system for common configurations
 
 ---
 
@@ -587,15 +587,7 @@ DEFAULT_OPERATIONS = ["lint", "test", "docstring"]
 
 #### Concerns
 
-1. **Command injection surface**: `run_linter.pym` calls external commands:
-   ```python
-   completed = await run_command(cmd="ruff", args=command_args)
-   ```
-   While `run_command` is presumably safe, the pattern bears watching.
-
-2. **Workspace isolation**: Agent workspaces are isolated but all share the same filesystem namespace. A malicious agent could potentially write to predictable paths.
-
-3. **Hub daemon runs with full privileges**: The Hub indexes the entire project root, which could expose sensitive files in `.remora/hub.db`.
+None, The combination of Grail and Cairn/FSdantic provide excellent security for the use case. 
 
 ---
 
