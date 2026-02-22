@@ -44,7 +44,7 @@ Inference is performed by an OpenAI-compatible server (typically vLLM) using Fun
 ┌───────────────────────────────────────────────────────────┐
 │ Workspace Layer                                           │
 │  - Cairn workspaces per agent run                          │
-│  - Manual or auto-merge                                    │
+│  - CairnWorkspaceBridge handles manual or auto-merge       │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -56,11 +56,11 @@ Commands include `analyze`, `watch`, `config`, and `list-agents`. The CLI resolv
 
 ### Discovery (`remora.discovery`)
 
-`TreeSitterDiscoverer` loads `.scm` query packs from `src/remora/queries`, parses Python files, and returns immutable `CSTNode` objects.
+`TreeSitterDiscoverer` loads `.scm` query packs from `src/remora/queries`, parses Python files concurrently via `ThreadPoolExecutor`, and returns immutable `CSTNode` objects.
 
 ### Coordinator (`remora.orchestrator.Coordinator`)
 
-The coordinator enforces concurrency limits, builds `KernelRunner` instances, and aggregates `NodeResult` outputs. Each operation produces a unique `agent_id` used as the workspace identifier.
+The coordinator enforces concurrency limits, builds `KernelRunner` instances, and aggregates `NodeResult` outputs. The Coordinator can also spawn the Hub as an `in-process` task. Each operation produces a unique `agent_id` used as the workspace identifier.
 
 ### KernelRunner (`remora.kernel_runner.KernelRunner`)
 
@@ -73,7 +73,7 @@ The coordinator enforces concurrency limits, builds `KernelRunner` instances, an
 
 ### Context Manager (`remora.context`)
 
-The Decision Packet summarizes recent tool activity and errors for prompt injection. It can pull additional context from the optional Hub daemon (`remora-hub`).
+The Decision Packet summarizes recent tool activity and errors for prompt injection. It can pull additional context from the optional Hub daemon (`remora-hub`), which can run either as a separate process or as an in-process asyncio task inside the `Coordinator`.
 
 ### Events and Logs (`remora.events`, `remora.llm_logger`)
 
@@ -89,7 +89,7 @@ Each operation lives under `agents/<operation>` and contains:
 
 ## Workspace Management
 
-Grail tools run inside Cairn workspaces stored under `~/.cache/remora/workspaces/<agent_id>` (or `cairn.home`). Successful runs can be merged into the project root via `RemoraAnalyzer.accept()` or `--auto-accept`.
+Grail tools run inside Cairn workspaces stored under `~/.cache/remora/workspaces/<agent_id>` (or `cairn.home`). Successful runs can be merged into the project root via `RemoraAnalyzer.accept()` or `--auto-accept`, which delegates to the `CairnWorkspaceBridge`.
 
 ## Data Flow
 

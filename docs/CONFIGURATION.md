@@ -11,6 +11,7 @@ This document describes the `remora.yaml` schema, defaults, and how CLI override
 
 ```yaml
 agents_dir: agents
+hub_mode: disabled
 
 server:
   base_url: http://remora-server:8000/v1
@@ -102,6 +103,12 @@ watch:
 ### `agents_dir`
 
 Path to the `agents/` directory containing bundle definitions. Relative paths are resolved against the config file directory.
+
+### `hub_mode`
+
+Hub daemon execution context setting.
+
+- `hub_mode`: Can be `in-process`, `daemon`, or `disabled` (default). Determines how the state synchronization Hub connects. 
 
 ### `server`
 

@@ -195,6 +195,11 @@ from grail import external
 async def read_file(path: str) -> str:
     """Read text content from a file."""
     ...
+
+@external
+async def run_json_command(cmd: str, args: list[str]) -> dict[str, Any] | list[Any]:
+    """Run a command and parse its stdout as JSON."""
+    ...
 ```
 
 Rules:
@@ -403,6 +408,36 @@ project_name: str = Input("project_name", default="demo")
 
 try:
     result = {"project": project_name}
+except Exception as exc:
+    result = {"error": str(exc)}
+
+result
+```
+
+### Example 4: Tool using `run_json_command`
+
+When invoking CLI tools that return JSON (like Ruff or Pytest), use `run_json_command` to let the host process parse the JSON safely, rather than parsing string output inside the `.pym` sandbox.
+
+```python
+from typing import Any
+from grail import Input, external
+
+target_file: str = Input("target_file")
+
+@external
+async def run_json_command(cmd: str, args: list[str]) -> Any:
+    ...
+
+try:
+    issues = await run_json_command(
+        cmd="ruff", 
+        args=["check", "--output-format", "json", target_file]
+    )
+    
+    if isinstance(issues, dict) and "error" in issues:
+        result = {"error": issues["error"]}
+    else:
+        result = {"status": "ok", "issue_count": len(issues)}
 except Exception as exc:
     result = {"error": str(exc)}
 

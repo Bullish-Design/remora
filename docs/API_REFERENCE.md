@@ -28,6 +28,7 @@ Additional flag:
 ### `remora config`
 
 Print the resolved configuration after merging defaults, file values, and CLI overrides.
+Includes the `hub_mode` execution context setting (`in-process`, `daemon`, or `disabled`).
 
 ### `remora list-agents`
 
@@ -64,7 +65,25 @@ Programmatic API for running analysis.
   - `reject(node_id: str | None = None, operation: str | None = None) -> None`
   - `retry(node_id: str, operation: str, config_override: dict | None = None) -> AgentResult`
   - `bulk_accept(...)`, `bulk_reject(...)`
+
+### `remora.presenter`
+
+Formatting and presenting analysis results.
+
 - `ResultPresenter(format_type="table")`
+  - `present(results: AnalysisResults) -> None`
+
+### `remora.workspace_bridge`
+
+Bridge for Cairn workspace merging and discarding operations.
+
+- `CairnWorkspaceBridge(workspace_manager, project_root, cache_root)`
+  - `merge(workspace_id: str) -> None`
+  - `discard(workspace_id: str) -> None`
+
+### `remora.constants`
+
+Centralized configuration constants.
 
 ### `remora.orchestrator`
 
