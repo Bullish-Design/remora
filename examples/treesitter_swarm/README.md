@@ -19,9 +19,6 @@ While the decentralized AST-agent approach provides unparalleled isolation of co
 **The Flaw:** By forcing nodes to only communicate upstream/downstream with immediate AST parents and children, you risk severe context degradation. A `return_statement` agent might not fully understand the intent passed down from the `class_definition` agent 4 levels up.
 **Refactor Opportunity:** Introduce a "Shared Swarm Memory Bus" (potentially using the Cairn KV store globally for the task) where any node agent can instantly lookup the original `SwarmTask` intent without relying on its parent to explain it properly. This increases cohesion without violating the structural encapsulation.
 
-### 2. VRAM and Context Switching Overhead
-**The Flaw:** Spinning up a uniquely fine-tuned LoRA for *every single node type* (e.g., `tiny-for-loop-expert`, `tiny-binary-operator-expert`) will cause massive VRAM chunking or constant disk-swapping in vLLM. The overhead of model-switching will dominate the actual inference time, reducing throughput to a crawl during fan-out.
-**Refactor Opportunity:** Group structural concepts into slightly broader domain models (e.g., `tiny-control-flow-expert`, `tiny-declaration-expert`) rather than per-node. This reduces the number of LoRA adapters loaded while still maintaining highly specific expertise.
 
 ### 3. Asymmetric Dataset Generation
 **The Flaw:** Generating exhaustive summary and topological data for generic leaf nodes like literal strings or simple assignments is mostly noise and pollutes the semantic vector space, making graph search wildly inefficient. 
