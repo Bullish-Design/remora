@@ -3,32 +3,27 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import time
+import uuid
 from contextlib import suppress
 from enum import Enum
-from typing import Any, cast
 from pathlib import Path
+from typing import Any, cast
 
 from pydantic import BaseModel, Field, field_validator
 
-from remora.client import build_client
-from remora.config import RemoraConfig, resolve_grail_limits
+from remora.config import RemoraConfig
 from remora.discovery import CSTNode
 from remora.events import (
     CompositeEventEmitter,
     EventEmitter,
-    EventName,
-    EventStatus,
     EventStreamController,
     build_event_emitter,
 )
-from remora.execution import ProcessIsolatedExecutor, SnapshotManager
-from remora.results import AgentResult, NodeResult
-from remora.runner import AgentError, FunctionGemmaRunner
-from remora.subagent import load_subagent_definition
+from remora.kernel_runner import KernelRunner
 from remora.llm_logger import LlmConversationLogger
+from remora.results import AgentResult, AgentStatus, NodeResult
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +103,8 @@ def _normalize_phase(phase: str) -> tuple[str, str | None]:
 # ---------------------------------------------------------------------------
 
 
-from cairn.orchestrator.queue import TaskQueue, TaskPriority
-from cairn.runtime.workspace_manager import WorkspaceManager
+from cairn.orchestrator.queue import TaskPriority
 from cairn.runtime.workspace_cache import WorkspaceCache
-from fsdantic import Fsdantic
 
 
 PRIORITY_MAP = {
@@ -133,10 +126,7 @@ class Coordinator:
     ) -> None:
         self.config = config
 
-        self._http_client = build_client(config.server)
-        self._queue = TaskQueue(max_size=config.cairn.max_queue_size)
         self._semaphore = asyncio.Semaphore(config.cairn.max_concurrent_agents)
-        self._workspace_manager = WorkspaceManager()
         self._workspace_cache = WorkspaceCache(max_size=config.cairn.workspace_cache_size)
         self._event_emitter = build_event_emitter(
             config.event_stream,
@@ -163,19 +153,6 @@ class Coordinator:
         self._watch_task: asyncio.Task[None] | None = None
         self._running_tasks: set[asyncio.Task[Any]] = set()
         self._shutdown_requested: bool = False
-        # Phase 1: in-process Grail execution
-        self._executor = ProcessIsolatedExecutor(
-            max_workers=config.cairn.pool_workers,
-            call_timeout=float(config.cairn.timeout),
-        )
-        self._grail_limits = resolve_grail_limits(config.cairn)
-        # Phase 6: Snapshot pause/resume (opt-in)
-        self._snapshot_manager: SnapshotManager | None = None
-        if config.cairn.enable_snapshots:
-            self._snapshot_manager = SnapshotManager(
-                max_snapshots=config.cairn.max_snapshots,
-                max_resumes=config.cairn.max_resumes_per_script,
-            )
 
     async def __aenter__(self) -> "Coordinator":
         if isinstance(self._event_emitter, EventStreamController):
@@ -205,15 +182,8 @@ class Coordinator:
                 await self._watch_task
         if self._llm_logger:
             self._llm_logger.close()
-        close_result = self._http_client.close()
-        if inspect.isawaitable(close_result):
-            await close_result
         self._event_emitter.close()
-        await self._workspace_manager.close_all()
         await self._workspace_cache.clear()
-        await self._executor.shutdown()
-        if self._snapshot_manager is not None:
-            self._snapshot_manager.clear()
 
     # -- Signal handling (graceful shutdown) --------------------------------
 
@@ -245,8 +215,8 @@ class Coordinator:
     # -- Node processing ----------------------------------------------------
 
     async def process_node(self, node: CSTNode, operations: list[str]) -> NodeResult:
-        runners: dict[str, tuple[RemoraAgentContext, FunctionGemmaRunner]] = {}
-        errors: list[dict] = []
+        runners: dict[str, tuple[RemoraAgentContext, KernelRunner]] = {}
+        errors: list[dict[str, Any]] = []
 
         for operation in operations:
             if self._shutdown_requested:
@@ -256,7 +226,7 @@ class Coordinator:
             if not op_config or not op_config.enabled:
                 continue
 
-            agent_id = f"{operation}-{node.node_id}"
+            agent_id = f"{operation}-{node.node_id[:8]}-{uuid.uuid4().hex[:4]}"
             ctx = RemoraAgentContext(
                 agent_id=agent_id,
                 task=f"{operation} on {node.name}",
@@ -264,143 +234,65 @@ class Coordinator:
                 node_id=node.node_id,
             )
 
-            definition_path = self.config.agents_dir / op_config.subagent
+            bundle_path = self.config.agents_dir / op_config.subagent
+            workspace_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
+            workspace_path = workspace_root / "workspaces" / agent_id
+            workspace_path.mkdir(parents=True, exist_ok=True)
+
             try:
-                definition = load_subagent_definition(definition_path, agents_dir=self.config.agents_dir)
-                self._event_emitter.emit(
-                    {
-                        "event": EventName.GRAIL_CHECK,
-                        "agent_id": ctx.agent_id,
-                        "node_id": node.node_id,
-                        "operation": operation,
-                        "phase": "grail_check",
-                        "status": EventStatus.OK,
-                        "warnings": definition.grail_summary.get("warnings", []),
-                    }
+                runner = KernelRunner(
+                    node=node,
+                    ctx=ctx,
+                    config=self.config,
+                    bundle_path=bundle_path,
+                    event_emitter=self._event_emitter,
+                    workspace_path=workspace_path,
+                    stable_path=None,
                 )
-                runners[operation] = (
-                    ctx,
-                    FunctionGemmaRunner(
-                        definition=definition,
-                        node=node,
-                        ctx=ctx,
-                        server_config=self.config.server,
-                        runner_config=self.config.runner,
-                        adapter_name=op_config.model_id,
-                        http_client=self._http_client,
-                        event_emitter=self._event_emitter,
-                        grail_executor=self._executor,
-                        grail_dir=self.config.cairn.home or Path.cwd(),
-                        grail_limits=self._grail_limits,
-                        snapshot_manager=self._snapshot_manager,
-                    ),
-                )
+                runners[operation] = (ctx, runner)
             except Exception as exc:
                 ctx.transition(RemoraAgentState.ERRORED)
                 errors.append({"operation": operation, "phase": "init", "error": str(exc)})
-                phase, step = _normalize_phase("init")
-                payload = {
-                    "event": EventName.AGENT_ERROR,
-                    "agent_id": ctx.agent_id,
-                    "node_id": node.node_id,
-                    "operation": operation,
-                    "phase": phase,
-                    "error": str(exc),
-                }
-                if step is not None:
-                    payload["step"] = step
-                self._event_emitter.emit(payload)
 
         async def run_with_limit(
             operation: str,
             ctx: RemoraAgentContext,
-            runner: FunctionGemmaRunner,
-        ) -> tuple[str, AgentResult | Exception]:
+            runner: KernelRunner,
+        ) -> tuple[str, AgentResult]:
             async with self._semaphore:
+                ctx.transition(RemoraAgentState.EXECUTING)
                 try:
-                    # Phase 4: Manage workspace lifecycle
-                    cache_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
-                    workspace_path = cache_root / "workspaces" / ctx.agent_id
-                    workspace_path.mkdir(parents=True, exist_ok=True)
-                    workspace_db = workspace_path / "workspace.db"
-
-                    runner.workspace_root = workspace_db
-                    runner.stable_root = workspace_db
-
-                    # Track workspace via cache for lifecycle management
-                    cache_key = ctx.agent_id
-                    ws = await self._workspace_cache.get(cache_key)
-                    if ws is None:
-                        ws = await Fsdantic.open(path=str(workspace_db))
-                        await self._workspace_cache.put(cache_key, ws)
-
-                    ctx.transition(RemoraAgentState.EXECUTING)
-                    try:
-                        result = await runner.run()
-                        ctx.transition(RemoraAgentState.COMPLETED)
-                        return operation, result
-                    except Exception as exc:
-                        ctx.transition(RemoraAgentState.ERRORED)
-                        raw_phase = getattr(exc, "phase", "run")
-                        phase, step = _normalize_phase(raw_phase)
-                        error_code = getattr(exc, "error_code", None)
-                        payload: dict[str, Any] = {
-                            "event": EventName.AGENT_ERROR,
-                            "agent_id": ctx.agent_id,
-                            "node_id": node.node_id,
-                            "operation": operation,
-                            "phase": phase,
-                            "error": str(exc),
-                        }
-                        if step is not None:
-                            payload["step"] = step
-                        if error_code is not None:
-                            payload["error_code"] = error_code
-                        self._event_emitter.emit(payload)
-                        return operation, exc
-                    finally:
-                        await self._workspace_cache.remove(cache_key)
-                        # Phase 6: Clean up any dangling snapshots for this agent
-                        if self._snapshot_manager is not None:
-                            self._snapshot_manager.cleanup_agent(ctx.agent_id)
-                except Exception as setup_exc:
-                    logger.error("Workspace setup failed for %s: %s", ctx.agent_id, setup_exc, exc_info=True)
+                    result = await runner.run()
+                    ctx.transition(RemoraAgentState.COMPLETED)
+                    return operation, result
+                except Exception as exc:
                     ctx.transition(RemoraAgentState.ERRORED)
-                    return operation, setup_exc
+                    logger.exception("Runner failed for %s", operation)
+                    return (
+                        operation,
+                        AgentResult(
+                            status=AgentStatus.FAILED,
+                            workspace_id=ctx.agent_id,
+                            changed_files=[],
+                            summary="",
+                            details={},
+                            error=str(exc),
+                        ),
+                    )
 
         results: dict[str, AgentResult] = {}
         if runners:
-            tasks = [asyncio.ensure_future(run_with_limit(op, ctx, runner)) for op, (ctx, runner) in runners.items()]
+            tasks = [asyncio.create_task(run_with_limit(op, ctx, runner)) for op, (ctx, runner) in runners.items()]
             self._running_tasks.update(tasks)
             try:
-                raw = await asyncio.gather(*tasks, return_exceptions=True)
+                raw_results = await asyncio.gather(*tasks)
             finally:
                 self._running_tasks.difference_update(tasks)
 
-            for item in raw:
-                if isinstance(item, BaseException):
-                    if isinstance(item, asyncio.CancelledError):
-                        # Genuine shutdown cancellation — skip silently
-                        continue
-                    # Unexpected exception that escaped run_with_limit
-                    logger.error(
-                        "Unhandled exception in run_with_limit: %s",
-                        item,
-                        exc_info=item,
-                    )
-                    errors.append(
-                        {
-                            "operation": "unknown",
-                            "phase": "run",
-                            "error": str(item),
-                        }
-                    )
-                    continue
-                operation, outcome = item
-                if isinstance(outcome, Exception):
-                    errors.append({"operation": operation, "phase": "run", "error": str(outcome)})
-                else:
-                    results[operation] = outcome
+            for operation, outcome in raw_results:
+                results[operation] = outcome
+                if outcome.status == AgentStatus.FAILED and outcome.error:
+                    errors.append({"operation": operation, "phase": "run", "error": outcome.error})
 
         return NodeResult(
             node_id=node.node_id,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable
 
 from cairn.runtime.external_functions import create_external_functions
@@ -10,8 +11,8 @@ def create_remora_externals(
     agent_id: str,
     node_source: str,
     node_metadata: dict[str, Any],
-    agent_fs: Workspace,
-    stable_fs: Workspace,
+    workspace_path: str | None = None,
+    stable_path: str | None = None,
 ) -> dict[str, Callable]:
     """Create external functions available to Remora's .pym tools.
 
@@ -22,12 +23,15 @@ def create_remora_externals(
         agent_id: Unique agent identifier.
         node_source: Source code of the node being analyzed.
         node_metadata: Metadata dict for the node (name, type, etc).
-        agent_fs: The agent's private workspace filesystem.
-        stable_fs: The read-only backing filesystem (codebase).
+        workspace_path: Path to the agent's private workspace.
+        stable_path: Path to the read-only backing filesystem.
 
     Returns:
         Dictionary of functions to inject into the Grail script.
     """
+    agent_fs = Workspace(Path(workspace_path)) if workspace_path else None
+    stable_fs = Workspace(Path(stable_path)) if stable_path else None
+
     base_externals = create_external_functions(agent_id, agent_fs, stable_fs)
 
     async def get_node_source() -> str:
