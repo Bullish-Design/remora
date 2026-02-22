@@ -97,9 +97,19 @@ class KernelRunner:
 
     def _build_kernel(self) -> AgentKernel:
         """Build the structured-agents kernel with Remora configuration."""
+        # Resolve model configuration
+        op_config = self.config.operations.get(self.bundle.name)
+        
+        # Override bundle manifest if the Remora config explicitly defines them
+        bundled_adapter = self.bundle.manifest.model.adapter
+        model_id = op_config.model_id if op_config and op_config.model_id else (bundled_adapter or self.config.server.default_adapter)
+        
+        bundled_plugin = self.bundle.manifest.model.plugin
+        model_plugin_name = op_config.model_plugin if op_config and op_config.model_plugin else (bundled_plugin or self.config.server.default_plugin)
+        
         kernel_config = KernelConfig(
             base_url=self.config.server.base_url,
-            model=self.bundle.manifest.model.adapter or self.config.server.default_adapter,
+            model=model_id,
             api_key=self.config.server.api_key,
             timeout=float(self.config.server.timeout),
             max_tokens=self.config.runner.max_tokens,
@@ -127,7 +137,7 @@ class KernelRunner:
 
         tool_source = self.bundle.build_tool_source(self._backend)
         grammar_config = self.bundle.get_grammar_config()
-        plugin = self.bundle.get_plugin()
+        plugin = self.bundle.get_plugin(model_plugin_name)
 
         return AgentKernel(
             config=kernel_config,
@@ -195,6 +205,7 @@ class KernelRunner:
         fresh context into tool execution.
         """
         await self.context_manager.pull_hub_context()
+        prompt_ctx = self.context_manager.get_prompt_context()
 
         return {
             "node_text": self.node.text,
@@ -210,7 +221,8 @@ class KernelRunner:
                 "file_path": str(self.node.file_path),
                 "node_id": self.node.node_id,
             },
-            **self.context_manager.get_prompt_context(),
+            "model_override": prompt_ctx.get("target_lora"),
+            **prompt_ctx,
         }
 
     async def run(self) -> AgentResult:

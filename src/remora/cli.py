@@ -19,7 +19,7 @@ from remora.analyzer import RemoraAnalyzer, ResultPresenter
 from remora.config import ConfigError, RemoraConfig, load_config, serialize_config
 from remora.errors import CONFIG_003
 from remora.constants import DEFAULT_OPERATIONS
-from remora.subagent import load_subagent_definition
+from structured_agents import load_bundle
 
 app = typer.Typer(help="Remora CLI.")
 console = Console()
@@ -162,6 +162,11 @@ def analyze(
         dir_okay=False,
         resolve_path=True,
     ),
+    profile: bool = typer.Option(
+        False,
+        "--profile",
+        help="Run using cProfile and save to .remora/profile.prof",
+    ),
 ) -> None:
     """Analyze Python code and generate suggestions."""
     overrides = _build_overrides(
@@ -210,8 +215,28 @@ def analyze(
 
         return results
 
-    results = asyncio.run(_run())
-    raise typer.Exit(_exit_code(results))
+    import cProfile
+    import pstats
+
+    if profile:
+        console.print("[yellow]Running with performance profiling enabled...[/yellow]")
+        profiler = cProfile.Profile()
+        profiler.enable()
+        
+        results = asyncio.run(_run())
+        
+        profiler.disable()
+        # Save profile data
+        profile_path = Path(".remora/profile.prof")
+        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        profiler.dump_stats(profile_path)
+        
+        console.print(f"\n[bold green]Profile saved to {profile_path}[/bold green]")
+        console.print("View it using: [cyan]snakeviz .remora/profile.prof[/cyan]")
+        raise typer.Exit(_exit_code(results))
+    else:
+        results = asyncio.run(_run())
+        raise typer.Exit(_exit_code(results))
 
 
 @app.command()
@@ -448,10 +473,39 @@ def list_agents(
         grail_warnings = []
         if yaml_exists:
             try:
-                definition = load_subagent_definition(yaml_path, config.agents_dir)
-                grail_summary = definition.grail_summary
-                grail_valid = grail_summary.get("valid", False)
-                grail_warnings = grail_summary.get("warnings", [])
+                bundle = load_bundle(yaml_path.parent)
+
+                from dataclasses import dataclass
+                from remora.tool_registry import GrailToolRegistry
+                
+                @dataclass
+                class _CliToolConfig:
+                    name: str
+                    pym: Path
+                    tool_description: str
+                    inputs_override: dict[str, dict[str, Any]]
+
+                tool_configs = []
+                schema_map = {s.name: s for s in bundle.tool_schemas}
+                
+                for tool_ref in bundle.manifest.tools:
+                    schema = schema_map.get(tool_ref.name)
+                    if not schema or not schema.script_path:
+                        continue
+                        
+                    tool_configs.append(
+                        _CliToolConfig(
+                            name=tool_ref.name,
+                            pym=schema.script_path,
+                            tool_description=tool_ref.description or schema.description,
+                            inputs_override=tool_ref.inputs_override or {},
+                        )
+                    )
+
+                registry = GrailToolRegistry(config.agents_dir)
+                catalog = registry.build_tool_catalog(tool_configs)
+                grail_valid = catalog.grail_summary.get("valid", False)
+                grail_warnings = catalog.grail_summary.get("warnings", [])
             except Exception:
                 pass
 

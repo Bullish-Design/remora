@@ -8,7 +8,6 @@ from remora.config import RunnerConfig, ServerConfig
 from remora.constants import TERMINATION_TOOL
 from remora.discovery import CSTNode, NodeType
 from remora.orchestrator import RemoraAgentContext
-from remora.subagent import InitialContext, SubagentDefinition, ToolDefinition
 from remora.testing.fakes import FakeCompletionMessage, FakeToolCall
 
 
@@ -23,43 +22,6 @@ def make_ctx(agent_id: str = "ws-1", operation: str = "lint") -> RemoraAgentCont
 
 def tool_schema(name: str, description: str, parameters: dict[str, Any]) -> dict[str, Any]:
     return {"type": "function", "function": {"name": name, "description": description, "parameters": parameters}}
-
-
-def make_definition(
-    *,
-    tools: list[ToolDefinition] | None = None,
-    max_turns: int = 10,
-    tool_schemas: list[dict[str, Any]] | None = None,
-) -> SubagentDefinition:
-    if tools is None:
-        tools = [
-            ToolDefinition(
-                tool_name=TERMINATION_TOOL,
-                pym=Path("submit.pym"),
-                tool_description="Submit the result.",
-                context_providers=[],
-            )
-        ]
-    definition = SubagentDefinition(
-        name="lint_agent",
-        max_turns=max_turns,
-        initial_context=InitialContext(
-            system_prompt="You are a lint agent.",
-            node_context="node {{ node_name }} {{ node_type }} {{ node_text }}",
-        ),
-        tools=tools,
-    )
-    if tool_schemas is None:
-        tool_schemas = [
-            tool_schema(
-                tool.name,
-                tool.tool_description,
-                {"type": "object", "additionalProperties": False, "properties": {}},
-            )
-            for tool in tools
-        ]
-    definition._tool_schemas = tool_schemas
-    return definition
 
 
 def make_node() -> CSTNode:

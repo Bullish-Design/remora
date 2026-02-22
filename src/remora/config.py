@@ -60,6 +60,7 @@ class ServerConfig(BaseModel):
     api_key: str = "EMPTY"
     timeout: int = 120
     default_adapter: str = "google/functiongemma-270m-it"
+    default_plugin: str = "function_gemma"
     retry: RetryConfig = Field(default_factory=RetryConfig)
 
 
@@ -80,6 +81,7 @@ class OperationConfig(BaseModel):
     auto_accept: bool = False
     subagent: str
     model_id: str | None = None
+    model_plugin: str | None = None
     priority: Literal["low", "normal", "high"] = "normal"
 
 
@@ -132,6 +134,7 @@ class WatchConfig(BaseModel):
             "node_modules",
             CACHE_DIR,
             ".agentfs",
+            ".remora",
         ]
     )
     debounce_ms: int = 500
@@ -174,6 +177,8 @@ class RemoraConfig(BaseModel):
             for op_name, op_config in self.operations.items():
                 if getattr(op_config, 'model_id', None) is None:
                     op_config.model_id = self.server.default_adapter
+                if getattr(op_config, 'model_plugin', None) is None:
+                    op_config.model_plugin = self.server.default_plugin
                     
         return self
 

@@ -78,10 +78,6 @@ Programmatic API for running analysis.
 - `KernelRunner(node, ctx, config, bundle_path, event_emitter, workspace_path=None, stable_path=None)`
   - `run() -> AgentResult`
 
-### `remora.subagent`
-
-- `load_subagent_definition(path, agents_dir) -> SubagentDefinition`
-
 ### `remora.discovery`
 
 - `TreeSitterDiscoverer(root_dirs, language, query_pack, query_dir=None)`
