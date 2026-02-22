@@ -271,16 +271,7 @@ Integrate the Hub watcher natively into the orchestrator so it doesn't require a
 
 ## Phase 5: Cleanup & Security
 
-### Task 5.1: Dependency Pinning
-Secure the supply chain.
-
-**Action:**
-Update `pyproject.toml` (or `requirements.txt`/`uv.lock`) replacing git branch references with specific commit SHAs.
-
-*Example (pyproject.toml):*
-`cairn = { git = "https://github.com/...", rev = "abcd1234efgh5678" }`
-
-### Task 5.2: Subagent Deprecation
+### Task 5.1: Subagent Deprecation
 Remove dead code.
 
 **Action:**

@@ -51,6 +51,7 @@ dev = [
   "hypothesis>=6.0.0",
   "aiohttp>=3.9",
   "pytest-benchmark",
+  "pytest-timeout>=2.3.1",
   "syrupy",
 ]
 
@@ -90,6 +91,11 @@ markers = [
   "acceptance: end-to-end MVP acceptance tests (requires vLLM server)",
   "acceptance_mock: end-to-end tests with mock server",
   "slow: long-running tests",
+]
+filterwarnings = [
+  "ignore:.*builtin type SwigPyPacked has no __module__ attribute.*:DeprecationWarning",
+  "ignore:.*builtin type SwigPyObject has no __module__ attribute.*:DeprecationWarning",
+  "ignore:.*This process.*is multi-threaded, use of fork\\(\\) may lead to deadlocks.*:DeprecationWarning",
 ]
 
 [tool.mypy]
