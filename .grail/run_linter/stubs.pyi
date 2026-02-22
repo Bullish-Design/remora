@@ -16,3 +16,7 @@ async def file_exists(path: str) -> bool:
 async def run_command(cmd: str, args: list[str]) -> dict[str, Any]:
     """Run a command in the sandbox."""
     ...
+
+async def run_json_command(cmd: str, args: list[str]) -> Any:
+    """Run a command and parse its stdout as JSON."""
+    ...

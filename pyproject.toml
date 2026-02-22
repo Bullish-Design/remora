@@ -23,8 +23,6 @@ dependencies = [
   "grail",
   "cairn",
   "structured-agents",
-  
-  # cairn added as local or VCS dependency
 ]
 
 [tool.uv.sources]

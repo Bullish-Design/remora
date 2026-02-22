@@ -25,6 +25,42 @@
       ],
       "return_type": "bool",
       "docstring": "Check if a file or directory exists."
+    },
+    {
+      "name": "run_command",
+      "async": true,
+      "parameters": [
+        {
+          "name": "cmd",
+          "type": "str",
+          "default": null
+        },
+        {
+          "name": "args",
+          "type": "list[str]",
+          "default": null
+        }
+      ],
+      "return_type": "dict[str, Any]",
+      "docstring": "Run a command in the sandbox."
+    },
+    {
+      "name": "run_json_command",
+      "async": true,
+      "parameters": [
+        {
+          "name": "cmd",
+          "type": "str",
+          "default": null
+        },
+        {
+          "name": "args",
+          "type": "list[str]",
+          "default": null
+        }
+      ],
+      "return_type": "Any",
+      "docstring": "Run a command and parse its stdout as JSON."
     }
   ]
 }

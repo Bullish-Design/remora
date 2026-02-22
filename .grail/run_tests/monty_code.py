@@ -20,6 +20,10 @@ def _default_test_path(target_file: str) -> str:
     module_name = filename.rsplit('.', 1)[0]
     return f'tests/test_{module_name}.py'
 
+def _parse_number(text: str) -> int:
+    digits = [ch for ch in text if ch.isdigit()]
+    return int(''.join(digits)) if digits else 0
+
 def _read_attr(tag: str, key: str) -> int:
     marker = f'{key}="'
     if marker not in tag:

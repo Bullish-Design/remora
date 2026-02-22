@@ -4,9 +4,9 @@
   "errors": [],
   "warnings": [],
   "info": {
-    "externals_count": 2,
+    "externals_count": 4,
     "inputs_count": 2,
-    "lines_of_code": 78,
+    "lines_of_code": 88,
     "monty_features_used": [
       "async_await",
       "f_string"

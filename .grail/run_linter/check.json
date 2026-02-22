@@ -2,23 +2,15 @@
   "file": "/home/andrew/Documents/Projects/remora/agents/lint/tools/run_linter.pym",
   "valid": true,
   "errors": [],
-  "warnings": [
-    {
-      "line": 1,
-      "column": 0,
-      "code": "W004",
-      "message": "Script is 204 lines long (>200) \u2014 may indicate too much logic in sandbox"
-    }
-  ],
+  "warnings": [],
   "info": {
-    "externals_count": 3,
+    "externals_count": 4,
     "inputs_count": 2,
-    "lines_of_code": 204,
+    "lines_of_code": 120,
     "monty_features_used": [
       "async_await",
       "f_string",
-      "for_loop",
-      "list_comprehension"
+      "for_loop"
     ]
   }
 }

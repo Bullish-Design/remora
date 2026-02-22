@@ -7,17 +7,18 @@
       "line": 1,
       "column": 0,
       "code": "W004",
-      "message": "Script is 257 lines long (>200) \u2014 may indicate too much logic in sandbox"
+      "message": "Script is 268 lines long (>200) \u2014 may indicate too much logic in sandbox"
     }
   ],
   "info": {
-    "externals_count": 3,
+    "externals_count": 4,
     "inputs_count": 2,
-    "lines_of_code": 257,
+    "lines_of_code": 268,
     "monty_features_used": [
       "async_await",
       "f_string",
-      "for_loop"
+      "for_loop",
+      "list_comprehension"
     ]
   }
 }
