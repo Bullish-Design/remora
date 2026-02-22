@@ -34,7 +34,7 @@ def _build_test_config(base: RemoraConfig, concurrency: int) -> RemoraConfig:
     if "lint" in base.operations:
         ops["lint"] = base.operations["lint"]
     else:
-        ops["lint"] = OperationConfig(subagent="lint/lint_subagent.yaml")
+        ops["lint"] = OperationConfig(subagent="lint")
 
     return base.model_copy(
         update={

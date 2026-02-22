@@ -18,7 +18,7 @@ operations:
   lint:
     enabled: true
     auto_accept: false
-    subagent: lint/lint_subagent.yaml
+    subagent: lint
     # model_id here is the LoRA adapter name on the server
     # omit to use server.default_adapter
     # model_id: "lint"
@@ -26,25 +26,25 @@ operations:
   test:
     enabled: true
     auto_accept: false
-    subagent: test/test_subagent.yaml
+    subagent: test
 
   docstring:
     enabled: true
     auto_accept: false
-    subagent: docstring/docstring_subagent.yaml
+    subagent: docstring
     style: google
 
   sample_data:
     enabled: false
     auto_accept: false
-    subagent: sample_data/sample_data_subagent.yaml
+    subagent: sample_data
 
 runner:
   max_turns: 20
   max_tokens: 4096
   temperature: 0.1
   tool_choice: "auto"  # "required" | "auto" | "none"
-  use_grammar_enforcement: true
+  max_history_messages: 50
 
 cairn:
   command: cairn

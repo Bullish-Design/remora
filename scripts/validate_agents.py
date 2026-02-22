@@ -8,23 +8,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from remora.config import load_config
-from remora.subagent import load_subagent_definition
+from structured_agents import load_bundle
 
 
 async def validate_agent(agent_name: str, agents_dir: Path) -> bool:
     """Validate an agent loads correctly and has proper configuration."""
     try:
-        yaml_path = agents_dir / agent_name / f"{agent_name}_subagent.yaml"
+        bundle_path = agents_dir / agent_name
+        yaml_path = bundle_path / "bundle.yaml"
         if not yaml_path.exists():
-            print(f"  {agent_name}: SKIP (no yaml file)")
+            print(f"  {agent_name}: SKIP (no bundle.yaml)")
             return True
 
-        definition = load_subagent_definition(
-            Path(f"{agent_name}/{agent_name}_subagent.yaml"),
-            agents_dir,
-        )
+        bundle = load_bundle(bundle_path)
 
-        prompt = definition.initial_context.system_prompt
+        prompt = bundle.manifest.initial_context.system_prompt
         checks = [
             ("<task_description>", "<task_description> tag"),
             ("Always respond with a tool call", "tool-call directive"),
@@ -35,18 +33,16 @@ async def validate_agent(agent_name: str, agents_dir: Path) -> bool:
                 print(f"  {agent_name}: FAIL - Missing {name}")
                 return False
 
-        if len(definition.tools) < 2:
+        if len(bundle.manifest.tools) < 2:
             print(f"  {agent_name}: FAIL - Need at least 2 tools (including submit_result)")
             return False
 
-        tool_names = [tool.tool_name for tool in definition.tools]
+        tool_names = [tool.name for tool in bundle.manifest.tools]
         if "submit_result" not in tool_names:
             print(f"  {agent_name}: FAIL - Missing submit_result tool")
             return False
 
-        print(
-            f"  {agent_name}: PASS ({len(definition.tools)} tools, max_turns={definition.max_turns})"
-        )
+        print(f"  {agent_name}: PASS ({len(bundle.manifest.tools)} tools, max_turns={bundle.max_turns})")
         return True
 
     except Exception as e:

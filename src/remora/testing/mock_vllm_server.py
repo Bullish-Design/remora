@@ -91,8 +91,9 @@ class MockVLLMServer:
                 user_content = message.get("content", "")
                 break
 
-        for mock_response in self.responses:
+        for index, mock_response in enumerate(self.responses):
             if re.search(mock_response.pattern, user_content, re.IGNORECASE):
+                self.responses.pop(index)
                 return web.json_response(mock_response.response)
 
         return web.json_response(

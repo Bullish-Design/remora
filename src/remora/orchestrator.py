@@ -6,7 +6,6 @@ import asyncio
 import logging
 import time
 import uuid
-from contextlib import suppress
 from enum import Enum
 from pathlib import Path
 from typing import Any, cast
@@ -18,8 +17,8 @@ from remora.discovery import CSTNode
 from remora.events import (
     CompositeEventEmitter,
     EventEmitter,
-    EventStreamController,
-    build_event_emitter,
+    JsonlEventEmitter,
+    NullEventEmitter,
 )
 from remora.kernel_runner import KernelRunner
 from remora.llm_logger import LlmConversationLogger
@@ -103,15 +102,7 @@ def _normalize_phase(phase: str) -> tuple[str, str | None]:
 # ---------------------------------------------------------------------------
 
 
-from cairn.orchestrator.queue import TaskPriority
 from cairn.runtime.workspace_cache import WorkspaceCache
-
-
-PRIORITY_MAP = {
-    "low": TaskPriority.LOW,
-    "normal": TaskPriority.NORMAL,
-    "high": TaskPriority.HIGH,
-}
 
 
 class Coordinator:
@@ -128,8 +119,7 @@ class Coordinator:
 
         self._semaphore = asyncio.Semaphore(config.cairn.max_concurrent_agents)
         self._workspace_cache = WorkspaceCache(max_size=config.cairn.workspace_cache_size)
-        self._event_emitter = build_event_emitter(
-            config.event_stream,
+        self._event_emitter = self._build_event_emitter(
             enabled_override=event_stream_enabled,
             output_override=event_stream_output,
         )
@@ -144,25 +134,29 @@ class Coordinator:
                 max_content_lines=config.llm_log.max_content_lines,
             )
             emitters = cast(list[EventEmitter], [self._event_emitter, self._llm_logger])
-            self._event_emitter = CompositeEventEmitter(
-                emitters=emitters,
-                enabled=True,
-                include_payloads=True,  # Composite needs payloads to pass them down
-            )
+            self._event_emitter = CompositeEventEmitter(emitters)
 
-        self._watch_task: asyncio.Task[None] | None = None
         self._running_tasks: set[asyncio.Task[Any]] = set()
         self._shutdown_requested: bool = False
 
-    async def __aenter__(self) -> "Coordinator":
-        if isinstance(self._event_emitter, EventStreamController):
-            self._watch_task = asyncio.create_task(self._event_emitter.watch())
-        elif isinstance(self._event_emitter, CompositeEventEmitter):
-            # Check if one of the children is the controller
-            for child in self._event_emitter.emitters:
-                if isinstance(child, EventStreamController):
-                    self._watch_task = asyncio.create_task(child.watch())
+    def _build_event_emitter(
+        self,
+        *,
+        enabled_override: bool | None = None,
+        output_override: Path | None = None,
+    ) -> EventEmitter:
+        config = self.config.event_stream
+        enabled = config.enabled if enabled_override is None else enabled_override
+        output = config.output if output_override is None else output_override
+        if not enabled:
+            return NullEventEmitter()
+        return JsonlEventEmitter(
+            output=output,
+            include_payloads=config.include_payloads,
+            max_payload_chars=config.max_payload_chars,
+        )
 
+    async def __aenter__(self) -> "Coordinator":
         if self._llm_logger:
             self._llm_logger.open()
 
@@ -176,10 +170,6 @@ class Coordinator:
         if self._running_tasks:
             await asyncio.gather(*self._running_tasks, return_exceptions=True)
         self._running_tasks.clear()
-        if self._watch_task is not None:
-            self._watch_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._watch_task
         if self._llm_logger:
             self._llm_logger.close()
         self._event_emitter.close()

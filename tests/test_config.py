@@ -15,8 +15,8 @@ def _write_subagent_files(agents_dir: Path) -> None:
     for name in ["lint", "test", "docstring", "sample_data"]:
         subagent_dir = agents_dir / name
         subagent_dir.mkdir(parents=True, exist_ok=True)
-        subagent_file = subagent_dir / f"{name}_subagent.yaml"
-        subagent_file.write_text("", encoding="utf-8")
+        bundle_file = subagent_dir / "bundle.yaml"
+        bundle_file.write_text("", encoding="utf-8")
 
 
 def test_default_config_loads_without_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -125,4 +125,3 @@ def test_resolve_grail_limits_with_override() -> None:
     config = CairnConfig(limits_preset="default", limits_override={"max_duration": "60s"})
     result = resolve_grail_limits(config)
     assert result["max_duration"] == "60s"
-

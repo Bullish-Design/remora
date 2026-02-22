@@ -20,10 +20,10 @@ def _demo_root() -> Path:
 
 
 def _build_demo_config(base: RemoraConfig, demo_root: Path) -> RemoraConfig:
-    lint_op = base.operations.get("lint", OperationConfig(subagent="lint/lint_subagent.yaml"))
+    lint_op = base.operations.get("lint", OperationConfig(subagent="lint"))
     docstring_op = base.operations.get(
         "docstring",
-        OperationConfig.model_validate({"subagent": "docstring/docstring_subagent.yaml", "style": "google"}),
+        OperationConfig.model_validate({"subagent": "docstring", "style": "google"}),
     )
     type_check_op = lint_op.model_copy()
     operations = {

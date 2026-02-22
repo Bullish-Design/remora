@@ -14,16 +14,16 @@ operations:
   lint:
     enabled: true
     auto_accept: false
-    subagent: lint/lint_subagent.yaml
+    subagent: lint
   test:
     enabled: true
     auto_accept: false
-    subagent: test/test_subagent.yaml
+    subagent: test
   docstring:
     enabled: true
     auto_accept: false
-    subagent: docstring/docstring_subagent.yaml
+    subagent: docstring
     style: google
   sample_data:
     enabled: false
-    subagent: sample_data/sample_data_subagent.yaml
+    subagent: sample_data

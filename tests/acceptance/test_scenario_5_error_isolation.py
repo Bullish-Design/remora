@@ -11,7 +11,7 @@ from pathlib import Path
 from remora.analyzer import RemoraAnalyzer
 from remora.config import load_config
 
-pytestmark = pytest.mark.acceptance
+pytestmark = [pytest.mark.acceptance, pytest.mark.integration]
 
 
 @pytest.mark.asyncio

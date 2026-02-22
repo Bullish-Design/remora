@@ -59,9 +59,7 @@ class RunnerConfig(BaseModel):
     max_tokens: int = 4096
     temperature: float = 0.1
     tool_choice: str = "auto"
-    include_prompt_context: bool = False
-    include_tool_guide: bool = True
-    use_grammar_enforcement: bool = True
+    max_history_messages: int = 50
 
 
 class OperationConfig(BaseModel):
@@ -132,13 +130,11 @@ class WatchConfig(BaseModel):
 
 def _default_operations() -> dict[str, OperationConfig]:
     return {
-        "lint": OperationConfig(subagent="lint/lint_subagent.yaml"),
-        "test": OperationConfig(subagent="test/test_subagent.yaml", priority="high"),
-        "docstring": OperationConfig.model_validate(
-            {"subagent": "docstring/docstring_subagent.yaml", "style": "google"}
-        ),
+        "lint": OperationConfig(subagent="lint"),
+        "test": OperationConfig(subagent="test", priority="high"),
+        "docstring": OperationConfig.model_validate({"subagent": "docstring", "style": "google"}),
         "sample_data": OperationConfig(
-            subagent="sample_data/sample_data_subagent.yaml",
+            subagent="sample_data",
             enabled=False,
         ),
     }

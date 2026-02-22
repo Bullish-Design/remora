@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.acceptance
+pytestmark = [pytest.mark.acceptance, pytest.mark.integration]
 
 
 @pytest.mark.slow

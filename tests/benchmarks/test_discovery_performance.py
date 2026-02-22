@@ -90,21 +90,3 @@ class TestDiscoveryPerformance:
         result = benchmark(discoverer.discover)
 
         assert len(result) > 0
-
-
-class TestExecutionPerformance:
-    """Benchmark tests for script execution."""
-
-    def test_executor_startup_time(self, benchmark) -> None:
-        """Benchmark executor initialization."""
-        from remora.execution import ProcessIsolatedExecutor
-
-        def create_executor():
-            executor = ProcessIsolatedExecutor(max_workers=4)
-            return executor
-
-        executor = benchmark(create_executor)
-
-        import asyncio
-
-        asyncio.run(executor.shutdown())

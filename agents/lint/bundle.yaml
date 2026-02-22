@@ -1,0 +1,78 @@
+name: lint_agent
+version: '1.0'
+model:
+  plugin: function_gemma
+  adapter: google/functiongemma-270m-it
+  grammar:
+    mode: ebnf
+    allow_parallel_calls: true
+    args_format: permissive
+initial_context:
+  system_prompt: 'You are a model that can do function calling with the following
+    functions.
+
+    <task_description>You are a Python linting tool. Use the linter to find
+
+    issues, apply fixes when possible, and report results. If required arguments
+
+    are missing, omit them from the function call.</task_description>
+
+
+    Respond with a single tool call each turn. Do not output any text outside
+
+    the tool call.
+
+    '
+  user_template: 'Code to lint:
+
+    {{ node_text }}
+
+    '
+max_turns: 15
+termination_tool: submit_result
+tools:
+- name: run_linter
+  registry: grail
+  description: Run ruff linter on the Python code and return a list of issues found.
+  inputs_override:
+    check_only:
+      type: string
+      description: If true, only check for issues without applying fixes.
+  context_providers:
+  - context/ruff_config.pym
+- name: apply_fix
+  registry: grail
+  description: Apply an automatic fix for a specific lint issue by its code and line
+    number.
+  inputs_override:
+    issue_code:
+      type: string
+      description: The ruff issue code to fix, e.g. F401 or E501.
+    line_number:
+      type: string
+      description: The line number where the issue occurs.
+- name: read_file
+  registry: grail
+  description: Read and return the full contents of the current Python file being
+    analyzed.
+- name: submit_result
+  registry: grail
+  description: Submit the final linting result after all issues have been checked
+    and optionally fixed.
+  inputs_override:
+    summary:
+      type: string
+      description: A short summary of what was done.
+    issues_fixed:
+      type: string
+      description: The number of issues that were fixed.
+    issues_remaining:
+      type: string
+      description: The number of issues still remaining.
+    changed_files:
+      type: array
+      description: List of file paths that were modified.
+registries:
+- type: grail
+  config:
+    agents_dir: tools

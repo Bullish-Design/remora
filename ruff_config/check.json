@@ -1,0 +1,15 @@
+{
+  "file": "/run/user/1000/pytest-of-andrew/pytest-23/test_lint_scenario_with_mock0/sample_project/agents/lint/context/ruff_config.pym",
+  "valid": true,
+  "errors": [],
+  "warnings": [],
+  "info": {
+    "externals_count": 2,
+    "inputs_count": 1,
+    "lines_of_code": 49,
+    "monty_features_used": [
+      "f_string",
+      "for_loop"
+    ]
+  }
+}

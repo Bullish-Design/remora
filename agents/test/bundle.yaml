@@ -1,0 +1,67 @@
+name: test_agent
+version: '1.0'
+model:
+  plugin: function_gemma
+  adapter: google/functiongemma-270m-it
+  grammar:
+    mode: ebnf
+    allow_parallel_calls: true
+    args_format: permissive
+initial_context:
+  system_prompt: 'You are a model that can do function calling with the following
+    functions.
+
+    <task_description>You are a Python test generator. Analyze the signature,
+
+    check for existing tests, write new tests, and run them until they pass.
+
+    If required arguments are missing, omit them from the function call.</task_description>
+
+
+    Respond with a single tool call each turn. Do not output any text outside
+
+    the tool call.
+
+    '
+  user_template: 'Target file: {{ file_path }}
+
+    Node: {{ node_name }} ({{ node_type }})
+
+
+    {{ node_text }}
+
+    '
+max_turns: 20
+termination_tool: submit_result
+tools:
+- name: analyze_signature
+  registry: grail
+  description: Extract the function signature, parameter names, and types from the
+    Python code.
+- name: read_existing_tests
+  registry: grail
+  description: Read any existing test files for the current Python code.
+- name: write_test_file
+  registry: grail
+  description: Write a new pytest test file with generated test cases.
+  inputs_override:
+    content:
+      type: string
+      description: The full Python source code of the test file to write.
+    path_value:
+      type: string
+      description: The file path where the test file should be written.
+  context_providers:
+  - context/pytest_config.pym
+- name: run_tests
+  registry: grail
+  description: Run pytest on the generated tests and return pass or fail results.
+  context_providers:
+  - context/pytest_config.pym
+- name: submit_result
+  registry: grail
+  description: Submit the final result after test generation is complete.
+registries:
+- type: grail
+  config:
+    agents_dir: tools

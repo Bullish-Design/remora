@@ -78,7 +78,7 @@ class LlmConversationLogger:
 
         # Check for completion events to trigger flush
         event_type = payload.get("event")
-        if event_type in (EventName.SUBMIT_RESULT, EventName.AGENT_ERROR):
+        if event_type in (EventName.AGENT_COMPLETE, EventName.AGENT_ERROR):
             self._flush_agent(agent_id)
 
     def _write(self, text: str) -> None:
@@ -152,8 +152,8 @@ class LlmConversationLogger:
                 self._print_tool_result(event)
             elif event_type == EventName.AGENT_ERROR:
                 self._print_agent_error(event)
-            elif event_type == EventName.SUBMIT_RESULT:
-                self._print_submit_result(event)
+            elif event_type == EventName.AGENT_COMPLETE:
+                self._print_agent_complete(event)
             elif not last_request and event_type == EventName.MODEL_REQUEST:
                 self._write("\n  (Found model_request but failed to identify it as last_request)")
             elif getattr(self, f"_print_{event_type}", None):
@@ -230,9 +230,17 @@ class LlmConversationLogger:
             self._write(f"  Code: {p['error_code']}")
         self._write(f"{'!' * 60}")
 
-    def _print_submit_result(self, p: dict[str, Any]) -> None:
-        status = p.get("status", "?")
-        self._write(f"\nRESULT: {status}")
+    def _print_agent_complete(self, p: dict[str, Any]) -> None:
+        self._write("\n── Agent Complete " + "─" * 42)
+        turn_count = p.get("turn_count")
+        termination_reason = p.get("termination_reason")
+        total_duration_ms = p.get("total_duration_ms")
+        if turn_count is not None:
+            self._write(f"  turns: {turn_count}")
+        if termination_reason:
+            self._write(f"  termination_reason: {termination_reason}")
+        if total_duration_ms is not None:
+            self._write(f"  total_duration_ms: {total_duration_ms}")
 
     def _write_agent_header(self, p: dict[str, Any]) -> None:
         self._write(f"\n{'═' * 60}")
