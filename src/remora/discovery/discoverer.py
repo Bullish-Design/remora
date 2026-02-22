@@ -68,17 +68,30 @@ class TreeSitterDiscoverer:
         start = time.monotonic()
         status = EventStatus.OK
         try:
+            import concurrent.futures
+
             queries = self._loader.load_query_pack(self.query_dir, self.language, self.query_pack)
             py_files = self._collect_files()
             all_nodes: list[CSTNode] = []
-            for file_path in py_files:
+
+            def _parse_single(file_path: Path) -> list[CSTNode]:
                 try:
-                    tree, source_bytes = self._parser.parse_file(file_path)
-                    nodes = self._extractor.extract(file_path, tree, source_bytes, queries)
-                    all_nodes.extend(nodes)
+                    from remora.discovery.source_parser import SourceParser
+                    from remora.discovery.match_extractor import MatchExtractor
+                    parser = SourceParser()
+                    extractor = MatchExtractor()
+
+                    tree, source_bytes = parser.parse_file(file_path)
+                    return extractor.extract(file_path, tree, source_bytes, queries)
                 except DiscoveryError:
                     logger.warning("Skipping %s due to parse error", file_path)
-                    continue
+                    return []
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                results_generator = executor.map(_parse_single, py_files)
+                for nodes in results_generator:
+                    all_nodes.extend(nodes)
+
             all_nodes.sort(key=lambda n: (str(n.file_path), n.start_byte, n.node_type.value, n.name))
             return all_nodes
         except Exception:

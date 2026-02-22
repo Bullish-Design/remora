@@ -139,6 +139,7 @@ class Coordinator:
             emitters = cast(list[EventEmitter], [self._event_emitter, self._llm_logger])
             self._event_emitter = CompositeEventEmitter(emitters)
 
+        self._hub_daemon_task: asyncio.Task[None] | None = None
         self._running_tasks: set[asyncio.Task[Any]] = set()
         self._shutdown_requested: bool = False
         self._runner_factory = runner_factory or KernelRunner
@@ -165,6 +166,13 @@ class Coordinator:
             self._llm_logger.open()
 
         self._setup_signal_handlers()
+
+        if self.config.hub_mode == "in-process":
+            from remora.hub.daemon import HubDaemon
+            project_root = self.config.agents_dir.parent.resolve()
+            daemon = HubDaemon(project_root=project_root, standalone=False)
+            self._hub_daemon_task = asyncio.create_task(daemon.run())
+
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -174,6 +182,14 @@ class Coordinator:
         if self._running_tasks:
             await asyncio.gather(*self._running_tasks, return_exceptions=True)
         self._running_tasks.clear()
+
+        if self._hub_daemon_task and not self._hub_daemon_task.done():
+            self._hub_daemon_task.cancel()
+            try:
+                await self._hub_daemon_task
+            except asyncio.CancelledError:
+                pass
+
         if self._llm_logger:
             self._llm_logger.close()
         self._event_emitter.close()

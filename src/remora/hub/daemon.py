@@ -41,6 +41,7 @@ class HubDaemon:
         project_root: Path,
         db_path: Path | None = None,
         grail_executor: Any = None,
+        standalone: bool = True,
     ) -> None:
         """Initialize the daemon.
 
@@ -57,6 +58,7 @@ class HubDaemon:
         self.store: NodeStateStore | None = None
         self.watcher: HubWatcher | None = None
         self.rules = RulesEngine()
+        self.standalone = standalone
 
         self._shutdown_event = asyncio.Event()
         self._started_at: datetime | None = None
@@ -73,8 +75,9 @@ class HubDaemon:
         self.workspace = await Fsdantic.open(path=str(self.db_path))
         self.store = NodeStateStore(self.workspace)
 
-        self._write_pid_file()
-        self._setup_signals()
+        if self.standalone:
+            self._write_pid_file()
+            self._setup_signals()
 
         self._started_at = datetime.now(timezone.utc)
         await self._update_status(running=True)
@@ -307,7 +310,8 @@ class HubDaemon:
         if self.workspace:
             await self.workspace.close()
 
-        self._remove_pid_file()
+        if self.standalone:
+            self._remove_pid_file()
 
         logger.info("Hub daemon stopped")
 

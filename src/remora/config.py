@@ -162,6 +162,7 @@ class RemoraConfig(BaseModel):
     event_stream: EventStreamConfig = Field(default_factory=EventStreamConfig)
     llm_log: LlmLogConfig = Field(default_factory=LlmLogConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
+    hub_mode: Literal["in-process", "daemon", "disabled"] = "disabled"
 
     @model_validator(mode='after')
     def validate_and_resolve_precedence(self) -> "RemoraConfig":
