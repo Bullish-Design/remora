@@ -231,7 +231,6 @@ class Coordinator:
             bundle_path = self.config.agents_dir / op_config.subagent
             workspace_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
             workspace_path = workspace_root / "workspaces" / agent_id
-            workspace_path.mkdir(parents=True, exist_ok=True)
 
             try:
                 runner = self._runner_factory(
@@ -259,7 +258,10 @@ class Coordinator:
             async with self._semaphore:
                 ctx.transition(RemoraAgentState.EXECUTING)
                 try:
-                    result = await runner.run()
+                    from remora.utils.fs import managed_workspace
+                    
+                    async with managed_workspace(runner.workspace_path):
+                        result = await runner.run()
                     ctx.transition(RemoraAgentState.COMPLETED)
                     return operation, result
                 except Exception as exc:
