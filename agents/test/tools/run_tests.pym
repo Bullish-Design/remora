@@ -23,6 +23,12 @@ async def run_command(cmd: str, args: list[str]) -> dict[str, Any]:
     ...
 
 
+@external
+async def run_json_command(cmd: str, args: list[str]) -> Any:
+    """Run a command and parse its stdout as JSON."""
+    ...
+
+
 async def _read_optional(path: str) -> str | None:
     if await file_exists(path=path):
         return await read_file(path=path)
