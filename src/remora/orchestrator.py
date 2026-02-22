@@ -8,7 +8,7 @@ import time
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -104,6 +104,8 @@ def _normalize_phase(phase: str) -> tuple[str, str | None]:
 
 from cairn.runtime.workspace_cache import WorkspaceCache
 
+RunnerFactory = Callable[..., KernelRunner]
+
 
 class Coordinator:
     """Coordinate discovery, execution, and workspace management."""
@@ -114,6 +116,7 @@ class Coordinator:
         *,
         event_stream_enabled: bool | None = None,
         event_stream_output: Path | None = None,
+        runner_factory: RunnerFactory | None = None,
     ) -> None:
         self.config = config
 
@@ -138,6 +141,7 @@ class Coordinator:
 
         self._running_tasks: set[asyncio.Task[Any]] = set()
         self._shutdown_requested: bool = False
+        self._runner_factory = runner_factory or KernelRunner
 
     def _build_event_emitter(
         self,
@@ -230,7 +234,7 @@ class Coordinator:
             workspace_path.mkdir(parents=True, exist_ok=True)
 
             try:
-                runner = KernelRunner(
+                runner = self._runner_factory(
                     node=node,
                     ctx=ctx,
                     config=self.config,

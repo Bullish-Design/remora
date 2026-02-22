@@ -7,7 +7,7 @@ import shutil
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from rich.console import Console
 from rich.table import Table
@@ -47,6 +47,9 @@ class RemoraAnalyzer:
         self,
         config: RemoraConfig,
         event_emitter: EventEmitter | None = None,
+        workspace_manager: WorkspaceManager | None = None,
+        discoverer_factory: Callable[..., TreeSitterDiscoverer] | None = None,
+        coordinator_cls: type[Coordinator] = Coordinator,
     ):
         """Initialize analyzer.
 
@@ -60,7 +63,9 @@ class RemoraAnalyzer:
         self._results: AnalysisResults | None = None
         self._nodes: list[CSTNode] = []
         self._workspaces: dict[tuple[str, str], WorkspaceInfo] = {}
-        self._workspace_manager = WorkspaceManager()
+        self._workspace_manager = workspace_manager or WorkspaceManager()
+        self._discoverer_factory = discoverer_factory or TreeSitterDiscoverer
+        self._coordinator_cls = coordinator_cls
 
     async def analyze(
         self,
@@ -81,7 +86,7 @@ class RemoraAnalyzer:
             operations = [name for name, op_config in self.config.operations.items() if op_config.enabled]
 
         # Discover nodes using tree-sitter
-        discoverer = TreeSitterDiscoverer(
+        discoverer = self._discoverer_factory(
             root_dirs=paths,
             language=self.config.discovery.language,
             query_pack=self.config.discovery.query_pack,
@@ -91,7 +96,7 @@ class RemoraAnalyzer:
         self._nodes = await asyncio.to_thread(discoverer.discover)
 
         # Run analysis through coordinator
-        async with Coordinator(
+        async with self._coordinator_cls(
             config=self.config,
             event_stream_enabled=self.config.event_stream.enabled,
             event_stream_output=self.config.event_stream.output,
@@ -216,7 +221,7 @@ class RemoraAnalyzer:
             config = self._apply_config_override(config_override)
 
         # Re-run the operation
-        async with Coordinator(
+        async with self._coordinator_cls(
             config=config,
             event_stream_enabled=config.event_stream.enabled,
             event_stream_output=config.event_stream.output,

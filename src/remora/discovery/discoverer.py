@@ -46,6 +46,9 @@ class TreeSitterDiscoverer:
         *,
         query_dir: Path | None = None,
         event_emitter=None,
+        parser: SourceParser | None = None,
+        loader: QueryLoader | None = None,
+        extractor: MatchExtractor | None = None,
     ) -> None:
         self.root_dirs = [Path(p).resolve() for p in root_dirs]
         self.language = language
@@ -53,9 +56,9 @@ class TreeSitterDiscoverer:
         self.query_dir = query_dir or _default_query_dir()
         self.event_emitter = event_emitter
 
-        self._parser = SourceParser()
-        self._loader = QueryLoader()
-        self._extractor = MatchExtractor()
+        self._parser = parser or SourceParser()
+        self._loader = loader or QueryLoader()
+        self._extractor = extractor or MatchExtractor()
 
     def discover(self) -> list[CSTNode]:
         """Walk root_dirs, parse .py files, run queries, return CSTNodes.

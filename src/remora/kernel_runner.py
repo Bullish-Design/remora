@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 from structured_agents import (
     AgentKernel,
@@ -51,6 +51,8 @@ class KernelRunner:
         event_emitter: EventEmitter,
         workspace_path: Path | None = None,
         stable_path: Path | None = None,
+        *,
+        backend_factory: Callable[[GrailBackendConfig, Callable], GrailBackend] | None = None,
     ):
         self.node = node
         self.ctx = ctx
@@ -82,6 +84,7 @@ class KernelRunner:
         )
 
         self._backend: GrailBackend | None = None
+        self._backend_factory = backend_factory
 
         self._kernel = self._build_kernel()
 
@@ -114,10 +117,13 @@ class KernelRunner:
             },
         )
 
-        self._backend = GrailBackend(
-            config=backend_config,
-            externals_factory=self._create_externals,
-        )
+        if self._backend_factory:
+            self._backend = self._backend_factory(backend_config, self._create_externals)
+        else:
+            self._backend = GrailBackend(
+                config=backend_config,
+                externals_factory=self._create_externals,
+            )
 
         tool_source = self.bundle.build_tool_source(self._backend)
         grammar_config = self.bundle.get_grammar_config()
