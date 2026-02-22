@@ -249,6 +249,9 @@ class KernelRunner:
 
     async def run(self) -> AgentResult:
         """Execute the agent loop via structured-agents."""
+        from structured_agents.exceptions import KernelError
+        from structured_agents.exceptions import ToolExecutionError as SAToolExecutionError
+
         initial_messages = self.bundle.build_initial_messages(
             {
                 "node_text": self.node.text,
@@ -272,6 +275,48 @@ class KernelRunner:
 
             return self._format_result(result)
 
+        except SAToolExecutionError as exc:
+            logger.exception("Tool execution failed for %s", self.node.node_id)
+            return AgentResult(
+                status=AgentStatus.FAILED,
+                workspace_id=self.ctx.agent_id,
+                changed_files=[],
+                summary=f"Tool execution failed: {str(exc)}",
+                details={"error_type": "ToolExecutionError", "tool_name": exc.tool_name},
+                error=str(exc),
+            )
+        except KernelError as exc:
+            error_str = str(exc).lower()
+            if "time out" in error_str or "timed out" in error_str:
+                logger.exception("Timeout during KernelRunner execution for %s", self.node.node_id)
+                return AgentResult(
+                    status=AgentStatus.FAILED,
+                    workspace_id=self.ctx.agent_id,
+                    changed_files=[],
+                    summary="Execution timed out.",
+                    details={"error_type": "KernelTimeoutError"},
+                    error=str(exc),
+                )
+            elif "context_length_exceeded" in error_str or "maximum context length" in error_str or "context length" in error_str:
+                logger.exception("Context length exceeded for %s", self.node.node_id)
+                return AgentResult(
+                    status=AgentStatus.FAILED,
+                    workspace_id=self.ctx.agent_id,
+                    changed_files=[],
+                    summary="Context length exceeded.",
+                    details={"error_type": "ContextLengthError"},
+                    error=str(exc),
+                )
+            else:
+                logger.exception("Kernel error for %s", self.node.node_id)
+                return AgentResult(
+                    status=AgentStatus.FAILED,
+                    workspace_id=self.ctx.agent_id,
+                    changed_files=[],
+                    summary=f"Kernel error: {str(exc)}",
+                    details={"error_type": "KernelError"},
+                    error=str(exc),
+                )
         except Exception as exc:
             from remora.errors import ExecutionError
 

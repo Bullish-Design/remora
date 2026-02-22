@@ -25,3 +25,15 @@ class ExecutionError(RemoraError):
 
 class SubagentError(RemoraError):
     code = "REMORA-AGENT"
+
+class KernelTimeoutError(ExecutionError):
+    """Raised when the LLM or tool execution times out."""
+    code = "REMORA-EXEC-TIMEOUT"
+
+class ToolExecutionError(ExecutionError):
+    """Raised when a specific tool fails catastrophically."""
+    code = "REMORA-EXEC-TOOL"
+
+class ContextLengthError(ExecutionError):
+    """Raised when the prompt exceeds the model's context window."""
+    code = "REMORA-EXEC-CONTEXT"
