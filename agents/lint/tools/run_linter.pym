@@ -23,6 +23,12 @@ async def run_command(cmd: str, args: list[str]) -> dict[str, Any]:
     ...
 
 
+@external
+async def run_json_command(cmd: str, args: list[str]) -> Any:
+    """Run a command and parse its stdout as JSON."""
+    ...
+
+
 async def _read_optional(path: str) -> str | None:
     if await file_exists(path=path):
         return await read_file(path=path)
@@ -37,90 +43,6 @@ async def _resolve_target_file() -> str | None:
         return stored.strip()
     return None
 
-
-def _split_json_objects(text: str) -> list[str]:
-    objects, depth, start = [], 0, None
-    in_string, escape = False, False
-    for idx, ch in enumerate(text):
-        if in_string:
-            escape = not escape and ch == "\\"
-            if ch == '"' and not escape:
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-            continue
-        if ch == "{":
-            if depth == 0:
-                start = idx
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0 and start is not None:
-                objects.append(text[start:idx + 1])
-                start = None
-    return objects
-
-
-def _find_value_start(text: str, key: str) -> int | None:
-    idx = text.find(f'"{key}":')
-    return idx + len(f'"{key}":') if idx != -1 else None
-
-
-def _parse_string(text: str) -> str:
-    if not text.startswith('"'):
-        return ""
-    result, escape = [], False
-    for ch in text[1:]:
-        if escape:
-            result.append(ch)
-            escape = False
-        elif ch == "\\":
-            escape = True
-        elif ch == '"':
-            break
-        else:
-            result.append(ch)
-    return "".join(result)
-
-
-def _parse_number(text: str) -> int:
-    digits = [ch for ch in text if ch.isdigit()]
-    return int("".join(digits)) if digits else 0
-
-
-def _get_string(obj: str, key: str) -> str:
-    start = _find_value_start(obj, key)
-    return _parse_string(obj[start:].lstrip()) if start else ""
-
-
-def _get_int(obj: str, key: str) -> int:
-    start = _find_value_start(obj, key)
-    return _parse_number(obj[start:].lstrip()) if start else 0
-
-
-def _extract_code(issue: str) -> str:
-    start = _find_value_start(issue, "code")
-    if not start:
-        return ""
-    remainder = issue[start:].lstrip()
-    if remainder.startswith("{"):
-        value_start = _find_value_start(remainder, "value")
-        return _parse_string(remainder[value_start:].lstrip()) if value_start else ""
-    return _parse_string(remainder)
-
-
-def _format_issue(issue: str) -> dict[str, Any]:
-    fixable = "\"fix\"" in issue and "\"applicability\":\"unfixable\"" not in issue
-    return {
-        "code": _extract_code(issue),
-        "line": _get_int(issue, "row"),
-        "col": _get_int(issue, "column"),
-        "message": _get_string(issue, "message"),
-        "fixable": fixable,
-    }
-
-
 try:
     target_file = await _resolve_target_file()
     if not target_file:
@@ -131,14 +53,10 @@ try:
         command_args.append("--fix")
     command_args.append(target_file)
 
-    completed = await run_command(cmd="ruff", args=command_args)
-    exit_code = int(completed.get("exit_code", 0) or 0)
-    stderr = str(completed.get("stderr", ""))
-    stdout = str(completed.get("stdout", ""))
-    output = stdout.strip() or stderr.strip()
+    issues_raw = await run_json_command(cmd="ruff", args=command_args)
 
-    if exit_code not in {0, 1}:
-        error_message = stderr.strip() or f"ruff exit code {exit_code}"
+    if isinstance(issues_raw, dict) and "error" in issues_raw:
+        error_message = issues_raw.get("stderr", "").strip() or f"ruff exit code {issues_raw.get('exit_code')}"
         result = {
             "result": None,
             "summary": f"Error: {error_message}",
@@ -147,30 +65,28 @@ try:
             "error": error_message,
         }
     else:
-        issues_raw = _split_json_objects(output)
-        issues = [_format_issue(issue) for issue in issues_raw]
-        if not issues and exit_code == 1:
-            concise = await run_command(cmd="ruff", args=["check", "--select", "E,W,F", "--format", "concise", target_file])
-            concise_output = str(concise.get("stdout", ""))
-            for line in concise_output.splitlines():
-                if ":" not in line:
-                    continue
-                parts = line.split(":")
-                if len(parts) < 4:
-                    continue
-                code_part = parts[3].strip()
-                code = code_part.split(" ", 1)[0] if code_part else ""
-                if not code:
-                    continue
-                issues.append(
-                    {
-                        "code": code,
-                        "line": _parse_number(parts[1]),
-                        "col": _parse_number(parts[2]),
-                        "message": code_part,
-                        "fixable": code.startswith("E") or code.startswith("W"),
-                    }
-                )
+        issues = []
+        if issues_raw:
+            for issue_data in issues_raw:
+                code_val = issue_data.get("code")
+                if isinstance(code_val, dict):
+                    code_str = str(code_val.get("value", ""))
+                else:
+                    code_str = str(code_val or "")
+                
+                fix_data = issue_data.get("fix")
+                fixable = fix_data is not None
+                if isinstance(fix_data, dict) and fix_data.get("applicability") == "unfixable":
+                    fixable = False
+                    
+                issues.append({
+                    "code": code_str,
+                    "line": issue_data.get("location", {}).get("row", 0),
+                    "col": issue_data.get("location", {}).get("column", 0),
+                    "message": str(issue_data.get("message", "")),
+                    "fixable": fixable
+                })
+                
         fixable_count = sum(1 for issue in issues if issue.get("fixable"))
         total = len(issues)
         raw_result = {"issues": issues, "total": total, "fixable_count": fixable_count}

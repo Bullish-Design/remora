@@ -42,9 +42,34 @@ def create_remora_externals(
         """Return metadata about the current node."""
         return node_metadata
 
+    async def run_json_command(cmd: str, args: list[str]) -> dict[str, Any] | list[Any]:
+        """Run a command and parse its stdout as JSON."""
+        import json
+        run_command = base_externals.get("run_command")
+        if not run_command:
+            return {"error": "run_command not found in base_externals"}
+        
+        result = await run_command(cmd=cmd, args=args)
+        stdout = str(result.get("stdout", ""))
+        stderr = str(result.get("stderr", ""))
+        exit_code = int(result.get("exit_code", 0) or 0)
+        
+        try:
+            if not stdout.strip():
+                return []
+            return json.loads(stdout)
+        except json.JSONDecodeError:
+            return {
+                "error": "Failed to parse JSON", 
+                "stdout": stdout, 
+                "stderr": stderr,
+                "exit_code": exit_code
+            }
+
     # Remora-specific overrides or additions
     base_externals["get_node_source"] = get_node_source
     base_externals["get_node_metadata"] = get_node_metadata
+    base_externals["run_json_command"] = run_json_command
 
     return base_externals
 
