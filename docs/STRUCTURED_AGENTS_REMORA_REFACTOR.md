@@ -2,9 +2,9 @@
 
 ## Overview
 
-This guide walks through refactoring Remora to use the new `structured-agents` library. The refactor will:
+This guide walks through refactoring Remora to use the `structured-agents` library. The refactor will:
 
-1. **Remove** ~1,300 lines of code that moved to structured-agents
+1. **Remove** ~1,400 lines of code that moved to structured-agents
 2. **Add** a thin wrapper (`KernelRunner`) that bridges Remora's orchestration to the new library
 3. **Migrate** existing subagent YAML files to the new bundle.yaml format
 
@@ -14,7 +14,7 @@ This guide walks through refactoring Remora to use the new `structured-agents` l
 
 ## Prerequisites
 
-- Completed `structured-agents` library (see STRUCTURED_AGENTS_DEV_GUIDE.md)
+- Completed `structured-agents` library (in `.context/structured-agents/`)
 - `structured-agents` published or available as a path dependency
 - Familiarity with current Remora codebase
 
@@ -38,6 +38,7 @@ This guide walks through refactoring Remora to use the new `structured-agents` l
 | `src/remora/orchestrator.py` | Use new `KernelRunner` |
 | `src/remora/config.py` | Remove runner-specific config, add bundle paths |
 | `src/remora/events.py` | Simplify - now bridges to structured-agents observer |
+| `src/remora/externals.py` | Update to work with path-based context |
 | `pyproject.toml` | Add structured-agents dependency |
 
 ### Files to CREATE
@@ -53,7 +54,6 @@ This guide walks through refactoring Remora to use the new `structured-agents` l
 |------|---------|
 | `src/remora/discovery/*` | CST parsing with tree-sitter |
 | `src/remora/context/*` | ContextManager, Hub integration |
-| `src/remora/externals.py` | Remora-specific Grail external functions |
 | `src/remora/cli.py` | CLI entry points |
 | `src/remora/results.py` | AgentResult, NodeResult |
 | `src/remora/errors.py` | Error codes |
@@ -170,6 +170,7 @@ class RemoraEventBridge:
         payload = self._base_payload(EventName.AGENT_START)
         payload["max_turns"] = event.max_turns
         payload["tools_count"] = event.tools_count
+        payload["initial_messages_count"] = event.initial_messages_count
         self._emitter.emit(payload)
         self._start_time = time.monotonic()
 
@@ -240,6 +241,7 @@ class RemoraEventBridge:
         payload = self._base_payload(EventName.TURN_COMPLETE)
         payload["turn"] = event.turn
         payload["tool_calls_count"] = event.tool_calls_count
+        payload["tool_results_count"] = event.tool_results_count
         payload["errors_count"] = event.errors_count
         self._emitter.emit(payload)
 
@@ -269,13 +271,11 @@ Create **`tests/test_event_bridge.py`**:
 """Tests for the event bridge."""
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
 from structured_agents import (
     ModelRequestEvent,
-    ModelResponseEvent,
     ToolResultEvent,
-    TokenUsage,
 )
 
 from remora.event_bridge import RemoraEventBridge
@@ -368,14 +368,14 @@ from typing import Any, TYPE_CHECKING
 
 from structured_agents import (
     AgentKernel,
+    GrailBackend,
+    GrailBackendConfig,
     KernelConfig,
-    Message,
     ToolResult,
     load_bundle,
 )
-from structured_agents.backends import GrailBackend, GrailBackendConfig
 
-from remora.config import RemoraConfig, ServerConfig
+from remora.config import RemoraConfig
 from remora.context import ContextManager
 from remora.context.summarizers import get_default_summarizers
 from remora.discovery import CSTNode
@@ -424,7 +424,7 @@ class KernelRunner:
 
         # Initialize context manager
         self.context_manager = ContextManager(
-            base_context={
+            initial_context={
                 "agent_id": ctx.agent_id,
                 "goal": f"{self.bundle.name} on {node.name}",
                 "operation": self.bundle.name,
@@ -442,6 +442,9 @@ class KernelRunner:
             node_id=node.node_id,
             operation=self.bundle.name,
         )
+
+        # Store backend for cleanup
+        self._backend: GrailBackend | None = None
 
         # Build kernel
         self._kernel = self._build_kernel()
@@ -472,17 +475,22 @@ class KernelRunner:
             max_workers=self.config.cairn.pool_workers,
             timeout=float(self.config.cairn.timeout),
             limits={
-                # Map limits_preset to actual limits
                 **(self._get_limits_for_preset(self.config.cairn.limits_preset)),
                 **self.config.cairn.limits_override,
             },
         )
 
         # Create backend with externals factory
-        backend = GrailBackend(
+        self._backend = GrailBackend(
             config=backend_config,
             externals_factory=self._create_externals,
         )
+
+        # Build ToolSource from bundle + backend
+        tool_source = self.bundle.build_tool_source(self._backend)
+
+        # Get grammar config from bundle
+        grammar_config = self.bundle.get_grammar_config()
 
         # Get plugin from bundle
         plugin = self.bundle.get_plugin()
@@ -490,8 +498,9 @@ class KernelRunner:
         return AgentKernel(
             config=kernel_config,
             plugin=plugin,
-            backend=backend,
+            tool_source=tool_source,
             observer=self._observer,
+            grammar_config=grammar_config,
             max_history_messages=self.config.runner.max_history_messages,
         )
 
@@ -523,13 +532,16 @@ class KernelRunner:
     ) -> dict[str, Any]:
         """Create Remora-specific Grail external functions.
 
-        These are the functions available to .pym scripts that provide
-        access to Remora's workspace, node info, etc.
+        The context dict from GrailBackend contains:
+        - workspace_path: str | None
+        - stable_path: str | None
+        - node_source: str | None
+        - node_metadata: dict | None
         """
         return create_remora_externals(
             agent_id=agent_id,
-            node_source=self.node.text,
-            node_metadata={
+            node_source=context.get("node_source") or self.node.text,
+            node_metadata=context.get("node_metadata") or {
                 "name": self.node.name,
                 "type": str(self.node.node_type),
                 "file_path": str(self.node.file_path),
@@ -537,8 +549,12 @@ class KernelRunner:
                 "start_line": self.node.start_line,
                 "end_line": self.node.end_line,
             },
-            agent_fs=context.get("agent_fs"),
-            stable_fs=context.get("stable_fs"),
+            workspace_path=context.get("workspace_path") or (
+                str(self.workspace_path) if self.workspace_path else None
+            ),
+            stable_path=context.get("stable_path") or (
+                str(self.stable_path) if self.stable_path else None
+            ),
         )
 
     async def _provide_context(self) -> dict[str, Any]:
@@ -617,6 +633,8 @@ class KernelRunner:
 
         finally:
             await self._kernel.close()
+            if self._backend:
+                self._backend.shutdown()
 
     def _format_result(self, result) -> AgentResult:
         """Convert structured-agents RunResult to Remora's AgentResult."""
@@ -688,6 +706,65 @@ class KernelRunner:
         return status_map.get(status_str.lower(), AgentStatus.SUCCESS)
 ```
 
+### Step 4.2: Update externals.py
+
+The externals.py needs to be updated to work with path strings instead of Workspace objects:
+
+**File: `src/remora/externals.py`** (updated)
+
+```python
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Callable
+
+from cairn.runtime.external_functions import create_external_functions
+from fsdantic import Workspace
+
+
+def create_remora_externals(
+    agent_id: str,
+    node_source: str,
+    node_metadata: dict[str, Any],
+    workspace_path: str | None = None,
+    stable_path: str | None = None,
+) -> dict[str, Callable]:
+    """Create external functions available to Remora's .pym tools.
+
+    Extends Cairn's base externals with Remora-specific functions
+    like node context access.
+
+    Args:
+        agent_id: Unique agent identifier.
+        node_source: Source code of the node being analyzed.
+        node_metadata: Metadata dict for the node (name, type, etc).
+        workspace_path: Path to the agent's private workspace.
+        stable_path: Path to the read-only backing filesystem.
+
+    Returns:
+        Dictionary of functions to inject into the Grail script.
+    """
+    # Create workspace objects from paths if provided
+    agent_fs = Workspace(Path(workspace_path)) if workspace_path else None
+    stable_fs = Workspace(Path(stable_path)) if stable_path else None
+
+    base_externals = create_external_functions(agent_id, agent_fs, stable_fs)
+
+    async def get_node_source() -> str:
+        """Return the source code of the current node being analyzed."""
+        return node_source
+
+    async def get_node_metadata() -> dict[str, str]:
+        """Return metadata about the current node."""
+        return node_metadata
+
+    # Remora-specific overrides or additions
+    base_externals["get_node_source"] = get_node_source
+    base_externals["get_node_metadata"] = get_node_metadata
+
+    return base_externals
+```
+
 ### Testing Step 4
 
 Create **`tests/test_kernel_runner.py`**:
@@ -745,71 +822,109 @@ class TestKernelRunner:
         return MagicMock()
 
     def test_summarize_node_short(self, mock_node, mock_ctx, mock_config, mock_emitter, tmp_path):
-        # Create a test bundle
         bundle_dir = tmp_path / "test_bundle"
         bundle_dir.mkdir()
+        (bundle_dir / "tools").mkdir()
         (bundle_dir / "bundle.yaml").write_text("""
 name: test_agent
+version: "1.0"
+
+model:
+  plugin: function_gemma
+
 initial_context:
   system_prompt: Test
   user_template: "{{ node_text }}"
+
+max_turns: 5
+termination_tool: submit_result
+
 tools:
   - name: submit_result
-    script: tools/submit.pym
+    registry: grail
     description: Submit result
+
+registries:
+  - type: grail
+    config:
+      agents_dir: tools
 """)
-        (bundle_dir / "tools").mkdir()
 
         with patch("remora.kernel_runner.load_bundle") as mock_load:
             mock_bundle = MagicMock()
             mock_bundle.name = "test_agent"
             mock_bundle.manifest.model.adapter = None
+            mock_bundle.max_turns = 5
+            mock_bundle.termination_tool = "submit_result"
+            mock_bundle.tool_schemas = []
+            mock_bundle.get_plugin.return_value = MagicMock()
+            mock_bundle.get_grammar_config.return_value = MagicMock()
+            mock_bundle.build_tool_source.return_value = MagicMock()
             mock_load.return_value = mock_bundle
 
-            runner = KernelRunner(
-                node=mock_node,
-                ctx=mock_ctx,
-                config=mock_config,
-                bundle_path=bundle_dir,
-                event_emitter=mock_emitter,
-            )
+            with patch("remora.kernel_runner.GrailBackend"):
+                with patch("remora.kernel_runner.AgentKernel"):
+                    runner = KernelRunner(
+                        node=mock_node,
+                        ctx=mock_ctx,
+                        config=mock_config,
+                        bundle_path=bundle_dir,
+                        event_emitter=mock_emitter,
+                    )
 
-            summary = runner._summarize_node()
-            assert "def test_function" in summary
+                    summary = runner._summarize_node()
+                    assert "def test_function" in summary
 
     def test_parse_status(self, mock_node, mock_ctx, mock_config, mock_emitter, tmp_path):
         bundle_dir = tmp_path / "test_bundle"
         bundle_dir.mkdir()
+        (bundle_dir / "tools").mkdir()
         (bundle_dir / "bundle.yaml").write_text("""
 name: test_agent
+version: "1.0"
+model:
+  plugin: function_gemma
 initial_context:
   system_prompt: Test
   user_template: "{{ node_text }}"
+max_turns: 5
+termination_tool: submit_result
 tools:
   - name: submit_result
-    script: tools/submit.pym
+    registry: grail
     description: Submit result
+registries:
+  - type: grail
+    config:
+      agents_dir: tools
 """)
-        (bundle_dir / "tools").mkdir()
 
         with patch("remora.kernel_runner.load_bundle") as mock_load:
             mock_bundle = MagicMock()
             mock_bundle.name = "test_agent"
             mock_bundle.manifest.model.adapter = None
+            mock_bundle.max_turns = 5
+            mock_bundle.termination_tool = "submit_result"
+            mock_bundle.tool_schemas = []
+            mock_bundle.get_plugin.return_value = MagicMock()
+            mock_bundle.get_grammar_config.return_value = MagicMock()
+            mock_bundle.build_tool_source.return_value = MagicMock()
             mock_load.return_value = mock_bundle
 
-            runner = KernelRunner(
-                node=mock_node,
-                ctx=mock_ctx,
-                config=mock_config,
-                bundle_path=bundle_dir,
-                event_emitter=mock_emitter,
-            )
+            with patch("remora.kernel_runner.GrailBackend"):
+                with patch("remora.kernel_runner.AgentKernel"):
+                    runner = KernelRunner(
+                        node=mock_node,
+                        ctx=mock_ctx,
+                        config=mock_config,
+                        bundle_path=bundle_dir,
+                        event_emitter=mock_emitter,
+                    )
 
-            assert runner._parse_status("success") == AgentStatus.SUCCESS
-            assert runner._parse_status("skipped") == AgentStatus.SKIPPED
-            assert runner._parse_status("failed") == AgentStatus.ERRORED
-            assert runner._parse_status("ERROR") == AgentStatus.ERRORED
+                    assert runner._parse_status("success") == AgentStatus.SUCCESS
+                    assert runner._parse_status("skipped") == AgentStatus.SKIPPED
+                    assert runner._parse_status("failed") == AgentStatus.ERRORED
+                    assert runner._parse_status("ERROR") == AgentStatus.ERRORED
 ```
 
 Run test:
@@ -881,7 +996,7 @@ class Coordinator:
                 state=RemoraAgentState.QUEUED,
             )
 
-            # Get bundle path
+            # Get bundle path - now points to directory containing bundle.yaml
             bundle_path = self.config.agents_dir / op_config.subagent
 
             # Get workspace paths
@@ -940,61 +1055,6 @@ class Coordinator:
         )
 ```
 
-### Testing Step 5
-
-Create or update integration tests:
-
-```python
-"""Integration tests for orchestrator with KernelRunner."""
-
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-
-from remora.orchestrator import Coordinator
-from remora.results import AgentStatus
-
-
-class TestCoordinatorWithKernelRunner:
-    @pytest.fixture
-    def mock_config(self):
-        config = MagicMock()
-        config.cairn.max_concurrent_agents = 4
-        config.cairn.home = None
-        config.operations = {
-            "docstring": MagicMock(enabled=True, subagent="docstring/bundle.yaml"),
-        }
-        config.agents_dir = MagicMock()
-        config.agents_dir.__truediv__ = lambda self, x: f"/agents/{x}"
-        return config
-
-    @pytest.mark.asyncio
-    async def test_process_node_creates_kernel_runner(self, mock_config):
-        with patch("remora.orchestrator.KernelRunner") as MockRunner:
-            mock_runner = AsyncMock()
-            mock_runner.run.return_value = MagicMock(
-                status=AgentStatus.SUCCESS,
-                workspace_id="test",
-                changed_files=[],
-                summary="Done",
-                details={},
-                error=None,
-            )
-            MockRunner.return_value = mock_runner
-
-            coordinator = Coordinator(config=mock_config)
-
-            mock_node = MagicMock()
-            mock_node.node_id = "test-id"
-            mock_node.name = "test_func"
-            mock_node.node_type = "function"
-            mock_node.file_path = "/test.py"
-
-            result = await coordinator.process_node(mock_node, ["docstring"])
-
-            MockRunner.assert_called_once()
-            assert "docstring" in result.operation_results
-```
-
 ---
 
 ## Part 6: Delete Obsolete Code
@@ -1049,9 +1109,35 @@ from remora.kernel_runner import KernelRunner
 
 ## Part 7: Migrate Bundles
 
-### Step 7.1: Convert Subagent YAML to Bundle Format
+### Step 7.1: Understanding the Bundle Format
 
-For each existing subagent YAML, create a bundle.yaml:
+Bundles use a **registry-based** tool resolution system. Tools are NOT referenced by script path directly. Instead:
+
+1. The bundle specifies which **registries** to use (e.g., `grail`)
+2. Each tool references a **name** and **registry**
+3. The `GrailRegistry` scans the configured directory for `.pym` files
+4. Tool schemas are loaded from `.grail/{tool_name}/inputs.json` if present
+
+### Step 7.2: Bundle Directory Structure
+
+```
+agents/docstring/
+├── bundle.yaml              # Bundle manifest
+├── tools/                   # Tool .pym files (scanned by GrailRegistry)
+│   ├── read_current_docstring.pym
+│   ├── read_type_hints.pym
+│   ├── write_docstring.pym
+│   └── submit.pym
+│   └── .grail/              # Optional: pre-computed tool schemas
+│       ├── read_current_docstring/
+│       │   └── inputs.json
+│       └── write_docstring/
+│           └── inputs.json
+└── context/                 # Context provider scripts
+    └── docstring_style.pym
+```
+
+### Step 7.3: Convert Subagent YAML to Bundle Format
 
 **Before (`agents/docstring/docstring_subagent.yaml`):**
 
@@ -1094,6 +1180,10 @@ version: "1.0"
 model:
   plugin: function_gemma
   adapter: google/functiongemma-270m-it
+  grammar:
+    mode: ebnf
+    allow_parallel_calls: true
+    args_format: permissive
 
 initial_context:
   system_prompt: |
@@ -1111,17 +1201,17 @@ termination_tool: submit_result
 
 tools:
   - name: read_current_docstring
-    script: tools/read_current_docstring.pym
+    registry: grail
     description: Read the existing docstring from the current Python function or class.
 
   - name: read_type_hints
-    script: tools/read_type_hints.pym
+    registry: grail
     description: Extract parameter type annotations and return type.
 
   - name: write_docstring
-    script: tools/write_docstring.pym
+    registry: grail
     description: Write or replace a docstring on the current function.
-    inputs:
+    inputs_override:
       docstring:
         type: string
         description: The docstring text to write.
@@ -1132,9 +1222,9 @@ tools:
       - context/docstring_style.pym
 
   - name: submit_result
-    script: tools/submit.pym
+    registry: grail
     description: Submit the final result after docstring work is complete.
-    inputs:
+    inputs_override:
       summary:
         type: string
         description: A short summary of what was done.
@@ -1144,9 +1234,14 @@ tools:
       changed_files:
         type: array
         description: List of file paths that were modified.
+
+registries:
+  - type: grail
+    config:
+      agents_dir: tools
 ```
 
-### Step 7.2: Migration Script
+### Step 7.4: Migration Script
 
 Create a script to automate the conversion:
 
@@ -1173,6 +1268,11 @@ def migrate_subagent(old_path: Path) -> dict:
         "model": {
             "plugin": "function_gemma",
             "adapter": old.get("model_id", "google/functiongemma-270m-it"),
+            "grammar": {
+                "mode": "ebnf",
+                "allow_parallel_calls": True,
+                "args_format": "permissive",
+            },
         },
         "initial_context": {
             "system_prompt": old.get("initial_context", {}).get("system_prompt", ""),
@@ -1181,26 +1281,34 @@ def migrate_subagent(old_path: Path) -> dict:
         "max_turns": old.get("max_turns", 20),
         "termination_tool": "submit_result",
         "tools": [],
+        "registries": [
+            {
+                "type": "grail",
+                "config": {
+                    "agents_dir": "tools",
+                },
+            },
+        ],
     }
 
     # Convert tools
     for tool in old.get("tools", []):
         new_tool = {
             "name": tool.get("tool_name"),
-            "script": tool.get("pym", "").replace(old_path.parent.name + "/", ""),
+            "registry": "grail",
             "description": tool.get("tool_description", ""),
         }
 
-        # Convert inputs_override to inputs
+        # Convert inputs_override
         if "inputs_override" in tool:
-            new_tool["inputs"] = {}
+            new_tool["inputs_override"] = {}
             for name, override in tool["inputs_override"].items():
-                new_tool["inputs"][name] = {
+                new_tool["inputs_override"][name] = {
                     "type": override.get("type", "string"),
                     "description": override.get("description", ""),
                 }
 
-        # Convert context_providers
+        # Convert context_providers (strip parent directory prefix)
         if "context_providers" in tool:
             new_tool["context_providers"] = [
                 cp.replace(old_path.parent.name + "/", "")
@@ -1236,7 +1344,26 @@ if __name__ == "__main__":
     main()
 ```
 
-### Step 7.3: Update Config References
+### Step 7.5: Reorganize Tool Files
+
+After migration, move .pym files to match the expected structure:
+
+```bash
+# For each agent directory
+cd agents/docstring
+
+# Create tools directory if needed
+mkdir -p tools
+
+# Move tool .pym files (adjust paths as needed)
+mv docstring/tools/*.pym tools/
+
+# Move context providers
+mkdir -p context
+mv docstring/context/*.pym context/
+```
+
+### Step 7.6: Update Config References
 
 Update `remora.yaml` to point to bundle directories:
 
@@ -1244,7 +1371,7 @@ Update `remora.yaml` to point to bundle directories:
 operations:
   lint:
     enabled: true
-    subagent: lint  # Now just the directory name, not the YAML file
+    subagent: lint  # Directory name containing bundle.yaml
   docstring:
     enabled: true
     subagent: docstring
@@ -1253,22 +1380,11 @@ operations:
     subagent: test
 ```
 
-Update config.py to handle this:
-
-```python
-class OperationConfig(BaseModel):
-    enabled: bool = True
-    subagent: str  # Directory name containing bundle.yaml
-    # ... other fields
-```
-
 ---
 
 ## Part 8: Update Events Module
 
 Simplify `events.py` since the heavy lifting is now in structured-agents:
-
-### Step 8.1: Simplify events.py
 
 **File: `src/remora/events.py`**
 
@@ -1426,7 +1542,7 @@ class RunnerConfig(BaseModel):
     tool_choice: str = "auto"
     max_history_messages: int = 50
 
-    # REMOVE: use_grammar_enforcement (now handled by plugin)
+    # REMOVE: use_grammar_enforcement (now handled by bundle grammar config)
     # REMOVE: include_prompt_context (now handled by bundle templates)
     # REMOVE: include_tool_guide (now handled by bundle system prompt)
 ```
@@ -1477,6 +1593,10 @@ version: "1.0"
 
 model:
   plugin: function_gemma
+  grammar:
+    mode: ebnf
+    allow_parallel_calls: true
+    args_format: permissive
 
 initial_context:
   system_prompt: You are a test agent.
@@ -1487,16 +1607,21 @@ termination_tool: submit_result
 
 tools:
   - name: analyze
-    script: tools/analyze.pym
+    registry: grail
     description: Analyze code
 
   - name: submit_result
-    script: tools/submit.pym
+    registry: grail
     description: Submit result
-    inputs:
+    inputs_override:
       summary:
         type: string
         description: Summary
+
+registries:
+  - type: grail
+    config:
+      agents_dir: tools
 """)
 
         return bundle_dir
@@ -1540,24 +1665,37 @@ tools:
                 mock_result.termination_reason = "termination_tool"
                 mock_result.final_tool_result = MagicMock()
                 mock_result.final_tool_result.name = "submit_result"
-                mock_result.final_tool_result.output = {"status": "success", "summary": "Done"}
+                mock_result.final_tool_result.output = '{"status": "success", "summary": "Done"}'
                 mock_kernel.run.return_value = mock_result
                 mock_kernel.close = AsyncMock()
                 MockKernel.return_value = mock_kernel
 
-                runner = KernelRunner(
-                    node=mock_node,
-                    ctx=mock_ctx,
-                    config=mock_config,
-                    bundle_path=sample_bundle,
-                    event_emitter=mock_emitter,
-                )
+                with patch("remora.kernel_runner.load_bundle") as mock_load:
+                    mock_bundle = MagicMock()
+                    mock_bundle.name = "test_agent"
+                    mock_bundle.manifest.model.adapter = None
+                    mock_bundle.max_turns = 5
+                    mock_bundle.termination_tool = "submit_result"
+                    mock_bundle.tool_schemas = []
+                    mock_bundle.get_plugin.return_value = MagicMock()
+                    mock_bundle.get_grammar_config.return_value = MagicMock()
+                    mock_bundle.build_tool_source.return_value = MagicMock()
+                    mock_bundle.build_initial_messages.return_value = []
+                    mock_load.return_value = mock_bundle
 
-                result = await runner.run()
+                    runner = KernelRunner(
+                        node=mock_node,
+                        ctx=mock_ctx,
+                        config=mock_config,
+                        bundle_path=sample_bundle,
+                        event_emitter=mock_emitter,
+                    )
 
-                assert result.status == AgentStatus.SUCCESS
-                assert result.summary == "Done"
-                mock_kernel.run.assert_called_once()
+                    result = await runner.run()
+
+                    assert result.status == AgentStatus.SUCCESS
+                    assert result.summary == "Done"
+                    mock_kernel.run.assert_called_once()
 ```
 
 Run:
@@ -1582,7 +1720,7 @@ uv run remora analyze tests/fixtures/sample.py --operations docstring 2>&1 | hea
 
 You have now refactored Remora to use the `structured-agents` library:
 
-1. **Removed** ~1,300 lines of code (runner.py, grammar.py, tool_parser.py, execution.py)
+1. **Removed** ~1,400 lines of code (runner.py, grammar.py, tool_parser.py, execution.py)
 2. **Created** `KernelRunner` - thin wrapper around structured-agents AgentKernel
 3. **Created** `RemoraEventBridge` - translates events to Remora's format
 4. **Updated** `Coordinator` to use KernelRunner
@@ -1598,17 +1736,30 @@ Remora (Orchestration Layer)
 ├── orchestrator.py     # Uses KernelRunner
 ├── kernel_runner.py    # NEW: Wraps structured-agents
 ├── event_bridge.py     # NEW: Event translation
-├── externals.py        # Grail externals - UNCHANGED
+├── externals.py        # Grail externals - UPDATED
 └── cli.py              # CLI - UNCHANGED
 
 structured-agents (Execution Layer)
 ├── kernel.py           # Agent loop
-├── plugins/            # Model-specific handling
-├── backends/           # Tool execution (Grail)
-├── bundles/            # Bundle loading
+├── plugins/            # Model-specific handling (FunctionGemma, etc.)
+├── backends/           # Tool execution (GrailBackend)
+├── bundles/            # Bundle loading with registry-based tools
+├── registries/         # Tool discovery (GrailRegistry)
+├── tool_sources/       # ToolSource protocol
+├── grammar/            # Grammar builders (EBNF, JSON Schema)
 └── observer/           # Event streaming
 ```
 
 This is a much cleaner separation of concerns:
 - **structured-agents**: Handles the mechanics of tool-calling agents
 - **Remora**: Handles codebase navigation and orchestration
+
+### Key API Differences from Original Plan
+
+| Original Guide | Actual API |
+|----------------|------------|
+| `AgentKernel(backend=...)` | `AgentKernel(tool_source=...)` |
+| `tools[].script` | `tools[].registry` + GrailRegistry |
+| N/A | `bundle.build_tool_source(backend)` |
+| N/A | `bundle.get_grammar_config()` |
+| ContextManager `base_context` | ContextManager `initial_context` |
