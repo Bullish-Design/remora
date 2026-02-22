@@ -23,7 +23,6 @@ from remora.testing.factories import (
     tool_call_message,
     tool_schema,
 )
-from remora.testing.patches import patch_openai
 from remora.testing.mock_vllm_server import MockVLLMServer
 
 __all__ = [
@@ -45,7 +44,6 @@ __all__ = [
     "tool_call_message",
     "tool_schema",
     # Patches
-    "patch_openai",
     # Mock server
     "MockVLLMServer",
 ]

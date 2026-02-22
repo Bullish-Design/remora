@@ -18,7 +18,6 @@ from remora.discovery import CSTNode, TreeSitterDiscoverer
 from remora.events import EventEmitter, EventName, EventStatus, JsonlEventEmitter, NullEventEmitter
 from remora.orchestrator import Coordinator
 from remora.results import AgentResult, AgentStatus, AnalysisResults, NodeResult
-from remora.runner import AgentError
 
 
 class WorkspaceState(Enum):
