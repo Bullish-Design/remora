@@ -106,4 +106,22 @@ def build_file_externals(
 
         externals["run_command"] = run_command_external
 
+    import json
+    async def run_json_command(cmd: str, args: list[str]) -> Any:
+        result = await externals["run_command"](cmd, args)
+        stdout = str(result.get("stdout", ""))
+        try:
+            if not stdout.strip():
+                return []
+            return json.loads(stdout)
+        except json.JSONDecodeError:
+            return {
+                "error": "Failed to parse JSON", 
+                "stdout": stdout, 
+                "stderr": str(result.get("stderr", "")),
+                "exit_code": int(result.get("exit_code", 0) or 0)
+            }
+            
+    externals["run_json_command"] = run_json_command
+
     return externals
