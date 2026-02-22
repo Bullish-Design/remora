@@ -1,6 +1,7 @@
 """Remora library package."""
 
-from remora.analyzer import RemoraAnalyzer, ResultPresenter, WorkspaceState
+from remora.analyzer import RemoraAnalyzer, WorkspaceState
+from remora.presenter import ResultPresenter
 from remora.config import RemoraConfig, load_config
 from remora.discovery import CSTNode, NodeType, TreeSitterDiscoverer
 from remora.kernel_runner import KernelRunner
