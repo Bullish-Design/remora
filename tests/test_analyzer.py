@@ -22,11 +22,11 @@ async def test_accept_emits_workspace_accepted() -> None:
     result = AgentResult(status=AgentStatus.SUCCESS, workspace_id="ws-1")
     info = WorkspaceInfo(workspace_id="ws-1", node_id="node-1", operation="lint", result=result)
     analyzer._workspaces = {("node-1", "lint"): info}
-    analyzer._cairn_merge = AsyncMock()
+    analyzer._bridge.merge = AsyncMock()
 
     await analyzer.accept("node-1", "lint")
 
-    analyzer._cairn_merge.assert_awaited_once_with("ws-1")
+    analyzer._bridge.merge.assert_awaited_once_with("ws-1")
     assert info.state == WorkspaceState.ACCEPTED
     payload = emitter.emit.call_args[0][0]
     assert payload["event"] == EventName.WORKSPACE_ACCEPTED
@@ -42,11 +42,11 @@ async def test_reject_emits_workspace_rejected() -> None:
     result = AgentResult(status=AgentStatus.SUCCESS, workspace_id="ws-2")
     info = WorkspaceInfo(workspace_id="ws-2", node_id="node-2", operation="test", result=result)
     analyzer._workspaces = {("node-2", "test"): info}
-    analyzer._cairn_discard = AsyncMock()
+    analyzer._bridge.discard = AsyncMock()
 
     await analyzer.reject("node-2", "test")
 
-    analyzer._cairn_discard.assert_awaited_once_with("ws-2")
+    analyzer._bridge.discard.assert_awaited_once_with("ws-2")
     assert info.state == WorkspaceState.REJECTED
     payload = emitter.emit.call_args[0][0]
     assert payload["event"] == EventName.WORKSPACE_REJECTED
@@ -113,7 +113,7 @@ async def test_cairn_merge_refuses_outside_project_root(tmp_path: Path) -> None:
 
     analyzer = RemoraAnalyzer(config)
     workspace_id = "lint-node"
-    workspace_db = analyzer._workspace_db_path(workspace_id)
+    workspace_db = analyzer._bridge.get_workspace_db_path(workspace_id)
     workspace_db.parent.mkdir(parents=True, exist_ok=True)
     workspace_db.write_text("db", encoding="utf-8")
 
@@ -136,7 +136,7 @@ async def test_cairn_merge_refuses_outside_project_root(tmp_path: Path) -> None:
     async def fake_open_workspace(_path: Path):
         yield FakeWorkspace()
 
-    analyzer._workspace_manager.open_workspace = fake_open_workspace
+    analyzer._bridge.workspace_manager.open_workspace = fake_open_workspace
 
     with pytest.raises(ValueError):
-        await analyzer._cairn_merge(workspace_id)
+        await analyzer._bridge.merge(workspace_id)
