@@ -55,10 +55,11 @@ async def test_large_codebase_indexing(large_project: Path, mock_grail_executor:
     task = asyncio.create_task(daemon.run())
     # Wait for indexing to complete by polling stats
     stats = {"files": 0, "nodes": 0}
-    for _ in range(50):
-        stats = await daemon.store.stats()
-        if stats["files"] >= 100:
-            break
+    for _ in range(100): # Allow up to 50s
+        if daemon.store is not None:
+            stats = await daemon.store.stats()
+            if stats["files"] >= 100:
+                break
         await asyncio.sleep(0.5)
 
     elapsed = time.monotonic() - start
@@ -89,7 +90,23 @@ async def test_concurrent_file_changes(large_project: Path, mock_grail_executor:
     )
 
     task = asyncio.create_task(daemon.run())
-    await asyncio.sleep(3.0)  # Initial indexing
+    
+    # Wait for initial cold start indexing to finish
+    for _ in range(100):
+        if daemon.store is not None:
+            stats = await daemon.store.stats()
+            if stats["files"] >= 100:
+                break
+        await asyncio.sleep(0.5)
+        
+    # Wait for watcher to explicitly be created
+    for _ in range(10):
+        if getattr(daemon, "watcher", None) is not None:
+            break
+        await asyncio.sleep(0.5)
+        
+    # Extra sleep to ensure watcher has started observing the FS
+    await asyncio.sleep(1.0)
 
     # Modify 20 files concurrently
     async def modify_file(i: int) -> None:
@@ -100,11 +117,12 @@ async def test_concurrent_file_changes(large_project: Path, mock_grail_executor:
     await asyncio.gather(*[modify_file(i) for i in range(20)])
 
     # Wait for processing by polling
-    for _ in range(30):
-        all_nodes = await daemon.store.list_all_nodes()
-        added_funcs = [n for n in all_nodes if "added_func" in n.node_name]
-        if len(added_funcs) >= 20:
-            break
+    for _ in range(60):
+        if daemon.store is not None:
+            all_nodes = await daemon.store.list_all_nodes()
+            added_funcs = [n for n in all_nodes if "added_func" in n.node_name]
+            if len(added_funcs) >= 20:
+                break
         await asyncio.sleep(0.5)
 
     # Verify new functions indexed
