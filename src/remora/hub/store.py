@@ -152,8 +152,19 @@ class NodeStateStore:
         Returns:
             List of NodeState objects for that file
         """
-        all_nodes = await self.node_repo.list_all()
-        return [node for node in all_nodes if node.file_path == file_path]
+        # Efficiently fetch only the nodes for this file by filtering IDs first
+        # instead of loading all NodeState objects into memory.
+        all_ids = await self.node_repo.list_ids()
+        
+        # Keys in node_repo are formatted as {file_path}:{node_name}
+        file_prefix = f"{file_path}:"
+        file_node_ids = [node_id for node_id in all_ids if node_id.startswith(file_prefix)]
+        
+        if not file_node_ids:
+            return []
+            
+        nodes_dict = await self.get_many([f"node:{n}" for n in file_node_ids])
+        return list(nodes_dict.values())
 
     async def invalidate_file(self, file_path: str) -> list[str]:
         """Remove all nodes for a file.
