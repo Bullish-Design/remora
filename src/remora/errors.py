@@ -26,6 +26,10 @@ class ExecutionError(RemoraError):
 class SubagentError(RemoraError):
     code = "REMORA-AGENT"
 
+class HubError(RemoraError):
+    """Base exception for all Hub-related errors."""
+    code = "REMORA-HUB"
+
 class KernelTimeoutError(ExecutionError):
     """Raised when the LLM or tool execution times out."""
     code = "REMORA-EXEC-TIMEOUT"
