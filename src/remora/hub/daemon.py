@@ -104,6 +104,10 @@ class HubDaemon:
         if store is None:
             return
 
+        from remora.config import load_config
+        config = load_config(self.project_root / "remora.yaml")
+        enable_cross_file_analysis = config.hub.enable_cross_file_analysis
+
         logger.info("Cold start: checking for changed files...")
 
         indexed = 0
@@ -142,6 +146,18 @@ class HubDaemon:
             errors,
         )
 
+        if enable_cross_file_analysis:
+            from remora.hub.call_graph import update_call_graph
+            from remora.hub.test_discovery import update_test_relationships
+            
+            logger.info("Running cross-file call graph analysis...")
+            updated = await update_call_graph(store, self.project_root)
+            logger.info("Call graph analysis complete: %s nodes updated", updated)
+            
+            logger.info("Running test discovery...")
+            test_updated = await update_test_relationships(store, self.project_root)
+            logger.info("Test discovery complete: %s nodes updated", test_updated)
+
     async def _handle_file_change(self, change_type: str, path: Path) -> None:
         """Handle a file change event from watcher.
 
@@ -152,6 +168,10 @@ class HubDaemon:
         store = self.store
         if store is None:
             return
+
+        from remora.config import load_config
+        config = load_config(self.project_root / "remora.yaml")
+        enable_cross_file_analysis = config.hub.enable_cross_file_analysis
 
         logger.debug("Processing %s: %s", change_type, path)
 
@@ -176,6 +196,16 @@ class HubDaemon:
 
             except Exception as exc:
                 logger.exception("Action failed for %s", path)
+
+        if enable_cross_file_analysis:
+            from remora.hub.call_graph import update_call_graph
+            from remora.hub.test_discovery import update_test_relationships
+            
+            logger.debug("Incremental call graph analysis triggered by %s", path)
+            await update_call_graph(store, self.project_root)
+            
+            logger.debug("Incremental test discovery triggered by %s", path)
+            await update_test_relationships(store, self.project_root)
 
         await self._update_status(running=True)
 
@@ -231,9 +261,13 @@ class HubDaemon:
 
         await store.invalidate_file(str(path))
 
+        from remora.hub.imports import extract_node_imports
+
         now = datetime.now(timezone.utc)
         for node_data in nodes:
             node_key = f"node:{path}:{node_data['name']}"
+            
+            imports = extract_node_imports(path, node_data["name"])
 
             state = NodeState(
                 key=node_key,
@@ -245,6 +279,7 @@ class HubDaemon:
                 signature=node_data.get("signature"),
                 docstring=node_data.get("docstring"),
                 decorators=node_data.get("decorators", []),
+                imports=imports,
                 line_count=node_data.get("line_count"),
                 has_type_hints=node_data.get("has_type_hints", False),
                 update_source=update_source,

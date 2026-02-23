@@ -60,10 +60,10 @@ async def index_file_simple(
 
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            state = _extract_function_simple(node, file_path, file_hash, lines)
+            state = _extract_function_simple(node, file_path, file_hash, lines, tree)
             nodes.append(state)
         elif isinstance(node, ast.ClassDef):
-            state = _extract_class_simple(node, file_path, file_hash, lines)
+            state = _extract_class_simple(node, file_path, file_hash, lines, tree)
             nodes.append(state)
 
     # Invalidate existing nodes for this file
@@ -94,9 +94,11 @@ def _extract_function_simple(
     file_path: Path,
     file_hash: str,
     lines: list[str],
+    tree: ast.AST,
 ) -> "NodeState":
     """Extract function metadata (simplified version)."""
     from remora.hub.models import NodeState
+    from remora.hub.imports import extract_node_imports
 
     # Get source
     start = node.lineno - 1
@@ -134,6 +136,8 @@ def _extract_function_simple(
         or any(a.annotation for a in node.args.args)
     )
 
+    imports = extract_node_imports(file_path, node.name)
+
     return NodeState(
         key=f"node:{file_path}:{node.name}",
         file_path=str(file_path),
@@ -143,6 +147,7 @@ def _extract_function_simple(
         file_hash=file_hash,
         signature=signature,
         docstring=docstring,
+        imports=imports,
         decorators=decorators,
         line_count=end - start,
         has_type_hints=has_type_hints,
@@ -155,9 +160,11 @@ def _extract_class_simple(
     file_path: Path,
     file_hash: str,
     lines: list[str],
+    tree: ast.AST,
 ) -> "NodeState":
     """Extract class metadata (simplified version)."""
     from remora.hub.models import NodeState
+    from remora.hub.imports import extract_node_imports
 
     # Get source
     start = node.lineno - 1
@@ -179,6 +186,8 @@ def _extract_class_simple(
     # Get decorators
     decorators = [f"@{ast.unparse(d)}" for d in node.decorator_list]
 
+    imports = extract_node_imports(file_path, node.name)
+
     return NodeState(
         key=f"node:{file_path}:{node.name}",
         file_path=str(file_path),
@@ -188,6 +197,7 @@ def _extract_class_simple(
         file_hash=file_hash,
         signature=signature,
         docstring=docstring,
+        imports=imports,
         decorators=decorators,
         line_count=end - start,
         has_type_hints=True,  # Classes don't need return annotations
