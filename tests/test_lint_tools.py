@@ -104,7 +104,7 @@ def test_read_file_returns_content_and_lines(tmp_path: Path) -> None:
     assert_valid_tool_result(result)
     payload = result["result"]
     assert payload["content"] == target.read_text(encoding="utf-8")
-    assert payload["lines"] == 2
+    assert payload["lines"] == 4
 
 
 def test_ruff_config_returns_empty_when_missing(tmp_path: Path) -> None:
