@@ -20,6 +20,8 @@ def project_with_files(tmp_path: Path) -> Path:
     """Create a project with multiple Python files."""
     src = tmp_path / "src"
     src.mkdir()
+    agents = tmp_path / "agents"
+    agents.mkdir()
 
     (src / "main.py").write_text('''
 def main():

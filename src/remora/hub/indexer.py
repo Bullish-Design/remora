@@ -51,7 +51,11 @@ async def index_file_simple(
     file_hash = hashlib.sha256(content.encode()).hexdigest()
 
     # Parse AST
-    tree = ast.parse(content)
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return 0
+        
     lines = content.splitlines()
 
     # Extract nodes

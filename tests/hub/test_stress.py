@@ -17,6 +17,8 @@ def large_project(tmp_path: Path) -> Path:
     """Create a project with many files."""
     src = tmp_path / "src"
     src.mkdir()
+    agents = tmp_path / "agents"
+    agents.mkdir()
 
     # Create 100 modules with 5 functions each
     for i in range(100):

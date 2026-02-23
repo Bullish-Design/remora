@@ -15,6 +15,9 @@ class MockNodeStateStore:
     async def list_all_nodes(self) -> list[str]:
         return list(self.nodes.keys())
 
+    async def invalidate_file(self, file_path: str) -> None:
+        pass
+
     async def get_status(self) -> Any:
         class DummyStatus:
             indexed_files = 100
