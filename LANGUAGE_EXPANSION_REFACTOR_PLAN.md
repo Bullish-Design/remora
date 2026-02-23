@@ -2,141 +2,116 @@
 
 This document outlines architectural strategies for expanding Remora's `discovery` module from a strictly Python-centric Tree-sitter parser to a generic, elegant, multi-language parser capable of driving the AST_MOMENTUM generative features.
 
-**Core Philosophy:** We do not care about backwards compatibility or ease of implementation. The goal is the cleanest, most extensible object-oriented design possible.
+**Core Philosophy:** The goal is the absolute best, most elegant, and cleanly maintainable codebase moving forward. We do not care about backwards compatibility or ease of implementation.
 
 ---
 
-## The Current State vs. the Ideal State
+## 1. The Core Problem: The "Naming" Heuristic
+Tree-sitter returns syntax nodes. Remora needs `CSTNode` objects that have a human-readable `name` (e.g. "MyClass.my_method") and a stable `NodeType` (e.g. `NodeType.METHOD`). 
 
-**Current State (Hardcoded):**
-- `SourceParser` hardcodes `PY_LANGUAGE` via `tree-sitter-python`.
-- `QueryLoader` hardcodes `PY_LANGUAGE`.
-- `TreeSitterDiscoverer` hardcodes `.py` file extension discovery.
-- `MatchExtractor` uses a hardcoded `_PREFIX_TO_NODE_TYPE` static dict (`"@class.def" -> NodeType.CLASS`).
+In the current hardcoded Python implementation:
+- `NodeType` is determined by hardcoded dictionary mapping: `"@class.def" -> NodeType.CLASS`
+- `name` is extracted by specific Python logic:
+  - Find a child node literally named "name".
+  - If it's a `function_definition`, walk up the AST in Python to see if the parent is a `class_definition`. If so, it's a `METHOD` and prepend the class name.
 
-**Ideal State (Generic & Polymorphic):**
-- The core discovery classes (`SourceParser`, `QueryLoader`, `MatchExtractor`) should know **nothing** about specific languages, extensions, or grammar specifics.
-- Adding a new language (e.g., Markdown, Rust, TOML) should involve registering a unified `LanguageDefinition` object (or subclass) and dropping `.scm` queries into the correct folder. There should be exactly zero `if language == "python":` logic in the core pipeline.
+When we add TOML (e.g., extracting a `[tool.pytest]` table name) or Markdown (e.g., getting the text of an `## H2 Header`), this hardcoded logic completely breaks down.
 
 ---
 
-## Option 1: The Unified Language Registry Pattern (Recommended)
+## Option A: Pure Data-Driven Polymorphism (The "Smart Queries" Approach) - Highly Recommended
 
-In this approach, we define a formal `LanguageDialect` or `LanguageDefinition` interface. Each language provides its Tree-sitter bindings, its file extensions, and its specific AST-node mapping logic inside an encapsulated class. The core `discovery` module simply queries a `LanguageRegistry`.
+Instead of using Python to write complex logic for *how* to extract names or classify nodes for different languages, we push 100% of the extraction logic to the `.scm` files and configure the pipeline purely via static data.
 
-### Example Architecture
+If a language can be parsed by Tree-sitter, we should be able to query *everything* we need directly using Tree-sitter queries. 
+
+### Architecture
+
+1. **The Registry Config**: A pure data definition (e.g., built into the config or a `languages.toml`) that defines the parsing capabilities:
+```toml
+[language.python]
+extensions = [".py"]
+grammar_module = "tree_sitter_python"
+
+[language.toml]
+extensions = [".toml"]
+grammar_module = "tree_sitter_toml"
+```
+
+2. **The `.scm` Contract**: The python engine no longer tries to guess relationships. It enforces a strict grammar on the `.scm` files themselves. 
+Every query that identifies a node **must** capture:
+- `@node.def`: The full byte-range of the node.
+- `@node.name`: The byte-range of the identifier string.
+
+3. **Dynamic Node Typing**: We eliminate the hardcoded `NodeType` enum. If a query file is named `models.scm` and captures `@table.def`, the node type is simply `"table"`.
+
+### Pros:
+- **Zero Python Logic**: We never have to write Python AST walking code again. If we want to change how a Markdown header name is extracted, we edit the `markdown/discovery.scm` file.
+- **Trivial Extensibility**: Adding a new language is literally just adding 3 lines to a TOML config and writing `.scm` files.
+- **Language Agnostic Engine**: `TreeSitterDiscoverer` and `MatchExtractor` become universally applicable to any language Tree-sitter supports.
+
+### Cons:
+- Complex naming relationships (like Python's `Class.method` fully qualified name) require writing slightly more advanced `.scm` queries (using overlapping captures or predicates) rather than a simple Python `while node.parent:` loop.
+
+---
+
+## Option B: Object-Oriented `LanguageDialect` Plugins
+
+This is the traditional "Strategy Pattern" approach. We define an abstract `LanguageDialect` interface, and each language implements its own python class to handle the quirks of its AST.
+
+### Architecture
 
 ```python
 class LanguageDialect(ABC):
-    @property
-    @abstractmethod
-    def name(self) -> str: ...
-    
-    @property
-    @abstractmethod
-    def tree_sitter_language(self) -> tree_sitter.Language: ...
-    
-    @property
-    @abstractmethod
-    def file_extensions(self) -> set[str]: ...
+    name: str
+    extensions: tuple[str, ...]
     
     @abstractmethod
-    def map_capture_to_node_type(self, capture_name: str) -> NodeType | None:
-        """Map generic capture names (@class.def) to NodeTypes."""
-        pass
-        
+    def get_parser(self) -> tree_sitter.Language: ...
+    
     @abstractmethod
-    def extract_node_name(self, ts_node: tree_sitter.Node, source_bytes: bytes) -> str | None:
-        """Language-specific logic to extract a human readable name (e.g. from a class_definition)."""
-        pass
-
-# Implementations
-class PythonDialect(LanguageDialect):
-    name = "python"
-    tree_sitter_language = Language(tspython.language())
-    file_extensions = {".py", ".pyi"}
-    # ... implements python specific name extraction and capture mapping ...
-
-class TomlDialect(LanguageDialect):
-    name = "toml"
-    tree_sitter_language = Language(tstoml.language())
-    file_extensions = {".toml"}
-    # ... implements TOML specific extraction (e.g. mapping @table.def -> NodeType.TABLE)
-
-# Core usage
-class TreeSitterDiscoverer:
-    def __init__(self, registry: LanguageRegistry, target_languages: list[str]):
-        self.dialects = [registry.get(lang) for lang in target_languages]
+    def extract_node_data(self, capture_name: str, ts_node: Node, source_bytes: bytes) -> tuple[str, str]:
+        """Returns (NodeType, NodeName) using whatever python logic the language needs."""
 ```
 
 ### Pros:
-- **Maximum Cleanliness:** Perfectly separates the standard discovery orchestration from the language-specific nuances (like how Python defines a "method" vs. how TOML defines a "table").
-- **Highly Extensible:** Adding a new language strictly involves creating a new subclass representing the dialect, and updating `NodeType` enums. No core logic changes.
-- **Dependency Injection Friendly:** The `TreeSitterDiscoverer` only depends on the abstract `LanguageDialect`, making unit testing incredibly clean.
+- **Familiar Pattern**: Standard gang-of-four dependency injection.
+- **Handles Edge Cases Easily**: If a language has a bizarre quirk that is hard to capture in `.scm`, you have the full power of Python to walk the AST to figure it out.
 
 ### Cons:
-- Highest refactoring overhead upfront. We must touch every file in `src/remora/discovery/`.
+- **Heavier Footprint**: Every new language requires shipping and maintaining a new Python class file, rather than just `.scm` files.
+- **Leaky Abstraction**: Mixing Tree-sitter `.scm` logic for discovery with Python logic for extraction means the "truth" of how a node is parsed is split across two domains.
 
 ---
 
-## Option 2: The Data-Driven Configuration Model
+## Option C: The Callback / Hook System
 
-Instead of Polymorphic classes defining how a language behaves, we use a purely data-driven Pydantic configuration file that maps everything.
-
-### Example Architecture
+A middle-ground where the core engine uses `.scm` for everything, but allows languages to register arbitrary Python callback hooks to mutate the `CSTNode` right after it's birthed.
 
 ```python
-class LanguageConfig(BaseModel):
-    name: str
-    library_name: str           # e.g., "tree_sitter_python"
-    extensions: list[str]
-    capture_mappings: dict[str, NodeType]
-    name_extraction_queries: dict[NodeType, str] # e.g. "class": "(class_definition name: (identifier) @name)"
+def python_method_hook(node: CSTNode, ts_node: Node_ tree: Tree) -> CSTNode:
+    # Walk the tree, if parent is class, prepend name and change type.
+    pass
+
+EXTRACTOR_HOOKS = {
+    "python": [python_method_hook]
+}
 ```
 
-The system dynamically loads the `tree_sitter` language binding module using `importlib` based on the config. Instead of writing Python logic to parse the `name` out of a node (like traversing parents to see if a function is a method), we use secondary Tree-sitter `.scm` queries defined in the config to generically fetch the name from any node.
-
 ### Pros:
-- **Zero-Code Extensions**: Adding a new language means appending a JSON/YAML/Pydantic block in a central config file. No new Python classes needed.
-- **Enforces Pure AST Searching**: Forces developers to rely exclusively on Tree-sitter queries rather than writing hacky python code to traverse AST nodes to find names.
+- Keeps the core engine agnostic but provides an escape hatch.
 
 ### Cons:
-- **Complexity in Queries**: Extracting names or figuring out complex hierarchical relationships (like Python method vs function) can sometimes be intensely difficult to write cleanly in pure `.scm` queries compared to 5 lines of Python AST traversal.
-- **Dynamic Imports**: Using `importlib` to fetch the Tree-sitter `language()` pointer feels slightly less robust than explicit class definitions.
+- Action-at-a-distance. Hooks make it very hard to trace why a node was named a certain way or why its type changed.
 
 ---
 
-## Option 3: The "Smart" Generic Discovery (Relying Entirely on `.scm` Conventions)
+## Recommendation: Option A (Pure Data-Driven "Smart Queries")
 
-In this model, the Python code implements exactly zero language-specific logic. We enforce a strict `.scm` query contract that *every* language must follow.
+If we want the *best* and most elegant architecture moving forward, **Option A is the clear winner.**
 
-If the `.scm` file is named `python/tags.scm`, the parser uses `importlib` to load `tree_sitter_python`.
-To map NodeTypes, we enforce that captures MUST match the enum exactly: `@node_type.class.def` or `@node_type.file.def`.
-To extract names, we enforce that every `*.def` capture MUST be paired with a `*.name` capture in the same logical query grouping.
+We should push Tree-sitter to its limits. By forcing the `.scm` queries to be the sole source of truth for both *discovery* and *extraction*, we create a massively cleaner Python layer.
 
-### Pros:
-- The absolute smallest Python footprint. Let the `.scm` files do 100% of the heavy lifting.
+The core pipeline (`MatchExtractor.py`) shrinks significantly. It no longer cares if it's looking at Python, TOML, or Rust. It simply executes a query, looks for a `@X.def` capture, looks for a paired `@X.name` capture, and creates a `CSTNode` of type `X`. 
 
-### Cons:
-- **Fragile `.scm` Files**: Tree-sitter `.scm` files become bloated and highly coupled to Remora's internal Enums.
-- **Tough to Debug**: If a node isn't named right, you have to debug complex `.scm` predicate logic instead of dropping a `print()` or debugger into a Python class.
-
----
-
-## Recommendation: Option 1 (The OOP LanguageDialect Registry)
-
-Given the user mandate for the "best, cleanest, most elegant codebase" prioritizing true object-oriented architecture via Smalltalk-style message passing and explicit context: **Option 1 is the definitive path forward.**
-
-**Why?**
-1. It encapsulates the messy reality that every language parses differently.
-2. It allows `TreeSitterDiscoverer` to do what it does best: orchestrating files.
-3. It allows `MatchExtractor` to say, *"Hey dialect, here's a Tree-sitter node. Tell me its Remora NodeType, and tell me its human-readable name."* This is perfect OOP separation of concerns.
-
-### Refactoring Steps for Option 1:
-
-1. **New Module:** `src/remora/discovery/dialects.py`. Define the `LanguageDialect` base class.
-2. **Implement Dialects:** Spin up `PythonDialect`, `TomlDialect`, `MarkdownDialect`.
-3. **Refactor `SourceParser`**: Accept a `LanguageDialect` on parse or instantiation.
-4. **Refactor `QueryLoader`**: Accept a `LanguageDialect`.
-5. **Refactor `MatchExtractor`**: Gut the hardcoded `_classify_function` and `_extract_name_from_node_` methods. Delegate those questions directly to the active `LanguageDialect`.
-6. **Refactor `TreeSitterDiscoverer`**: Update the `discover` loop to iterate over registered dialects, grab their specific active extensions, and farm out the parser/extractor accordingly.
+**The elegance comes from the constraint:** If a language feature cannot be expressed cleanly by capturing its definition and its name in an `.scm` file, it shouldn't be a primitive Node Type in our system.
