@@ -20,16 +20,27 @@ Grounding this in the `examples/treesitter_swarm` and the `FEATURE_ASSEMBLY_LINE
 *Inspiration: `examples/TREESITTER_AGENT_SWARM_CONCEPT.md`*
 
 **The Concept:**
-Instead of passing the entire codebase to a single logic model, the Root Architect utilizes the multi-modal embeddings of the Tree-sitter AST to partition the codebase into semantic sub-graphs (e.g. using Louvain community detection or A* data-flow pathfinding). 
+Instead of passing the entire codebase to a single logic model as a massive string prompt, the Root Architect is placed in a sandbox where the *Tree-sitter AST is a queryable object*. The model operates programmatically on the tree, completely unconstrained by strict traversal rules.
 
 For example, when refactoring an API:
-1. The Root Environment possesses the global AST.
-2. It uses `vector_arithmetic.pym` and topological pathfinding to isolate a specific sub-graph (e.g., all database controller nodes and their corresponding routing nodes).
-3. It spawns highly specialized **Node Environments**, each loaded *only* with the isolated sub-graph context.
-4. It calls upon specific LoRA adapters (e.g., a "function_definition_expert" LoRA) to operate within those localized environments.
+1. The Root Environment receives the codebase as an accessible AST object rather than text.
+2. The agent writes simple Python scripts in its REPL sandbox to interact with the AST (e.g., `ast_graph.find_functions(name_contains="get_", return_type="dict")`). 
+3. Based on what its programmatic queries return, it dynamically isolates a subset of the graph.
+4. It recursively spawns sub-environments, injecting *only* that isolated sub-graph context, and dynamically loads the appropriate LoRA adapter (e.g., a "function_definition_expert") to execute localized refactoring tasks.
 
-**Why it works in Remora:**
-Remora's integration with `vLLM` enables high-throughput, continuous batched inference. We can dynamically hot-swap dozens of highly specialized "tiny" LoRA adapters concurrently across these micro-environments without blowing up VRAM. The environment bounds the LLM's reality to a specific spatial subset of the code graph, and vLLM efficiently serves the exact intelligence required for that subset.
+**Remora Implementation Mappings:**
+*   **Agent Bundles Required:**
+    *   `architect`: The Root Agent. Loaded with `function_gemma` and an `architect-v1` LoRA. It is the only agent that receives the global `ast_graph`.
+    *   `node_implementer`: The spawned worker agent. It is passed specific `node_ids` to construct its localized Cairn Workspace Bridge.
+*   **Grail Tools (`.pym`) Required:**
+    *   `query_ast.pym`:
+        *   **Functionality:** Allows the Architect to write and execute basic python traversal scripts against the Tree-sitter AST Graph object in its sandbox.
+        *   **Inputs:** `script: str` (The Python execution sequence).
+        *   **Outputs:** JSON representation of discovered `TreeNode` objects (IDs, types, and file locations).
+    *   `spawn_node_environment.pym`:
+        *   **Functionality:** The trigger to initiate the fan-out recursion. Tells the `Coordinator` to batch new tasks for the identified nodes.
+        *   **Inputs:** `node_ids: list[str]`, `target_agent: str` (e.g., `"node_implementer"`), `intent: str`.
+        *   **Outputs:** `task_ids: list[str]` representing the newly spawned sub-tasks on the Hub daemon.
 
 ### 2. Temporal Recursion: "The Assembly Line Sandbox"
 
@@ -43,8 +54,20 @@ Recursion in code usually implies drilling *down* into data structures. But we c
 3. Upon finalizing the plan, the Planning Environment dynamically executes code to construct and launch the **Implementation Environment**, passing only the architectural constraints as the environment state in Cairn KV.
 4. If the Implementation Environment encounters an error, it doesn't just fail; it dynamically constructs a **Debugging Environment**, injecting the stack trace as the primary context variable, and recurses into it.
 
-**Why it works in Remora:**
-This gives the user the "Feature Assembly Line" they want, but fundamentally implemented via RLM mechanics. The LLM dictates the pipeline purely by writing Python code in its sandbox that spawns the next sandbox.
+**Remora Implementation Mappings:**
+*   **Agent Bundles Required:**
+    *   `planner`: Analyzes requirements and drafts the `implementation_plan.md`.
+    *   `implementer`: Actually executes the Grail commands to mutate the codebase.
+    *   `debugger`: Injected purely with stack-traces and diffs if the `implementer`'s verification tests fail.
+*   **Grail Tools (`.pym`) Required:**
+    *   `transition_phase.pym`:
+        *   **Functionality:** Suspends the current task and spawns a new Temporal Environment running a different Agent Bundle. Writes the "constraints" payload to the `remora.hub.db` for the next agent to read.
+        *   **Inputs:** `next_bundle_name: str` (e.g., `"implementer"`), `state_constraints: dict`.
+        *   **Outputs:** Terminates the current agent session; Coordinator returns an event stream confirmation that the next phase has started.
+    *   `spawn_debugging_environment.pym`:
+        *   **Functionality:** An error-handler tool specifically for the `implementer`. Instead of trying to fix the bug itself, it recurses into a dedicated `debugger` environment.
+        *   **Inputs:** `failing_test_command: str`, `stack_trace: str`, `recent_diffs: str`.
+        *   **Outputs:** `debugging_task_id: str` (The implementer waits for this task to complete before continuing).
 
 ### 3. Memory-Bus Recursion: "The Cairn Context Tree"
 
@@ -58,8 +81,18 @@ In a standard RLM, passing context down to a sub-call requires serializing it in
 3. The Sub-Environment *doesn't* get the full intent in its system prompt. Instead, its REPL has an exposed `bus.get("task_intent")` tool. 
 4. The Sub-Model dynamically queries its parent's environment state only when it needs clarification.
 
-**Why it works in Remora:**
-This entirely eliminates the "Telephone Game" context degradation. An agent 4 levels deep in the AST hierarchy can programmatically reach up to the Root Environment's memory space. Context rot is avoided because context is pulled lazily via code execution, rather than pushed greedily via text prompting.
+**Remora Implementation Mappings:**
+*   **Agent Bundles Required:**
+    *   Any agent bundle spun up as a "Sub-Task" (e.g., `node_implementer`, `debugger`). Their initial system prompt is injected *only* with `Task ID: <uuid>`.
+*   **Grail Tools (`.pym`) Required:**
+    *   `hub_memory_write.pym`:
+        *   **Functionality:** Allows a Parent Agent to construct the "Context Tree" by writing key-value configuration or intent payloads directly to the Hub Daemon's KV store for a specific task.
+        *   **Inputs:** `task_id: str`, `key: str`, `value: any`.
+        *   **Outputs:** `success: bool`.
+    *   `hub_memory_read.pym`:
+        *   **Functionality:** Allows a Sub-Agent to lazy-load its context programmatically via code execution, avoiding prompt bloat and context rotation on the base model side. 
+        *   **Inputs:** `key: str` (e.g., `"task_intent"`, or `"architectural_constraints"`).
+        *   **Outputs:** The JSON value stored by the Parent Agent in the Hub Daemon's memory bus.
 
 ---
 
