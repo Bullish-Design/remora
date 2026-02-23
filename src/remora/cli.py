@@ -435,6 +435,29 @@ def _fetch_models(server_config: Any) -> set[str]:
         return set()
 
 
+@app.command("metrics")
+def show_metrics() -> None:
+    """Show Hub daemon metrics."""
+    from remora.hub.metrics import get_metrics
+
+    metrics = get_metrics()
+    data = metrics.to_dict()
+
+    console.print("=== Hub Metrics ===\n")
+    console.print("[bold]Counters:[/bold]")
+    for key, value in data["counters"].items():
+        console.print(f"  {key}: {value}")
+
+    console.print("\n[bold]Timing:[/bold]")
+    for key, value in data["timing"].items():
+        console.print(f"  {key}: {value}")
+
+    console.print("\n[bold]Gauges:[/bold]")
+    for key, value in data["gauges"].items():
+        console.print(f"  {key}: {value}")
+    console.print()
+
+
 @app.command("list-agents")
 def list_agents(
     config_path: Path | None = typer.Option(

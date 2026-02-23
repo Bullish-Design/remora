@@ -10,7 +10,9 @@ import asyncio
 import hashlib
 import logging
 import os
+import json
 import signal
+from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -18,6 +20,9 @@ from typing import Any, Literal
 from fsdantic import Fsdantic, Workspace
 
 from remora.constants import HUB_DB_NAME
+from remora.context.hub_client import HubClient
+from remora.errors import HubError
+from remora.hub.metrics import get_metrics
 from remora.hub.models import FileIndex, HubStatus, NodeState
 from remora.hub.rules import ActionContext, ExtractSignatures, RulesEngine
 from remora.hub.store import NodeStateStore
@@ -52,7 +57,9 @@ class HubDaemon:
         """
         self.project_root = project_root.resolve()
         self.db_path = db_path or (self.project_root / ".remora" / HUB_DB_NAME)
-        self.grail_executor = grail_executor
+        self.executor = grail_executor # Renamed from grail_executor to executor
+
+        self._metrics = get_metrics()
 
         self.workspace: Workspace | None = None
         self.store: NodeStateStore | None = None
@@ -109,6 +116,7 @@ class HubDaemon:
         enable_cross_file_analysis = config.hub.enable_cross_file_analysis
 
         logger.info("Cold start: checking for changed files...")
+        self._metrics.start_timer("cold_start")
 
         indexed = 0
         errors = 0
@@ -119,11 +127,14 @@ class HubDaemon:
             ):
                 continue
 
+            self._metrics.start_timer(f"index:{py_file}")
             try:
                 file_hash = self._hash_file(py_file)
                 existing = await store.get_file_index(str(py_file))
 
                 if existing and existing.file_hash == file_hash:
+                    # File unchanged
+                    self._metrics.stop_timer(f"index:{py_file}")
                     continue
 
                 await self._index_file(py_file, "cold_start")
@@ -131,6 +142,8 @@ class HubDaemon:
 
             except Exception as exc:
                 logger.exception("Failed to index %s", py_file)
+                self._metrics.stop_timer(f"index:{py_file}")
+                self._metrics.record_file_failed()
                 errors += 1
 
         stats = await store.stats()
@@ -157,14 +170,17 @@ class HubDaemon:
             logger.info("Running test discovery...")
             test_updated = await update_test_relationships(store, self.project_root)
             logger.info("Test discovery complete: %s nodes updated", test_updated)
+            
+        self._metrics.cold_start_duration = self._metrics.stop_timer("cold_start")
 
     async def _handle_file_change(self, change_type: str, path: Path) -> None:
         """Handle a file change event from watcher.
-
+        
         Args:
-            change_type: "added", "modified", or "deleted"
-            path: Absolute path to changed file
+            change_type: Type of change (e.g., "modified", "deleted")
+            path: Path to the changed file
         """
+        self._metrics.record_file_change()
         store = self.store
         if store is None:
             return
@@ -179,23 +195,37 @@ class HubDaemon:
 
         context = ActionContext(
             store=store,
-            grail_executor=self.grail_executor,
+            grail_executor=self.executor, # Use self.executor
             project_root=self.project_root,
         )
 
-        for action in actions:
-            try:
-                result = await action.execute(context)
+        self._metrics.start_timer(f"index:{path}")
+        try:
+            for action in actions:
+                try:
+                    result = await action.execute(context)
 
-                if isinstance(action, ExtractSignatures) and "nodes" in result:
-                    await self._process_extraction_result(
-                        path,
-                        result,
-                        update_source="file_change",
-                    )
+                    if isinstance(action, ExtractSignatures) and "nodes" in result:
+                        await self._process_extraction_result(
+                            path,
+                            result,
+                            update_source="file_change",
+                        )
 
-            except Exception as exc:
-                logger.exception("Action failed for %s", path)
+                except Exception as exc:
+                    logger.exception("Action failed for %s", path)
+            
+            # Metrics for successful file change processing
+            duration = self._metrics.stop_timer(f"index:{path}")
+            # Node count is recorded in _process_extraction_result, so just record duration here if no nodes were extracted
+            # or if it's a delete operation.
+            # For now, we'll assume _process_extraction_result handles the node count metric.
+            # If no nodes were extracted, this timer will still be stopped.
+        except Exception as e:
+            logger.error("Error processing file change for %s: %s", path, e)
+            self._metrics.stop_timer(f"index:{path}")
+            self._metrics.record_file_failed()
+
 
         if enable_cross_file_analysis:
             from remora.hub.call_graph import update_call_graph
@@ -226,7 +256,7 @@ class HubDaemon:
 
         context = ActionContext(
             store=store,
-            grail_executor=self.grail_executor,
+            grail_executor=self.executor, # Use self.executor
             project_root=self.project_root,
         )
 
@@ -258,6 +288,7 @@ class HubDaemon:
 
         file_hash = result["file_hash"]
         nodes = result.get("nodes", [])
+        node_states = {} # To store NodeState objects for cleanup and metrics
 
         await store.invalidate_file(str(path))
 
@@ -284,7 +315,7 @@ class HubDaemon:
                 has_type_hints=node_data.get("has_type_hints", False),
                 update_source=update_source,
             )
-
+            node_states[node_key] = state
             await store.set(state)
 
         await store.set_file_index(
@@ -296,11 +327,37 @@ class HubDaemon:
             )
         )
 
+        # Cleanup old indices
+        await self._cleanup_old_indices(str(path), file_hash, list(node_states.keys()))
+        
+        # Record metrics
+        nodes_count = len(node_states)
+        duration = self._metrics.stop_timer(f"index:{path}")
+        self._metrics.record_file_indexed(nodes_count, duration)
+        self._log_index_event(path, nodes_count, duration, success=True)
+
         logger.debug(
             "Indexed %s: %s nodes",
             path,
             len(nodes),
         )
+
+    def _log_index_event(
+        self,
+        file_path: Path,
+        nodes: int,
+        duration: float,
+        success: bool,
+    ) -> None:
+        """Emit structured log for indexing events."""
+        event = {
+            "event": "file_indexed",
+            "file": str(file_path),
+            "nodes": nodes,
+            "duration_ms": round(duration * 1000, 2),
+            "success": success,
+        }
+        logger.info(json.dumps(event))
 
     async def _update_status(
         self,
