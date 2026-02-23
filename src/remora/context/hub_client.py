@@ -1,6 +1,6 @@
 """Hub client for Pull Hook integration.
 
-This client reads directly from the Hub workspace (no IPC).
+This client reads directly from the Hub workspace.
 Implements the "Lazy Daemon" pattern for graceful degradation.
 """
 
