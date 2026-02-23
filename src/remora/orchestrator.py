@@ -167,7 +167,7 @@ class Coordinator:
 
         self._setup_signal_handlers()
 
-        if self.config.hub_mode == "in-process":
+        if self.config.hub.mode == "in-process":
             from remora.hub.daemon import HubDaemon
             project_root = self.config.agents_dir.parent.resolve()
             daemon = HubDaemon(project_root=project_root, standalone=False)
