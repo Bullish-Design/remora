@@ -2,31 +2,30 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 from pathlib import Path
 
-import tree_sitter_python as tspython
 from tree_sitter import Language, Query
 
 from remora.discovery.models import DiscoveryError
 
 logger = logging.getLogger(__name__)
 
-PY_LANGUAGE = Language(tspython.language())
-
 
 class CompiledQuery:
     """A compiled tree-sitter query with metadata."""
 
-    def __init__(self, query: Query, source_file: Path, query_text: str) -> None:
+    def __init__(self, query: Query, source_file: Path, query_text: str, query_name: str) -> None:
         self.query = query
         self.source_file = source_file
         self.query_text = query_text
+        self._query_name = query_name
 
     @property
     def name(self) -> str:
-        """Query name derived from filename (e.g. 'function_def' from 'function_def.scm')."""
-        return self.source_file.stem
+        """Query name derived from filename (e.g. 'function' from 'function.scm')."""
+        return self._query_name
 
 
 class QueryLoader:
@@ -39,7 +38,6 @@ class QueryLoader:
             language="python",
             query_pack="remora_core",
         )
-        # queries is a list of CompiledQuery objects
     """
 
     def load_query_pack(
@@ -52,7 +50,7 @@ class QueryLoader:
 
         Args:
             query_dir: Root query directory (e.g. src/remora/queries/).
-            language: Language subdirectory (e.g. "python").
+            language: Language subdirectory (e.g. "python", "toml", "markdown").
             query_pack: Query pack subdirectory (e.g. "remora_core").
 
         Returns:
@@ -73,9 +71,18 @@ class QueryLoader:
                 f"No .scm query files found in: {pack_dir}",
             )
 
+        # Dynamically load the language for query compilation
+        grammar_module = f"tree_sitter_{language}"
+        try:
+            grammar_pkg = importlib.import_module(grammar_module)
+        except ImportError as exc:
+            raise DiscoveryError(f"Failed to import grammar module: {grammar_module}") from exc
+
+        ts_language = Language(grammar_pkg.language())
+
         compiled: list[CompiledQuery] = []
         for scm_file in scm_files:
-            compiled.append(self._compile_query(scm_file))
+            compiled.append(self._compile_query(scm_file, ts_language))
 
         logger.info(
             "Loaded %d queries from %s/%s: %s",
@@ -86,7 +93,7 @@ class QueryLoader:
         )
         return compiled
 
-    def _compile_query(self, scm_file: Path) -> CompiledQuery:
+    def _compile_query(self, scm_file: Path, ts_language: Language) -> CompiledQuery:
         """Compile a single .scm file into a tree-sitter Query."""
         try:
             query_text = scm_file.read_text(encoding="utf-8")
@@ -94,8 +101,13 @@ class QueryLoader:
             raise DiscoveryError(f"Failed to read query file: {scm_file}") from exc
 
         try:
-            query = Query(PY_LANGUAGE, query_text)
+            query = Query(ts_language, query_text)
         except Exception as exc:
             raise DiscoveryError(f"Query syntax error in {scm_file.name}: {exc}") from exc
 
-        return CompiledQuery(query=query, source_file=scm_file, query_text=query_text)
+        return CompiledQuery(
+            query=query,
+            source_file=scm_file,
+            query_text=query_text,
+            query_name=scm_file.stem,
+        )

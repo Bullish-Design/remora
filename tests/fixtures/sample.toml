@@ -1,0 +1,17 @@
+[project]
+name = "sample"
+version = "1.0.0"
+
+[tool.pytest]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+[[servers]]
+name = "alpha"
+port = 8080

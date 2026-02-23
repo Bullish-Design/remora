@@ -6,7 +6,7 @@ from typing import Any
 
 from remora.config import RunnerConfig, ServerConfig
 from remora.constants import TERMINATION_TOOL
-from remora.discovery import CSTNode, NodeType
+from remora.discovery import CSTNode
 from remora.orchestrator import RemoraAgentContext
 from remora.testing.fakes import FakeCompletionMessage, FakeToolCall
 
@@ -24,10 +24,15 @@ def tool_schema(name: str, description: str, parameters: dict[str, Any]) -> dict
     return {"type": "function", "function": {"name": name, "description": description, "parameters": parameters}}
 
 
-def make_node() -> CSTNode:
+def make_node(node_type: str = "function") -> CSTNode:
+    """Create a test CSTNode.
+
+    Args:
+        node_type: Node type string (default: "function").
+    """
     return CSTNode(
         node_id="node-1",
-        node_type=NodeType.FUNCTION,
+        node_type=node_type,
         name="hello",
         file_path=Path("src/example.py"),
         start_byte=0,

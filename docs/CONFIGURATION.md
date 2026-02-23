@@ -122,10 +122,9 @@ Settings for the OpenAI-compatible inference server.
 
 ### `discovery`
 
-Tree-sitter discovery settings.
+Tree-sitter discovery settings. Note: Language support is now configured via the `LANGUAGES` dict in `config.py`.
 
-- `language`: Language identifier (default `python`).
-- `query_pack`: Query pack directory name.
+- `query_pack`: Query pack directory name (default: `remora_core`).
 - `query_dir`: Optional custom query directory; `null` uses built-in queries.
 
 ### `operations`
@@ -197,5 +196,7 @@ Settings for `remora watch`.
 CLI flags override configuration values at runtime. Example:
 
 ```
-remora analyze --max-turns 10 --discovery-language python --query-pack remora_core
+remora analyze --max-turns 10 --query-pack remora_core
 ```
+
+**Note:** The discovery module now automatically discovers all configured languages (Python, TOML, Markdown) based on the `LANGUAGES` config. The `--discovery-language` flag has been removed.

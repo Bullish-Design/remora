@@ -14,7 +14,7 @@ Key flags:
 - `--config`: Path to `remora.yaml`.
 - `--auto-accept`: Auto-accept successful results.
 - `--max-turns`, `--max-tokens`, `--temperature`, `--tool-choice`: Runner overrides.
-- `--discovery-language`, `--query-pack`, `--agents-dir`: Discovery and agent overrides.
+- `--query-pack`, `--agents-dir`: Discovery and agent overrides.
 - `--max-concurrent-agents`, `--cairn-timeout`, `--cairn-home`: Cairn overrides.
 - `--event-stream`, `--event-stream-file`: Event stream overrides.
 
@@ -99,9 +99,9 @@ Centralized configuration constants.
 
 ### `remora.discovery`
 
-- `TreeSitterDiscoverer(root_dirs, language, query_pack, query_dir=None)`
+- `TreeSitterDiscoverer(root_dirs, query_pack, query_dir=None, languages=None)`
   - `discover() -> list[CSTNode]`
-- `CSTNode`, `NodeType`
+- `CSTNode` (node_type is now a string: "file", "class", "function", "method", etc.)
 
 ### `remora.events`
 

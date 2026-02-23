@@ -26,7 +26,17 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from remora.errors import ConfigurationError
 from remora.constants import CACHE_DIR
+
 DEFAULT_CONFIG_FILENAME = "remora.yaml"
+
+# Language extension to grammar module mapping
+# Used by discovery to dynamically load tree-sitter parsers
+LANGUAGES: dict[str, str] = {
+    ".py": "tree_sitter_python",
+    ".pyi": "tree_sitter_python",
+    ".toml": "tree_sitter_toml",
+    ".md": "tree_sitter_markdown",
+}
 
 
 def _default_cache_dir() -> Path:
@@ -86,7 +96,6 @@ class OperationConfig(BaseModel):
 
 
 class DiscoveryConfig(BaseModel):
-    language: str = "python"
     query_pack: str = "remora_core"
     query_dir: Path | None = None  # None = use built-in queries inside the package
 
@@ -196,23 +205,23 @@ class RemoraConfig(BaseModel):
     watch: WatchConfig = Field(default_factory=WatchConfig)
     hub: HubConfig = Field(default_factory=HubConfig)
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_and_resolve_precedence(self) -> "RemoraConfig":
         # 1. Resolve cairn.home vs agents_dir overrides
-        # Ensure cairn has a home directory even if not explicitly provided, routing it 
+        # Ensure cairn has a home directory even if not explicitly provided, routing it
         # to a hidden folder inside the agents_dir.
-        if hasattr(self, 'cairn') and not self.cairn.home and hasattr(self, 'agents_dir') and self.agents_dir:
+        if hasattr(self, "cairn") and not self.cairn.home and hasattr(self, "agents_dir") and self.agents_dir:
             self.cairn.home = self.agents_dir / ".cairn"
-            
+
         # 2. Model Adapter precedence
         # For each operation, if it doesn't specify a model_id, inherit from server.default_adapter
-        if hasattr(self, 'operations') and hasattr(self, 'server'):
+        if hasattr(self, "operations") and hasattr(self, "server"):
             for op_name, op_config in self.operations.items():
-                if getattr(op_config, 'model_id', None) is None:
+                if getattr(op_config, "model_id", None) is None:
                     op_config.model_id = self.server.default_adapter
-                if getattr(op_config, 'model_plugin', None) is None:
+                if getattr(op_config, "model_plugin", None) is None:
                     op_config.model_plugin = self.server.default_plugin
-                    
+
         return self
 
 

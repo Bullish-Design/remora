@@ -56,7 +56,7 @@ Commands include `analyze`, `watch`, `config`, and `list-agents`. The CLI resolv
 
 ### Discovery (`remora.discovery`)
 
-`TreeSitterDiscoverer` loads `.scm` query packs from `src/remora/queries`, parses Python files concurrently via `ThreadPoolExecutor`, and returns immutable `CSTNode` objects.
+`TreeSitterDiscoverer` loads `.scm` query packs from `src/remora/queries`, parses source files (Python, TOML, Markdown, etc.) concurrently via `ThreadPoolExecutor`, and returns immutable `CSTNode` objects. Language support is configured via the `LANGUAGES` dict in `config.py`.
 
 ### Coordinator (`remora.orchestrator.Coordinator`)
 

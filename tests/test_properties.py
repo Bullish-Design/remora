@@ -8,10 +8,12 @@ from pathlib import Path
 from hypothesis import assume, given, settings, strategies as st
 
 from remora.config import _deep_update
-from remora.discovery import NodeType, compute_node_id
+from remora.discovery import compute_node_id
 
 
 safe_path_chars = st.characters(whitelist_categories=("L", "N"), whitelist_characters="/._-")
+
+NODE_TYPES = ["file", "class", "function", "method"]
 
 
 @given(
@@ -19,9 +21,9 @@ safe_path_chars = st.characters(whitelist_categories=("L", "N"), whitelist_chara
         alphabet=st.characters(whitelist_categories=("L", "N"), whitelist_characters="_"), min_size=1, max_size=50
     ),
     file_path=st.text(alphabet=safe_path_chars, min_size=1, max_size=60),
-    node_type=st.sampled_from(list(NodeType)),
+    node_type=st.sampled_from(NODE_TYPES),
 )
-def test_node_id_deterministic(name: str, file_path: str, node_type: NodeType) -> None:
+def test_node_id_deterministic(name: str, file_path: str, node_type: str) -> None:
     """Node ID generation is deterministic for same inputs."""
     assume("\x00" not in file_path)
     path = Path(file_path)

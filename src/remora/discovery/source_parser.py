@@ -2,37 +2,54 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 from pathlib import Path
 
-import tree_sitter_python as tspython
 from tree_sitter import Language, Parser, Tree
 
 from remora.discovery.models import DiscoveryError
 
 logger = logging.getLogger(__name__)
 
-PY_LANGUAGE = Language(tspython.language())
-
 
 class SourceParser:
-    """Parses Python source files into tree-sitter Trees.
+    """Parses source files into tree-sitter Trees.
+
+    Dynamically loads the appropriate tree-sitter grammar based on the
+    grammar_module parameter (e.g., "tree_sitter_python", "tree_sitter_toml").
 
     Usage:
-        parser = SourceParser()
+        parser = SourceParser("tree_sitter_python")
         tree, source_bytes = parser.parse_file(Path("example.py"))
-        # tree is a tree_sitter.Tree
-        # source_bytes is the raw file content as bytes
     """
 
-    def __init__(self) -> None:
-        self._parser = Parser(PY_LANGUAGE)
-
-    def parse_file(self, file_path: Path) -> tuple[Tree, bytes]:
-        """Parse a Python file and return (tree, source_bytes).
+    def __init__(self, grammar_module: str) -> None:
+        """Initialize parser with a specific grammar module.
 
         Args:
-            file_path: Path to a .py file.
+            grammar_module: The tree-sitter grammar module name,
+                           e.g., "tree_sitter_python", "tree_sitter_toml".
+        """
+        try:
+            grammar_pkg = importlib.import_module(grammar_module)
+        except ImportError as exc:
+            raise DiscoveryError(f"Failed to import grammar module: {grammar_module}") from exc
+
+        self._language = Language(grammar_pkg.language())
+        self._parser = Parser(self._language)
+        self._grammar_module = grammar_module
+
+    @property
+    def language(self) -> Language:
+        """Return the tree-sitter Language object."""
+        return self._language
+
+    def parse_file(self, file_path: Path) -> tuple[Tree, bytes]:
+        """Parse a source file and return (tree, source_bytes).
+
+        Args:
+            file_path: Path to the source file.
 
         Returns:
             Tuple of (parsed Tree, raw source bytes).

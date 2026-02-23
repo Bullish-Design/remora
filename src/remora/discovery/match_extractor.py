@@ -7,20 +7,20 @@ from pathlib import Path
 
 from tree_sitter import Node, QueryCursor, Tree
 
-from remora.discovery.models import CSTNode, NodeType, compute_node_id
+from remora.discovery.models import CSTNode, compute_node_id
+from remora.discovery.query_loader import CompiledQuery
 
 logger = logging.getLogger(__name__)
-
-# Map capture-name prefixes to base NodeType.
-_PREFIX_TO_NODE_TYPE: dict[str, NodeType] = {
-    "file": NodeType.FILE,
-    "class": NodeType.CLASS,
-    "function": NodeType.FUNCTION,
-}
 
 
 class MatchExtractor:
     """Executes compiled queries against parsed trees and builds CSTNode lists.
+
+    This extractor is completely language-agnostic. It relies on the .scm query
+    files to define:
+    - What nodes to capture via @X.def
+    - What names to extract via @X.name
+    - What types nodes should have (derived from capture prefix X)
 
     Usage:
         extractor = MatchExtractor()
@@ -37,7 +37,7 @@ class MatchExtractor:
         file_path: Path,
         tree: Tree,
         source_bytes: bytes,
-        queries: list,
+        queries: list[CompiledQuery],
     ) -> list[CSTNode]:
         """Run all queries against a tree and return discovered CSTNodes.
 
@@ -60,7 +60,7 @@ class MatchExtractor:
                     seen_ids.add(node.node_id)
                     nodes.append(node)
 
-        nodes.sort(key=lambda n: (str(n.file_path), n.start_byte, n.node_type.value, n.name))
+        nodes.sort(key=lambda n: (str(n.file_path), n.start_byte, n.node_type, n.name))
         return nodes
 
     def _run_query(
@@ -68,116 +68,72 @@ class MatchExtractor:
         file_path: Path,
         tree: Tree,
         source_bytes: bytes,
-        compiled_query,
+        compiled_query: CompiledQuery,
     ) -> list[CSTNode]:
-        """Run a single query and extract CSTNodes from matches."""
+        """Run a single query and extract CSTNodes from matches.
+
+        The query file name determines the node type. For example:
+        - function.scm → expects @function.def and @function.name captures
+        - class.scm → expects @class.def and @class.name captures
+        - file.scm → expects @file.def capture (name derived from file stem)
+
+        For queries with multiple node types (e.g., function.scm with both
+        @function.def and @method.def), each capture prefix defines its type.
+        """
         cursor = QueryCursor(compiled_query.query)
-        captures = cursor.captures(tree.root_node)
         nodes: list[CSTNode] = []
 
-        # Group captures by pattern (group by the @X.def capture)
-        # For now, process each capture individually
-        for capture_name, ts_nodes in captures.items():
-            for ts_node in ts_nodes:
-                node = self._build_node_from_capture(file_path, source_bytes, capture_name, ts_node)
-                if node is not None:
-                    nodes.append(node)
+        # Process matches (each match groups related captures)
+        for match in cursor.matches(tree.root_node):
+            # Group captures by their prefix (e.g., "function", "method", "class")
+            # match[1] is a dict mapping capture_name -> list of Node objects
+            captures_by_prefix: dict[str, dict[str, list[Node]]] = {}
+
+            for capture_name, ts_nodes in match[1].items():
+                parts = capture_name.split(".")
+                if len(parts) != 2:
+                    continue
+
+                prefix, suffix = parts
+                if prefix not in captures_by_prefix:
+                    captures_by_prefix[prefix] = {}
+                if suffix not in captures_by_prefix[prefix]:
+                    captures_by_prefix[prefix][suffix] = []
+                captures_by_prefix[prefix][suffix].extend(ts_nodes)
+
+            # Build nodes for each captured prefix that has a .def
+            for prefix, captures in captures_by_prefix.items():
+                def_nodes = captures.get("def", [])
+                name_nodes = captures.get("name", [])
+
+                for i, def_node in enumerate(def_nodes):
+                    node_type = prefix  # e.g., "function", "method", "class", "table"
+
+                    # Extract name from @X.name capture, or use file stem for file nodes
+                    if i < len(name_nodes):
+                        name_node = name_nodes[i]
+                        name = source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="replace")
+                    elif node_type == "file":
+                        name = file_path.stem
+                    else:
+                        name = "unknown"
+
+                    text = source_bytes[def_node.start_byte : def_node.end_byte].decode("utf-8", errors="replace")
+
+                    node_id = compute_node_id(file_path, node_type, name)
+
+                    nodes.append(
+                        CSTNode(
+                            node_id=node_id,
+                            node_type=node_type,
+                            name=name,
+                            file_path=file_path,
+                            start_byte=def_node.start_byte,
+                            end_byte=def_node.end_byte,
+                            text=text,
+                            start_line=def_node.start_point.row + 1,
+                            end_line=def_node.end_point.row + 1,
+                        )
+                    )
 
         return nodes
-
-    def _build_node_from_capture(
-        self,
-        file_path: Path,
-        source_bytes: bytes,
-        capture_name: str,
-        ts_node: Node,
-    ) -> CSTNode | None:
-        """Build a CSTNode from a single capture.
-
-        The capture_name follows the convention @X.def or @X.name
-        where X is one of: file, class, function
-        """
-        parts = capture_name.split(".")
-        if len(parts) != 2:
-            return None
-
-        prefix, suffix = parts
-        base_type = _PREFIX_TO_NODE_TYPE.get(prefix)
-
-        if base_type is None:
-            return None
-
-        # Only process .def captures to create nodes
-        if suffix != "def":
-            return None
-
-        # Extract the name from the corresponding @X.name capture
-        # For now, try to get name from the node itself
-        name_text = self._extract_name_from_node(ts_node, source_bytes)
-
-        # For FILE nodes, use file stem as name
-        if base_type == NodeType.FILE:
-            name_text = file_path.stem
-
-        if not name_text:
-            name_text = "unknown"
-
-        # Determine if a FUNCTION is actually a METHOD by inspecting parents
-        actual_type = base_type
-        full_name = name_text
-        if base_type == NodeType.FUNCTION:
-            actual_type, full_name = self._classify_function(ts_node, name_text, source_bytes)
-
-        text = source_bytes[ts_node.start_byte : ts_node.end_byte].decode("utf-8", errors="replace")
-
-        node_id = compute_node_id(file_path, actual_type, name_text)
-
-        return CSTNode(
-            node_id=node_id,
-            node_type=actual_type,
-            name=name_text,
-            file_path=file_path,
-            start_byte=ts_node.start_byte,
-            end_byte=ts_node.end_byte,
-            text=text,
-            start_line=ts_node.start_point.row + 1,  # tree-sitter is 0-indexed
-            end_line=ts_node.end_point.row + 1,
-            _full_name=full_name,
-        )
-
-    def _extract_name_from_node(self, ts_node: Node, source_bytes: bytes) -> str | None:
-        """Try to extract a name from a tree-sitter node."""
-        # For function_definition and class_definition, get the name child
-        name_node = ts_node.child_by_field_name("name")
-        if name_node is not None:
-            return source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="replace")
-        return None
-
-    def _classify_function(
-        self,
-        def_node: Node,
-        name: str,
-        source_bytes: bytes,
-    ) -> tuple[NodeType, str]:
-        """Determine if a function_definition is a METHOD or FUNCTION.
-
-        Walk the tree-sitter parent chain. If any ancestor is a class_definition,
-        this is a METHOD and we build a qualified full_name.
-
-        Returns:
-            Tuple of (NodeType, full_name).
-        """
-        parent = def_node.parent
-        while parent is not None:
-            if parent.type == "class_definition":
-                # Extract the class name
-                class_name_node = parent.child_by_field_name("name")
-                if class_name_node is not None:
-                    class_name = source_bytes[class_name_node.start_byte : class_name_node.end_byte].decode(
-                        "utf-8", errors="replace"
-                    )
-                    return NodeType.METHOD, f"{class_name}.{name}"
-                return NodeType.METHOD, name
-            parent = parent.parent
-
-        return NodeType.FUNCTION, name

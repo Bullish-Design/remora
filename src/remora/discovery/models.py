@@ -4,20 +4,14 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 
-
-class NodeType(str, Enum):
-    """Type of discovered code node."""
-
-    FILE = "file"
-    CLASS = "class"
-    FUNCTION = "function"
-    METHOD = "method"
-
-
 from remora.errors import DiscoveryError as BaseDiscoveryError
+
+# NodeType is now a simple string - any value is valid.
+# The type is determined by the capture prefix in .scm files (e.g., @class.def → "class")
+NodeType = str
+
 
 class DiscoveryError(BaseDiscoveryError):
     pass
@@ -26,10 +20,10 @@ class DiscoveryError(BaseDiscoveryError):
 def compute_node_id(file_path: Path, node_type: NodeType, name: str) -> str:
     """Compute a stable node ID.
 
-    Hash: sha256(resolved_file_path:node_type_value:name), truncated to 16 hex chars.
+    Hash: sha256(resolved_file_path:node_type:name), truncated to 16 hex chars.
     Stable across reformatting because it does NOT include byte offsets.
     """
-    digest_input = f"{file_path.resolve()}:{node_type.value}:{name}".encode("utf-8")
+    digest_input = f"{file_path.resolve()}:{node_type}:{name}".encode("utf-8")
     return hashlib.sha256(digest_input).hexdigest()[:16]
 
 

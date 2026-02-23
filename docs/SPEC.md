@@ -18,7 +18,7 @@ remora analyze [PATHS...] [OPTIONS]
 - `--config, -c`: Path to configuration file.
 - `--format, -f`: `table`, `json`, or `interactive`.
 - `--auto-accept`: Auto-merge successful results.
-- `--discovery-language`, `--query-pack`, `--agents-dir`: Discovery overrides.
+- `--query-pack`, `--agents-dir`: Discovery overrides.
 - `--max-turns`, `--max-tokens`, `--temperature`, `--tool-choice`: Runner overrides.
 - `--cairn-home`, `--max-concurrent-agents`, `--cairn-timeout`: Cairn overrides.
 - `--event-stream`, `--event-stream-file`: Event stream overrides.
@@ -85,7 +85,7 @@ Key fields:
 ```python
 class CSTNode:
     node_id: str
-    node_type: NodeType  # file | class | function | method
+    node_type: str  # "file", "class", "function", "method", "table", "section", etc.
     name: str
     file_path: Path
     start_byte: int
