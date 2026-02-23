@@ -16,11 +16,21 @@ set -e
 #                           (major throughput win for remora's repeated tool schemas)
 
 #python3 -m vllm.entrypoints.openai.api_server \
-vllm serve google/functiongemma-270m-it \
+#vllm serve google/functiongemma-270m-it \
+#    --enable-auto-tool-choice \
+#    --tool-call-parser functiongemma \
+#    --chat-template /app/tool_chat_template_functiongemma.jinja \
+#    --structured-outputs-config.backend xgrammar \
+#    --max-num-seqs 32 \
+#    --max-model-len 32768 \
+#    --enable-prefix-caching
+
+# Qwen3-4B-Instruct-2507-FP8 - Non-thinking mode model with FP8 quantization
+# NOTE: This model has issues with structured output causing endless generation
+# See: https://github.com/QwenLM/Qwen3/issues/1700
+vllm serve Qwen/Qwen3-4B-Instruct-2507-FP8 \
     --enable-auto-tool-choice \
-    --tool-call-parser functiongemma \
-    --chat-template /app/tool_chat_template_functiongemma.jinja \
-    --structured-outputs-config.backend xgrammar \
+    --tool-call-parser qwen3_coder \
     --max-num-seqs 32 \
     --max-model-len 32768 \
     --enable-prefix-caching

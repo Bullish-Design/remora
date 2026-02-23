@@ -1,0 +1,42 @@
+{"timestamp": 1771885748.1788995, "event": "parsed", "node": "AST", "type": "System", "message": "Discovered 8 nodes. Initiating workspaces."}
+{"timestamp": 1771885748.2604983, "event": "workspace_provision", "node": "main", "type": "FunctionDef", "message": "Provisioning Cairn workspace"}
+{"timestamp": 1771885748.2632241, "event": "workspace_provision", "node": "__init__", "type": "FunctionDef", "message": "Provisioning Cairn workspace"}
+{"timestamp": 1771885748.265314, "event": "workspace_provision", "node": "add", "type": "FunctionDef", "message": "Provisioning Cairn workspace"}
+{"timestamp": 1771885748.2671235, "event": "workspace_provision", "node": "subtract", "type": "FunctionDef", "message": "Provisioning Cairn workspace"}
+{"timestamp": 1771885748.2688596, "event": "workspace_provision", "node": "multiply", "type": "FunctionDef", "message": "Provisioning Cairn workspace"}
+{"timestamp": 1771885748.2705195, "event": "workspace_provision", "node": "divide", "type": "FunctionDef", "message": "Provisioning Cairn workspace"}
+{"timestamp": 1771885748.439523, "event": "summarizing", "node": "main", "type": "FunctionDef", "message": "Generating LLM summary"}
+{"timestamp": 1771885748.4422648, "event": "llm_request", "node": "main", "type": "FunctionDef", "message": "Sending request to vLLM"}
+{"timestamp": 1771885749.0390065, "event": "summarizing", "node": "add", "type": "FunctionDef", "message": "Generating LLM summary"}
+{"timestamp": 1771885749.0399258, "event": "llm_request", "node": "add", "type": "FunctionDef", "message": "Sending request to vLLM"}
+{"timestamp": 1771885749.0440466, "event": "summarizing", "node": "multiply", "type": "FunctionDef", "message": "Generating LLM summary"}
+{"timestamp": 1771885749.046732, "event": "llm_request", "node": "multiply", "type": "FunctionDef", "message": "Sending request to vLLM"}
+{"timestamp": 1771885749.072905, "event": "summarizing", "node": "__init__", "type": "FunctionDef", "message": "Generating LLM summary"}
+{"timestamp": 1771885749.0733016, "event": "llm_request", "node": "__init__", "type": "FunctionDef", "message": "Sending request to vLLM"}
+{"timestamp": 1771885749.0777342, "event": "summarizing", "node": "divide", "type": "FunctionDef", "message": "Generating LLM summary"}
+{"timestamp": 1771885749.0788195, "event": "llm_request", "node": "divide", "type": "FunctionDef", "message": "Sending request to vLLM"}
+{"timestamp": 1771885749.0826085, "event": "summarizing", "node": "subtract", "type": "FunctionDef", "message": "Generating LLM summary"}
+{"timestamp": 1771885749.0829384, "event": "llm_request", "node": "subtract", "type": "FunctionDef", "message": "Sending request to vLLM"}
+{"timestamp": 1771885749.4538686, "event": "llm_response", "node": "__init__", "type": "FunctionDef", "message": "Received response (61 chars)"}
+{"timestamp": 1771885749.457384, "event": "llm_response", "node": "subtract", "type": "FunctionDef", "message": "Received response (61 chars)"}
+{"timestamp": 1771885749.4784966, "event": "done", "node": "__init__", "type": "FunctionDef", "message": "Rollup complete", "summary": "air dry shoot shoot shoot shoot shoot shoot\nI cannot define."}
+{"timestamp": 1771885749.4791481, "event": "done", "node": "subtract", "type": "FunctionDef", "message": "Rollup complete", "summary": "air blue blue red red red blue blue\nI cannot define further."}
+{"timestamp": 1771885749.5538962, "event": "llm_response", "node": "main", "type": "FunctionDef", "message": "Received response (79 chars)"}
+{"timestamp": 1771885749.5649917, "event": "done", "node": "main", "type": "FunctionDef", "message": "Rollup complete", "summary": ":\n    \"\"\"Main entry point.\"\"\"\n    calc.add(5, 3)\n    print(f\"5 + 3 = {result}\")"}
+{"timestamp": 1771885749.7959213, "event": "llm_response", "node": "divide", "type": "FunctionDef", "message": "Received response (264 chars)"}
+{"timestamp": 1771885749.8091424, "event": "done", "node": "divide", "type": "FunctionDef", "message": "Rollup complete", "summary": ":\nbrooke let brooke let brooke let brooke let brooke let brooke let brooke.\nbrooke let brooke let brooke let brooke let brooke let brooke.\nbrooke let brooke let brooke let brooke let brooke let brooke.\nbrooke let brooke let brooke let brooke let brooke let brooke."}
+{"timestamp": 1771885749.9560893, "event": "llm_response", "node": "multiply", "type": "FunctionDef", "message": "Received response (553 chars)"}
+{"timestamp": 1771885749.9683707, "event": "done", "node": "multiply", "type": "FunctionDef", "message": "Rollup complete", "summary": "air pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump pump.\"\"\""}
+{"timestamp": 1771885750.4291718, "event": "llm_response", "node": "add", "type": "FunctionDef", "message": "Received response (264 chars)"}
+{"timestamp": 1771885750.4419844, "event": "done", "node": "add", "type": "FunctionDef", "message": "Rollup complete", "summary": "objective_______________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________"}
+{"timestamp": 1771885750.4428036, "event": "workspace_provision", "node": "Calculator", "type": "ClassDef", "message": "Provisioning Cairn workspace"}
+{"timestamp": 1771885750.4744575, "event": "summarizing", "node": "Calculator", "type": "ClassDef", "message": "Generating LLM summary"}
+{"timestamp": 1771885750.4748592, "event": "llm_request", "node": "Calculator", "type": "ClassDef", "message": "Sending request to vLLM"}
+{"timestamp": 1771885750.5309775, "event": "llm_response", "node": "Calculator", "type": "ClassDef", "message": "Received response (15 chars)"}
+{"timestamp": 1771885750.541542, "event": "done", "node": "Calculator", "type": "ClassDef", "message": "Rollup complete", "summary": ": Response Only"}
+{"timestamp": 1771885750.5420744, "event": "workspace_provision", "node": "File Root", "type": "Module", "message": "Provisioning Cairn workspace"}
+{"timestamp": 1771885750.5718617, "event": "summarizing", "node": "File Root", "type": "Module", "message": "Generating LLM summary"}
+{"timestamp": 1771885750.5722492, "event": "llm_request", "node": "File Root", "type": "Module", "message": "Sending request to vLLM"}
+{"timestamp": 1771885751.4173744, "event": "llm_response", "node": "File Root", "type": "Module", "message": "Received response (909 chars)"}
+{"timestamp": 1771885751.4284258, "event": "done", "node": "File Root", "type": "Module", "message": "Rollup complete", "summary": "<start_function_call>afteractionhogriceumble_file_root_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module_module"}
+{"timestamp": 1771885751.4307277, "event": "complete", "node": "System", "type": "System", "message": "AST Summary Rollup Complete."}

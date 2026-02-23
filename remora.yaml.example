@@ -13,7 +13,7 @@ server:
   base_url: "http://remora-server:8000/v1"
   api_key: "EMPTY"
   timeout: 120
-  default_adapter: "google/functiongemma-270m-it"
+  default_adapter: "Qwen/Qwen3-4B-Instruct-2507-FP8"
   retry:
     max_attempts: 3
     initial_delay: 1.0

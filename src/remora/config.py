@@ -69,7 +69,7 @@ class ServerConfig(BaseModel):
     base_url: str = "http://remora-server:8000/v1"
     api_key: str = "EMPTY"
     timeout: int = 120
-    default_adapter: str = "google/functiongemma-270m-it"
+    default_adapter: str = "Qwen/Qwen3-4B-Instruct-2507-FP8"
     default_plugin: str = "function_gemma"
     retry: RetryConfig = Field(default_factory=RetryConfig)
 
