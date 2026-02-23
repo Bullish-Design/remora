@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.utils.grail_runtime import build_file_externals, run_script
 from tests.utils.tool_contract import assert_valid_tool_result
 

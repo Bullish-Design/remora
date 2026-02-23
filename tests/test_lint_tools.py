@@ -54,7 +54,7 @@ def test_run_linter_parses_issues(tmp_path: Path) -> None:
     assert payload["total"] == 1
     assert payload["fixable_count"] == 1
     assert payload["issues"][0]["code"] == "E225"
-    assert payload["issues"][0]["fixable"] is True
+    assert payload["issues"][0]["fix"]["applicability"] == "safe"
 
 
 def test_apply_fix_updates_file(tmp_path: Path) -> None:
