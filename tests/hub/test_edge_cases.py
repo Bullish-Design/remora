@@ -19,7 +19,7 @@ async def test_syntax_error_file(tmp_path: Path, mock_store: "Any") -> None:
 
     # Should not raise, should return empty
     indexed = await index_file_simple(bad_file, mock_store)
-    assert indexed == []
+    assert indexed == 0
 
 
 @pytest.mark.asyncio
@@ -29,7 +29,7 @@ async def test_binary_file(tmp_path: Path, mock_store: "Any") -> None:
     binary_file.write_bytes(b"\x00\x01\x02\x03")
 
     indexed = await index_file_simple(binary_file, mock_store)
-    assert indexed == []
+    assert indexed == 0
 
 
 @pytest.mark.asyncio
@@ -39,7 +39,7 @@ async def test_empty_file(tmp_path: Path, mock_store: "Any") -> None:
     empty_file.write_text("", encoding="utf-8")
 
     indexed = await index_file_simple(empty_file, mock_store)
-    assert indexed == []
+    assert indexed == 0
 
 
 @pytest.mark.asyncio
@@ -50,7 +50,7 @@ async def test_very_long_function(tmp_path: Path, mock_store: "Any") -> None:
     long_func.write_text(f"def very_long():\n{body}\n    return x\n", encoding="utf-8")
 
     indexed = await index_file_simple(long_func, mock_store)
-    assert len(indexed) == 1
+    assert indexed == 1
 
 
 @pytest.mark.asyncio
@@ -64,7 +64,7 @@ def greeting():
 ''', encoding="utf-8")
 
     indexed = await index_file_simple(unicode_file, mock_store)
-    assert len(indexed) == 1
+    assert indexed == 1
 
 
 @pytest.mark.asyncio
@@ -81,5 +81,6 @@ def outer():
 ''', encoding="utf-8")
 
     indexed = await index_file_simple(nested_file, mock_store)
-    # Should index outer, behavior for inner is implementation-defined
-    assert "outer" in indexed[0]["name"] if indexed else True
+    assert indexed > 0
+    nodes = list(mock_store.nodes.values())
+    assert any("outer" == n.node_name for n in nodes)

@@ -59,19 +59,17 @@ async def test_daemon_cold_start(project_with_files: Path, mock_grail_executor: 
     )
 
     # Run for a short time then stop
-    async def run_briefly():
-        task = asyncio.create_task(daemon.run())
-        await asyncio.sleep(0.5)
-        daemon._shutdown_event.set()
-        await task
-
-    await run_briefly()
+    task = asyncio.create_task(daemon.run())
+    await asyncio.sleep(0.5)
 
     # Verify files were indexed
     status = await daemon.store.get_status()
     assert status is not None
     assert status.indexed_files >= 3
     assert status.indexed_nodes >= 3
+
+    daemon._shutdown_event.set()
+    await task
 
 
 @pytest.mark.asyncio
@@ -93,8 +91,13 @@ async def test_daemon_graceful_shutdown(project_with_files: Path, mock_grail_exe
     daemon._shutdown_event.set()
     await asyncio.wait_for(task, timeout=5.0)
 
-    # Verify clean shutdown
-    status = await daemon.store.get_status()
+    # Verify clean shutdown by opening a new temporary client
+    from fsdantic import Fsdantic
+    from remora.hub.store import NodeStateStore
+    workspace = await Fsdantic.open(path=str(daemon.db_path))
+    store = NodeStateStore(workspace)
+    status = await store.get_status()
+    await workspace.close()
     assert status is None or status.running is False
 
 
@@ -127,13 +130,13 @@ def new_function():
     # Wait for change to be processed
     await asyncio.sleep(1.0)
 
-    daemon._shutdown_event.set()
-    await task
-
     # Verify new function was indexed
     all_nodes = await daemon.store.list_all_nodes()
     node_names = [n.split(":")[-1] for n in all_nodes]
     assert "new_function" in node_names
+
+    daemon._shutdown_event.set()
+    await task
 
 
 @pytest.mark.asyncio
@@ -151,10 +154,11 @@ async def test_daemon_restart_recovery(project_with_files: Path, mock_grail_exec
 
     task1 = asyncio.create_task(daemon1.run())
     await asyncio.sleep(0.5)
-    daemon1._shutdown_event.set()
-    await task1
 
     initial_nodes = await daemon1.store.list_all_nodes()
+
+    daemon1._shutdown_event.set()
+    await task1
 
     # Second run (restart)
     daemon2 = HubDaemon(
@@ -164,10 +168,11 @@ async def test_daemon_restart_recovery(project_with_files: Path, mock_grail_exec
     )
 
     task2 = asyncio.create_task(daemon2.run())
-    await asyncio.sleep(0.3)
-    daemon2._shutdown_event.set()
-    await task2
+    await asyncio.sleep(0.5)
 
     # Verify state persisted
     recovered_nodes = await daemon2.store.list_all_nodes()
     assert set(recovered_nodes) == set(initial_nodes)
+
+    daemon2._shutdown_event.set()
+    await task2

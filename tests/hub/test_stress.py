@@ -54,15 +54,16 @@ async def test_large_codebase_indexing(large_project: Path, mock_grail_executor:
 
     task = asyncio.create_task(daemon.run())
     await asyncio.sleep(5.0)  # Allow time for indexing
-    daemon._shutdown_event.set()
-    await task
-
+    
     elapsed = time.monotonic() - start
 
     # Verify all nodes indexed
     status = await daemon.store.get_status()
     assert status.indexed_files >= 100
     assert status.indexed_nodes >= 500  # 100 files * 5 functions
+
+    daemon._shutdown_event.set()
+    await task
 
     # Performance assertion: should index in reasonable time
     assert elapsed < 60.0, f"Indexing took {elapsed:.1f}s, expected < 60s"
@@ -95,10 +96,10 @@ async def test_concurrent_file_changes(large_project: Path, mock_grail_executor:
     # Wait for processing
     await asyncio.sleep(3.0)
 
-    daemon._shutdown_event.set()
-    await task
-
     # Verify new functions indexed
-    all_nodes = await daemon._store.list_all_nodes()
+    all_nodes = await daemon.store.list_all_nodes()
     added_funcs = [n for n in all_nodes if "added_func" in n]
     assert len(added_funcs) == 20
+
+    daemon._shutdown_event.set()
+    await task
