@@ -6,20 +6,7 @@ import pytest
 from remora.hub.call_graph import CallGraphBuilder
 
 
-class MockNodeStateStore:
-    def __init__(self) -> None:
-        self.nodes = {}
-        
-    async def get(self, node_id: str) -> dict[str, Any]:
-        return self.nodes.get(node_id)
-        
-    async def set(self, node: dict[str, Any]) -> None:
-        pass
 
-
-@pytest.fixture
-def mock_store() -> "Any":
-    return MockNodeStateStore()
 
 
 @pytest.fixture

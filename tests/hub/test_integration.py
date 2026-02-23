@@ -172,6 +172,7 @@ async def test_end_to_end_indexing(tmp_path: Path) -> None:
 
     config_file = tmp_path / "remora.yaml"
     config_file.write_text("hub:\n  mode: in-process\n  enable_cross_file_analysis: false\n")
+    (tmp_path / "agents").mkdir(parents=True, exist_ok=True)
 
     daemon = HubDaemon(project_root=tmp_path, grail_executor=SimpleGrailExecutor())
     daemon_task = asyncio.create_task(daemon.run())
