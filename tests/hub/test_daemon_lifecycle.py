@@ -132,7 +132,7 @@ def new_function():
 
     # Verify new function was indexed
     all_nodes = await daemon.store.list_all_nodes()
-    node_names = [n.split(":")[-1] for n in all_nodes]
+    node_names = [n.node_name for n in all_nodes]
     assert "new_function" in node_names
 
     daemon._shutdown_event.set()
@@ -172,7 +172,10 @@ async def test_daemon_restart_recovery(project_with_files: Path, mock_grail_exec
 
     # Verify state persisted
     recovered_nodes = await daemon2.store.list_all_nodes()
-    assert set(recovered_nodes) == set(initial_nodes)
+    
+    initial_keys = {n.key for n in initial_nodes}
+    recovered_keys = {n.key for n in recovered_nodes}
+    assert recovered_keys == initial_keys
 
     daemon2._shutdown_event.set()
     await task2

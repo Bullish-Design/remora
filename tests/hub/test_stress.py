@@ -53,14 +53,20 @@ async def test_large_codebase_indexing(large_project: Path, mock_grail_executor:
     start = time.monotonic()
 
     task = asyncio.create_task(daemon.run())
-    await asyncio.sleep(5.0)  # Allow time for indexing
-    
+    # Wait for indexing to complete by polling stats
+    stats = {"files": 0, "nodes": 0}
+    for _ in range(50):
+        stats = await daemon.store.stats()
+        if stats["files"] >= 100:
+            break
+        await asyncio.sleep(0.5)
+
     elapsed = time.monotonic() - start
 
     # Verify all nodes indexed
     status = await daemon.store.get_status()
-    assert status.indexed_files >= 100
-    assert status.indexed_nodes >= 500  # 100 files * 5 functions
+    assert stats["files"] >= 100
+    assert stats["nodes"] >= 500  # 100 files * 5 functions
 
     daemon._shutdown_event.set()
     await task
@@ -93,12 +99,17 @@ async def test_concurrent_file_changes(large_project: Path, mock_grail_executor:
 
     await asyncio.gather(*[modify_file(i) for i in range(20)])
 
-    # Wait for processing
-    await asyncio.sleep(3.0)
+    # Wait for processing by polling
+    for _ in range(30):
+        all_nodes = await daemon.store.list_all_nodes()
+        added_funcs = [n for n in all_nodes if "added_func" in n.node_name]
+        if len(added_funcs) >= 20:
+            break
+        await asyncio.sleep(0.5)
 
     # Verify new functions indexed
     all_nodes = await daemon.store.list_all_nodes()
-    added_funcs = [n for n in all_nodes if "added_func" in n]
+    added_funcs = [n for n in all_nodes if "added_func" in n.node_name]
     assert len(added_funcs) == 20
 
     daemon._shutdown_event.set()
