@@ -11,6 +11,7 @@ Key design:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -46,6 +47,7 @@ class NodeStateStore:
             workspace: Open FSdantic Workspace instance
         """
         self.workspace = workspace
+        self._lock = asyncio.Lock()
 
         # Create typed repositories for each model
         # Prefix determines the key namespace in KV store
@@ -155,14 +157,14 @@ class NodeStateStore:
         # Efficiently fetch only the nodes for this file by filtering IDs first
         # instead of loading all NodeState objects into memory.
         all_ids = await self.node_repo.list_ids()
-        
+
         # Keys in node_repo are formatted as {file_path}:{node_name}
         file_prefix = f"{file_path}:"
         file_node_ids = [node_id for node_id in all_ids if node_id.startswith(file_prefix)]
-        
+
         if not file_node_ids:
             return []
-            
+
         nodes_dict = await self.get_many([f"node:{n}" for n in file_node_ids])
         return list(nodes_dict.values())
 
@@ -191,6 +193,25 @@ class NodeStateStore:
         await self.delete_file_index(file_path)
 
         return deleted_keys
+
+    async def invalidate_and_set(
+        self,
+        file_path: str,
+        states: list[NodeState],
+        file_index: FileIndex,
+    ) -> None:
+        """Atomic operation: invalidate + set + set_file_index.
+
+        Args:
+            file_path: Absolute file path
+            states: List of NodeState objects to store
+            file_index: FileIndex to store
+        """
+        async with self._lock:
+            await self.invalidate_file(file_path)
+            if states:
+                await self.set_many(states)
+            await self.set_file_index(file_index)
 
     # === File Index Operations ===
 

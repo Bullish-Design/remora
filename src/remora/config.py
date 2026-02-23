@@ -178,6 +178,11 @@ class HubConfig(BaseModel):
     batch_size: int = 50  # Files to index per batch
     index_delay_ms: int = 100  # Delay between batches
 
+    # Concurrency settings
+    max_indexing_workers: int = Field(default=4, description="Max parallel workers for cold-start indexing")
+    max_change_workers: int = Field(default=1, description="Max parallel workers for file change processing")
+    change_queue_size: int = Field(default=1000, description="Max size of file change queue (backpressure)")
+
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

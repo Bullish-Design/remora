@@ -7,6 +7,7 @@ Runs as a background process, communicating via shared workspace.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import hashlib
 import logging
 import os
@@ -58,7 +59,7 @@ class HubDaemon:
         """
         self.project_root = project_root.resolve()
         self.db_path = db_path or (self.project_root / ".remora" / HUB_DB_NAME)
-        self.executor = grail_executor # Renamed from grail_executor to executor
+        self.executor = grail_executor  # Renamed from grail_executor to executor
 
         self._metrics = get_metrics()
 
@@ -71,12 +72,33 @@ class HubDaemon:
         self._shutdown_event = asyncio.Event()
         self._started_at: datetime | None = None
 
+        # Concurrency settings
+        self.max_indexing_workers: int = 8
+        self.max_change_workers: int = 4
+        self.change_queue_size: int = 1000
+
+        # Change queue for concurrent processing
+        self._change_queue: asyncio.Queue[tuple[str, Path]] | None = None
+        self._change_workers: list[asyncio.Task] = []
+
     async def run(self) -> None:
         """Main daemon loop.
 
         Blocks until shutdown signal received.
         """
         logger.info("Hub daemon starting for %s", self.project_root)
+
+        from remora.config import load_config
+
+        config = load_config(self.project_root / "remora.yaml")
+
+        # Set concurrency settings from config
+        self.max_indexing_workers = config.hub.max_indexing_workers
+        self.max_change_workers = config.hub.max_change_workers
+        self.change_queue_size = config.hub.change_queue_size
+
+        # Initialize change queue
+        self._change_queue = asyncio.Queue(maxsize=self.change_queue_size)
 
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -96,24 +118,24 @@ class HubDaemon:
             if self._shutdown_event.is_set():
                 return
 
+            # Start change workers for concurrent file change processing
+            await self._start_change_workers()
+
             self.watcher = HubWatcher(
                 self.project_root,
                 self._handle_file_change,
             )
 
             logger.info("Hub daemon ready, watching for changes")
-            
+
             watch_task = asyncio.create_task(self.watcher.start())
             shutdown_task = asyncio.create_task(self._shutdown_event.wait())
-            
-            await asyncio.wait(
-                [watch_task, shutdown_task],
-                return_when=asyncio.FIRST_COMPLETED
-            )
-            
+
+            await asyncio.wait([watch_task, shutdown_task], return_when=asyncio.FIRST_COMPLETED)
+
             if self.watcher:
                 self.watcher.stop()
-            
+
             if not watch_task.done():
                 await watch_task
 
@@ -122,91 +144,50 @@ class HubDaemon:
         finally:
             await self._shutdown()
 
-    async def _cold_start_index(self) -> None:
-        """Index files that changed since last shutdown."""
-        store = self.store
-        if store is None:
-            return
+    async def _start_change_workers(self) -> None:
+        """Start workers to process file changes concurrently."""
+        for i in range(self.max_change_workers):
+            task = asyncio.create_task(self._change_worker(i))
+            self._change_workers.append(task)
+        logger.info("Started %s change workers", self.max_change_workers)
 
-        from remora.config import load_config
-        config = load_config(self.project_root / "remora.yaml")
-        enable_cross_file_analysis = config.hub.enable_cross_file_analysis
+    async def _change_worker(self, worker_id: int) -> None:
+        """Worker coroutine that processes file changes from queue."""
+        logger.debug("Change worker %s started", worker_id)
 
-        logger.info("Cold start: checking for changed files...")
-        self._metrics.start_timer("cold_start")
-
-        indexed = 0
-        errors = 0
-
-        for py_file in self.project_root.rglob("*.py"):
-            if self._shutdown_event.is_set():
-                logger.info("Cold start aborted by shutdown signal")
-                break
-                
-            if not self.rules.should_process_file(
-                py_file, HubWatcher.DEFAULT_IGNORE_PATTERNS
-            ):
-                continue
-
-            self._metrics.start_timer(f"index:{py_file}")
+        while not self._shutdown_event.is_set():
             try:
-                file_hash = self._hash_file(py_file)
-                existing = await store.get_file_index(str(py_file))
+                change_type, path = await asyncio.wait_for(self._change_queue.get(), timeout=1.0)
 
-                if existing and existing.file_hash == file_hash:
-                    # File unchanged
-                    self._metrics.stop_timer(f"index:{py_file}")
-                    continue
+                await self._handle_file_change_internal(change_type, path)
 
-                await self._index_file(py_file, "cold_start")
-                indexed += 1
-
+            except asyncio.TimeoutError:
+                continue
             except Exception as exc:
-                logger.exception("Failed to index %s", py_file)
-                self._metrics.stop_timer(f"index:{py_file}")
-                self._metrics.record_file_failed()
-                errors += 1
+                logger.exception("Error in change worker %s", worker_id)
 
-        stats = await store.stats()
-        await self._update_status(
-            running=True,
-            indexed_files=stats["files"],
-            indexed_nodes=stats["nodes"],
-        )
-
-        logger.info(
-            "Cold start complete: indexed %s files, %s errors",
-            indexed,
-            errors,
-        )
-
-        if enable_cross_file_analysis:
-            from remora.hub.call_graph import update_call_graph
-            from remora.hub.test_discovery import update_test_relationships
-            
-            logger.info("Running cross-file call graph analysis...")
-            updated = await update_call_graph(store, self.project_root)
-            logger.info("Call graph analysis complete: %s nodes updated", updated)
-            
-            logger.info("Running test discovery...")
-            test_updated = await update_test_relationships(store, self.project_root)
-            logger.info("Test discovery complete: %s nodes updated", test_updated)
-            
-        self._metrics.cold_start_duration = self._metrics.stop_timer("cold_start")
+        logger.debug("Change worker %s stopped", worker_id)
 
     async def _handle_file_change(self, change_type: str, path: Path) -> None:
-        """Handle a file change event from watcher.
-        
-        Args:
-            change_type: Type of change (e.g., "modified", "deleted")
-            path: Path to the changed file
-        """
+        """Queue a file change for processing instead of processing directly."""
+        if self._change_queue is None:
+            return
+
+        if self._change_queue.full():
+            logger.warning("Change queue full, dropping change for %s", path)
+            return
+
+        await self._change_queue.put((change_type, path))
+
+    async def _handle_file_change_internal(self, change_type: str, path: Path) -> None:
+        """Actual file change processing."""
         self._metrics.record_file_change()
         store = self.store
         if store is None:
             return
 
         from remora.config import load_config
+
         config = load_config(self.project_root / "remora.yaml")
         enable_cross_file_analysis = config.hub.enable_cross_file_analysis
 
@@ -216,7 +197,7 @@ class HubDaemon:
 
         context = ActionContext(
             store=store,
-            grail_executor=self.executor, # Use self.executor
+            grail_executor=self.executor,
             project_root=self.project_root,
         )
 
@@ -235,30 +216,133 @@ class HubDaemon:
 
                 except Exception as exc:
                     logger.exception("Action failed for %s", path)
-            
-            # Metrics for successful file change processing
+
             duration = self._metrics.stop_timer(f"index:{path}")
-            # Node count is recorded in _process_extraction_result, so just record duration here if no nodes were extracted
-            # or if it's a delete operation.
-            # For now, we'll assume _process_extraction_result handles the node count metric.
-            # If no nodes were extracted, this timer will still be stopped.
         except Exception as e:
             logger.error("Error processing file change for %s: %s", path, e)
             self._metrics.stop_timer(f"index:{path}")
             self._metrics.record_file_failed()
 
-
         if enable_cross_file_analysis:
             from remora.hub.call_graph import update_call_graph
             from remora.hub.test_discovery import update_test_relationships
-            
+
             logger.debug("Incremental call graph analysis triggered by %s", path)
             await update_call_graph(store, self.project_root)
-            
+
             logger.debug("Incremental test discovery triggered by %s", path)
             await update_test_relationships(store, self.project_root)
 
         await self._update_status(running=True)
+
+    async def _cold_start_index(self) -> None:
+        """Index files that changed since last shutdown."""
+        store = self.store
+        if store is None:
+            return
+
+        from remora.config import load_config
+
+        config = load_config(self.project_root / "remora.yaml")
+        enable_cross_file_analysis = config.hub.enable_cross_file_analysis
+
+        logger.info("Cold start: checking for changed files...")
+        self._metrics.start_timer("cold_start")
+
+        files = []
+        for py_file in self.project_root.rglob("*.py"):
+            if self._shutdown_event.is_set():
+                logger.info("Cold start aborted by shutdown signal")
+                break
+
+            if not self.rules.should_process_file(py_file, HubWatcher.DEFAULT_IGNORE_PATTERNS):
+                continue
+            files.append(py_file)
+
+        files_to_index = []
+        for f in files:
+            file_hash = self._hash_file(f)
+            existing = await store.get_file_index(str(f))
+            if not existing or existing.file_hash != file_hash:
+                files_to_index.append(f)
+
+        logger.info("Found %s files to index (out of %s total)", len(files_to_index), len(files))
+
+        if files_to_index:
+            indexed, errors = await self._index_files_parallel(files_to_index, "cold_start")
+        else:
+            indexed, errors = 0, 0
+
+        stats = await store.stats()
+        await self._update_status(
+            running=True,
+            indexed_files=stats["files"],
+            indexed_nodes=stats["nodes"],
+        )
+
+        logger.info(
+            "Cold start complete: indexed %s files, %s errors",
+            indexed,
+            errors,
+        )
+
+        if enable_cross_file_analysis:
+            from remora.hub.call_graph import update_call_graph
+            from remora.hub.test_discovery import update_test_relationships
+
+            logger.info("Running cross-file call graph analysis...")
+            updated = await update_call_graph(store, self.project_root)
+            logger.info("Call graph analysis complete: %s nodes updated", updated)
+
+            logger.info("Running test discovery...")
+            test_updated = await update_test_relationships(store, self.project_root)
+            logger.info("Test discovery complete: %s nodes updated", test_updated)
+
+        self._metrics.cold_start_duration = self._metrics.stop_timer("cold_start")
+
+    async def _index_files_parallel(
+        self, files: list[Path], update_source: Literal["cold_start", "file_change"]
+    ) -> tuple[int, int]:
+        """Index multiple files in parallel using asyncio."""
+        from remora.hub.indexer import index_file_simple
+
+        store = self.store
+        if store is None:
+            return 0, len(files)
+
+        semaphore = asyncio.Semaphore(self.max_indexing_workers)
+
+        async def process_file_with_limit(path: Path) -> tuple[Path, int, float]:
+            async with semaphore:
+                start = time.monotonic()
+                try:
+                    count = await index_file_simple(path, store)
+                except Exception as e:
+                    logger.exception("Error indexing %s", path)
+                    raise
+                duration = time.monotonic() - start
+                return (path, count, duration)
+
+        indexed = 0
+        errors = 0
+
+        tasks = [process_file_with_limit(f) for f in files]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for i, result in enumerate(results):
+            path = files[i]
+            if isinstance(result, Exception):
+                logger.exception("Error indexing %s", path)
+                self._metrics.record_file_failed()
+                errors += 1
+            else:
+                _, count, duration = result
+                self._metrics.record_file_indexed(count, duration)
+                indexed += 1
+
+        logger.info("Parallel indexing complete: %s files, %s errors", indexed, errors)
+
+        return indexed, errors
 
     async def _index_file(
         self,
@@ -276,23 +360,25 @@ class HubDaemon:
             return
 
         from remora.config import load_config
+
         config = load_config(self.project_root / "remora.yaml")
         enable_cross_file_analysis = config.hub.enable_cross_file_analysis
 
         if not enable_cross_file_analysis:
             # Use lightweight indexing when cross-file analysis isn't needed
             from remora.hub.indexer import index_file_simple
+
             start = time.monotonic()
             nodes_count = await index_file_simple(path, store)
             duration = time.monotonic() - start
-            
+
             self._metrics.record_file_indexed(nodes_count, duration)
             self._log_index_event(path, nodes_count, duration, success=True)
             return
 
         context = ActionContext(
             store=store,
-            grail_executor=self.executor, # Use self.executor
+            grail_executor=self.executor,  # Use self.executor
             project_root=self.project_root,
         )
 
@@ -324,7 +410,7 @@ class HubDaemon:
 
         file_hash = result["file_hash"]
         nodes = result.get("nodes", [])
-        node_states = {} # To store NodeState objects for cleanup and metrics
+        node_states = {}  # To store NodeState objects for cleanup and metrics
 
         await store.invalidate_file(str(path))
 
@@ -333,7 +419,7 @@ class HubDaemon:
         now = datetime.now(timezone.utc)
         for node_data in nodes:
             node_key = f"node:{path}:{node_data['name']}"
-            
+
             imports = extract_node_imports(path, node_data["name"])
 
             state = NodeState(
@@ -364,7 +450,7 @@ class HubDaemon:
         )
 
         # Cleanup handled by earlier invalidate_file call
-        
+
         # Record metrics
         nodes_count = len(node_states)
         duration = self._metrics.stop_timer(f"index:{path}")
@@ -411,12 +497,8 @@ class HubDaemon:
             running=running,
             pid=os.getpid(),
             project_root=str(self.project_root),
-            indexed_files=indexed_files
-            if indexed_files is not None
-            else (existing.indexed_files if existing else 0),
-            indexed_nodes=indexed_nodes
-            if indexed_nodes is not None
-            else (existing.indexed_nodes if existing else 0),
+            indexed_files=indexed_files if indexed_files is not None else (existing.indexed_files if existing else 0),
+            indexed_nodes=indexed_nodes if indexed_nodes is not None else (existing.indexed_nodes if existing else 0),
             started_at=self._started_at,
             last_update=datetime.now(timezone.utc),
             version=existing.version if existing else 1,
