@@ -12,6 +12,7 @@ import logging
 import os
 import json
 import signal
+import time
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
@@ -272,6 +273,21 @@ class HubDaemon:
         """
         store = self.store
         if store is None:
+            return
+
+        from remora.config import load_config
+        config = load_config(self.project_root / "remora.yaml")
+        enable_cross_file_analysis = config.hub.enable_cross_file_analysis
+
+        if not enable_cross_file_analysis:
+            # Use lightweight indexing when cross-file analysis isn't needed
+            from remora.hub.indexer import index_file_simple
+            start = time.monotonic()
+            nodes_count = await index_file_simple(path, store)
+            duration = time.monotonic() - start
+            
+            self._metrics.record_file_indexed(nodes_count, duration)
+            self._log_index_event(path, nodes_count, duration, success=True)
             return
 
         context = ActionContext(
