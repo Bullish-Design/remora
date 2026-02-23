@@ -1,159 +1,363 @@
-# Language Expansion Refactor Guide
+# Language Expansion Refactor Guide (Simplified)
 
-## Overview
+## Core Philosophy
 
-Add TOML and Markdown tree-sitter language support using per-language NodeType enums.
+Push all extraction logic to `.scm` files. Make the Python engine completely generic. Use strings instead of enums.
 
-## Architecture
+---
 
+## The Three Key Changes
+
+### 1. NodeType = str (not enum)
+
+```python
+# src/remora/discovery/models.py
+NodeType = str  # Replace enum entirely
+
+@dataclass(frozen=True)
+class CSTNode:
+    node_type: NodeType = "block"  # Any string
+    name: str
+    file_path: Path
+    start_byte: int
+    end_byte: int
+    text: str
+    start_line: int
+    end_line: int
+    node_id: str = ""
+    _full_name: str = ""
 ```
-remora/discovery/languages/
-├── __init__.py          # LanguageRegistry
-├── base.py              # LanguageAdapter ABC
-├── python.py            # PythonNodeType, PythonLanguage
-├── toml.py              # TomlNodeType, TomlLanguage
-├── markdown.py          # MarkdownNodeType, MarkdownLanguage
-└── protocols.py         # Typed protocols
+
+### 2. Config-driven language loading
+
+```python
+# src/remora/config.py
+LANGUAGES: dict[str, str] = {  # extension -> grammar_module
+    ".py": "tree_sitter_python",
+    ".toml": "tree_sitter_toml",
+    ".md": "tree_sitter_markdown",
+}
 ```
 
-## Phase 1: Foundation
+### 3. Simplify MatchExtractor (~50 lines)
 
-### Step 1.1: Create base.py
-- Define `LanguageAdapter` abstract base class
-- Methods: `name`, `file_extensions`, `language`, `node_type_enum`, `get_node_type_prefixes()`
-- Test: ABC cannot be instantiated directly
+```python
+# src/remora/discovery/match_extractor.py
+def _run_query(self, file_path, tree, source_bytes, compiled_query):
+    cursor = QueryCursor(compiled_query.query)
+    
+    nodes = []
+    for match_index, captures in cursor.matches(tree.root_node):
+        # Find .def and .name captures for this query's pattern
+        def_node = captures.get(f"@{self.query_name}.def")
+        name_node = captures.get(f"@{self.query_name}.name")
+        
+        if def_node is None:
+            continue
+            
+        node_type = self.query_name
+        name = "unknown"
+        
+        if name_node:
+            name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8", errors="replace")
+        
+        text = source_bytes[def_node.start_byte:def_node.end_byte].decode("utf-8", errors="replace")
+        
+        node_id = compute_node_id(file_path, node_type, name)
+        
+        nodes.append(CSTNode(
+            node_id=node_id,
+            node_type=node_type,
+            name=name,
+            file_path=file_path,
+            start_byte=def_node.start_byte,
+            end_byte=def_node.end_byte,
+            text=text,
+            start_line=def_node.start_point.row + 1,
+            end_line=def_node.end_point.row + 1,
+        ))
+    
+    return nodes
+```
 
-### Step 1.2: Create protocols.py
-- Define `TypedNodeType` protocol (str, Enum subclass)
-- Define `ParsableLanguage` protocol
-- Test: Protocol validation with mypy
+---
 
-## Phase 2: Migrate Python
+## Implementation Steps
 
-### Step 2.1: Create python.py
-- Define `PythonNodeType(str, Enum)` with FILE, CLASS, FUNCTION, METHOD
-- Create `PythonLanguage(LanguageAdapter)` class
-- Move logic from `source_parser.py` and `match_extractor.py`
-- Test: Parse sample.py, verify all node types are `PythonNodeType`
+### Step 1: Add Dependencies
 
-### Step 2.2: Update models.py
-- Make `CSTNode` generic over node type
-- Add `NodeType = TypeVar('NodeType', bound=str)`
-- Test: CSTNode construction with each language's NodeType
+```toml
+# pyproject.toml
+dependencies = [
+    ...
+    "tree-sitter-toml>=0.7",
+    "tree-sitter-markdown>=0.5",
+]
+```
 
-### Step 2.3: Update source_parser.py
-- Accept `LanguageAdapter` in constructor
-- Add `for_file()` classmethod factory
-- Test: Parser constructed via factory for .py files
+**Test:** `python -c "import tree_sitter_toml; import tree_sitter_markdown"`
 
-### Step 2.4: Update query_loader.py
-- Accept `LanguageAdapter` instead of language string
-- Test: Queries load for Python
+---
 
-### Step 2.5: Update match_extractor.py
-- Use `LanguageAdapter.node_type_enum` for type construction
-- Test: Extracted nodes have correct PythonNodeType
+### Step 2: Refactor models.py
 
-## Phase 3: Add TOML
+- Replace `NodeType` enum with `NodeType = str`
+- Update all references from `NodeType.FUNCTION` to `"function"`
+- Update `factories.py` to use string literals
 
-### Step 3.1: Add dependency
-- Add `tree-sitter-toml>=0.7` to pyproject.toml
-- Test: `import tree_sitter_toml` succeeds
+**Test:** `pytest tests/test_discovery.py`
 
-### Step 3.2: Create toml.py
-- Define `TomlNodeType(str, Enum)`: FILE, TABLE, ARRAY_TABLE, KEY_VALUE
-- Create `TomlLanguage(LanguageAdapter)`
-- Implement `get_node_type_prefixes()` for TOML nodes
-- Test: Adapter properties are correct
+---
 
-### Step 3.3: Create queries/toml/remora_core/
-- file.scm: `(document) @file.def`
-- table.scm: `(table (bare_key) @table.name) @table.def`
-- Test: Queries compile without error
+### Step 3: Refactor source_parser.py
 
-### Step 3.4: Update LanguageRegistry
-- Register TomlLanguage for `.toml` extension
-- Test: `registry.get_for_extension('.toml')` returns TomlLanguage
+```python
+import importlib
+from tree_sitter import Language, Parser
 
-### Step 3.5: Integration test
-- Parse sample pyproject.toml
-- Verify TABLE nodes extracted with correct names
-- Test: `[project]` table has name "project"
+class SourceParser:
+    def __init__(self, grammar_module: str) -> None:
+        grammar_pkg = importlib.import_module(grammar_module)
+        self._language = Language(grammar_pkg.language())
+        self._parser = Parser(self._language)
+    
+    @classmethod
+    def for_extension(cls, ext: str) -> "SourceParser | None":
+        grammar_module = LANGUAGES.get(ext)
+        return cls(grammar_module) if grammar_module else None
+```
 
-## Phase 4: Add Markdown
+**Test:** Parse `.py`, `.toml`, `.md` files with appropriate SourceParser
 
-### Step 4.1: Add dependency
-- Add `tree-sitter-markdown>=0.5` to pyproject.toml
-- Test: `import tree_sitter_markdown` succeeds
+---
 
-### Step 4.2: Create markdown.py
-- Define `MarkdownNodeType(str, Enum)`: FILE, SECTION, PARAGRAPH, CODE_BLOCK, LIST
-- Create `MarkdownLanguage(LanguageAdapter)`
-- Test: Adapter properties are correct
+### Step 4: Refactor query_loader.py
 
-### Step 4.3: Create queries/markdown/remora_core/
-- file.scm: `(document) @file.def`
-- section.scm: `(atx_heading) @section.def`
-- Test: Queries compile without error
+```python
+import importlib
+from tree_sitter import Language, Query
 
-### Step 4.4: Update LanguageRegistry
-- Register MarkdownLanguage for `.md`, `.markdown`
-- Test: `registry.get_for_extension('.md')` returns MarkdownLanguage
+class QueryLoader:
+    def __init__(self, language: str) -> None:
+        self._language_name = language
+    
+    def load_query_pack(self, query_dir: Path, language: str, query_pack: str):
+        grammar_module = f"tree_sitter_{language}"
+        grammar_pkg = importlib.import_module(grammar_module)
+        language_obj = Language(grammar_pkg.language())
+        
+        # ... load .scm files and compile with language_obj
+```
 
-### Step 4.5: Integration test
-- Parse sample README.md
-- Verify SECTION nodes for headings
-- Test: `# Title` creates SECTION node
+**Test:** Load queries for python, toml, markdown
 
-## Phase 5: Update Discoverer
+---
 
-### Step 5.1: Refactor TreeSitterDiscoverer
-- Accept list of `LanguageAdapter` instances
-- Auto-detect language per file via registry
-- Test: Discover both .py and .toml files in mixed directory
+### Step 5: Simplify match_extractor.py
 
-### Step 5.2: Update config.py
-- Add `languages: list[str]` to DiscoveryConfig
-- Default to ["python", "toml", "markdown"]
-- Test: Config loads with new field
+**Remove:**
+- `_PREFIX_TO_NODE_TYPE` dict
+- `_extract_name_from_node()` method  
+- `_classify_function()` method
+- All Python AST walking logic
 
-## Phase 6: Final Validation
+**Simplify to:**
+- Parse capture names directly: `@class.name` → `node_type="class"`
+- Extract name from `@X.name` capture
+- Return CSTNode with string node_type
 
-### Step 6.1: Run all existing tests
-- Ensure no regressions
-- Test: `pytest tests/` passes
+**Test:** Parse sample.py, verify node_type is string "function", "class", not enum
 
-### Step 6.2: Type checking
-- Run mypy with strict mode
-- Test: `mypy src/remora` passes
+---
 
-### Step 6.3: New test coverage
-- Create test_languages.py
-- Test all three language adapters
-- Test CSTNode with each NodeType enum
+### Step 6: Update discoverer.py
+
+```python
+class TreeSitterDiscoverer:
+    def discover(self) -> list[CSTNode]:
+        all_nodes = []
+        
+        for ext, grammar_module in LANGUAGES.items():
+            parser = SourceParser(grammar_module)
+            loader = QueryLoader(grammar_module.replace("tree_sitter_", ""))
+            
+            files = self._collect_files({ext})
+            queries = loader.load_query_pack(...)
+            
+            for file_path in files:
+                tree, src = parser.parse_file(file_path)
+                nodes = extractor.extract(file_path, tree, src, queries)
+                all_nodes.extend(nodes)
+        
+        return all_nodes
+```
+
+**Test:** Discover mixed directory with .py, .toml, .md files
+
+---
+
+### Step 7: Rewrite Python .scm files (nested queries)
+
+**Key insight:** Methods must be captured with nested query to distinguish from standalone functions. Order matters!
+
+```scm
+; src/remora/queries/python/remora_core/function.scm
+
+; Methods (functions inside classes) - MUST come FIRST
+; This nested pattern captures @method.def and @method.name
+(class_definition
+  body: (block
+    (function_definition
+      name: (identifier) @method.name
+    ) @method.def
+  )
+)
+
+; Standalone functions - capture @function.def and @function.name
+(function_definition
+  name: (identifier) @function.name
+) @function.def
+```
+
+```scm
+; src/remora/queries/python/remora_core/class.scm
+(class_definition
+  name: (identifier) @class.name
+) @class.def
+```
+
+```scm
+; src/remora/queries/python/remora_core/file.scm
+(module) @file.def
+```
+
+**Test:** Parse sample.py with both standalone functions and class methods. Methods should have `node_type="method"`, not "function".
+
+---
+
+### Step 8: Create TOML .scm files
+
+**Critical:** tree-sitter-toml uses different node types than expected!
+
+| Expected | Actual tree-sitter-toml |
+|----------|------------------------|
+| `array_table` | `table_array_element` |
+| `table` | `table` |
+
+```scm
+; src/remora/queries/toml/remora_core/table.scm
+
+; Standard tables: [project], [tool.pytest]
+(table
+  (bare_key) @table.name
+) @table.def
+
+(table
+  (dotted_key) @table.name
+) @table.def
+
+; Array tables: [[tool.mypy.overrides]]
+(table_array_element
+  (bare_key) @array_table.name
+) @array_table.def
+
+(table_array_element
+  (dotted_key) @array_table.name
+) @array_table.def
+```
+
+```scm
+; src/remora/queries/toml/remora_core/file.scm
+(document) @file.def
+```
+
+**Test:** Parse pyproject.toml with `[project]`, `[tool.pytest]`, `[[tool.mypy.overrides]]`. Verify correct names extracted.
+
+---
+
+### Step 9: Create Markdown .scm files
+
+```scm
+; src/remora/queries/markdown/remora_core/section.scm
+
+; ATX headings: # Title, ## Section, etc.
+(atx_heading
+  (inline) @section.name
+) @section.def
+
+; Fenced code blocks
+(fenced_code_block
+  (info_string) @code_block.lang
+) @code_block.def
+```
+
+```scm
+; src/remora/queries/markdown/remora_core/file.scm
+(document) @file.def
+```
+
+**Test:** Parse README.md with headings. Verify section names extracted.
+
+---
+
+### Step 10: Final Validation
+
+```bash
+# Run all discovery tests
+pytest tests/test_discovery.py -v
+
+# Type checking
+mypy src/remora/discovery/
+
+# Test multi-language discovery
+python -c "
+from remora.discovery import TreeSitterDiscoverer
+discoverer = TreeSitterDiscoverer(root_dirs=['tests/fixtures'], ...)
+nodes = discoverer.discover()
+for n in nodes:
+    print(f'{n.node_type}: {n.name}')
+"
+```
+
+---
 
 ## File Checklist
 
-**Create:**
-- src/remora/discovery/languages/__init__.py
-- src/remora/discovery/languages/base.py
-- src/remora/discovery/languages/protocols.py
-- src/remora/discovery/languages/python.py
-- src/remora/discovery/languages/toml.py
-- src/remora/discovery/languages/markdown.py
-- src/remora/queries/toml/remora_core/file.scm
-- src/remora/queries/toml/remora_core/table.scm
-- src/remora/queries/markdown/remora_core/file.scm
-- src/remora/queries/markdown/remora_core/section.scm
-- tests/test_languages.py
-- tests/fixtures/sample.toml
-- tests/fixtures/sample.md
+### Create (New Files)
+- `src/remora/queries/toml/remora_core/file.scm`
+- `src/remora/queries/toml/remora_core/table.scm`
+- `src/remora/queries/markdown/remora_core/file.scm`
+- `src/remora/queries/markdown/remora_core/section.scm`
+- `tests/fixtures/sample.toml`
+- `tests/fixtures/sample.md`
 
-**Modify:**
-- pyproject.toml (add dependencies)
-- src/remora/discovery/models.py (generic CSTNode)
-- src/remora/discovery/source_parser.py (multi-language)
-- src/remora/discovery/query_loader.py (LanguageAdapter)
-- src/remora/discovery/match_extractor.py (use adapter)
-- src/remora/discovery/discoverer.py (auto-detect)
-- src/remora/config.py (languages config)
+### Modify (Existing Files)
+| File | Change |
+|------|--------|
+| `pyproject.toml` | Add tree-sitter-toml, tree-sitter-markdown deps |
+| `src/remora/config.py` | Add LANGUAGES dict |
+| `src/remora/discovery/models.py` | Replace NodeType enum with `NodeType = str` |
+| `src/remora/discovery/source_parser.py` | Dynamic language loading via importlib |
+| `src/remora/discovery/query_loader.py` | Dynamic language for Query compilation |
+| `src/remora/discovery/match_extractor.py` | Simplify to ~50 lines, remove Python AST walking |
+| `src/remora/discovery/discoverer.py` | Loop over LANGUAGES config |
+| `src/remora/queries/python/remora_core/function.scm` | Add nested query for methods FIRST |
+| `tests/test_discovery.py` | Update tests for string NodeType |
+| `tests/fixtures/sample.py` | Add class with method for testing |
+
+### Delete (If No Longer Needed)
+- `src/remora/discovery/languages/` (if created in old plan - not needed)
+
+---
+
+## Verification Tests
+
+| Test | Expected Result |
+|------|-----------------|
+| Parse Python with methods | node_type="method", name="greet" |
+| Parse Python standalone function | node_type="function", name="add" |
+| Parse `[project]` table | node_type="table", name="project" |
+| Parse `[tool.pytest]` table | node_type="table", name="tool.pytest" |
+| Parse `[[array]]` table | node_type="array_table", name="array" |
+| Parse `# Title` | node_type="section", name="Title" |
+| Discover mixed directory | Returns nodes from .py, .toml, .md files |
