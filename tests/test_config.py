@@ -125,3 +125,30 @@ def test_resolve_grail_limits_with_override() -> None:
     config = CairnConfig(limits_preset="default", limits_override={"max_duration": "60s"})
     result = resolve_grail_limits(config)
     assert result["max_duration"] == "60s"
+
+
+def test_hub_config_defaults() -> None:
+    from remora.config import RemoraConfig
+    config = RemoraConfig()
+    assert config.hub.mode == "disabled"
+    assert config.hub.stale_threshold_seconds == 5.0
+    assert config.hub.max_adhoc_files == 5
+    assert config.hub.enable_cross_file_analysis is False
+
+
+def test_hub_config_from_yaml(tmp_path: Path) -> None:
+    yaml_content = """
+hub:
+  mode: daemon
+  stale_threshold_seconds: 10.0
+  enable_cross_file_analysis: true
+"""
+    config_file = tmp_path / "remora.yaml"
+    config_file.write_text(yaml_content, encoding="utf-8")
+    # Create agents dir
+    (tmp_path / "agents").mkdir()
+
+    config = load_config(config_file)
+    assert config.hub.mode == "daemon"
+    assert config.hub.stale_threshold_seconds == 10.0
+    assert config.hub.enable_cross_file_analysis is True

@@ -16,6 +16,7 @@ from fsdantic import Fsdantic, Workspace
 from remora.constants import HUB_DB_NAME
 
 if TYPE_CHECKING:
+    from remora.config import HubConfig
     from remora.hub.models import NodeState
     from remora.hub.store import NodeStateStore
 
@@ -34,26 +35,36 @@ class HubClient:
     while still giving optimal performance when it is.
     """
 
-    STALE_THRESHOLD_SECONDS = 5.0
-    MAX_ADHOC_FILES = 5
-
     def __init__(
         self,
         hub_db_path: Path | None = None,
         project_root: Path | None = None,
+        config: "HubConfig | None" = None,
     ) -> None:
         """Initialize the client.
 
         Args:
             hub_db_path: Path to {HUB_DB_NAME} (default: auto-discover)
             project_root: Project root for ad-hoc indexing
+            config: Optional HubConfig for controlling client behavior.
         """
         self.hub_db_path = hub_db_path
         self.project_root = project_root
+        
+        from remora.config import HubConfig
+        self._config = config or HubConfig()
 
         self._workspace: Workspace | None = None
         self._store: "NodeStateStore | None" = None
         self._available: bool | None = None
+
+    @property
+    def stale_threshold(self) -> float:
+        return self._config.stale_threshold_seconds
+
+    @property
+    def max_adhoc_files(self) -> int:
+        return self._config.max_adhoc_files
 
     async def get_context(self, node_ids: list[str]) -> dict[str, "NodeState"]:
         """Get context for nodes with lazy fallback.
@@ -140,7 +151,7 @@ class HubClient:
                 last_scanned_dt = datetime.fromisoformat(last_scanned)
             else:
                 last_scanned_dt = last_scanned
-            if file_mtime > last_scanned_dt.timestamp() + self.STALE_THRESHOLD_SECONDS:
+            if file_mtime > last_scanned_dt.timestamp() + self.stale_threshold:
                 stale.append(file_path)
 
         return stale
@@ -167,7 +178,7 @@ class HubClient:
 
         from remora.hub.indexer import index_file_simple
 
-        for file_path in files[: self.MAX_ADHOC_FILES]:
+        for file_path in files[: self.max_adhoc_files]:
             try:
                 await index_file_simple(file_path, self._store)
             except Exception as exc:

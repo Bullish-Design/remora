@@ -140,6 +140,38 @@ class WatchConfig(BaseModel):
     debounce_ms: int = 500
 
 
+class HubConfig(BaseModel):
+    """Configuration for the Node State Hub daemon."""
+
+    # Enable/disable modes
+    mode: Literal["in-process", "daemon", "disabled"] = "disabled"
+
+    # Database location (relative to project root)
+    db_path: Path | None = None  # Default: .remora/hub.db
+
+    # Indexing behavior
+    index_on_startup: bool = True
+    watch_for_changes: bool = True
+
+    # Freshness thresholds
+    stale_threshold_seconds: float = 5.0
+    max_adhoc_files: int = 5
+
+    # Ignore patterns (in addition to watch.ignore_patterns)
+    additional_ignore_patterns: list[str] = Field(default_factory=list)
+
+    # Cross-file analysis (Phase 2)
+    enable_cross_file_analysis: bool = False
+    cross_file_analysis_depth: int = 2  # How many hops to follow
+
+    # Performance tuning
+    batch_size: int = 50  # Files to index per batch
+    index_delay_ms: int = 100  # Delay between batches
+
+    # Logging
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+
 def _default_operations() -> dict[str, OperationConfig]:
     return {
         "lint": OperationConfig(subagent="lint"),
@@ -162,7 +194,7 @@ class RemoraConfig(BaseModel):
     event_stream: EventStreamConfig = Field(default_factory=EventStreamConfig)
     llm_log: LlmLogConfig = Field(default_factory=LlmLogConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
-    hub_mode: Literal["in-process", "daemon", "disabled"] = "disabled"
+    hub: HubConfig = Field(default_factory=HubConfig)
 
     @model_validator(mode='after')
     def validate_and_resolve_precedence(self) -> "RemoraConfig":

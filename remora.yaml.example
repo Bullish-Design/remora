@@ -80,6 +80,19 @@ llm_log:
   include_full_prompts: false
   max_content_lines: 100
 
+hub:
+  mode: disabled  # "in-process" | "daemon" | "disabled"
+  # db_path: .remora/hub.db  # default
+  index_on_startup: true
+  watch_for_changes: true
+  stale_threshold_seconds: 5.0
+  max_adhoc_files: 5
+  enable_cross_file_analysis: false
+  # cross_file_analysis_depth: 2
+  # batch_size: 50
+  # index_delay_ms: 100
+  log_level: INFO
+
 watch:
   extensions: [".py"]
   ignore_patterns:
