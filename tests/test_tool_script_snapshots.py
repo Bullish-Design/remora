@@ -51,16 +51,7 @@ class TestLintToolSnapshots:
         """Lint tool output with issues should be structured."""
         path = _script_path("agents/lint/tools/run_linter.pym")
         target = tmp_path / "sample.py"
-        target.write_text("def add(a:int,b:int)->int:\n    return a+b\n", encoding="utf-8")
-
-        payload = [
-            {
-                "code": "E225",
-                "message": "missing whitespace around operator",
-                "location": {"row": 1, "column": 10},
-                "fix": {"applicability": "safe"},
-            }
-        ]
+        target.write_text("import os\ndef add(a:int,b:int)->int:\n    return a+b\n", encoding="utf-8")
 
         import shutil
         if not shutil.which("ruff"):
@@ -80,5 +71,5 @@ class TestLintToolSnapshots:
         payload = result["result"]
         assert payload["total"] == 1
         assert payload["fixable_count"] == 1
-        assert payload["issues"][0]["code"] == "E225"
+        assert payload["issues"][0]["code"] == "F401"
         assert result["outcome"] == "partial"

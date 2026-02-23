@@ -22,7 +22,7 @@ def _script_path(relative: str) -> Path:
 
 def _write_sample(workspace: Path) -> Path:
     target = workspace / "sample.py"
-    target.write_text("def add():\n    return 1+2\n", encoding="utf-8")
+    target.write_text("import os\n\ndef add():\n    return 1+2\n", encoding="utf-8")
     return target
 
 
@@ -53,8 +53,8 @@ def test_run_linter_parses_issues(tmp_path: Path) -> None:
     payload = result["result"]
     assert payload["total"] == 1
     assert payload["fixable_count"] == 1
-    assert payload["issues"][0]["code"] == "E225"
-    assert payload["issues"][0]["fix"]["applicability"] == "safe"
+    assert payload["issues"][0]["code"] == "F401"
+    assert payload["issues"][0]["fixable"] is True
 
 
 def test_apply_fix_updates_file(tmp_path: Path) -> None:
@@ -73,7 +73,7 @@ def test_apply_fix_updates_file(tmp_path: Path) -> None:
 
     result = run_script(
         path=path,
-        inputs={"issue_code": "E225", "line_number": 2, "target_file_input": "sample.py"},
+        inputs={"issue_code": "F401", "line_number": 1, "target_file_input": "sample.py"},
         externals=externals,
         grail_dir=grail_dir,
     )
@@ -83,7 +83,8 @@ def test_apply_fix_updates_file(tmp_path: Path) -> None:
     payload = result["result"]
     assert payload["success"] is True
     assert "Applied fix" in payload["message"]
-    assert "1 + 2" in target.read_text(encoding="utf-8")
+    content = target.read_text(encoding="utf-8")
+    assert "import os" not in content
 
 
 def test_read_file_returns_content_and_lines(tmp_path: Path) -> None:
@@ -164,7 +165,7 @@ def test_lint_flow_updates_file(tmp_path: Path) -> None:
     )
     fix_result = run_script(
         path=apply_fix_path,
-        inputs={"issue_code": "E225", "line_number": 2, "target_file_input": "sample.py"},
+        inputs={"issue_code": "F401", "line_number": 1, "target_file_input": "sample.py"},
         externals=build_file_externals(
             tmp_path,
             include_write_file=False,
@@ -192,4 +193,5 @@ def test_lint_flow_updates_file(tmp_path: Path) -> None:
     assert lint_result["result"]["fixable_count"] == 1
     assert fix_result["result"]["success"] is True
     assert submit_result["status"] == "success"
-    assert "1 + 2" in target.read_text(encoding="utf-8")
+    content = target.read_text(encoding="utf-8")
+    assert "import os" not in content
