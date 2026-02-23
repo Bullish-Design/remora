@@ -327,8 +327,7 @@ class HubDaemon:
             )
         )
 
-        # Cleanup old indices
-        await self._cleanup_old_indices(str(path), file_hash, list(node_states.keys()))
+        # Cleanup handled by earlier invalidate_file call
         
         # Record metrics
         nodes_count = len(node_states)
