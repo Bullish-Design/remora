@@ -68,7 +68,7 @@ async def test_daemon_cold_start(project_with_files: Path, mock_grail_executor: 
     await run_briefly()
 
     # Verify files were indexed
-    status = await daemon._store.get_status()
+    status = await daemon.store.get_status()
     assert status is not None
     assert status.indexed_files >= 3
     assert status.indexed_nodes >= 3
@@ -94,7 +94,7 @@ async def test_daemon_graceful_shutdown(project_with_files: Path, mock_grail_exe
     await asyncio.wait_for(task, timeout=5.0)
 
     # Verify clean shutdown
-    status = await daemon._store.get_status()
+    status = await daemon.store.get_status()
     assert status is None or status.running is False
 
 
@@ -131,7 +131,7 @@ def new_function():
     await task
 
     # Verify new function was indexed
-    all_nodes = await daemon._store.list_all_nodes()
+    all_nodes = await daemon.store.list_all_nodes()
     node_names = [n.split(":")[-1] for n in all_nodes]
     assert "new_function" in node_names
 
@@ -154,7 +154,7 @@ async def test_daemon_restart_recovery(project_with_files: Path, mock_grail_exec
     daemon1._shutdown_event.set()
     await task1
 
-    initial_nodes = await daemon1._store.list_all_nodes()
+    initial_nodes = await daemon1.store.list_all_nodes()
 
     # Second run (restart)
     daemon2 = HubDaemon(
@@ -169,5 +169,5 @@ async def test_daemon_restart_recovery(project_with_files: Path, mock_grail_exec
     await task2
 
     # Verify state persisted
-    recovered_nodes = await daemon2._store.list_all_nodes()
+    recovered_nodes = await daemon2.store.list_all_nodes()
     assert set(recovered_nodes) == set(initial_nodes)

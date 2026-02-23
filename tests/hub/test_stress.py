@@ -60,7 +60,7 @@ async def test_large_codebase_indexing(large_project: Path, mock_grail_executor:
     elapsed = time.monotonic() - start
 
     # Verify all nodes indexed
-    status = await daemon._store.get_status()
+    status = await daemon.store.get_status()
     assert status.indexed_files >= 100
     assert status.indexed_nodes >= 500  # 100 files * 5 functions
 

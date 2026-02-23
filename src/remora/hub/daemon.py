@@ -92,13 +92,29 @@ class HubDaemon:
         try:
             await self._cold_start_index()
 
+            if self._shutdown_event.is_set():
+                return
+
             self.watcher = HubWatcher(
                 self.project_root,
                 self._handle_file_change,
             )
 
             logger.info("Hub daemon ready, watching for changes")
-            await self.watcher.start()
+            
+            watch_task = asyncio.create_task(self.watcher.start())
+            shutdown_task = asyncio.create_task(self._shutdown_event.wait())
+            
+            await asyncio.wait(
+                [watch_task, shutdown_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            if self.watcher:
+                self.watcher.stop()
+            
+            if not watch_task.done():
+                await watch_task
 
         except asyncio.CancelledError:
             logger.info("Hub daemon received shutdown signal")
@@ -122,6 +138,10 @@ class HubDaemon:
         errors = 0
 
         for py_file in self.project_root.rglob("*.py"):
+            if self._shutdown_event.is_set():
+                logger.info("Cold start aborted by shutdown signal")
+                break
+                
             if not self.rules.should_process_file(
                 py_file, HubWatcher.DEFAULT_IGNORE_PATTERNS
             ):

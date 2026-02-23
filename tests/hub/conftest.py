@@ -6,16 +6,22 @@ class MockNodeStateStore:
     def __init__(self) -> None:
         self.nodes = {}
         
-    async def get(self, node_id: str) -> dict[str, Any]:
+    async def get(self, node_id: str) -> Any:
         return self.nodes.get(node_id)
         
-    async def set(self, node: dict[str, Any]) -> None:
-        self.nodes[node["key"]] = node
+    async def set(self, node: Any) -> None:
+        self.nodes[node.key] = node
 
     async def list_all_nodes(self) -> list[str]:
         return list(self.nodes.keys())
 
     async def invalidate_file(self, file_path: str) -> None:
+        pass
+
+    async def set_file_index(self, index: Any) -> None:
+        pass
+
+    async def delete_file_index(self, file_path: str) -> None:
         pass
 
     async def get_status(self) -> Any:
