@@ -100,3 +100,41 @@ def extract_node_imports(file_path: Path, node_name: str) -> list[str]:
             node_imports.append(file_imports[name])
 
     return sorted(set(node_imports))
+
+def get_file_imports_mapping(tree: ast.AST) -> dict[str, str]:
+    """Get all imports in an AST, mapping local name to full path."""
+    file_imports = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local_name = alias.asname or alias.name.split(".")[0]
+                file_imports[local_name] = alias.name
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            for alias in node.names:
+                local_name = alias.asname or alias.name
+                if module:
+                    file_imports[local_name] = f"{module}.{alias.name}"
+                else:
+                    file_imports[local_name] = alias.name
+    return file_imports
+
+def resolve_node_imports(node: ast.AST, file_imports: dict[str, str]) -> list[str]:
+    """Find imports used inside a specific AST node."""
+    used_names: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name):
+            used_names.add(child.id)
+        elif isinstance(child, ast.Attribute):
+            current = child
+            while isinstance(current, ast.Attribute):
+                current = current.value
+            if isinstance(current, ast.Name):
+                used_names.add(current.id)
+
+    node_imports = []
+    for name in used_names:
+        if name in file_imports:
+            node_imports.append(file_imports[name])
+            
+    return sorted(set(node_imports))

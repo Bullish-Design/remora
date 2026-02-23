@@ -58,24 +58,28 @@ async def index_file_simple(
         
     lines = content.splitlines()
 
+    # Extract file imports early to avoid re-parsing AST for every node
+    from remora.hub.imports import get_file_imports_mapping
+    file_imports = get_file_imports_mapping(tree)
+
     # Extract nodes
     nodes: list[NodeState] = []
     now = datetime.now(timezone.utc)
 
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            state = _extract_function_simple(node, file_path, file_hash, lines, tree)
+            state = _extract_function_simple(node, file_path, file_hash, lines, file_imports)
             nodes.append(state)
         elif isinstance(node, ast.ClassDef):
-            state = _extract_class_simple(node, file_path, file_hash, lines, tree)
+            state = _extract_class_simple(node, file_path, file_hash, lines, file_imports)
             nodes.append(state)
 
     # Invalidate existing nodes for this file
     await store.invalidate_file(str(file_path))
 
     # Save new nodes
-    for state in nodes:
-        await store.set(state)
+    if nodes:
+        await store.set_many(nodes)
 
     # Update file index
     await store.set_file_index(FileIndex(
@@ -98,11 +102,11 @@ def _extract_function_simple(
     file_path: Path,
     file_hash: str,
     lines: list[str],
-    tree: ast.AST,
+    file_imports: dict[str, str],
 ) -> "NodeState":
     """Extract function metadata (simplified version)."""
     from remora.hub.models import NodeState
-    from remora.hub.imports import extract_node_imports
+    from remora.hub.imports import resolve_node_imports
 
     # Get source
     start = node.lineno - 1
@@ -140,7 +144,7 @@ def _extract_function_simple(
         or any(a.annotation for a in node.args.args)
     )
 
-    imports = extract_node_imports(file_path, node.name)
+    imports = resolve_node_imports(node, file_imports)
 
     return NodeState(
         key=f"node:{file_path}:{node.name}",
@@ -164,11 +168,11 @@ def _extract_class_simple(
     file_path: Path,
     file_hash: str,
     lines: list[str],
-    tree: ast.AST,
+    file_imports: dict[str, str],
 ) -> "NodeState":
     """Extract class metadata (simplified version)."""
     from remora.hub.models import NodeState
-    from remora.hub.imports import extract_node_imports
+    from remora.hub.imports import resolve_node_imports
 
     # Get source
     start = node.lineno - 1
@@ -190,7 +194,7 @@ def _extract_class_simple(
     # Get decorators
     decorators = [f"@{ast.unparse(d)}" for d in node.decorator_list]
 
-    imports = extract_node_imports(file_path, node.name)
+    imports = resolve_node_imports(node, file_imports)
 
     return NodeState(
         key=f"node:{file_path}:{node.name}",
