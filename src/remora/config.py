@@ -98,6 +98,7 @@ class OperationConfig(BaseModel):
 class DiscoveryConfig(BaseModel):
     query_pack: str = "remora_core"
     query_dir: Path | None = None  # None = use built-in queries inside the package
+    languages: dict[str, str] = Field(default_factory=lambda: LANGUAGES.copy())  # Extension to grammar mapping
 
 
 class CairnConfig(BaseModel):

@@ -2,15 +2,20 @@ import pytest
 from typing import Any
 from pathlib import Path
 
+
 class MockNodeStateStore:
     def __init__(self) -> None:
         self.nodes = {}
-        
+
     async def get(self, node_id: str) -> Any:
         return self.nodes.get(node_id)
-        
+
     async def set(self, node: Any) -> None:
         self.nodes[node.key] = node
+
+    async def set_many(self, states: list[Any]) -> None:
+        for state in states:
+            self.nodes[state.key] = state
 
     async def list_all_nodes(self) -> list[str]:
         return list(self.nodes.keys())
@@ -29,13 +34,17 @@ class MockNodeStateStore:
             indexed_files = 100
             indexed_nodes = 500
             running = True
+
         return DummyStatus()
+
 
 @pytest.fixture
 def mock_store() -> Any:
     return MockNodeStateStore()
 
+
 @pytest.fixture
 def mock_grail_executor() -> Any:
     from tests.hub.test_integration import SimpleGrailExecutor
+
     return SimpleGrailExecutor()

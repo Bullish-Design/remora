@@ -20,6 +20,9 @@ class FakeStore:
     async def set(self, state):
         self.states.append(state)
 
+    async def set_many(self, states):
+        self.states.extend(states)
+
     async def set_file_index(self, index):
         self.file_index = index
 

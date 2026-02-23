@@ -68,12 +68,12 @@ class RemoraAnalyzer:
         self._workspace_manager = workspace_manager or WorkspaceManager()
         self._discoverer_factory = discoverer_factory or TreeSitterDiscoverer
         self._coordinator_cls = coordinator_cls
-        
+
         cache_root = self.config.cairn.home or (Path.home() / ".cache" / "remora")
         self._bridge = CairnWorkspaceBridge(
             workspace_manager=self._workspace_manager,
             project_root=self.config.agents_dir.parent.resolve(),
-            cache_root=cache_root
+            cache_root=cache_root,
         )
 
     async def analyze(
@@ -97,7 +97,7 @@ class RemoraAnalyzer:
         # Discover nodes using tree-sitter
         discoverer = self._discoverer_factory(
             root_dirs=paths,
-            language=self.config.discovery.language,
+            languages=self.config.discovery.languages,
             query_pack=self.config.discovery.query_pack,
             query_dir=self.config.discovery.query_dir,
             event_emitter=self._event_emitter,
@@ -315,5 +315,3 @@ class RemoraAnalyzer:
                 data[key] = value
         # Return new config
         return RemoraConfig.model_validate(data)
-
-

@@ -54,7 +54,7 @@ class TestDiscoveryPerformance:
 
         discoverer = TreeSitterDiscoverer(
             root_dirs=[small_codebase],
-            language="python",
+            languages={".py": "tree_sitter_python"},
             query_pack="remora_core",
         )
 
@@ -68,7 +68,7 @@ class TestDiscoveryPerformance:
 
         discoverer = TreeSitterDiscoverer(
             root_dirs=[medium_codebase],
-            language="python",
+            languages={".py": "tree_sitter_python"},
             query_pack="remora_core",
         )
 
@@ -83,7 +83,7 @@ class TestDiscoveryPerformance:
 
         discoverer = TreeSitterDiscoverer(
             root_dirs=[large_codebase],
-            language="python",
+            languages={".py": "tree_sitter_python"},
             query_pack="remora_core",
         )
 
