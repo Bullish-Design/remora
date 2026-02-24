@@ -767,7 +767,7 @@ from stario.http.writer import CompressionConfig
 
 
 # Configuration - Tailscale hostname of hub
-HUB_URL = "http://hub.remora.local:8000"
+HUB_URL = "http://localhost:8000"
 
 
 # =============================================================================

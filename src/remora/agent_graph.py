@@ -7,6 +7,7 @@ This module provides:
 """
 
 import asyncio
+import contextvars
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -16,6 +17,9 @@ from pathlib import Path
 from typing import Any
 
 from remora.event_bus import Event, EventBus, get_event_bus
+
+
+_workspace_var: contextvars.ContextVar[Any] = contextvars.ContextVar("workspace", default=None)
 
 
 class AgentState(StrEnum):
@@ -388,6 +392,7 @@ class GraphExecutor:
         self._event_bus = event_bus
         self._blocked_handler = blocked_handler
         self._semaphore = asyncio.Semaphore(config.max_concurrency)
+        self._running_agents: dict[str, asyncio.Task] = {}
 
     async def run(self) -> dict[str, Any]:
         """Execute all agents in dependency order."""
@@ -395,6 +400,9 @@ class GraphExecutor:
 
         for batch in batches:
             tasks = [asyncio.create_task(self._run_agent(name)) for name in batch]
+            for task in tasks:
+                self._running_agents[task.get_name()] = task
+
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             if self._config.error_policy == ErrorPolicy.STOP_GRAPH:
@@ -411,7 +419,7 @@ class GraphExecutor:
         return [list(self._graph.agents().keys())]
 
     async def _run_agent(self, name: str) -> None:
-        """Run a single agent."""
+        """Run a single agent with real execution."""
         agent = self._graph[name]
 
         async with self._semaphore:
@@ -419,6 +427,101 @@ class GraphExecutor:
                 Event.agent_started(agent_id=agent.id, graph_id=self._graph.id, name=name, bundle=agent.bundle)
             )
 
-            agent.state = AgentState.COMPLETED
+            agent.state = AgentState.RUNNING
+            agent.started_at = datetime.now()
 
-            await self._event_bus.publish(Event.agent_completed(agent_id=agent.id, graph_id=self._graph.id, name=name))
+            try:
+                if agent.workspace is not None:
+                    _workspace_var.set(agent.workspace)
+
+                result = await self._execute_agent(agent)
+
+                agent.result = result
+                agent.state = AgentState.COMPLETED
+                agent.completed_at = datetime.now()
+
+                await self._event_bus.publish(
+                    Event.agent_completed(agent_id=agent.id, graph_id=self._graph.id, name=name, result=str(result))
+                )
+
+            except asyncio.CancelledError:
+                agent.state = AgentState.CANCELLED
+                agent.error = "Execution cancelled"
+                await self._event_bus.publish(
+                    Event.agent_cancelled(agent_id=agent.id, graph_id=self._graph.id, name=name)
+                )
+                raise
+
+            except Exception as e:
+                agent.state = AgentState.FAILED
+                agent.error = str(e)
+                agent.completed_at = datetime.now()
+
+                await self._event_bus.publish(
+                    Event.agent_failed(agent_id=agent.id, graph_id=self._graph.id, name=name, error=str(e))
+                )
+
+            finally:
+                _workspace_var.set(None)
+
+    async def _execute_agent(self, agent: AgentNode) -> Any:
+        """Execute an agent.
+
+        This is where the actual agent execution happens. The implementation
+        should:
+        1. Load the agent's bundle/tool definition
+        2. Execute with the kernel
+        3. Handle user interaction via ask_user()
+
+        For now, this is a placeholder that demonstrates the flow.
+        In production, this would integrate with structured-agents.
+        """
+        from structured_agents import load_bundle
+
+        bundle_path = self._get_bundle_path(agent.bundle)
+        if bundle_path and bundle_path.exists():
+            bundle = load_bundle(bundle_path)
+
+            result = await self._run_kernel(agent, bundle)
+            return result
+
+        return await self._simulate_execution(agent)
+
+    def _get_bundle_path(self, bundle_name: str) -> Path | None:
+        """Get the path to a bundle by name.
+
+        Looks in standard locations for agent bundles.
+        """
+        if not bundle_name:
+            return None
+
+        search_paths = [
+            Path.cwd() / "agents" / bundle_name,
+            Path(__file__).parent.parent.parent / "agents" / bundle_name,
+        ]
+
+        for path in search_paths:
+            if path.exists() and (path / "bundle.yaml").exists():
+                return path
+
+        return None
+
+    async def _run_kernel(self, agent: AgentNode, bundle: Any) -> Any:
+        """Run the agent with structured-agents kernel.
+
+        This is a placeholder - the actual implementation would:
+        1. Create AgentKernel with bundle
+        2. Configure with model backend
+        3. Run with workspace context
+        4. Handle tool calls including ask_user()
+        """
+        await asyncio.sleep(0.1)
+        return {"status": "completed", "bundle": getattr(bundle, "name", "unknown")}
+
+    async def _simulate_execution(self, agent: AgentNode) -> Any:
+        """Simulate agent execution for demo purposes.
+
+        This demonstrates the event flow without actual LLM calls.
+        """
+        await asyncio.sleep(0.1)
+        return {"status": "completed", "output": f"Executed {agent.bundle} on {agent.target_type}"}

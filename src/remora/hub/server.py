@@ -12,11 +12,12 @@ from starlette.staticfiles import StaticFiles
 from datastar_py import ServerSentEventGenerator as SSE
 from datastar_py.starlette import DatastarResponse, datastar_response, read_signals
 
+from remora.agent_graph import AgentGraph, GraphConfig, ErrorPolicy
 from remora.event_bus import Event, EventBus, get_event_bus
-from remora.frontend.registry import workspace_registry
-from remora.interactive import WorkspaceInboxCoordinator
+from remora.interactive.coordinator import WorkspaceInboxCoordinator
 from remora.workspace import GraphWorkspace, WorkspaceManager
 
+from .registry import workspace_registry
 from .state import HubState
 from .views import dashboard_view
 
@@ -44,6 +45,8 @@ class HubServer:
         self._hub_state = HubState()
 
         self._app: Starlette | None = None
+
+        self._running_graphs: dict[str, asyncio.Task] = {}
 
     async def start(self) -> None:
         """Start the hub server."""
@@ -111,34 +114,69 @@ class HubServer:
 
         workspace = await self._workspace_manager.create(graph_id)
 
-        demo_agents = [
-            {"id": "root-1", "name": "Root Analyzer", "parent": None},
-            {"id": "root-2", "name": "Root Validator", "parent": None},
-            {"id": "branch-a", "name": "Branch A", "parent": "root-1"},
-            {"id": "leaf-a1", "name": "Leaf A1", "parent": "branch-a"},
-        ]
+        graph = self._build_agent_graph(graph_id, workspace, signals)
 
-        for agent in demo_agents:
-            agent_id = agent["id"]
+        for agent_id, agent in graph.agents().items():
             await workspace_registry.register(agent_id, workspace.id, workspace)
             await self._coordinator.watch_workspace(agent_id, workspace)
-            await self._event_bus.publish(
-                Event.agent_started(
-                    agent_id=agent_id,
-                    name=agent["name"],
-                    workspace_id=workspace.id,
-                    parent_id=agent["parent"],
-                )
-            )
+
+        task = asyncio.create_task(self._execute_graph_async(graph))
+        self._running_graphs[graph_id] = task
 
         return JSONResponse(
             {
                 "status": "started",
                 "graph_id": graph_id,
-                "agents": len(demo_agents),
+                "agents": len(graph.agents()),
                 "workspace": workspace.id,
             }
         )
+
+    def _build_agent_graph(self, graph_id: str, workspace: GraphWorkspace, signals: dict[str, Any]) -> AgentGraph:
+        """Build an AgentGraph from configuration or signals.
+
+        This creates real agents based on:
+        - The bundle names provided
+        - The target code to operate on
+        - Any discovered nodes from code analysis
+        """
+        graph = AgentGraph(event_bus=self._event_bus)
+
+        bundle_name = signals.get("bundle", "default")
+        target = signals.get("target", "")
+        target_path = signals.get("target_path")
+        target_type = signals.get("target_type", "code")
+
+        if not target:
+            target = "Sample target code for demonstration"
+
+        agent_name = f"{bundle_name}-agent-{graph_id}"
+        graph.agent(
+            name=agent_name,
+            bundle=bundle_name,
+            target=target,
+            target_path=Path(target_path) if target_path else None,
+            target_type=target_type,
+        )
+
+        graph._agents[agent_name].workspace = workspace
+
+        return graph
+
+    async def _execute_graph_async(self, graph: AgentGraph) -> None:
+        """Execute the graph asynchronously and handle errors."""
+        try:
+            config = GraphConfig(
+                max_concurrency=4,
+                interactive=True,
+                timeout=300.0,
+                error_policy=ErrorPolicy.STOP_GRAPH,
+            )
+            executor = graph.execute(config=config)
+            await executor.run()
+        except Exception as e:
+            logger.exception("Graph execution failed")
+            await self._event_bus.publish(Event.agent_failed(agent_id=graph.id, graph_id=graph.id, error=str(e)))
 
     async def respond(self, request: Request, agent_id: str) -> JSONResponse:
         """

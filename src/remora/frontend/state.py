@@ -1,10 +1,14 @@
+"""Frontend state management.
+
+This module provides the DashboardState for tracking agent events and state.
+The actual views are in hub/views.py using datastar-py.
+"""
+
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
 from remora.event_bus import Event
-
-from remora.frontend.registry import workspace_registry
 
 MAX_EVENTS = 200
 
@@ -51,8 +55,8 @@ class DashboardState:
                 state = self.agent_states.get(agent_id)
                 if state:
                     state["state"] = event.action
-                    self.completed_agents += 1
-                    workspace_registry.unregister(agent_id)
+                    if event.action == "completed":
+                        self.completed_agents += 1
 
         if event.category == "agent" and event.action == "completed":
             self.results.insert(
