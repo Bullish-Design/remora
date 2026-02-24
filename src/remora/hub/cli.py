@@ -176,5 +176,19 @@ def main() -> None:
     cli()
 
 
+@cli.command()
+@click.option("--workspace", type=click.Path(path_type=Path), default=".remora/hub")
+@click.option("--host", default="0.0.0.0")
+@click.option("--port", default=8000, type=int)
+def serve(workspace: Path, host: str, port: int):
+    """Start the Remora Hub server."""
+    from remora.hub.server import run_hub
+
+    logging.basicConfig(level=logging.INFO)
+    import asyncio
+
+    asyncio.run(run_hub(workspace, host, port))
+
+
 if __name__ == "__main__":
     main()
