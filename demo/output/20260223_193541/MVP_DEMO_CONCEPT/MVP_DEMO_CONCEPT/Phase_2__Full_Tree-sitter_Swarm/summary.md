@@ -1,0 +1,1 @@
+Phase 2: Full Tree-sitter Swarm trains node-specific LoRA adapters, applies graph algorithms for efficient navigation and coordination, and improves multi-file code understanding through advanced graph-based methods.

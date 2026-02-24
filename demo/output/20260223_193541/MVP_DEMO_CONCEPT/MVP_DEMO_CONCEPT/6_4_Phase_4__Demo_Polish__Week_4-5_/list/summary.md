@@ -1,0 +1,1 @@
+This list outlines required components for a demo script automation system, including sample code, recording features, error recovery, and presentation materials.

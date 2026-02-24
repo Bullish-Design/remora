@@ -1,0 +1,1 @@
+The paper cites the STaR (Self-Taught Reasoner) method. We shouldn't pay humans to write RLM trajectories. Instead:

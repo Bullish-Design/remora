@@ -1,0 +1,4 @@
+1. **Visual Impact** - Live dashboard with AST navigation and agent coordination
+2. **Technical Differentiation** - LoRA hot-swapping is unique and impressive
+3. **Achievable Scope** - Builds on existing infrastructure
+4. **Business Relevance** - Clear enterprise use case

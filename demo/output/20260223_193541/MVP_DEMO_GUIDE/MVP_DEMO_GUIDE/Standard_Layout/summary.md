@@ -1,0 +1,1 @@
+The Standard Layout heading defines a consistent, standardized structure that all node workspaces must follow to ensure uniformity in organization and functionality. Its child element establishes the foundational framework that enforces this consistency across different workspace implementations.

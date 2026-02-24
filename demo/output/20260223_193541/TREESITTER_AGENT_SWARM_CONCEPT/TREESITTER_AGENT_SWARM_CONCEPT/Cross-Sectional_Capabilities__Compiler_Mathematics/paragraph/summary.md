@@ -1,0 +1,1 @@
+The Swarm architecture enhances LLM agent capabilities by integrating AST analysis across four dimensions, enabling advanced compiler-level reasoning. FunctionGemma models run Grail scripts (`.pym`) to perform graph theory, linear algebra, and vector calculus operations on codebases.

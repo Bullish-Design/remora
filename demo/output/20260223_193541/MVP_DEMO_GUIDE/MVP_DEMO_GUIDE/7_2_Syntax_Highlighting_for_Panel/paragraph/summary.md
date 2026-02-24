@@ -1,0 +1,1 @@
+This Vim plugin file enhances syntax highlighting for Remora panel code, adding custom highlighting rules to improve readability and distinguish different elements within Remora's interface code.

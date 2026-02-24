@@ -1,0 +1,1 @@
+**File**: `~/.config/nvim/after/syntax/remora-panel.vim`

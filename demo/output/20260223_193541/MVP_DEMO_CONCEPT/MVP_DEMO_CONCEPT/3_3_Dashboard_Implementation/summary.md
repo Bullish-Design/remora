@@ -1,0 +1,1 @@
+This heading introduces the implementation of an interactive terminal-based dashboard using `rich` and `textual` to deliver engaging and visually appealing user experiences. The child element details how these libraries are utilized to build a dynamic and responsive dashboard interface.

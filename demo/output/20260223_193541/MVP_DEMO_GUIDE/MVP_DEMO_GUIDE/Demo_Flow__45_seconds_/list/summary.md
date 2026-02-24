@@ -1,0 +1,1 @@
+This workflow uses Neovim with the `vaf` command and Remora to analyze a function's docstring, generate a live workspace with context, draft suggestions, and self-critique, then accept the final proposed change into the source file.

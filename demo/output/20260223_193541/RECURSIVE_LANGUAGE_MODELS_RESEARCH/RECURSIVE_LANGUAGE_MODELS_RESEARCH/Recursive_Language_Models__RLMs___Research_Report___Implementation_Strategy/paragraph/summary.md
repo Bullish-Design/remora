@@ -1,0 +1,1 @@
+The paper "Recursive Language Models" by Alex L. Zhang proposes a novel architecture for language models that employs recursive structures to improve contextual understanding and generate more coherent, long-range outputs by iteratively refining predictions through hierarchical processing.

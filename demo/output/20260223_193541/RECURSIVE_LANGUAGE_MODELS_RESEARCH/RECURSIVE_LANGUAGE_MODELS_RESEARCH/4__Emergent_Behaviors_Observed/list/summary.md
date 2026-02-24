@@ -1,0 +1,1 @@
+The models employed intelligent, programmatic strategies—such as filtering with priors, peeking at context, chunking with map-reduce, long-output synthesis via REPL variables, and automated verification—to efficiently process large contexts, avoid token limits, and ensure accuracy in complex, document-level tasks.

@@ -1,0 +1,4 @@
+- Tree-sitter parses the target codebase
+- Real-time visualization of nodes being analyzed
+- Agents "claim" nodes and show their activity
+- Color-coded status (analyzing, modified, complete)

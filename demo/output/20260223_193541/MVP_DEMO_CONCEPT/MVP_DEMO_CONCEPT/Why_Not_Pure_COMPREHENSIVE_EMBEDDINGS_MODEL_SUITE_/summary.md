@@ -1,0 +1,1 @@
+This heading introduces a streamlined, role-based model suite using FunctionGemma as the core, with children defining specialized models and a structured language pack for localization, enabling efficient and focused handling of embedding, code, text, and function tasks through simplified prompt engineering.

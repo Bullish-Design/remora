@@ -1,0 +1,1 @@
+The AST Summary Demo showcases a feature that extracts and summarizes the structural and semantic elements of Python code using an Abstract Syntax Tree to provide a clear overview of its logic and organization. Its child component demonstrates how the AST Summary feature analyzes and presents key code structure and semantics.

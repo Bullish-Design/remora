@@ -1,0 +1,1 @@
+The system decomposes a configuration update request into a structured task tree, using parallel research to gather context, then executes and verifies refactoring steps with recursive debugging and validation, ultimately merging successful changes back to the main workspace.

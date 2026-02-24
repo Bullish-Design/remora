@@ -1,0 +1,7 @@
+> "Finally, in output/, we have the proposal.
+> Let me open the diff..."
+
+**Click on proposed_change.diff**
+
+> "Clean, well-documented docstring.
+> If I like it, I press 'a' to accept."

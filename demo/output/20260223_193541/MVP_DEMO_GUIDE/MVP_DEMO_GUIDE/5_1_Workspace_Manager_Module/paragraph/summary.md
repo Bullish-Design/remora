@@ -1,0 +1,1 @@
+This file defines a `WorkspaceManager` class responsible for managing and organizing workspaces, likely handling workspace creation, configuration, and lifecycle operations within a Remora application.

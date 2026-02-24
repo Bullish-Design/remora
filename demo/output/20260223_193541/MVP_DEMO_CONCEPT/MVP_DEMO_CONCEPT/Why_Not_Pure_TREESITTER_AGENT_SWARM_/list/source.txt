@@ -1,0 +1,4 @@
+- Training 50+ node-specific LoRA adapters
+- Implementing Louvain community detection
+- Building Bayesian infection propagation
+- Creating vector arithmetic tooling

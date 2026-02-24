@@ -1,0 +1,1 @@
+The paper introduces key concepts and acronyms to define its proposed architecture and evaluation methodologies.

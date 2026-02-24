@@ -1,0 +1,3 @@
+If we use the **Recursive Environment Models (REM)** terminology for the MVP Demo, the pitch becomes overwhelmingly strong:
+
+*"LLMs fail at massive codebases because of Context Rot. Standard tools try to fix this with Vector DBs. Remora fixes this with **Recursive Environment Models**. Watch as our Root Agent uses Python to grep a 100k-line Tree-sitter AST, and then dynamically compiles and launches isolated, LoRA-tuned **Micro-Environments** to execute targeted refactors in parallel, connected by a shared KV memory bus."*

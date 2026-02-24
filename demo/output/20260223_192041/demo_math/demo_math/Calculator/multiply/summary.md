@@ -1,0 +1,1 @@
+This method multiplies two integer inputs and returns their product.

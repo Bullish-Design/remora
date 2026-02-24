@@ -1,0 +1,2 @@
+*   **Role**: Executes the specific coding tasks.
+*   **Action**: Uses programmatic REPL tools to query the *Code Space* of the target repository *and* the Golden Reference Libraries simultaneously. "How did the Golden Library implement this exact AST structure?"

@@ -1,0 +1,1 @@
+The authors argue that using standard base models as Reasoning Language Models (RLMs) is inefficient due to excessive sub-calls and redundant assertions, and propose that future work should focus on explicitly training RLMs to navigate contexts more efficiently and natively.

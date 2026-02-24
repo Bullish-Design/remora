@@ -1,0 +1,1 @@
+This heading introduces Appendix B, which outlines the key differences between the current approach and an event-streaming approach, concluding the MVP Demo Guide by summarizing key points and next steps. The child summary provides a closing reflection that ties together the demonstration's highlights and forward-looking actions.

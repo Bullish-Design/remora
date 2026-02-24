@@ -1,0 +1,1 @@
+The total duration is approximately 13 days.

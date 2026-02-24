@@ -1,0 +1,1 @@
+The 3.2 TaskNode → New Model + Hub Persistence section introduces a TaskNode model to represent and manage tasks within a structured graph, enabling efficient execution and state tracking, with support from task-related functionality in remora/hub/tasks.py for background processing and workflow orchestration.

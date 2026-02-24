@@ -1,0 +1,1 @@
+Monitors workspace directories for changes and automatically refreshes the panel to reflect updated files.

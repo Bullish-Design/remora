@@ -1,0 +1,1 @@
+This section discusses the effectiveness of using base models as Reasoning Language Models (RLMs) without fine-tuning, highlighting that zero-shot and few-shot prompting suffice for large-scale tasks, while advocating for future research to improve RLM efficiency through targeted training to reduce redundant reasoning.

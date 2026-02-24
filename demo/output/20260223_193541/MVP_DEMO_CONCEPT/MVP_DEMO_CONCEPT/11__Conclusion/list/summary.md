@@ -1,0 +1,1 @@
+The proposal outlines a live dashboard that enables AST navigation and agent coordination, distinguished by unique LoRA hot-swapping capabilities, built on existing infrastructure with clear enterprise value.

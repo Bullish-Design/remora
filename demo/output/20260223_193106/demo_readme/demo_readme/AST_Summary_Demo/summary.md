@@ -1,0 +1,1 @@
+The Heading1 element "AST Summary Demo" introduces the AST Summary feature, which uses child components to extract and present a structured overview of Python code's components and logical flow. Its children illustrate how the feature analyzes and summarizes syntax and semantics to provide a clear, high-level understanding of the code.

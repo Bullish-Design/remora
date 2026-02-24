@@ -1,0 +1,4 @@
+1.  **Explores**: Queries the Semantic Space of your repo to find roughly where a feature should go.
+2.  **Learns**: Queries the Graph Space of a famous OSS repo to see how they structured the same feature.
+3.  **Plans**: Automatically writes a multi-step `task.md` in the KV store, backed by physical research artifacts in its workspace.
+4.  **Executes**: Spawns sub-agents that write files, run tests, and check off their own tasks organically until the feature is built.

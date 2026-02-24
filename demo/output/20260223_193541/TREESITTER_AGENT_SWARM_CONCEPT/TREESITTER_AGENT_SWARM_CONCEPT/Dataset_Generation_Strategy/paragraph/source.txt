@@ -1,0 +1,1 @@
+To train the dozens/hundreds of specific "Node Agents" and the multi-vector embeddings, a massive autonomous data generation pipeline is required:

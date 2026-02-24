@@ -1,0 +1,1 @@
+This approach curates high-quality Python repositories and uses a large language model to analyze their ASTs, generating rich metadata including summaries, structural graphs, and runtime insights. These are then split into specialized datasets for fine-tuning lightweight "Tiny" reasoning models that excel at understanding specific AST patterns with minimal computational cost.

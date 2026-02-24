@@ -1,0 +1,4 @@
+* **Syntax (Code):** The literal source code text of the node.
+* **Semantics (Comments):** Summaries and docstrings associated with or generated for the node.
+* **Types / Signatures:** The structural inputs and outputs matching the node.
+* **Topology (Graph):** Its structural relationship to other nodes (parent, children, siblings, data flow).

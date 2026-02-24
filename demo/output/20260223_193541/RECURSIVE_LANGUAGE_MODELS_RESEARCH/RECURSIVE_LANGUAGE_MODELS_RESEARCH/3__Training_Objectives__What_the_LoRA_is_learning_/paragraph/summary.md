@@ -1,0 +1,1 @@
+The QLoRA fine-tuning process should focus on teaching the model environmental discipline—such as safely handling code execution, managing resources, and avoiding harmful behaviors—rather than teaching coding fundamentals, which are already embedded in the base model.

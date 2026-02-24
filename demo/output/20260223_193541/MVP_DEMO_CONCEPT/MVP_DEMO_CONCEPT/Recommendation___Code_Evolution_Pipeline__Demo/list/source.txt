@@ -1,0 +1,4 @@
+1. **Visual AST-driven agent coordination** (most impressive element)
+2. **Real-time LoRA adapter hot-swapping** (unique vLLM capability)
+3. **Sandboxed multi-agent collaboration** (Grail/Cairn showcase)
+4. **Live streaming dashboard** (engaging presentation)

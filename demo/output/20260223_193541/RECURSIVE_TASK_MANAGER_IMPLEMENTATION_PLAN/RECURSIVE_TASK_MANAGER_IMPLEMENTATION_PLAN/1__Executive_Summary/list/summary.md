@@ -1,0 +1,1 @@
+Manages task execution through orchestration, enables sub-task spawning, maintains task state via a hub, and automates verification and debugging loops.

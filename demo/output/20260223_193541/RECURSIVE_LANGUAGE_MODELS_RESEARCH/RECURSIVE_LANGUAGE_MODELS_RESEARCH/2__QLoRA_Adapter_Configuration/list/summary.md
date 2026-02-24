@@ -1,0 +1,1 @@
+This configuration fine-tunes a large language model using LoRA to enable RLM navigation by applying adapters to all linear layers with a moderate rank and alpha value, optimizing it for learning complex REPL syntax and tool-calling patterns while minimizing VRAM usage through 4-bit quantization.

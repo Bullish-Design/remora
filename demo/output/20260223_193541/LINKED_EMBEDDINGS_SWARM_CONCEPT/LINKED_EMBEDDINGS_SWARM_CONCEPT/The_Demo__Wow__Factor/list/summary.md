@@ -1,0 +1,1 @@
+The system autonomously discovers feature placement in a codebase, learns from open-source project structures, generates a detailed execution plan, and deploys sub-agents to build and test the feature end-to-end.

@@ -1,0 +1,1 @@
+The language pack concept requires defining a structured format for storing and managing translation data, typically including key-value pairs for text strings, supported languages, and metadata for localization purposes.

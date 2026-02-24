@@ -1,0 +1,1 @@
+The "Fan-Out" Graph Swarm enables decentralized, parallel task execution by distributing user requests across a network of nodes, using a Supervisor LoRA to interpret intent, define the final desired state, and orchestrate hierarchical task delegation through graph-based reasoning and automated testing for safe, efficient codebase evolution.

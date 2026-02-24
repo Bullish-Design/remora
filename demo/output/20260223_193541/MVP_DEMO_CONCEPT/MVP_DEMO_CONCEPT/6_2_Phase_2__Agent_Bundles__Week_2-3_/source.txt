@@ -1,0 +1,8 @@
+**Deliverables:**
+
+- [ ] Architect agent bundle
+- [ ] Implementation agent bundle
+- [ ] Rate-limit tool script
+- [ ] Caching tool script
+
+**Bundle Structure:**

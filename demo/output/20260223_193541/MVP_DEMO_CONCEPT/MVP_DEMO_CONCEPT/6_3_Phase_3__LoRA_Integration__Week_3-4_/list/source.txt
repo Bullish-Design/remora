@@ -1,0 +1,4 @@
+- [ ] LoRA swap event emission
+- [ ] Dashboard adapter visualization
+- [ ] Adapter preloading hints
+- [ ] Fallback to base model

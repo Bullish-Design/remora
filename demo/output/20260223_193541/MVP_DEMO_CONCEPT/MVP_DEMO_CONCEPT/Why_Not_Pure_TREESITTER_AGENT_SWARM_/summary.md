@@ -1,0 +1,1 @@
+This heading introduces the rationale for adopting a pure TREESITTER_AGENT_SWARM approach by highlighting its emergent behavior through decentralized agent coordination, supporting advanced graph-based machine learning via specialized modeling and utilities, and justifying a phased MVP that delivers core functionality through focused development.

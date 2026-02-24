@@ -1,0 +1,1 @@
+This heading outlines the training objectives for LoRA fine-tuning, focusing on teaching environmental discipline and safe, efficient code execution rather than coding fundamentals. The children detail specific behaviors like clean script writing, error handling, and dynamic LoRA swapping to achieve high performance on cost-effective models.

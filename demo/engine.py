@@ -19,6 +19,7 @@ async def process_node(
     cache_root: Path,
     config: DemoConfig | None = None,
     max_concurrency: int = 10,
+    output_root: Path | None = None,
 ) -> str:
     """Recursively process a node: spin up workspace, await children, summarize.
 
@@ -28,6 +29,7 @@ async def process_node(
         cache_root: Root directory for workspace databases.
         config: Demo configuration.
         max_concurrency: Maximum concurrent workspace operations.
+        output_root: Root directory for output markdown files.
 
     Returns:
         The generated summary for this node.
@@ -36,11 +38,12 @@ async def process_node(
     summarizer = Summarizer(config)
     semaphore = asyncio.Semaphore(max_concurrency)
 
-    async def process_with_semaphore(n: AstNode) -> str:
+    async def process_with_semaphore(n: AstNode, path_parts: list[str]) -> str:
         async with semaphore:
-            return await _process_single_node(n, workspace_manager, cache_root, summarizer)
+            return await _process_single_node(n, workspace_manager, cache_root, summarizer, path_parts, output_root)
 
-    child_tasks = [process_with_semaphore(child) for child in node.children]
+    path_parts: list[str] = []
+    child_tasks = [process_with_semaphore(child, path_parts + [child.name]) for child in node.children]
     child_summaries_raw = await asyncio.gather(*child_tasks, return_exceptions=True)
 
     valid_summaries: list[str] = []
@@ -50,7 +53,9 @@ async def process_node(
         elif isinstance(summary, str):
             valid_summaries.append(summary)
 
-    return await _generate_in_workspace(node, valid_summaries, workspace_manager, cache_root, summarizer)
+    return await _generate_in_workspace(
+        node, valid_summaries, workspace_manager, cache_root, summarizer, path_parts, output_root
+    )
 
 
 async def _process_single_node(
@@ -58,11 +63,17 @@ async def _process_single_node(
     workspace_manager: WorkspaceManager,
     cache_root: Path,
     summarizer: Summarizer,
+    path_parts: list[str],
+    output_root: Path | None = None,
 ) -> str:
     """Process a single node (used for children)."""
     child_tasks = []
     for child in node.children:
-        child_tasks.append(_process_single_node(child, workspace_manager, cache_root, summarizer))
+        child_tasks.append(
+            _process_single_node(
+                child, workspace_manager, cache_root, summarizer, path_parts + [child.name], output_root
+            )
+        )
 
     child_summaries_raw = await asyncio.gather(*child_tasks, return_exceptions=True)
 
@@ -73,7 +84,14 @@ async def _process_single_node(
         elif isinstance(summary, str):
             valid_summaries.append(summary)
 
-    return await _generate_in_workspace(node, valid_summaries, workspace_manager, cache_root, summarizer)
+    return await _generate_in_workspace(
+        node, valid_summaries, workspace_manager, cache_root, summarizer, path_parts, output_root
+    )
+
+
+def _sanitize_filename(name: str) -> str:
+    """Sanitize a name for use in a filename."""
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
 
 
 async def _generate_in_workspace(
@@ -82,6 +100,8 @@ async def _generate_in_workspace(
     workspace_manager: WorkspaceManager,
     cache_root: Path,
     summarizer: Summarizer,
+    path_parts: list[str],
+    output_root: Path | None,
 ) -> str:
     """Generate summary inside a Cairn workspace."""
     workspace_id = f"summary-{id(node)}"
@@ -100,6 +120,21 @@ async def _generate_in_workspace(
         node.status = "done"
 
         await workspace.files.write("/summary.md", summary)
+
+    if output_root:
+        if path_parts:
+            node_dir = output_root
+            for part in path_parts:
+                node_dir = node_dir / _sanitize_filename(part)
+        else:
+            node_dir = output_root / "root"
+        node_dir.mkdir(parents=True, exist_ok=True)
+
+        summary_file = node_dir / "summary.md"
+        summary_file.write_text(summary, encoding="utf-8")
+
+        source_file = node_dir / "source.txt"
+        source_file.write_text(node.source_text, encoding="utf-8")
 
     emit_event("done", node.name, node.node_type, "Rollup complete", extra={"summary": summary})
     return summary

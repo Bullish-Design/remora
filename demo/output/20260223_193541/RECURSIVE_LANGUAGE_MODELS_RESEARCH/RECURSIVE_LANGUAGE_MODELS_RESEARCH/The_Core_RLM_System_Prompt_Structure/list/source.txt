@@ -1,0 +1,5 @@
+1.  **Environment Definition:** Explaining that a `context` variable exists in memory and contains the data.
+2.  **Tool Definitions:** Defining the `llm_query(prompt)` function to allow recursive calls.
+3.  **Syntactic Rules:** Instructing the model to write code in ````repl```` blocks.
+4.  **Workflow Examples (Few-Shot):** The prompt heavily relies on in-context examples showing the model *how* to chunk, *how* to write map-reduce loops over the `context` list, and *how* to use regex to search headers.
+5.  **Termination Clause:** Explicitly defining how to exit the loop by invoking `FINAL(answer)` or `FINAL_VAR(var_name)`.

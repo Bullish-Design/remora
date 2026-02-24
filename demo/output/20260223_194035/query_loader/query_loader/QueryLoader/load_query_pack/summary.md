@@ -1,0 +1,1 @@
+Loads and compiles SCM-formatted query files from a specified directory structure using the Tree-sitter grammar for the given language, returning a list of compiled queries.

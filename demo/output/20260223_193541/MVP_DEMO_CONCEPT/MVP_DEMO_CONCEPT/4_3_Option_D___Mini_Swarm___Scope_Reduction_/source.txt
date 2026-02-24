@@ -1,0 +1,16 @@
+**Concept:** Drastically simplified TREESITTER_AGENT_SWARM
+
+**Demo Flow:**
+
+1. User selects a single function in codebase
+2. Show 3 specialized agents analyzing it:
+   - Structure Agent (AST analysis)
+   - Style Agent (linting/formatting)
+   - Doc Agent (docstring generation)
+3. Agents communicate via shared workspace
+4. Final merged result
+
+**Pros:** Most faithful to your favorite concept, achievable scope
+**Cons:** Less impressive than full swarm vision
+
+**Effort:** 3-4 weeks

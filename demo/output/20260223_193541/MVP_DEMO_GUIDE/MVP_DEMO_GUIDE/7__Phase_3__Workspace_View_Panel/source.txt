@@ -1,0 +1,1 @@
+**Goal**: Create side panel that shows live workspace contents.

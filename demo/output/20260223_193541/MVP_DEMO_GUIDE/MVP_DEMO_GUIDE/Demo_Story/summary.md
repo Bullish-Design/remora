@@ -1,0 +1,1 @@
+The "Demo Story" heading introduces a transparent, real-time demonstration of how Remora generates and displays code files by researching the codebase, pulling documentation, and showing every step of its AI reasoning process. Its child element illustrates this process by visually revealing each decision and file creation, ensuring full visibility into the AI's workflow.

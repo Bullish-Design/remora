@@ -1,0 +1,1 @@
+The system uses Tree-sitter to parse code and provides real-time visualization of parsed nodes, with agents claiming nodes and displaying color-coded status indicating analysis progress.

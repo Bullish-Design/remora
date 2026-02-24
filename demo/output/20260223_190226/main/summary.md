@@ -1,0 +1,1 @@
+The main function initializes a Calculator instance, adds 5 and 3 using its add method, and prints the result.

@@ -1,0 +1,3 @@
+**New Component**: `src/remora/task_manager.py`
+
+This is the core new functionality. It sits above the existing `Coordinator` and manages the task tree.

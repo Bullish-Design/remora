@@ -1,0 +1,2 @@
+> "Clean, well-documented docstring.
+> If I like it, I press 'a' to accept."

@@ -1,0 +1,1 @@
+When an agent needs to understand a massive, complex file or make bets on changes:

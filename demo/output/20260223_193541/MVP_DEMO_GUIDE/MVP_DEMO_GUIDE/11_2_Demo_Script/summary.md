@@ -1,0 +1,1 @@
+The heading "11.2 Demo Script" introduces a demonstration script that guides users through a feature using a step-by-step walkthrough, with supporting components like a calculating function for value aggregation, a sliding animation for visual feedback, and an isolated workspace setup for safe execution.

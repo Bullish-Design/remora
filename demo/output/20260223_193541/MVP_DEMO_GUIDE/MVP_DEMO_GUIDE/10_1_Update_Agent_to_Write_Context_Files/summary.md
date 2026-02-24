@@ -1,0 +1,1 @@
+This heading outlines the update to the agent system to write context files directly to workspace directories, enabling structured context management. Its child tools collectively support end-to-end document generation by gathering context, drafting content, evaluating drafts, and finalizing output for consistent and informed agent decision-making.

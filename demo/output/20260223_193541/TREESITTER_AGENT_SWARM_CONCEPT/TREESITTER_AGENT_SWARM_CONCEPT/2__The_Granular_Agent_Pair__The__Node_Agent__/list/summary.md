@@ -1,0 +1,1 @@
+This system integrates a fine-tuned reasoning model, a function-execution model (FunctionGemma), and Grail tools to perform precise code manipulation and execution within a secure sandbox, leveraging local codebase embeddings and multi-vector search for context-aware decision-making.

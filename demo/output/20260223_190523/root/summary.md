@@ -1,0 +1,1 @@
+The AST Summary Engine analyzes Python, TOML, and Markdown files by parsing them into hierarchical abstract syntax trees (ASTs) and generates recursive, bottom-up summaries for each node, with live monitoring and isolated execution environments per node.

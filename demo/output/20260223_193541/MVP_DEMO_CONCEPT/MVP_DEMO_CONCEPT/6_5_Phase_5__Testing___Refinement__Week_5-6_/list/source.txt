@@ -1,0 +1,4 @@
+- [ ] End-to-end demo tests
+- [ ] Performance optimization
+- [ ] Edge case handling
+- [ ] Documentation

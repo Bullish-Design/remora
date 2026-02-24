@@ -1,0 +1,1 @@
+This system enables a Root Language Model to navigate and process massive input contexts by generating Python code to interact with the data, recursively querying sub-LLMs on chunks of the context, accumulating results in buffers, and finally producing a synthesized answer through programmable, iterative processing.

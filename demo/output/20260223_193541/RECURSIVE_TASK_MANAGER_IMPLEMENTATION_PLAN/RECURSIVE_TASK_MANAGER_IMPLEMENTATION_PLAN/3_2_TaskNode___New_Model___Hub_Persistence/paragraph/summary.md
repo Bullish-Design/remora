@@ -1,0 +1,1 @@
+The TaskNode model is designed to represent a node in a task graph, enabling structured representation and execution of tasks with properties like state, dependencies, and metadata. Implementation should ensure it supports efficient task scheduling, state management, and integration with workflow execution systems.

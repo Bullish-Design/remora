@@ -1,0 +1,1 @@
+The Task Manager Layer orchestrates the creation, execution, and state management of tree-based tasks using object-oriented design, leveraging HubClient for execution and CairnWorkspaceBridge for state synchronization. Its children enable lifecycle control and integration with external systems to ensure reliable task processing.

@@ -1,0 +1,1 @@
+The File Root defines a Python project named "ast-summary" with version 0.1.0, specifying its dependencies and development tools. It requires Pydantic and Tree-sitter for core functionality, includes optional tools like pytest and ruff for testing and code formatting, and configures both to align with Python 3.13 and project standards.

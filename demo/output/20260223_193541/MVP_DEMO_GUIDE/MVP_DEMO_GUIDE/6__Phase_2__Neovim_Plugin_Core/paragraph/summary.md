@@ -1,0 +1,1 @@
+The plugin structure organizes and manages workspaces as first-class entities, replacing the use of subprocesses with a centralized, efficient workspace management system.

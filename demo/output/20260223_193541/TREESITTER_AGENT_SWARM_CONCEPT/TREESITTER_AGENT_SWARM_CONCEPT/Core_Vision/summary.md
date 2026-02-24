@@ -1,0 +1,1 @@
+The Core Vision defines the overarching goal of efficiently and accurately processing code by leveraging specialized models and context exchange within the syntax structure. Its children enable precise code analysis through fine-tuned models and facilitate collaborative modifications by exchanging context with neighboring code nodes.

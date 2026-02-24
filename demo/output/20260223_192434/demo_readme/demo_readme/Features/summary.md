@@ -1,0 +1,1 @@
+The "Features" heading outlines the core capabilities of the system, which include parsing multiple file formats, generating recursive summaries, providing real-time progress monitoring, and executing isolated workspaces for each node—functions enabled by its child components.

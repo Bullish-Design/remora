@@ -1,0 +1,1 @@
+This action triggers a review or application of a proposed code change as specified in the diff file.

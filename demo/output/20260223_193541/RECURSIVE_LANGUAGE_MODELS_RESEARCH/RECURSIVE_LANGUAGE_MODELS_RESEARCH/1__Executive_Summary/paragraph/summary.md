@@ -1,0 +1,1 @@
+The core thesis of an RLM is to offload context to an external execution environment (like a Python REPL) and use the LLM to generate code that dynamically queries, chunks, and recursively processes the context to build a final answer.

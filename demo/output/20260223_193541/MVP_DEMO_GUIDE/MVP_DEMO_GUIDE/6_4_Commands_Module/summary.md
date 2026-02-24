@@ -1,0 +1,1 @@
+The "6.4 Commands Module" defines Neovim commands for the Remora plugin, enabling users to manage or interact with code and text within the editor, with child elements specifying the actual command implementations and their functionalities.

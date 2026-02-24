@@ -1,0 +1,3 @@
+*   **`changed_files`**: List of files mutated in the sandbox (for Execution nodes).
+*   **`emitted_artifacts`**: Key-value pairs written back to the Hub (e.g., `"definition_of_done"`, `"golden_examples"`).
+*   **`success_boolean`**: Result of verification tasks running in the sandbox.

@@ -1,0 +1,1 @@
+The Heading2 "1. Overview" introduces the Recursive Decomposition Task Manager, which uses Extreme Recursion to dynamically solve user prompts by creating exploratory environments and managing independent Cairn Workspace Sandboxes through a synchronized state and intent system coordinated via Remora's Hub Daemon and versioned FSdantic models.

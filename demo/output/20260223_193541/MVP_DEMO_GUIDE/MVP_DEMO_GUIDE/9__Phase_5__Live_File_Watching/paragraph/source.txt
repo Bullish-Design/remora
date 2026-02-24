@@ -1,0 +1,1 @@
+**Goal**: Watch workspace directories and auto-refresh panel.

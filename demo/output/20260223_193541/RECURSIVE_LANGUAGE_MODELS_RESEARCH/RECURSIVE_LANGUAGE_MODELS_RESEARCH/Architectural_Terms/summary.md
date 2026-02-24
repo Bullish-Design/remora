@@ -1,0 +1,1 @@
+The Heading3 "Architectural Terms" introduces foundational concepts in the recursive language modeling framework, with its children explaining the roles of Root and Recursive LLMs, the use of REPL environments for code execution, and the challenge of context rot in information-dense tasks.

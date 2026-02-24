@@ -1,0 +1,4 @@
+*   Remora's **Grail `.pym` execution engine** serves as the robust Python REPL.
+*   Instead of just string blobs, Remora injects the **Tree-sitter AST Graph** into the REPL, giving the Root LM far more powerful query tooling than basic Regex.
+*   Remora's **vLLM Continuous Batching** natively solves the paper's primary limitation (slow, blocking inference), allowing the Root LM to spawn asynchronous, parallel sub-Agent workspaces instantly.
+*   Remora's **Cairn KV Memory Bus** handles the passing of variables and intent between the Root LM and the sub-LMs, replacing the brittle string manipulation of the paper's basic `llm_query` function.

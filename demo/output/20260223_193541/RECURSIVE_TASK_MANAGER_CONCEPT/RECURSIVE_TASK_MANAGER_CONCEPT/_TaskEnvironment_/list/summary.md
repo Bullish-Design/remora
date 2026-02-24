@@ -1,0 +1,1 @@
+This configuration defines an isolated environment in a Cairn Workspace, specifying its workspace ID, optional parent workspace for contextual inheritance, and a list of permitted Hub DB keys for data access.

@@ -1,0 +1,1 @@
+*   **Role**: Queries the codebase's existing tests in the Semantic space to understand testing conventions, then writes tests for the Implementer's changes.

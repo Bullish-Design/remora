@@ -1,0 +1,1 @@
+This method divides two integers and returns their quotient as a float, raising a ValueError if the divisor is zero.

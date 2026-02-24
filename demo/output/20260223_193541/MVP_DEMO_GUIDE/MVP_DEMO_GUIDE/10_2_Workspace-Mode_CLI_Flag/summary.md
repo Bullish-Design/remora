@@ -1,0 +1,1 @@
+The Heading3 element "10.2 Workspace-Mode CLI Flag" describes the addition of a `--workspace-mode` flag to the Remora CLI, enabling workspace-specific functionality. The `cli.py` file implements this feature by extending the command-line interface to support the new flag, allowing users to activate workspace mode through terminal commands.

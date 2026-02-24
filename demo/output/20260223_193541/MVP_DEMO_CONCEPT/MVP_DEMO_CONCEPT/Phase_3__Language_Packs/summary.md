@@ -1,0 +1,1 @@
+Phase 3: Language Packs introduces a custom .remorapack format, establishes a public registry, and integrates EmbeddingGemma to enable similarity search, enhancing language support and search functionality through modular, scalable components.

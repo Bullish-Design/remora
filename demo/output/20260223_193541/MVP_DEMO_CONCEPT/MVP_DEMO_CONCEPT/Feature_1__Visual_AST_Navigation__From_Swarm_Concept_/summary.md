@@ -1,0 +1,1 @@
+This heading introduces the feature that enables visual navigation of an Abstract Syntax Tree (AST) using Tree-sitter, with children detailing how real-time node parsing and color-coded status updates allow agents to claim and track analysis progress.

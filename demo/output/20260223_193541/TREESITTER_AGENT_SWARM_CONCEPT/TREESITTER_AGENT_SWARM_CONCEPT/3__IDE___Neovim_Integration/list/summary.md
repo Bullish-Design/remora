@@ -1,0 +1,1 @@
+The system enables developers to highlight specific code structures using Tree-sitter selection and allows users to describe refactoring requests, which are then processed to apply the desired changes.

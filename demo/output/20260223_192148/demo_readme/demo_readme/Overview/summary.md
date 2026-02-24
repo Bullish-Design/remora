@@ -1,0 +1,1 @@
+The "Overview" heading provides a high-level summary of the AST Summary Engine's functionality, which analyzes source code into an abstract syntax tree and generates structured summaries by traversing the tree from leaves to root. The child element explains how the engine processes code to produce these structured summaries.

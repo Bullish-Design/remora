@@ -1,0 +1,1 @@
+The system uses PageRank to score AST nodes by data flow and call frequency, Dijkstra's or A* search to find semantic paths between nodes for targeted code modifications, and the Louvain method for community detection to identify and split monolithic code into domain-specific microservices.

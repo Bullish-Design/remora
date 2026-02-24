@@ -30,7 +30,7 @@ set -e
 # See: https://github.com/QwenLM/Qwen3/issues/1700
 vllm serve Qwen/Qwen3-4B-Instruct-2507-FP8 \
     --enable-auto-tool-choice \
-    --tool-call-parser qwen3_coder \
+    --tool-call-parser qwen3_xml \
     --max-num-seqs 32 \
     --max-model-len 32768 \
     --enable-prefix-caching

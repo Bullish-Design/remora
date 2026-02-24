@@ -1,0 +1,1 @@
+The file `~/.config/nvim/lua/remora/watcher.lua` likely contains Lua code for a file watcher in Neovim that monitors file changes and triggers actions (like reloading buffers or updating the UI) in response to those changes, as part of the Remora plugin ecosystem.

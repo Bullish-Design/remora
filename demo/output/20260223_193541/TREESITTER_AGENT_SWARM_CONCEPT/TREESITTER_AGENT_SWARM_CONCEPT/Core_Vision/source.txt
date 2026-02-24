@@ -1,0 +1,3 @@
+Instead of using a monolithic LLM to process an entire file or chunk of code, the system decomposes the codebase into its constituent Tree-sitter nodes. **Every distinct type of AST node (e.g., `class_definition`, `function_definition`, `for_statement`, `expression`) is managed by its own specialized, fine-tuned "tiny" reasoning model paired with a FunctionGemma model for tool calling.**
+
+These models operate collaboratively across the codebase graph, negotiating changes and passing context to their node neighbors up and down the syntax tree.

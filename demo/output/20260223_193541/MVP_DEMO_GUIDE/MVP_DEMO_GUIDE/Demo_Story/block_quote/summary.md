@@ -1,0 +1,1 @@
+Remora creates a transparent, real-time environment for each code node by researching the codebase, pulling documentation, evaluating options, and visibly generating and displaying every file it produces—ensuring full visibility into its AI reasoning process.

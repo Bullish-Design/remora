@@ -1,0 +1,1 @@
+This heading introduces the use of `.pym` script tools within agent bundles to enable sub-task spawning and management, supported by creating a dedicated directory to organize and store these tools in the architectural module.

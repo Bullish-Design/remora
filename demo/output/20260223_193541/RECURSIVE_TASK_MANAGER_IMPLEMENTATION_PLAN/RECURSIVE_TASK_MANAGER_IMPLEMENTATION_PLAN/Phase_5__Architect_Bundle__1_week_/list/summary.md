@@ -1,0 +1,1 @@
+Designs and implements an agent bundle that decomposes complex tasks using a system prompt and few-shot examples, integrating linting, testing, and docstring generation as sub-tasks.

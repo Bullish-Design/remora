@@ -1,0 +1,3 @@
+- Create `.remorapack` distribution format
+- Build public registry
+- Add EmbeddingGemma for similarity search

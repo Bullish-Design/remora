@@ -1,0 +1,2 @@
+*   **Role**: Breaks down the initial prompt, queries semantic and graph spaces to map out the "blast radius" of the request.
+*   **Action**: Creates the initial `task.md` in the Cairn KV memory bus.

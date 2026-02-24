@@ -1,0 +1,1 @@
+The function discovers and extracts CST nodes from source files by iterating over configured languages, grouping files by extension, parsing them with tree-sitter grammars, and applying query packs to extract relevant nodes, while deduplicating results by node ID.

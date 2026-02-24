@@ -1,0 +1,4 @@
+- Dashboard shows current adapter for each agent
+- Visible swap events: `architect-v1 → implement-v1 → test-gen-v1`
+- Demonstrates vLLM's continuous batching capability
+- **This is the "wow" moment** - multiple adapters serving simultaneously

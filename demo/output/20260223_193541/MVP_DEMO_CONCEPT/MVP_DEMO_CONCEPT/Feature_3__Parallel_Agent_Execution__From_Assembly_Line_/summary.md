@@ -1,0 +1,1 @@
+This heading outlines a parallel agent execution workflow where multiple agents simultaneously develop and test code while an architect plans transformations, and a final linting/validation phase ensures code quality. The children detail the orchestration of the pipeline, agent roles, and quality assurance steps that enable efficient, concurrent code development.

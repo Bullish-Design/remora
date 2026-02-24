@@ -1,0 +1,1 @@
+The paper proposes an asymmetric model pairing strategy to reduce costs—using a powerful model for high-level reasoning and a cheaper model for repetitive tasks—while highlighting the need for asynchronous, parallel execution to improve performance and emphasizing the importance of tailored system prompts to prevent excessive, unnecessary sub-LM calls.

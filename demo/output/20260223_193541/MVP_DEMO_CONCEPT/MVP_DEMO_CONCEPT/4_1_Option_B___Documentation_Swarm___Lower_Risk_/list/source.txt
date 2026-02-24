@@ -1,0 +1,7 @@
+1. Point Remora at a codebase
+2. Watch 3 agents generate docs in parallel:
+   - API Documentation Agent
+   - README Generator Agent
+   - Architecture Diagram Agent
+3. Show live progress in terminal
+4. Output: Complete documentation suite

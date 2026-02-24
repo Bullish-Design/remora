@@ -1,0 +1,1 @@
+Allow multiple Remora instances to coordinate on the same task tree via Hub synchronization.

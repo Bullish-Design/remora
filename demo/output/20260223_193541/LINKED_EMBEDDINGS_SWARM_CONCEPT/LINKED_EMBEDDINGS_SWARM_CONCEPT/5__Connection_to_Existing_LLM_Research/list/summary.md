@@ -1,0 +1,1 @@
+The code integrates Code Property Graphs (CPGs) with Graph Neural Networks (GNNs) and tree-based positional embeddings to create structure-aware, hierarchical code representations that capture both syntactic and semantic relationships for improved agentic code navigation.

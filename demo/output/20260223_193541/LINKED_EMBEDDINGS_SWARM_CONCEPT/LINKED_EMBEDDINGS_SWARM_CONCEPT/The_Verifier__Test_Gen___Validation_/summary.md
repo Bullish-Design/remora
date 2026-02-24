@@ -1,0 +1,1 @@
+The Verifier (Test Gen & Validation) generates new tests by analyzing existing tests to identify and apply established testing patterns within the codebase. Its child component infers testing conventions in the semantic space to ensure generated tests align with the codebase's standards.

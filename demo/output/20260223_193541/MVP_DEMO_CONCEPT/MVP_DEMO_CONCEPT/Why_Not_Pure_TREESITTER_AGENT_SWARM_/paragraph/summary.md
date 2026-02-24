@@ -1,0 +1,1 @@
+The MVP focuses on delivering key features like AST visualization and multi-agent coordination within 6-12 months, bypassing the need for the full mathematical foundation to demonstrate core functionality.

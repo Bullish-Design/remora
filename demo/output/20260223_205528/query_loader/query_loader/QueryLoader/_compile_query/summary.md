@@ -1,0 +1,1 @@
+Compiles a tree-sitter query from a .scm file by reading its content and parsing it into a tree-sitter Query object, returning a CompiledQuery with the parsed query, source file path, query text, and query name.

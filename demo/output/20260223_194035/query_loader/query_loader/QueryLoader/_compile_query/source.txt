@@ -1,0 +1,18 @@
+def _compile_query(self, scm_file: Path, ts_language: Language) -> CompiledQuery:
+        """Compile a single .scm file into a tree-sitter Query."""
+        try:
+            query_text = scm_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise DiscoveryError(f"Failed to read query file: {scm_file}") from exc
+
+        try:
+            query = Query(ts_language, query_text)
+        except Exception as exc:
+            raise DiscoveryError(f"Query syntax error in {scm_file.name}: {exc}") from exc
+
+        return CompiledQuery(
+            query=query,
+            source_file=scm_file,
+            query_text=query_text,
+            query_name=scm_file.stem,
+        )

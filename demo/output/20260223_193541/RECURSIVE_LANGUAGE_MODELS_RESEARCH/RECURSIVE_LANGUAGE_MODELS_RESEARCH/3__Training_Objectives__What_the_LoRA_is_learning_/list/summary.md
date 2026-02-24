@@ -1,0 +1,1 @@
+The approach focuses on writing clean, efficient Python scripts with batch processing using native tools like Tree-sitter, handling errors gracefully within the REPL, and strictly adhering to termination formatting rules to ensure successful parsing and execution.

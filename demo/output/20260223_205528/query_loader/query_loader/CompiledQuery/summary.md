@@ -1,0 +1,1 @@
+The CompiledQuery class stores query metadata such as query text, source file path, and query name, initializing these values as instance attributes to enable structured query management and retrieval. Its children provide the foundational data attributes necessary for query compilation and subsequent execution.

@@ -1,0 +1,1 @@
+The Heading3 "7.1 Panel Module" outlines the panel module's role in managing UI panels within the Remora plugin, with the associated Lua file defining the core functionality for creating, rendering, and controlling panels in Neovim.

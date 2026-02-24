@@ -1,0 +1,1 @@
+A Python module that manages the lifecycle of workspaces, including creation, configuration, activation, and cleanup.

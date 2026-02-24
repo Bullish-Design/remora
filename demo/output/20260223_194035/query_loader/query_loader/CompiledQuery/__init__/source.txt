@@ -1,0 +1,5 @@
+def __init__(self, query: Query, source_file: Path, query_text: str, query_name: str) -> None:
+        self.query = query
+        self.source_file = source_file
+        self.query_text = query_text
+        self._query_name = query_name

@@ -1,0 +1,7 @@
+The paper cites the STaR (Self-Taught Reasoner) method. We shouldn't pay humans to write RLM trajectories. Instead:
+
+1.  Take a powerful, expensive model (like Claude 3.5 Sonnet or GPT-4o) and give it the heavy RLM system prompt.
+2.  Feed it 1,000 algorithmic codebase queries (e.g., "Find all functions returning a dict and modify them").
+3.  Let it organically operate in the Grail sandbox, generating REPL scripts and spawning sub-calls. 
+4.  Throw away the failed trajectories. Keep only the trajectories that successfully resulted in a correct codebase modification or correct answer. 
+5.  This yields a golden dataset of perfect code-based reasoning chains.

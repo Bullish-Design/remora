@@ -1,0 +1,1 @@
+The AST Summary Engine analyzes source code by converting it into an abstract syntax tree (AST) and generates structured summaries by traversing the tree from leaves to root.

@@ -1,0 +1,1 @@
+**Recommendation**: Begin with Phase 1 (Foundation Models) as it has no dependencies and provides immediate value for task tracking. Defer full recursive execution to post-MVP when Hub daemon is complete.

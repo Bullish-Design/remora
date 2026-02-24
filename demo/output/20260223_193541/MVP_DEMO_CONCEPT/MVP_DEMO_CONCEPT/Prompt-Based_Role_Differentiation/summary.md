@@ -1,0 +1,1 @@
+Prompt-Based Role Differentiation enables specialized agents to function through simulated behavior, allowing a demo to run without fine-tuning. The children define the MVP's core features, objectives, and scope, establishing a clear narrative and foundation for initial development and validation.

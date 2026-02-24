@@ -1,0 +1,1 @@
+This system manages isolated Cairn Workspace Sandboxes, where each node operates independently but shares synchronized state, intent, and constraints via Remora's Hub Daemon using versioned FSdantic models as a central "Memory Bus" for coordination.

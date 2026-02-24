@@ -1,0 +1,1 @@
+Parses Python, TOML, and Markdown files, generates recursive summaries, provides a live dashboard to monitor progress, and runs isolated Cairn workspaces for each node.

@@ -1,0 +1,4 @@
+1. The Root Architect creates a task intent and saves it to Cairn: `KV.set("task_intent", "Add rate limiting")`.
+2. It spawns a Sub-Environment to handle `routes.py`.
+3. The Sub-Environment *doesn't* get the full intent in its system prompt. Instead, its REPL has an exposed `bus.get("task_intent")` tool. 
+4. The Sub-Model dynamically queries its parent's environment state only when it needs clarification.

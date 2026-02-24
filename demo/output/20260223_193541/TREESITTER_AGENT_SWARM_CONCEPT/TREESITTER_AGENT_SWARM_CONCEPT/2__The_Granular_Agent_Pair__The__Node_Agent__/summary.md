@@ -1,0 +1,1 @@
+The Granular Agent Pair defines a node's intelligence by combining a fine-tuned reasoning model, function-execution capability, and Grail tools to enable context-aware, secure code manipulation and execution through local embeddings and multi-vector search.

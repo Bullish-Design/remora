@@ -1,0 +1,3 @@
+**Required Neovim version**: 0.10.0+ (for improved file watching)
+
+**Required plugins**:

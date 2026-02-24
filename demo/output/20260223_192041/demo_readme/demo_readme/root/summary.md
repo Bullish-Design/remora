@@ -1,0 +1,1 @@
+The File Root orchestrates the AST Summary Engine's core functionality by organizing and presenting a hierarchical, structured overview of Python code through abstract syntax tree analysis. Its children—covering the engine's overview, features, and demonstration—detail how code is parsed, summarized recursively, and presented with real-time insights and workspace isolation.

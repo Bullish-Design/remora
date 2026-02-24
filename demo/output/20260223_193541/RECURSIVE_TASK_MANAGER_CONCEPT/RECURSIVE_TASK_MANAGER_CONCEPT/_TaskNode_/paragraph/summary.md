@@ -1,0 +1,1 @@
+Manages the coordination and execution of operations within a unit of work, ensuring consistent and reliable processing of tasks.

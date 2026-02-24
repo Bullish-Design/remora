@@ -1,0 +1,1 @@
+The `TaskManager` delegates agent execution tasks to the `Coordinator` to handle the actual agent execution process.

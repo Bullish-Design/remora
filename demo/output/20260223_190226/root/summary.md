@@ -1,0 +1,1 @@
+The File Root module serves as the entry point for a basic arithmetic application, providing a structured environment where the Calculator class performs fundamental math operations and the main function demonstrates their usage through a simple example.

@@ -1,0 +1,1 @@
+The `cli.py` file contains the command-line interface (CLI) implementation for the Remora application, defining entry points and commands that allow users to interact with the system through terminal commands.

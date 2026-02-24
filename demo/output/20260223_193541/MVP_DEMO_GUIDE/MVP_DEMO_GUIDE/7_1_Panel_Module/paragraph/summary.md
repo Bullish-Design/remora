@@ -1,0 +1,1 @@
+The file `~/.config/nvim/lua/remora/ui/panel.lua` likely defines UI panel functionality for the Remora plugin, such as creating, managing, and rendering panels within Neovim's interface.

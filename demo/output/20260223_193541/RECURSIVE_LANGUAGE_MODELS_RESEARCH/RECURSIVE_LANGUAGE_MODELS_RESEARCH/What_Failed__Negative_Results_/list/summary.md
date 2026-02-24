@@ -1,0 +1,1 @@
+The system identifies critical challenges in using LLMs as Root RLMs, including inappropriate tool usage, insufficient coding capabilities in small models, token starvation in reasoning models, slow synchronous execution, and brittle termination detection, leading to the need for prompt engineering, asynchronous execution, and structural safeguards.

@@ -1,0 +1,1 @@
+Each node within the AST is embedded across multiple linked vector spaces, representing different conceptual dimensions:

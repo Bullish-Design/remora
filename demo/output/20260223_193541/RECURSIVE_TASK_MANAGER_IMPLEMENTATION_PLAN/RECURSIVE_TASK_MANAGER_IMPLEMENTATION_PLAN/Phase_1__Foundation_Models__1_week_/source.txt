@@ -1,0 +1,7 @@
+**Deliverables:**
+
+- [ ] `TaskNode`, `TaskEnvironment`, `TaskResult` models in `src/remora/hub/tasks.py`
+- [ ] FSdantic integration for Hub persistence
+- [ ] Unit tests for model serialization/deserialization
+
+**Key Files:**

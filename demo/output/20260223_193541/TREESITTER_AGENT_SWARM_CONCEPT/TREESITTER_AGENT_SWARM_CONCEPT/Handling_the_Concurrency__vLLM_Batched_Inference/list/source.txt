@@ -1,0 +1,3 @@
+* We can run 10+ "tiny" fine-tuned logic models concurrently.
+* We will not swamp the VRAM and will not suffer severe model loading overhead.
+* The system relies on continuous concurrent batched inference throughput, seamlessly swapping adapters as the swarm processes different nodes.

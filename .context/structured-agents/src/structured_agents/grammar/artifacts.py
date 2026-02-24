@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,7 +32,7 @@ class StructuralTagGrammar:
         return {
             "structured_outputs": {
                 "type": "structural_tag",
-                "structural_tag": self.tag,
+                "structural_tag": self.tag.model_dump_json(),
             }
         }
 

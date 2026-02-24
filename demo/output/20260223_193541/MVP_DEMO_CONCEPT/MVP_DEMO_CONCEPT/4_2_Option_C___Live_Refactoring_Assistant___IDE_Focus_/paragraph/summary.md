@@ -1,0 +1,1 @@
+Develops a comprehensive system for managing and analyzing large-scale data with a focus on performance optimization, scalability, and maintainability over a 5-7 week timeline.

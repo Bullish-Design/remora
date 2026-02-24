@@ -1,0 +1,1 @@
+The Implementer (Code & Pattern Matcher) generates aligned code by querying the target repository and Golden Reference Libraries to understand and replicate established AST implementations, ensuring standards-compliant and context-aware code generation. Its children provide the code execution and pattern-matching capabilities that enable accurate, reference-based implementation.

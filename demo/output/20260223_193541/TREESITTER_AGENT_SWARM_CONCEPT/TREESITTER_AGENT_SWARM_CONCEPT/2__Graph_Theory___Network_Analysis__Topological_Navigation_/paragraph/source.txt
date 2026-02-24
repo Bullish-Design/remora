@@ -1,0 +1,1 @@
+The AST is a Directed Acyclic Graph (DAG), but data flow and function calls turn it into a complex cyclic network. Agents use these algorithms to navigate and analyze the network:

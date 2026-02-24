@@ -1,0 +1,1 @@
+The QueryLoader class loads and compiles SCM-formatted query files from a directory structure using Tree-sitter, leveraging its child components to parse individual .scm files into structured Query objects for use in query execution.

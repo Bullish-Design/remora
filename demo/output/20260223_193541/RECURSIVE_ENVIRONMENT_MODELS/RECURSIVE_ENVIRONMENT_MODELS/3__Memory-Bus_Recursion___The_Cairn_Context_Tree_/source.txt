@@ -1,0 +1,23 @@
+*Inspiration: `examples/treesitter_swarm/README.md` (The "Shared Swarm Memory Bus" solution)*
+
+**The Concept:**
+In a standard RLM, passing context down to a sub-call requires serializing it into the prompt. In a REM, environments share an asynchronous memory bus (Cairn KV).
+
+1. The Root Architect creates a task intent and saves it to Cairn: `KV.set("task_intent", "Add rate limiting")`.
+2. It spawns a Sub-Environment to handle `routes.py`.
+3. The Sub-Environment *doesn't* get the full intent in its system prompt. Instead, its REPL has an exposed `bus.get("task_intent")` tool. 
+4. The Sub-Model dynamically queries its parent's environment state only when it needs clarification.
+
+**Remora Implementation Mappings:**
+
+*   **Agent Bundles Required:**
+    *   Any agent bundle spun up as a "Sub-Task" (e.g., `node_implementer`, `debugger`). Their initial system prompt is injected *only* with `Task ID: <uuid>`.
+*   **Grail Tools (`.pym`) Required:**
+    *   `hub_memory_write.pym`:
+        *   **Functionality:** Allows a Parent Agent to construct the "Context Tree" by writing key-value configuration or intent payloads directly to the Hub Daemon's KV store for a specific task.
+        *   **Inputs:** `task_id: str`, `key: str`, `value: any`.
+        *   **Outputs:** `success: bool`.
+    *   `hub_memory_read.pym`:
+        *   **Functionality:** Allows a Sub-Agent to lazy-load its context programmatically via code execution, avoiding prompt bloat and context rotation on the base model side. 
+        *   **Inputs:** `key: str` (e.g., `"task_intent"`, or `"architectural_constraints"`).
+        *   **Outputs:** The JSON value stored by the Parent Agent in the Hub Daemon's memory bus.

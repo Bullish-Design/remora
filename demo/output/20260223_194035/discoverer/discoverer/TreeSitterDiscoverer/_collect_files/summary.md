@@ -1,0 +1,1 @@
+Collects files from specified root directories that have extensions matching the given set, returning a sorted list of Path objects.

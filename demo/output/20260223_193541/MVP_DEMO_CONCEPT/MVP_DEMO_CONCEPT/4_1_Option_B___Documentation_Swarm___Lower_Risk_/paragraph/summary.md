@@ -1,0 +1,1 @@
+Develops a feature or module requiring moderate to high complexity, involving significant design, implementation, testing, and integration efforts over a 2-3 week period.

@@ -1,0 +1,1 @@
+The system uses UMAP/t-SNE to visualize and cluster codebase nodes in low-dimensional space, guiding feature placement by identifying semantic regions, and employs Markov Random Fields to model and propagate failure probabilities through the AST, enabling targeted, statistically grounded test generation.

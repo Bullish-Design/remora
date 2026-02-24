@@ -1,0 +1,7 @@
+The paper *Recursive Language Models* addresses a fundamental limitation in modern Large Language Models: **Context Rot**. As the length of a prompt increases, an LLM's ability to recall and reason over that information degrades, even if the information technically fits within its maximum context window.
+
+Rather than trying to force more tokens into the Transformer architecture (which is computationally expensive and still suffers from degradation on complex tasks), the paper proposes a simple, task-agnostic framework: **Recursive Language Models (RLMs)**.
+
+The core thesis of an RLM is to stop feeding the massive context directly into the LLM's prompt. Instead, the context is offloaded into an external execution environment (a Python REPL) as a queryable variable. The LLM is then placed into this environment and tasked with writing code to programmatically explore, chunk, and recursively spawn sub-LLM calls over specific pieces of that context to build up a final answer.
+
+The results show that RLMs can handle inputs containing tens of millions of tokens (far beyond any current model's context window), drastically outperform base models on complex long-context reasoning tasks, and operate at a comparable or cheaper API cost due to processing fewer tokens overall.

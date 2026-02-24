@@ -1,0 +1,1 @@
+This workflow demonstrates real-time code refactoring using AI agents, where selecting code triggers collaborative refactoring suggestions that can be accepted or rejected inline, enhanced by rich context from LSP support in VS Code or Neovim.

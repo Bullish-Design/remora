@@ -1,0 +1,1 @@
+The paper proposes replacing human-written RLM trajectories in the STaR method with self-generated, automatically constructed trajectories to reduce reliance on human labor.

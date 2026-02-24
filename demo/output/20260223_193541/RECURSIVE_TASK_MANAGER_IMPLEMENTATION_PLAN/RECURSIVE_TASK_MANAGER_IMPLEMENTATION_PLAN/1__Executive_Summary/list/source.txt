@@ -1,0 +1,4 @@
+- Task tree orchestration layer
+- Sub-task spawning tools
+- Hub-based task state persistence
+- Verification/debugging loop automation

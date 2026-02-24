@@ -1,0 +1,1 @@
+The TaskManager → Orchestration Layer coordinates task execution, scheduling, and state tracking within the Remora system, with the task_manager.py component managing the task tree and enabling core orchestration functionality above the Coordinator.

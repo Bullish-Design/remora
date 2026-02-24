@@ -1,0 +1,166 @@
+{
+  "nodes": [
+    {
+      "id": "cli",
+      "type": "text",
+      "text": "Remora CLI\n- `remora analyze/watch/list-agents/config`\n- resolves `remora.yaml` overrides\n- optional `remora-hub` daemon + watch mode\n- starts RemoraAnalyzer workflow",
+      "x": -500,
+      "y": -200,
+      "width": 340,
+      "height": 160
+    },
+    {
+      "id": "discovery",
+      "type": "text",
+      "text": "Discovery Layer\n- Tree-sitter `.scm` packs + queries\n- `TreeSitterDiscoverer` extracts CST nodes\n- files/classes/functions processed in parallel\n- languages configured in `config.LANGUAGES`",
+      "x": -120,
+      "y": -220,
+      "width": 360,
+      "height": 180
+    },
+    {
+      "id": "coordinator",
+      "type": "text",
+      "text": "Coordinator\n- enforces concurrency limits\n- builds `KernelRunner` per node+operation\n- aggregates `NodeResult` outputs\n- can host Hub in-process",
+      "x": 120,
+      "y": -220,
+      "width": 300,
+      "height": 160
+    },
+    {
+      "id": "kernel",
+      "type": "text",
+      "text": "Kernel Execution\n- `KernelRunner` loads `agents/<op>/bundle.yaml`\n- structured-agents kernel + Decision Packet\n- multi-turn tool loop until `submit_result`\n- emits events/logs per run",
+      "x": 360,
+      "y": -40,
+      "width": 320,
+      "height": 200
+    },
+    {
+      "id": "agent_bundles",
+      "type": "text",
+      "text": "Agent Bundles\n- `bundle.yaml`: FunctionGemma adapter, prompts, context\n- `tools/`: Grail `.pym` scripts\n- `context/`: optional providers",
+      "x": 360,
+      "y": -200,
+      "width": 320,
+      "height": 160
+    },
+    {
+      "id": "functiongemma",
+      "type": "text",
+      "text": "FunctionGemma / vLLM\n- OpenAI-compatible model server (vLLM)\n- structured prompts + Decision Packet context\n- returns deterministic function calls",
+      "x": 660,
+      "y": -200,
+      "width": 280,
+      "height": 140
+    },
+    {
+      "id": "grail",
+      "type": "text",
+      "text": "Grail Tool Runtime\n- executes `.pym` tools inside Cairn workspaces\n- wired via structured-agents kernel backend\n- surfaces deterministic tool behavior",
+      "x": 660,
+      "y": 40,
+      "width": 260,
+      "height": 140
+    },
+    {
+      "id": "decision",
+      "type": "text",
+      "text": "Decision Packet\n- summarizes recent tool actions + errors\n- injected into prompts every turn\n- optional Hub context enhances it",
+      "x": 360,
+      "y": 140,
+      "width": 320,
+      "height": 140
+    },
+    {
+      "id": "hub",
+      "type": "text",
+      "text": "Optional Hub Daemon\n- `remora-hub` indexes `.remora/hub.db`\n- supplies signatures, docstrings, call graphs\n- runs standalone or inside Coordinator",
+      "x": 120,
+      "y": 140,
+      "width": 320,
+      "height": 140
+    },
+    {
+      "id": "cairn",
+      "type": "text",
+      "text": "Cairn Workspaces\n- `~/.cache/remora/workspaces/<agent_id>` per run\n- Grail tools operate in isolated workspace\n- diffs reviewed or merged",
+      "x": 660,
+      "y": 200,
+      "width": 300,
+      "height": 160
+    },
+    {
+      "id": "bridge",
+      "type": "text",
+      "text": "Workspace Bridge\n- `RemoraAnalyzer.accept()` / `--auto-accept`\n- merges workspace changes back into project\n- ensures consistent runs",
+      "x": 660,
+      "y": 340,
+      "width": 300,
+      "height": 140
+    },
+    {
+      "id": "events",
+      "type": "text",
+      "text": "Events & Logs\n- `remora.events` emits JSONL streams\n- `llm_logger` writes transcripts\n- powers `remora-tui`, `remora-demo`, `remora-flood`",
+      "x": 120,
+      "y": 300,
+      "width": 320,
+      "height": 140
+    }
+  ],
+  "edges": [
+    {
+      "from": "cli",
+      "to": "discovery"
+    },
+    {
+      "from": "discovery",
+      "to": "coordinator"
+    },
+    {
+      "from": "coordinator",
+      "to": "kernel"
+    },
+    {
+      "from": "agent_bundles",
+      "to": "kernel"
+    },
+    {
+      "from": "kernel",
+      "to": "functiongemma"
+    },
+    {
+      "from": "kernel",
+      "to": "grail"
+    },
+    {
+      "from": "kernel",
+      "to": "decision"
+    },
+    {
+      "from": "hub",
+      "to": "decision"
+    },
+    {
+      "from": "kernel",
+      "to": "cairn"
+    },
+    {
+      "from": "cairn",
+      "to": "bridge"
+    },
+    {
+      "from": "kernel",
+      "to": "events"
+    },
+    {
+      "from": "cli",
+      "to": "hub"
+    },
+    {
+      "from": "agent_bundles",
+      "to": "grail"
+    }
+  ]
+}

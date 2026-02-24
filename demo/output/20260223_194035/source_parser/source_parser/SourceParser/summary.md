@@ -1,0 +1,1 @@
+The SourceParser class initializes a Tree-sitter parser from a grammar module and provides methods to parse source files or raw bytes into a tree structure, with children handling grammar setup, file parsing, and byte-level parsing for robust and flexible source code analysis.

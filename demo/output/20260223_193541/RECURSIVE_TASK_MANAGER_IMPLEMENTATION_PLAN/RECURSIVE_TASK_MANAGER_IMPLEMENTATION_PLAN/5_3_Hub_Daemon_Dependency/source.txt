@@ -1,0 +1,13 @@
+The TaskManager requires an operational Hub daemon for:
+
+- Task state persistence
+- Context key storage (artifacts, golden examples)
+- Cross-task communication
+
+**Current Hub Status**: 60% implemented
+
+**Required Before TaskManager:**
+
+1. Complete `HubDaemon.start()` implementation
+2. Implement `HubClient.watch()` for event subscription
+3. Add FSdantic record versioning for conflict detection

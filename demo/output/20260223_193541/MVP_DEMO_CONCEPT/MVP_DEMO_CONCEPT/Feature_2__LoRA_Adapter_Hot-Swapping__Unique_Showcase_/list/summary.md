@@ -1,0 +1,1 @@
+The dashboard showcases vLLM's continuous batching by displaying multiple adapters serving simultaneously across agents, highlighting a "wow" moment through real-time swap events between adapters like `architect-v1 → implement-v1 → test-gen-v1`.

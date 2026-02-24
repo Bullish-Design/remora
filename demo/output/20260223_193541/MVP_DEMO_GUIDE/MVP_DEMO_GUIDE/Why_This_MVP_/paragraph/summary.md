@@ -1,0 +1,1 @@
+The Cairn Workspace View demo visualizes agent reasoning in a tangible, interactive way, making the decision-making process physically visible to users for enhanced understanding and engagement.

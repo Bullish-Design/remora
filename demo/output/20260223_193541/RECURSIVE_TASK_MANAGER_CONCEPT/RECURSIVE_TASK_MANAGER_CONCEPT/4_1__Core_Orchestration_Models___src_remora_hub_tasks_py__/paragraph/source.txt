@@ -1,0 +1,1 @@
+We create a suite of models that inherit from `fsdantic.VersionedKVRecord` to enable safe, version-controlled storage in `remora.hub.db`.

@@ -1,0 +1,1 @@
+The SourceParser class provides a unified interface for parsing source code into a tree structure, leveraging tree-sitter grammars to parse either files or raw bytes, with child components handling grammar initialization, file parsing, and byte-level parsing with error resilience.

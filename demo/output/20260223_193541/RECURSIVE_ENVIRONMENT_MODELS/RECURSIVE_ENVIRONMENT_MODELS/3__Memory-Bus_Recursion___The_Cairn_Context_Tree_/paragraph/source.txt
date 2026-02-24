@@ -1,0 +1,2 @@
+**The Concept:**
+In a standard RLM, passing context down to a sub-call requires serializing it into the prompt. In a REM, environments share an asynchronous memory bus (Cairn KV).

@@ -1,0 +1,1 @@
+Remora's Grail execution engine enhances Python REPL capabilities by injecting Tree-sitter AST graphs for advanced query tooling, while vLLM continuous batching enables fast, asynchronous parallel inference and Cairn KV Memory Bus facilitates reliable, structured communication between the Root LM and sub-LMs.

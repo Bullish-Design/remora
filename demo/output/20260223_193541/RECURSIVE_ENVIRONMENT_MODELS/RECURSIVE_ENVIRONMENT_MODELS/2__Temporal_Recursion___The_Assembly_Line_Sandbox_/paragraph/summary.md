@@ -1,0 +1,1 @@
+This concept explores using recursion not to drill down into data structures, but to progress forward in time across a feature's lifecycle, modeling temporal evolution through recursive calls.

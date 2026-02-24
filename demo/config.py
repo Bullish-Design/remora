@@ -16,7 +16,7 @@ class DemoConfig(BaseModel):
     base_url: str = "http://remora-server:8000/v1"
     api_key: str = "EMPTY"
     timeout: int = 120
-    model: str = "Qwen/Qwen3-4B-Instruct-2507-FP8" #"google/functiongemma-270m-it"
+    model: str = "Qwen/Qwen3-4B-Instruct-2507-FP8"
     max_concurrency: int = 10
     cache_dir: Path = Path(".cache/ast_summary")
     event_file: Path = Path(".ast_summary_events.jsonl")

@@ -1,0 +1,3 @@
+- [ ] Architect agent bundle with decomposition system prompt
+- [ ] Few-shot examples for task decomposition
+- [ ] Integration with existing operations (lint, test, docstring) as sub-tasks

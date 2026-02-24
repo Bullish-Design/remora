@@ -85,15 +85,25 @@ def _get_event_color(event: str) -> str:
 
 
 def _render_status(entries: list[LogEntry]) -> Panel:
-    total = len(entries)
-    completed = sum(1 for e in entries if e.event == "done")
-    in_progress = sum(1 for e in entries if e.event == "summarizing")
-    pending = total - completed - in_progress
+    node_status: dict[str, str] = {}
+
+    for entry in entries:
+        node_key = f"{entry.node_type}:{entry.node}"
+        if entry.event == "done":
+            node_status[node_key] = "done"
+        elif entry.event == "summarizing" and node_key not in node_status:
+            node_status[node_key] = "in_progress"
+        elif entry.event == "workspace_provision" and node_key not in node_status:
+            node_status[node_key] = "pending"
+
+    completed = sum(1 for s in node_status.values() if s == "done")
+    in_progress = sum(1 for s in node_status.values() if s == "in_progress")
+    pending = sum(1 for s in node_status.values() if s == "pending")
 
     table = Table.grid(padding=1)
     table.add_column()
     table.add_column(justify="right")
-    table.add_row("Total Events", str(total))
+    table.add_row("Total Nodes", str(len(node_status)))
     table.add_row("Completed", Text(str(completed), style="green"))
     table.add_row("In Progress", Text(str(in_progress), style="magenta bold"))
     table.add_row("Pending", Text(str(pending), style="yellow"))

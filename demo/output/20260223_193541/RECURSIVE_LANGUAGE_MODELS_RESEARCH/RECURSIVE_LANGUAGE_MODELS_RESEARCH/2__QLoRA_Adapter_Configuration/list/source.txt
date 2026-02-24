@@ -1,0 +1,4 @@
+*   **Base Model:** Choose a strong, open-source coding model. **Qwen2.5-Coder-32B** or **Llama-3-70B-Instruct** are ideal candidates.
+*   **Quantization:** Load the base model in 4-bit NormalFloat (NF4) bitsandbytes quantization to drastically reduce VRAM requirements.
+*   **Target Modules:** Apply the LoRA adapters to all linear layers (e.g., `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`). RLM navigation requires complex logical reasoning, so targeting only attention heads is insufficient.
+*   **Rank (r) and Alpha:** Use a moderate rank, `r=16` or `r=32`, with `lora_alpha=2*r`. This provides enough parameter capacity to learn the specific REPL syntax rules and tool-calling cadence without overfitting.

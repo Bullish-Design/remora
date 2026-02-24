@@ -1,0 +1,1 @@
+The Step-by-Step Execution Loop orchestrates the recursive processing of large contexts by generating and executing Python code to query sub-LLMs, accumulate results, and synthesize a final answer through iterative, programmable steps. Its children enable context navigation, chunked querying, result buffering, and iterative refinement to achieve comprehensive understanding.

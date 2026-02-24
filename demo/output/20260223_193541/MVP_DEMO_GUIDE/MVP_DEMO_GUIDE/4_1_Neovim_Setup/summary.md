@@ -1,0 +1,1 @@
+This heading outlines the Neovim setup requirements, specifying that version 0.10.0 or higher is needed for enhanced file watching. The child element confirms the minimum version requirement necessary for these features.

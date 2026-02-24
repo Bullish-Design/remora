@@ -1,0 +1,1 @@
+The system enables efficient, concurrent inference of multiple tiny fine-tuned logic models by dynamically swapping adapters, minimizing VRAM usage and avoiding loading overhead while maintaining high throughput.

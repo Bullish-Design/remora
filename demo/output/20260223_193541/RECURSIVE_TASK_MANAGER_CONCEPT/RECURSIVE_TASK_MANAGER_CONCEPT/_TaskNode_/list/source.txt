@@ -1,0 +1,8 @@
+*   **`task_id`**: Unique identifier (UUID).
+*   **`parent_task_id`**: The UUID of the task forming the decomposition tree.
+*   **`task_type`**: Enum defining the node's purpose (`DECOMPOSITION`, `RESEARCH`, `EXECUTION`, `VERIFICATION`).
+*   **`intent`**: Natural language description of what *must* be done inside this node's environment.
+*   **`environment`**: The encapsulated `TaskEnvironment` definition.
+*   **`agent_bundle`**: The specific LoRA/Grail `.pym` configuration needed.
+*   **`status`**: State machine (`PENDING`, `EXECUTING`, `BLOCKED`, `COMPLETED`, `FAILED`).
+*   **`sub_tasks`**: A list of `task_id`s representing children spawned recursively by the agent.

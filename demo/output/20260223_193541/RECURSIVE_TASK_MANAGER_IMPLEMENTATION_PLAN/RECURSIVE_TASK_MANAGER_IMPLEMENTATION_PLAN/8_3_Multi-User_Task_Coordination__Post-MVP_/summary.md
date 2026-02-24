@@ -1,0 +1,1 @@
+This section describes how multiple Remora instances coordinate and synchronize on shared task trees via a central Hub, enabling collaborative task execution. The child element explains the mechanism of coordination and state sharing that allows concurrent instances to work together efficiently.

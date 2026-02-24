@@ -1,0 +1,1 @@
+The `src/remora/cli.py` file contains the command-line interface (CLI) implementation for the Remora application, enabling users to interact with the system through terminal commands. It defines entry points and argument parsing for various Remora functionalities.

@@ -1,0 +1,9 @@
+The key change is modifying the agent bundles to write files to workspace directories instead of streaming events.
+
+**File**: `agents/docstring/tools/gather_context.pym` (NEW)
+
+**File**: `agents/docstring/tools/generate_draft.pym` (NEW)
+
+**File**: `agents/docstring/tools/evaluate_draft.pym` (NEW)
+
+**File**: `agents/docstring/tools/finalize_output.pym` (NEW)

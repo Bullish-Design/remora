@@ -1,0 +1,1 @@
+Because the architecture embeds the AST across four dimensions, the Swarm transitions from a standard LLM agent framework into an engine capable of advanced compiler mathematics. The FunctionGemma models are equipped with Grail scripts (`.pym`) that execute classical graph theory, linear algebra, and vector calculus algorithms against the codebase.

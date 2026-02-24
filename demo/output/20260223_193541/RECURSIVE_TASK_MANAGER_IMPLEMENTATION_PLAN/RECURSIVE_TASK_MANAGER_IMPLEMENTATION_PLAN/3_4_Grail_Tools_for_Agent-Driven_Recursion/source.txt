@@ -1,0 +1,3 @@
+The agents themselves need tools to spawn sub-tasks. These are `.pym` scripts in the agent bundles.
+
+**New Tools Directory**: `agents/architect/tools/`

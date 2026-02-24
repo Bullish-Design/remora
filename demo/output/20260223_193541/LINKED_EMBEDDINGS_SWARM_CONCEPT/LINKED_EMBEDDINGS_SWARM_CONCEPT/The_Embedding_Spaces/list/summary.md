@@ -1,0 +1,1 @@
+The three spaces—Semantic, Structural, and Relational—represent different perspectives for querying and understanding code: semantic (natural language explanations), structural (raw code logic), and relational (AST-based call graphs). Each space enables agents to retrieve relevant code elements based on natural language or syntactic patterns.

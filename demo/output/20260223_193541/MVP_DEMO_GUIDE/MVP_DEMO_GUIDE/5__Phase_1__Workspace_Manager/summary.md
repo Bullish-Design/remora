@@ -1,0 +1,1 @@
+This heading introduces Phase 1 of the system, which focuses on workspace management, and its child module handles the full lifecycle of workspaces through creation, configuration, activation, and cleanup.

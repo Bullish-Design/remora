@@ -1,0 +1,15 @@
+The **Code Evolution Pipeline** demo represents the optimal balance of:
+
+1. **Visual Impact** - Live dashboard with AST navigation and agent coordination
+2. **Technical Differentiation** - LoRA hot-swapping is unique and impressive
+3. **Achievable Scope** - Builds on existing infrastructure
+4. **Business Relevance** - Clear enterprise use case
+
+**Recommended Next Steps:**
+
+1. Approve this concept and begin Phase 1
+2. Set up vLLM development environment with LoRA support
+3. Create initial dashboard prototype
+4. Define specific training data for adapter fine-tuning
+
+The demo should be ready for internal presentation in 4 weeks, with another 2 weeks for polish before external audiences.

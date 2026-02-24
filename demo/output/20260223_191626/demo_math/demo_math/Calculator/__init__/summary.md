@@ -1,0 +1,1 @@
+Initializes an instance with a value set to 0.

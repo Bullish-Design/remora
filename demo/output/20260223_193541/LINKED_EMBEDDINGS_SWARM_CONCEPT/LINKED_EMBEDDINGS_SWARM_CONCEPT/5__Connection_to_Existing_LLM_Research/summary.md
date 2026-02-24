@@ -1,0 +1,1 @@
+This section establishes a connection to existing LLM research by proposing a structured, hierarchical code representation using CPGs, GNNs, and tree-based embeddings to enable agentic, interactive code navigation, transforming static analysis into dynamic, autonomous decision-making.

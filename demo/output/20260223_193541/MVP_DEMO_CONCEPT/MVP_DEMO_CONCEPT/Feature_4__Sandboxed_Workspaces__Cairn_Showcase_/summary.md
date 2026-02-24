@@ -1,0 +1,1 @@
+Feature 4: Sandboxed Workspaces enables agents to work in isolated environments with real-time change tracking, visual transformation feedback, and rollback capabilities, as detailed in the child elements.

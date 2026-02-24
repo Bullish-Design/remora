@@ -1,0 +1,1 @@
+This document explores a highly experimental, decentralized architecture for Remora, leveraging Tree-sitter's AST (Abstract Syntax Tree) representation as the operational graph for a swarm of fine-tuned micro-agents.

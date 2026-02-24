@@ -1,0 +1,1 @@
+The system enables visual, AST-driven agent coordination with real-time LoRA adapter hot-swapping, supports sandboxed multi-agent collaboration, and features an interactive live streaming dashboard for dynamic, engaging demonstrations.

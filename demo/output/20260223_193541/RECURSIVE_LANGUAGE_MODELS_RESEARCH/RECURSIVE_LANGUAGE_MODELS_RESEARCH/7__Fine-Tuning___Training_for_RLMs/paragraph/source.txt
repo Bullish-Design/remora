@@ -1,0 +1,1 @@
+However, the authors explicitly state in their "Limitations and Future Work" section that utilizing standard base models as RLMs is inefficient (e.g., they make too many unnecessary sub-calls or repeat assertions). They hypothesize that the next major axis of scale is explicitly training RLMs to navigate contexts natively.

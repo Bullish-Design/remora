@@ -1,0 +1,1 @@
+Specifies that Neovim version 0.10.0 or higher is required for enhanced file watching capabilities.

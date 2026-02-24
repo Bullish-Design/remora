@@ -1,0 +1,1 @@
+To train on consumer hardware or low-cost cloud GPUs (like a single A100 or 4x RTX 4090s), use **QLoRA (Quantized Low-Rank Adaptation)**.

@@ -1,0 +1,1 @@
+Creates a live dashboard TUI with components for event stream integration, AST visualization, and agent status monitoring.

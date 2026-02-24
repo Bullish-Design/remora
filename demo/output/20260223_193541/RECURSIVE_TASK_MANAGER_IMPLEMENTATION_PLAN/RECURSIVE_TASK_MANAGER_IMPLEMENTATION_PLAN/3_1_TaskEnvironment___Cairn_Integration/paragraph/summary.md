@@ -1,0 +1,1 @@
+The `src/remora/workspace.py` file defines `WorkspaceCache` and `WorkspaceState` classes to manage and store workspace-related data, enabling efficient retrieval and persistence of workspace configurations and states.

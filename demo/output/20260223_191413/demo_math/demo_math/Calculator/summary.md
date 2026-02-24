@@ -1,0 +1,1 @@
+The Calculator class provides basic arithmetic operations—addition, subtraction, multiplication, and division—by implementing methods that take two integer inputs and return the computed result, with division handling division by zero through a ValueError.

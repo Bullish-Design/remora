@@ -1,0 +1,2 @@
+1. The developer uses Tree-sitter object selection (e.g., `vif` to select inner function, or `vac` for class) to highlight a specific syntactic subgraph.
+2. The user describes the requested change (e.g., "Refactor this to use the Cairn KV store instead of local dicts").

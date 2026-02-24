@@ -1,0 +1,1 @@
+Enables multiple Remora instances to collaboratively execute and synchronize on the same task tree using a central Hub for coordination and state sharing.

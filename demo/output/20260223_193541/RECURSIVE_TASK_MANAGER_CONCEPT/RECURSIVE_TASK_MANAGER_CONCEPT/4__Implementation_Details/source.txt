@@ -1,0 +1,1 @@
+To achieve this architecture, we will build explicit, strictly typed Pydantic models and a stateful orchestration layer.

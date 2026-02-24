@@ -1,0 +1,1 @@
+The heading "5.2 Event Stream Integration" outlines the mechanism for capturing task completion events and forwarding them to the `handle_task_completion` function, where its child component listens to these events and routes them for processing.

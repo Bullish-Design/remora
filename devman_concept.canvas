@@ -1,0 +1,17 @@
+{
+	"nodes":[
+		{"id":"4130f642ef87bc29","type":"text","text":"Devman (Devenv.sh)","x":-453,"y":-306,"width":250,"height":66},
+		{"id":"99fccfa9cfc3d6ea","type":"text","text":"Symlinked consistent dev environment","x":-453,"y":-220,"width":250,"height":83},
+		{"id":"97755e96811ced40","type":"text","text":"Filesystem (TursoDB)","x":340,"y":-306,"width":250,"height":66},
+		{"id":"5e819c8ae7f34ebc","type":"text","text":"Interaction","x":-100,"y":-306,"width":260,"height":66},
+		{"id":"051699950e96603f","type":"text","text":"Viewport (Neovim + Tmux)","x":-100,"y":-220,"width":250,"height":66},
+		{"id":"ca6ef91762e39622","type":"text","text":"Shell (Zsh)","x":-100,"y":-137,"width":250,"height":60},
+		{"id":"8a20b9f06b6f4a5a","type":"text","text":"Templateer:\n- Mako-backed Pydantic model template generation","x":-540,"y":52,"width":444,"height":268},
+		{"id":"fc76b6993d196ef6","type":"text","text":"Pydantree\n- Pydantic veneer over treesitter cli\n- Provide typed models for highlights and tags\n- Generate pydantic classes from TS grammar + Templateer codegen via CI/CD.\n- Ideally use tree-sitter test suite too\n- Use with simple pynvim interface for access to neovim treesitter?","x":120,"y":52,"width":530,"height":268},
+		{"id":"b149868841db0f82","type":"text","text":"Confidantic\n- Pydantic shim over CUElang + CUEcli\n- Generate validation and schema files from TS grammar + Templateer codegen via CI/CD.\n- Use codegen + validation to ensure the cue files are thoroughly tested for correctness\n\t- i.e. - If the generated cue directory exists for your model, its probably valid for pydantic?\n- Use to provide ahead-of-time validation so that pydantree models can be assumed to be valid pydantic models without pydantic's checking at build?","x":120,"y":680,"width":530,"height":306},
+		{"id":"c1421bf5c96e3fc9","type":"text","text":"Grammatic:\n- Treesitter grammar workshop\n- AGENT workflows to create+validate+generate+build new grammar/test/highlight/tag\n- Try opencode + automation workflows? Just let it cook and hope the distraction time is less.","x":-540,"y":680,"width":444,"height":306},
+		{"id":"b121ba11fc301fc5","type":"text","text":"OpenCode\n- Need to use it more\n- Make some workflows, let it rip in the background, see how it does\n- Try to just get a huge flywheel going out-of-sight for new languages and features and ci/cd automations","x":-300,"y":400,"width":600,"height":186},
+		{"id":"b97b264c0e84be84","x":-965,"y":416,"width":425,"height":144,"color":"3","type":"text","text":"SANDBOX\n- Can I get agentfs working?\n- Use built in overlays (bubblewrap?) for now?"}
+	],
+	"edges":[]
+}

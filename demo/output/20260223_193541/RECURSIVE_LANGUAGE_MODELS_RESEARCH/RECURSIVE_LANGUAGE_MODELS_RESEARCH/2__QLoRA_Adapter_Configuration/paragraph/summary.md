@@ -1,0 +1,1 @@
+QLoRA enables efficient training of large language models on consumer hardware or low-cost cloud GPUs by quantizing the model and using low-rank adaptation to reduce memory and computational requirements.

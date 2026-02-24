@@ -1,0 +1,1 @@
+The Code Evolution Pipeline shows Remora enabling real-time, multi-agent codebase transformation through dynamic AST navigation and on-the-fly LoRA adapter swapping.

@@ -1,0 +1,1 @@
+The Table of Contents provides a structured overview of the document's sections, guiding readers through the comprehensive Neovim plugin development process. Its children outline key phases—such as workspace management, syntax highlighting, live file watching, and modular architecture—enabling users to navigate the detailed implementation and features efficiently.

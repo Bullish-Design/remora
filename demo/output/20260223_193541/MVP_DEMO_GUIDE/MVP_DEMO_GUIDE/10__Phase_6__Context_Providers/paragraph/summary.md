@@ -1,0 +1,1 @@
+The code generates context files that agents create, enabling users to view and access the contextual information produced by the agents.

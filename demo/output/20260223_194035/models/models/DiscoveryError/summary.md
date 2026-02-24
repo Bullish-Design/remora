@@ -1,0 +1,1 @@
+A custom exception class for discovery-related errors, inheriting from BaseDiscoveryError.

@@ -1,0 +1,1 @@
+This heading highlights vLLM's innovative LoRA adapter hot-swapping capability, with the dashboard visually demonstrating real-time adapter transitions between different agent roles, creating an engaging "wow" moment through continuous batching and dynamic swaps.

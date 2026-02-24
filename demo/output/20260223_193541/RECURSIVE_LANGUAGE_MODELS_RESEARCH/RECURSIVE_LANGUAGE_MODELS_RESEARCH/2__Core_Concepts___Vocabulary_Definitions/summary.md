@@ -1,0 +1,1 @@
+This heading introduces foundational concepts and acronyms essential for understanding the paper's architecture and evaluation methods, with child elements defining and explaining these key terms.

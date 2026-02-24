@@ -1,0 +1,1 @@
+Displays a text-based user interface (TUI) dashboard that visualizes and updates the task tree structure in real-time, allowing users to monitor task hierarchy and progress dynamically.

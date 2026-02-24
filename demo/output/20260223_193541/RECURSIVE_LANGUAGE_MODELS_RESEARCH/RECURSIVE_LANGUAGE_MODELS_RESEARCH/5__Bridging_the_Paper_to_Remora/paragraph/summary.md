@@ -1,0 +1,1 @@
+Remora's implementation in `RECURSIVE_ENVIRONMENT_MODELS.md` explores a framework where environment models recursively update themselves based on interactions, enabling dynamic and self-improving environmental simulations.

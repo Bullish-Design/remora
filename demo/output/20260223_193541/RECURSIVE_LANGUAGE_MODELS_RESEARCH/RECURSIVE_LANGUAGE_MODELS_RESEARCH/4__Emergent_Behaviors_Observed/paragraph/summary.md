@@ -1,0 +1,1 @@
+The LLM autonomously generates and follows complex traversal patterns in the context, leading to unexpected or emergent behaviors not explicitly programmed.

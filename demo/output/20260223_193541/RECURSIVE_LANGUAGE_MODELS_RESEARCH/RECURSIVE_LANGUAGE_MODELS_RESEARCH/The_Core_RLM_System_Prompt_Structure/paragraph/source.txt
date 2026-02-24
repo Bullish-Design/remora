@@ -1,0 +1,1 @@
+The system prompt for an RLM does not contain the context. Instead, it defines the rules of the sandbox. The prompt provided to GPT-5 included:

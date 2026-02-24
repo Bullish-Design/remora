@@ -1,0 +1,3 @@
+The **Linked Embeddings Swarm Concept** reimagines the codebase as a multidimensional vector space rather than a flat string of text or a simple AST graph. Each primary Tree-sitter node (functions, classes, modules) is embedded simultaneously across multiple distinct embedding spaces representing different facets of the code.
+
+By combining this with the **Recursive Environment Models (REM)** architecture, we deploy a swarm of specialized agents—each equipped with specific LoRA adapters and tools. These agents navigate the codebase by jumping between embedding spaces, querying high-quality reference libraries to find patterns, and recursively creating and refining task lists in a sandboxed environment until the user's ultimate goal is met.

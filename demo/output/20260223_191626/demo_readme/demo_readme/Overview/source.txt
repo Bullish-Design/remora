@@ -1,0 +1,1 @@
+The AST Summary Engine parses source files into hierarchical AST trees and generates summaries bottom-up.

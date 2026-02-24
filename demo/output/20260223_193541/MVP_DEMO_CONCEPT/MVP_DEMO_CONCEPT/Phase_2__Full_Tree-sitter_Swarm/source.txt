@@ -1,0 +1,3 @@
+- Train node-specific LoRA adapters
+- Implement graph algorithms (PageRank, A*)
+- Add multi-file coordination

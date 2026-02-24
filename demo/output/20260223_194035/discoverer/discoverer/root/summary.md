@@ -1,0 +1,1 @@
+The File Root module provides access to the remora package's built-in queries directory and orchestrates the discovery and analysis of source code by coordinating the TreeSitterDiscoverer's directory traversal, language-specific query loading, file grouping, and parallel parsing to efficiently extract and deduplicate CST nodes.

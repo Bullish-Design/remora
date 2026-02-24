@@ -1,0 +1,1 @@
+The demo flow outlines a sequence of steps or actions demonstrating how a system or process works, typically used to illustrate user interaction, functionality, or workflow progression.

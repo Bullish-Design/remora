@@ -1,0 +1,1 @@
+The "Features" heading outlines the core capabilities of the system, which include parsing multiple file formats, generating recursive summaries, providing real-time progress monitoring, and executing isolated workspace environments for each file node. Its children detail how each functionality is implemented and integrated into the workflow.

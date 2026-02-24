@@ -1,0 +1,1 @@
+The method enables agents to perform semantic arithmetic on aligned embedding spaces to identify specific nodes or infer intended meanings.

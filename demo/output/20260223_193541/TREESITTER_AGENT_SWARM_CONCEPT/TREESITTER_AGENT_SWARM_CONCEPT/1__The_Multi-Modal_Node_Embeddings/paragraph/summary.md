@@ -1,0 +1,1 @@
+The code describes a method where each node in an AST (Abstract Syntax Tree) is represented as an embedding across multiple linked vector spaces, each capturing a different conceptual dimension of the node.

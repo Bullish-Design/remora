@@ -1,0 +1,1 @@
+The output of a `TaskNode` execution represents the result or data produced when a task node is executed within a workflow or pipeline.

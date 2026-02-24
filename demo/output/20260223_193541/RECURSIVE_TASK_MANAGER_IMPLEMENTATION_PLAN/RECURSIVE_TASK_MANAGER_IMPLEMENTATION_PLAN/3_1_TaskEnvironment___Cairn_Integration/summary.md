@@ -1,0 +1,1 @@
+This heading outlines the integration of Cairn into the task environment, focusing on enabling isolated workspaces with resource limits, state management, and parent workspace overlay support. Its children detail workspace caching, state management, implementation steps, and metadata extensions that collectively enable efficient, secure, and context-aware workspace operations.

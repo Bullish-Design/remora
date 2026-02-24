@@ -1,0 +1,1 @@
+The heading "2.1 Concept Overview" introduces the core idea of Remora's real-time, multi-agent codebase transformation capability, with the child element explaining how dynamic AST navigation and on-the-fly LoRA adapter swapping enable efficient and adaptive code evolution.

@@ -135,27 +135,73 @@ def _build_markdown_tree(node: Node, source_bytes: bytes, parent: AstNode | None
             _build_markdown_tree(child, source_bytes, ast_node)
         return ast_node
 
+    if node.type == "section":
+        heading_node: AstNode | None = None
+        section_parent = parent
+
+        for child in node.children:
+            if child.type in ("atx_heading", "setext_heading"):
+                heading_node = _build_markdown_tree(child, source_bytes, section_parent)
+            elif child.type == "section":
+                _build_markdown_tree(child, source_bytes, section_parent)
+            elif child.type in ("paragraph", "list", "block_quote", "code_fence") and heading_node is not None:
+                content = source_bytes[child.start_byte : child.end_byte].decode("utf-8").strip()
+                if content:
+                    content_node = AstNode(
+                        node_type=child.type.replace("_", " ").title().replace(" ", ""),
+                        name=child.type,
+                        source_text=content,
+                    )
+                    heading_node.children.append(content_node)
+
+        if heading_node is not None and heading_node.children:
+            heading_node.source_text = "\n\n".join(c.source_text for c in heading_node.children)
+
+        return None
+
     if node.type in ("atx_heading", "setext_heading"):
         heading_text = None
         for child in node.children:
             if child.type == "heading_text":
                 heading_text = child
                 break
-
-        if node.type == "atx_heading":
-            for child in node.children:
-                if child.type == "atx_hard_break":
-                    pass
+            if child.type == "inline" and heading_text is None:
+                heading_text = child
 
         name = (
-            source_bytes[heading_text.start_byte : heading_text.end_byte].decode("utf-8") if heading_text else "heading"
+            source_bytes[heading_text.start_byte : heading_text.end_byte].decode("utf-8").strip()
+            if heading_text
+            else "heading"
         )
+        level = 1
+        if node.type == "atx_heading":
+            for child in node.children:
+                if child.type.startswith("atx_h"):
+                    level = int(child.type.split("_")[1][1])
+                    break
+        elif node.type == "setext_heading":
+            for child in node.children:
+                if child.type.startswith("setext_h"):
+                    level = int(child.type.split("_")[1][1])
+                    break
+
         ast_node = AstNode(
-            node_type="Heading",
+            node_type=f"Heading{level}",
             name=name,
-            source_text=source_bytes[node.start_byte : node.end_byte].decode("utf-8"),
+            source_text="",
         )
 
+        if parent is not None:
+            parent.children.append(ast_node)
+        return ast_node
+
+    if node.type in ("paragraph", "list", "block_quote", "code_fence"):
+        content = source_bytes[node.start_byte : node.end_byte].decode("utf-8").strip()
+        ast_node = AstNode(
+            node_type=node.type.replace("_", " ").title().replace(" ", ""),
+            name=node.type,
+            source_text=content,
+        )
         if parent is not None:
             parent.children.append(ast_node)
         return ast_node

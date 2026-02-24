@@ -1,0 +1,1 @@
+The `TaskManager` class orchestrates task execution with async sub-task spawning and integrates an event stream to handle task completions and coordination.

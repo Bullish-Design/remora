@@ -1,0 +1,15 @@
+1.  **Task Ingestion**: The Architect receives a goal (e.g., "Implement JWT auth") and creates a `task.md` file in the Cairn KV memory bus. It queries the Semantic Space for "auth" and identifies 3 relevant nodes.
+2.  **Context Iteration (The RLM Pattern)**:
+    *   The Architect operates within its sandboxed Cairn Workspace. It uses tools to perform cross-space searches and writes the results to context files in the workspace: 
+        ```python
+        # Agent's generated search query via tools
+        semantic_hits = vector_db.search("semantic", query="user authentication", top_k=5)
+        graph_dependencies = vector_db.search("graph", query=semantic_hits[0].node_id)
+        ```
+    *   It refines its understanding by aggregating context across dimensions and analyzing the physical files generated in its workspace, providing physical evidence of its thought process.
+3.  **Task Refinement & Creation**:
+    *   Discovering that a password hashing utility is missing, the Architect updates the `task.md` in the Cairn KV to add: `[ ] Create hashing utility`.
+    *   It recursively spawns an Implementer agent for this new sub-task, passing the localized context and provisioning a child Cairn Workspace.
+4.  **Reference Implementation**:
+    *   The Implementer searches the Code Space of a *Golden Reference Library* (e.g., FastAPI's security utils) to retrieve an idiomatic, highly-rated implementation of password hashing.
+    *   The Implementer creates the new file (`security.py`) directly within its Cairn Workspace, writes the code, and marks the sub-task as complete `[x]`.

@@ -1,0 +1,4 @@
+By aligning the embedding spaces, agents can perform semantic arithmetic to isolate specific nodes or divine intent.
+
+* **Cross-Modal Retrieval Projection:** An agent takes a semantic query ("handles user authentication") and projects it into the Topological space to find the *shape* of authentication (e.g., a function wrapping a database call returning a boolean).
+* **Concept Arithmetic (Latent Space Algebra):** The ability to do math on code concepts. For example: `Vector("def execute(task)") - Vector("local execution") + Vector("remote API call") = Vector(Desired Final State)`. A `vector_arithmetic.pym` script takes node embeddings, adds/subtracts context vectors, and queries the database for the closest resulting structural match to use as an implementation template.

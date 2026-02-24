@@ -1,0 +1,2 @@
+**The Concept:**
+Instead of passing the entire codebase to a single logic model as a massive string prompt, the Root Architect is placed in a sandbox where the *Tree-sitter AST is a queryable object*. The model operates programmatically on the tree, completely unconstrained by strict traversal rules.

@@ -1,0 +1,1 @@
+**Goal**: Create plugin structure that manages workspaces instead of subprocesses.

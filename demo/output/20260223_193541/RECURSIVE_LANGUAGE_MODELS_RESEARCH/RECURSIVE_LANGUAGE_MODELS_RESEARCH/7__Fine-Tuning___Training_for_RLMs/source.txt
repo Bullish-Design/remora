@@ -1,0 +1,3 @@
+**Crucial Clarification:** The authors of the paper **did not perform any fine-tuning** or custom training for their RLMs. The phenomenal results achieved in the paper (handling 10M+ tokens) were done purely via Zero-Shot and Few-Shot prompting of off-the-shelf frontier models (GPT-5 and Qwen3-Coder-480B).
+
+However, the authors explicitly state in their "Limitations and Future Work" section that utilizing standard base models as RLMs is inefficient (e.g., they make too many unnecessary sub-calls or repeat assertions). They hypothesize that the next major axis of scale is explicitly training RLMs to navigate contexts natively.

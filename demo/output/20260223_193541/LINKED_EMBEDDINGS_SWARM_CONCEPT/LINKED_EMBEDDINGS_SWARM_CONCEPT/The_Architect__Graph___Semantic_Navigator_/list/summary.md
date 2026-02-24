@@ -1,0 +1,1 @@
+This component analyzes the initial prompt by querying semantic and graph spaces to determine the scope of related information, then initializes a task file (`task.md`) in the Cairn KV memory system to store and manage the request's context and expansion.

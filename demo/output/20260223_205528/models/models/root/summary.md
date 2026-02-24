@@ -1,0 +1,1 @@
+The File Root module provides error handling and file hashing capabilities for consistent file identification. It uses a custom exception class to manage discovery errors and computes a stable SHA-256 hash of file metadata to ensure consistency across reformatting.

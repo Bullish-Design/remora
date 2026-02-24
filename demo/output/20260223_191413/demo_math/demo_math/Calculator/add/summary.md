@@ -1,0 +1,1 @@
+This method takes two integer inputs and returns their sum.

@@ -1,0 +1,1 @@
+Initializes the parser with a specified Tree-sitter grammar module by importing it and creating a Language and Parser instance from the imported module.

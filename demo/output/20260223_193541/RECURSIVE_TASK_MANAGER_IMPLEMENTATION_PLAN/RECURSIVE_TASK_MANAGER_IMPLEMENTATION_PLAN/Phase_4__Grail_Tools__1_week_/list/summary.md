@@ -1,0 +1,1 @@
+These tasks involve developing and implementing tools for spawning sub-tasks, enabling hub communication via read/write operations, and injecting context into task and hub clients to facilitate their operation.
