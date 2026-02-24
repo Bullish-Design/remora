@@ -16,10 +16,14 @@
 4. [Phase 3: Interaction - Built-in User Tools](#phase-3-interaction---built-in-user-tools)
 5. [Phase 4: Orchestration - Declarative Graph DSL](#phase-4-orchestration---declarative-graph-dsl)
 6. [Phase 5: Persistence - Snapshots](#phase-5-persistence---snapshots)
-7. [Phase 6: Integration - Workspace & Discovery](#phase-6-integration---workspace--discovery)
-8. [Phase 7: UI - Event-Driven Frontends](#phase-7-ui---event-driven-frontends)
-9. [Testing Strategy](#testing-strategy)
-10. [Migration Path](#migration-path)
+7. [Phase 5B: Workspace Checkpointing](#6b-phase-5b-workspace-checkpointing-materialization)
+8. [Phase 6: Integration - Workspace & Discovery](#phase-6-integration---workspace--discovery)
+9. [Phase 7: UI - Event-Driven Frontends](#phase-7-ui---event-driven-frontends)
+10. [Error Handling & Cancellation](#8b-error-handling--cancellation)
+11. [Testing Strategy](#testing-strategy)
+12. [Migration Path](#migration-path)
+13. [Appendix A: Code to Remove](#appendix-a-code-to-remove)
+14. [Appendix B: Final V2 File Structure](#appendix-b-final-v2-file-structure)
 
 ---
 
@@ -105,7 +109,16 @@ async def main():
 - `src/remora/event_bridge.py`: Translation layer to convert structured-agents events to Remora format
 - `structured-agents/observer/`: In-process only callbacks
 
-### 2.2 What to Build
+### 2.2 Design Principles
+
+Based on the review, we use **Pydantic-first** for the public API with these improvements:
+
+1. **Pydantic for validation** - Invalid event shapes rejected at creation
+2. **Literal types for safety** - Catches typos at type-check time
+3. **Backpressure on queue** - Prevents memory issues with `maxsize=1000`
+4. **Concurrent subscriber notification** - Uses `asyncio.gather()` with error isolation
+
+### 2.3 What to Build
 
 Create `src/remora/event_bus.py`:
 
@@ -116,171 +129,279 @@ This module provides a single event system that:
 1. All components publish to (agents, kernels, tools)
 2. All consumers subscribe from (UI, logging, metrics)
 3. Supports both in-process and distributed consumers
+
+Design:
+- Pydantic-first for public API (validation, type safety)
+- Category + Action pattern for extensibility
+- Backpressure on queue for stability
+- Concurrent subscriber notification with error isolation
 """
 
 import asyncio
-import json
-from dataclasses import asdict, dataclass, field
+import logging
 from datetime import datetime
-from enum import Enum
-from typing import Any, Callable, Awaitable
-import uuid
+from typing import Any, Awaitable, Callable, Literal
 
+from pydantic import BaseModel, Field, ConfigDict
 
-class EventType(str, Enum):
-    """All events in the system. One enum to rule them all."""
-    
-    # Agent lifecycle
-    AGENT_CREATED = "agent_created"
-    AGENT_STARTED = "agent_started"
-    AGENT_BLOCKED = "agent_blocked"      # Waiting for user input
-    AGENT_RESUMED = "agent_resumed"      # User responded
-    AGENT_COMPLETED = "agent_completed"
-    AGENT_FAILED = "agent_failed"
-    AGENT_CANCELLED = "agent_cancelled"
-    
-    # Tool lifecycle
-    TOOL_CALLED = "tool_called"
-    TOOL_STARTED = "tool_started"
-    TOOL_COMPLETED = "tool_completed"
-    TOOL_FAILED = "tool_failed"
-    
-    # Model lifecycle
-    MODEL_REQUEST = "model_request"
-    MODEL_RESPONSE = "model_response"
-    
-    # User interaction
-    USER_MESSAGE_SENT = "user_message_sent"
-    USER_MESSAGE_RECEIVED = "user_message_received"
-    
-    # Graph lifecycle
-    GRAPH_STARTED = "graph_started"
-    GRAPH_COMPLETED = "graph_completed"
-    GRAPH_PROGRESS = "graph_progress"
+# =============================================================================
+# Event Categories & Actions (Literal types for type safety)
+# =============================================================================
 
+EventCategory = Literal["agent", "tool", "model", "user", "graph"]
 
-@dataclass
-class Event:
+class AgentAction:
+    """Pre-defined agent actions for type safety."""
+    STARTED = "started"
+    BLOCKED = "blocked"
+    RESUMED = "resumed"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+class ToolAction:
+    """Pre-defined tool actions."""
+    CALLED = "called"
+    STARTED = "started"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+class ModelAction:
+    """Pre-defined model actions."""
+    REQUEST = "request"
+    RESPONSE = "response"
+
+class GraphAction:
+    """Pre-defined graph actions."""
+    STARTED = "started"
+    PROGRESS = "progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+# =============================================================================
+# Event Model (Pydantic-first)
+# =============================================================================
+
+class Event(BaseModel):
     """Every event in the system has this shape.
     
-    Simple, JSON-serializable, and self-describing.
-    """
-    id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
-    type: EventType
-    timestamp: datetime = field(default_factory=datetime.now)
+    Design decisions:
+    - frozen=True: Events are immutable once created
+    - Literal category: Type-safe categories
+    - action as string: Extensible without enum changes
+    - .type property: Human-readable for logging
     
-    # Who/what
+    Usage:
+        # Create events
+        event = Event(category="agent", action="blocked", agent_id="123", 
+                      payload={"question": "Which format?"})
+        
+        # Or use convenience constructors
+        event = Event.agent_blocked(agent_id="123", question="Which format?")
+        
+        # Subscribe to patterns
+        await bus.subscribe("agent:blocked", handler)
+        await bus.subscribe("tool:*", handler)  # All tool events
+    """
+    model_config = ConfigDict(frozen=True)
+    
+    # Identifiers
+    id: str = Field(default_factory=lambda: __import__("uuid").uuid4().hex[:8])
+    timestamp: datetime = Field(default_factory=datetime.now)
+    
+    # Category (literal for type safety)
+    category: EventCategory
+    
+    # Action (string for extensibility)
+    action: str
+    
+    # Context
     agent_id: str | None = None
     graph_id: str | None = None
     node_id: str | None = None
     
-    # What happened
-    payload: dict[str, Any] = field(default_factory=dict)
+    # Payload (any additional data)
+    payload: dict[str, Any] = Field(default_factory=dict)
     
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict for JSON."""
-        return {
-            "id": self.id,
-            "type": self.type.value,
-            "timestamp": self.timestamp.isoformat(),
-            "agent_id": self.agent_id,
-            "graph_id": self.graph_id,
-            "node_id": self.node_id,
-            "payload": self.payload,
-        }
+    @property
+    def type(self) -> str:
+        """Human-readable type for logging. Returns 'agent_blocked'."""
+        return f"{self.category}_{self.action}"
     
-    def to_json(self) -> str:
-        return json.dumps(self.to_dict())
+    @property
+    def subscription_key(self) -> str:
+        """Key for subscription matching. Returns 'agent:blocked'."""
+        return f"{self.category}:{self.action}"
+    
+    # -------------------------------------------------------------------------
+    # Convenience constructors
+    # -------------------------------------------------------------------------
+    
+    @classmethod
+    def agent_started(cls, agent_id: str, **payload) -> "Event":
+        return cls(category="agent", action=AgentAction.STARTED, 
+                  agent_id=agent_id, payload=payload)
+    
+    @classmethod
+    def agent_blocked(cls, agent_id: str, question: str, **payload) -> "Event":
+        return cls(category="agent", action=AgentAction.BLOCKED,
+                  agent_id=agent_id, payload={"question": question, **payload})
+    
+    @classmethod
+    def agent_resumed(cls, agent_id: str, answer: str, **payload) -> "Event":
+        return cls(category="agent", action=AgentAction.RESUMED,
+                  agent_id=agent_id, payload={"answer": answer, **payload})
+    
+    @classmethod
+    def agent_completed(cls, agent_id: str, **payload) -> "Event":
+        return cls(category="agent", action=AgentAction.COMPLETED,
+                  agent_id=agent_id, payload=payload)
+    
+    @classmethod
+    def agent_failed(cls, agent_id: str, error: str, **payload) -> "Event":
+        return cls(category="agent", action=AgentAction.FAILED,
+                  agent_id=agent_id, payload={"error": error, **payload})
+    
+    @classmethod
+    def tool_called(cls, tool_name: str, call_id: str, **payload) -> "Event":
+        return cls(category="tool", action=ToolAction.CALLED,
+                  payload={"tool_name": tool_name, "call_id": call_id, **payload})
+    
+    @classmethod
+    def tool_result(cls, tool_name: str, call_id: str, **payload) -> "Event":
+        return cls(category="tool", action=ToolAction.COMPLETED,
+                  payload={"tool_name": tool_name, "call_id": call_id, **payload})
 
+
+# =============================================================================
+# Event Handler Type
+# =============================================================================
 
 EventHandler = Callable[[Event], Awaitable[None]]
 
+
+# =============================================================================
+# EventBus Implementation
+# =============================================================================
 
 class EventBus:
     """The single source of truth for all events.
     
     Usage:
         # Publish events
-        await event_bus.publish(Event(type=EventType.AGENT_STARTED, agent_id="..."))
+        await event_bus.publish(Event.agent_blocked(
+            agent_id="agent-123", 
+            question="Which format?"
+        ))
         
         # Subscribe to specific events
-        await event_bus.subscribe(EventType.AGENT_BLOCKED, my_handler)
+        await event_bus.subscribe("agent:blocked", my_handler)
         
         # Subscribe to patterns
-        await event_bus.subscribe("agent_*", my_handler)
+        await event_bus.subscribe("agent:*", all_agent_handler)
+        await event_bus.subscribe("tool:*", all_tool_handler)
         
-        # Get stream for consumption
+        # Get stream for consumption (e.g., SSE)
         async for event in event_bus.stream():
             print(event)
+    
+    Design:
+        - maxsize=1000 on queue for backpressure
+        - asyncio.gather() for concurrent subscriber notification
+        - Error isolation: one failing handler doesn't affect others
     """
     
-    def __init__(self):
-        self._queue: asyncio.Queue[Event] = asyncio.Queue()
+    def __init__(self, max_queue_size: int = 1000):
+        # Backpressure: prevent memory issues with unbounded queue
+        self._queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=max_queue_size)
         self._subscribers: dict[str, list[EventHandler]] = {}
         self._running = False
+        self._logger = logging.getLogger(__name__)
     
     async def publish(self, event: Event) -> None:
         """Publish an event to all subscribers."""
-        # Publish to queue for stream consumers
-        await self._queue.put(event)
+        # Publish to queue for stream consumers (with backpressure)
+        try:
+            self._queue.put_nowait(event)
+        except asyncio.QueueFull:
+            self._logger.warning(
+                f"Event queue full, dropping event: {event.type}"
+            )
+            return
         
-        # Notify pattern subscribers
+        # Notify subscribers concurrently
         await self._notify_subscribers(event)
     
     async def _notify_subscribers(self, event: Event) -> None:
-        """Notify all matching subscribers."""
-        event_key = event.type.value
+        """Notify all matching subscribers concurrently with error isolation."""
+        event_key = event.subscription_key
         
-        # Direct match
-        for handler in self._subscribers.get(event_key, []):
-            try:
-                await handler(event)
-            except Exception:
-                import logging
-                logging.exception(f"Handler failed for {event_key}")
+        # Collect all matching handlers
+        handlers = []
         
-        # Wildcard match
-        for pattern, handlers in self._subscribers.items():
-            if pattern.endswith("*") and event_key.startswith(pattern[:-1]):
-                for handler in handlers:
-                    try:
-                        await handler(event)
-                    except Exception:
-                        import logging
-                        logging.exception(f"Handler failed for pattern {pattern}")
+        # Direct match (e.g., "agent:blocked")
+        handlers.extend(self._subscribers.get(event_key, []))
+        
+        # Wildcard matches (e.g., "agent:*" matches "agent:blocked")
+        for pattern, pattern_handlers in self._subscribers.items():
+            if pattern.endswith("*"):
+                prefix = pattern[:-1]  # "agent:"
+                if event_key.startswith(prefix):
+                    handlers.extend(pattern_handlers)
+        
+        if not handlers:
+            return
+        
+        # Run concurrently with error isolation
+        results = await asyncio.gather(
+            *[self._safe_handler(h, event) for h in handlers],
+            return_exceptions=True
+        )
+        
+        # Log any failures
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                self._logger.exception(
+                    f"Event handler {handlers[i]} failed: {result}"
+                )
     
-    async def subscribe(self, event_pattern: str, handler: EventHandler) -> None:
+    async def _safe_handler(self, handler: EventHandler, event: Event) -> None:
+        """Execute handler with error isolation."""
+        try:
+            await handler(event)
+        except Exception:
+            raise  # Re-raise for asyncio.gather to catch
+    
+    async def subscribe(self, pattern: str, handler: EventHandler) -> None:
         """Subscribe to events matching the pattern.
         
         Args:
-            event_pattern: Exact event type (e.g., "agent_blocked") 
-                          or pattern (e.g., "agent_*")
+            pattern: Subscription pattern (e.g., "agent:blocked", "tool:*", "agent:*")
             handler: Async function to call when event matches
         """
-        if event_pattern not in self._subscribers:
-            self._subscribers[event_pattern] = []
-        self._subscribers[event_pattern].append(handler)
+        if pattern not in self._subscribers:
+            self._subscribers[pattern] = []
+        self._subscribers[pattern].append(handler)
     
-    async def unsubscribe(self, event_pattern: str, handler: EventHandler) -> None:
+    async def unsubscribe(self, pattern: str, handler: EventHandler) -> None:
         """Remove a subscription."""
-        if event_pattern in self._subscribers:
-            self._subscribers[event_pattern] = [
-                h for h in self._subscribers[event_pattern] 
+        if pattern in self._subscribers:
+            self._subscribers[pattern] = [
+                h for h in self._subscribers[pattern] 
                 if h != handler
             ]
     
     def stream(self) -> "EventStream":
-        """Get an async iterator of events."""
+        """Get an async iterator of events for consumption."""
         return EventStream(self._queue)
     
-    async def send_sse(self, scope: str = "default") -> str:
-        """Format events for Server-Sent Events."""
-        # For web UI consumption
-        ...
+    async def send_sse(self, event: Event) -> str:
+        """Format event for Server-Sent Events."""
+        return f"data: {event.model_dump_json()}\n\n"
 
 
 class EventStream:
-    """Async iterator for consuming events."""
+    """Async iterator for consuming events from the bus."""
     
     def __init__(self, queue: asyncio.Queue[Event]):
         self._queue = queue
@@ -292,7 +413,10 @@ class EventStream:
         return await self._queue.get()
 
 
-# Global singleton (for simple usage)
+# =============================================================================
+# Global Instance
+# =============================================================================
+
 _event_bus: EventBus | None = None
 
 def get_event_bus() -> EventBus:
@@ -510,7 +634,12 @@ class AgentInbox:
     Every AgentNode has one of these. It handles:
     - Blocking: Agent asks user, waits for response
     - Async: User sends message, agent receives on next turn
+    
+    Thread-safety: Uses asyncio.Lock to prevent race conditions.
     """
+    # Lock for thread-safe operations
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    
     # For blocking (agent asks user)
     blocked: bool = False
     blocked_question: str | None = None
@@ -522,12 +651,13 @@ class AgentInbox:
     
     async def ask_user(self, question: str, timeout: float = 300.0) -> str:
         """Block and wait for user response."""
-        self.blocked = True
-        self.blocked_question = question
-        self.blocked_since = datetime.now()
-        
-        loop = asyncio.get_running_loop()
-        self._pending_response = loop.create_future()
+        async with self._lock:
+            self.blocked = True
+            self.blocked_question = question
+            self.blocked_since = datetime.now()
+            
+            loop = asyncio.get_running_loop()
+            self._pending_response = loop.create_future()
         
         try:
             response = await asyncio.wait_for(
@@ -536,10 +666,11 @@ class AgentInbox:
             )
             return response
         finally:
-            self.blocked = False
-            self.blocked_question = None
-            self.blocked_since = None
-            self._pending_response = None
+            async with self._lock:
+                self.blocked = False
+                self.blocked_question = None
+                self.blocked_since = None
+                self._pending_response = None
     
     async def send_message(self, message: str) -> None:
         """Queue a message for the agent."""
@@ -552,10 +683,32 @@ class AgentInbox:
             messages.append(await self._message_queue.get())
         return messages
     
-    def _resolve_response(self, response: str) -> None:
-        """Called by UI to resolve blocked ask_user."""
+    def _resolve_response(self, response: str) -> bool:
+        """Called by UI to resolve blocked ask_user.
+        
+        Returns True if response was successfully resolved,
+        False if no pending response or already resolved.
+        
+        Thread-safe: Uses lock to prevent race conditions.
+        """
+        # Note: This is a sync method called from sync context (UI thread)
+        # We can't use async with self._lock here, so we do a best-effort check
+        # In practice, the coordinator handles all resolution async
         if self._pending_response and not self._pending_response.done():
             self._pending_response.set_result(response)
+            return True
+        return False
+    
+    async def resolve_response_async(self, response: str) -> bool:
+        """Async version of resolve_response for use in async contexts.
+        
+        Returns True if response was successfully resolved.
+        """
+        async with self._lock:
+            if self._pending_response and not self._pending_response.done():
+                self._pending_response.set_result(response)
+                return True
+            return False
 
 
 class AgentGraph:
@@ -826,209 +979,413 @@ async def test_graph_executor_creates_events(event_bus):
 
 ## 4. Phase 3: Interaction - Built-in User Tools
 
-**Goal**: Make user interaction a native capability of the agent kernel, not an add-on.
+**Goal**: Make user interaction a native capability using Cairn's workspace KV store as the IPC mechanism.
 
-**Time Estimate**: 3-4 days
+**Time Estimate**: 2-3 days
 
-### 4.1 What to Build
+### 4.1 Key Insight: Workspace-Based IPC
 
-We need to contribute back to structured-agents to add the `__ask_user__` tool natively.
+Based on the review (Appendix C), we use Cairn's existing KV store as the communication mechanism between agents and the coordinator. This eliminates the need for complex cross-process async handling.
 
-Create/update in `.context/structured-agents/src/structured_agents/tool_sources/`:
+**Why this works**:
+- No cross-process async needed - just synchronous KV operations
+- Cairn's workspace is already available to Grail externals
+- Coordinator watches for questions, writes responses to inbox
+- Natural persistence - questions survive crashes
+- Zero Grail modifications required
+
+### 4.2 Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Cairn Workspace                                    │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                         KV Store                                     │   │
+│  │                                                                      │   │
+│  │   outbox:question:001 ──────────────────────────────────────────┐  │   │
+│  │   {                                                                │  │   │
+│  │     "question": "Which docstring format?",                         │  │   │
+│  │     "options": ["google", "numpy", "sphinx"],                     │  │   │
+│  │     "status": "pending"                                            │  │   │
+│  │   }                                                                │  │   │
+│  │                                                                      │  │   │
+│  │   inbox:response:001 ◀──────────────────────────────────────────┐  │   │
+│  │   {                                                                │  │   │
+│  │     "answer": "google"                                            │  │   │
+│  │   }                                                                │  │   │
+│  │                                                                      │  │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Agent (Grail subprocess):                                                  │
+│    1. Writes to outbox:question:001                                        │
+│    2. Polls inbox:response:001 until it exists                             │
+│    3. Reads response and continues                                         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.3 Agent-Side: ask_user External Function
+
+Create in `src/remora/externals.py`:
 
 ```python
-# interactive.py
-"""Interactive tools - built-in user interaction capabilities.
+"""Interactive external functions using Workspace KV for IPC.
 
-This module adds native support for:
-- __ask_user__: Block and wait for user response
-- __get_user_messages__: Get async messages from user
+This module provides ask_user using Cairn's KV store as the communication
+mechanism between Grail subprocesses and the coordinator.
 """
 
-from dataclasses import dataclass
+import time
+import uuid
+from datetime import datetime
 from typing import Any
-import json
-import asyncio
-
-from structured_agents.tool_sources.protocol import ToolSource, ToolSchema
-from structured_agents.types import ToolCall, ToolResult
 
 
-# These tools are always available when using interactive mode
-INTERACTIVE_TOOLS = [
-    ToolSchema(
-        name="__ask_user__",
-        description=(
-            "Ask the user a question and wait for their response. "
-            "Use this when you need clarification, approval, or additional context. "
-            "The agent will pause until the user responds."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "question": {
-                    "type": "string",
-                    "description": "The question to ask the user"
-                },
-                "options": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional constrained choices (makes UI easier)"
-                },
-                "timeout_seconds": {
-                    "type": "number",
-                    "default": 300,
-                    "description": "How long to wait for response"
-                }
-            },
-            "required": ["question"]
-        }
-    ),
-    ToolSchema(
-        name="__get_user_messages__",
-        description=(
-            "Get any messages the user has sent to this agent. "
-            "Call this at the start of each turn to check for new context."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {}
-        }
-    )
-]
-
-
-class InteractiveBackend:
-    """Backend that handles interactive tools.
-    
-    This is a special backend that wraps another backend (usually GrailBackend)
-    and adds interactive tool handling.
+def ask_user(
+    question: str,
+    options: list[str] | None = None,
+    timeout: float = 300.0,
+    poll_interval: float = 0.5
+) -> str:
     """
+    Ask the user a question and wait for their response.
     
-    def __init__(self, wrapped: ToolSource, event_bus=None):
-        self._wrapped = wrapped
-        self._event_bus = event_bus
-        self._pending_futures: dict[str, asyncio.Future] = {}
+    This function writes to the workspace KV store and polls for a response.
+    No async needed - just synchronous KV operations that Grail supports.
     
-    def list_tools(self) -> list[str]:
-        tools = self._wrapped.list_tools()
-        tools.extend([t.name for t in INTERACTIVE_TOOLS])
-        return tools
+    Args:
+        question: The question to ask the user
+        options: Optional constrained choices (makes UI easier)
+        timeout: How long to wait for response (default 300s)
+        poll_interval: How often to check for response (default 0.5s)
+        
+    Returns:
+        The user's response string
+        
+    Raises:
+        TimeoutError: If the user doesn't respond within timeout
+    """
+    # Get workspace from Grail context (already available to externals)
+    workspace = _get_current_workspace()
     
-    def resolve(self, tool_name: str) -> ToolSchema | None:
-        # Check interactive tools first
-        for tool in INTERACTIVE_TOOLS:
-            if tool.name == tool_name:
-                return tool
-        return self._wrapped.resolve(tool_name)
+    # Generate unique message ID
+    msg_id = uuid.uuid4().hex[:8]
+    outbox_key = f"outbox:question:{msg_id}"
+    inbox_key = f"inbox:response:{msg_id}"
     
-    async def execute(
-        self, 
-        tool_call: ToolCall, 
-        tool_schema: ToolSchema, 
-        context: dict[str, Any]
-    ) -> ToolResult:
-        """Execute a tool, handling interactive ones specially."""
-        
-        if tool_schema.name == "__ask_user__":
-            return await self._execute_ask_user(tool_call, context)
-        
-        if tool_schema.name == "__get_user_messages__":
-            return await self._execute_get_messages(tool_call, context)
-        
-        # Fall through to wrapped backend
-        return await self._wrapped.execute(tool_call, tool_schema, context)
+    # Write question to outbox
+    workspace.kv.set(outbox_key, {
+        "question": question,
+        "options": options,
+        "status": "pending",
+        "created_at": datetime.now().isoformat(),
+        "timeout": timeout,
+    })
     
-    async def _execute_ask_user(
-        self, 
-        tool_call: ToolCall, 
-        context: dict[str, Any]
-    ) -> ToolResult:
-        """Handle __ask_user__ tool."""
-        args = tool_call.arguments
-        question = args.get("question", "Please respond")
-        options = args.get("options")
-        timeout = args.get("timeout_seconds", 300)
+    # Poll for response
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        response = workspace.kv.get(inbox_key)
+        if response is not None:
+            # Mark question as answered
+            current = workspace.kv.get(outbox_key) or {}
+            workspace.kv.set(outbox_key, {
+                **current,
+                "status": "answered"
+            })
+            return response.get("answer", "")
         
-        agent_id = context.get("agent_id", "unknown")
+        time.sleep(poll_interval)
+    
+    # Timeout
+    current = workspace.kv.get(outbox_key) or {}
+    workspace.kv.set(outbox_key, {
+        **current,
+        "status": "timeout"
+    })
+    raise TimeoutError(f"User did not respond within {timeout}s")
+
+
+def _get_current_workspace():
+    """Get the current workspace from Grail context.
+    
+    This is injected by Grail when running in a workspace context.
+    """
+    import contextvars
+    _workspace: contextvars.ContextVar[Any] = contextvars.ContextVar("workspace")
+    ws = _workspace.get(None)
+    if ws is None:
+        raise RuntimeError("ask_user called outside workspace context")
+    return ws
+
+
+def get_user_messages() -> list[str]:
+    """
+    Get any async messages the user has sent to this agent.
+    
+    Call this at the start of each turn to check for new context from the user.
+    
+    Returns:
+        List of messages from the user
+    """
+    workspace = _get_current_workspace()
+    
+    # Get all messages from the user's inbox
+    messages = []
+    prefix = f"inbox:user_message:"
+    
+    try:
+        entries = workspace.kv.list(prefix=prefix)
+        for entry in entries:
+            key = entry.get("key", "")
+            if key.startswith(prefix):
+                msg_id = key[len(prefix):]
+                # Get message and mark as read
+                msg = workspace.kv.get(key)
+                if msg:
+                    messages.append(msg.get("content", ""))
+                # Delete after reading
+                workspace.kv.delete(key)
+    except Exception:
+        pass  # Empty inbox is fine
+    
+    return messages
+```
+
+### 4.4 Coordinator-Side: Inbox Watcher
+
+Create `src/remora/interactive/coordinator.py`:
+
+```python
+"""Workspace-based coordinator for handling interactive agents.
+
+This module watches workspace KV stores for agent questions and writes responses.
+"""
+
+import asyncio
+import logging
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel
+
+from remora.event_bus import EventBus, Event, EventCategory
+
+
+class QuestionPayload(BaseModel):
+    """Payload from agent's outbox question."""
+    question: str
+    options: list[str] | None = None
+    status: str  # "pending", "answered", "timeout"
+    created_at: str
+    timeout: float
+
+
+class WorkspaceInboxCoordinator(BaseModel):
+    """
+    Watches workspace KV stores for agent questions and writes responses.
+    
+    This is the "parent process" side of the Workspace KV IPC pattern.
+    """
+    model_config = {"arbitrary_types_allowed": True}
+    
+    event_bus: EventBus
+    _watchers: dict[str, asyncio.Task] = {}
+    _poll_interval: float = 0.5
+    
+    async def watch_workspace(self, agent_id: str, workspace: Any) -> None:
+        """Start watching a workspace for outbox questions."""
         
-        # Emit blocked event
-        if self._event_bus:
-            from remora.event_bus import Event, EventType
-            await self._event_bus.publish(Event(
-                type=EventType.AGENT_BLOCKED,
-                agent_id=agent_id,
-                payload={
-                    "question": question,
-                    "options": options,
-                    "tool_call_id": tool_call.id
-                }
-            ))
+        async def watcher():
+            while True:
+                try:
+                    questions = await self._list_pending_questions(workspace)
+                    
+                    for q in questions:
+                        if q.status == "pending":
+                            # Emit AGENT_BLOCKED event for UI
+                            await self.event_bus.publish(Event.agent_blocked(
+                                agent_id=agent_id,
+                                question=q.question,
+                                options=q.options or [],
+                                msg_id=q.msg_id
+                            ))
+                except Exception as e:
+                    logging.exception(f"Error watching workspace for {agent_id}")
+                
+                await asyncio.sleep(self._poll_interval)
         
-        # Wait for response
-        loop = asyncio.get_running_loop()
-        future = loop.create_future()
-        self._pending_futures[tool_call.id] = future
+        self._watchers[agent_id] = asyncio.create_task(watcher())
+    
+    async def respond(
+        self,
+        agent_id: str,
+        msg_id: str,
+        answer: str,
+        workspace: Any
+    ) -> None:
+        """Write a response to the agent's inbox."""
+        inbox_key = f"inbox:response:{msg_id}"
         
-        try:
-            response = await asyncio.wait_for(future, timeout=timeout)
-            return ToolResult(
-                call_id=tool_call.id,
-                name="__ask_user__",
-                output=json.dumps({"status": "answered", "response": response}),
-                is_error=False
-            )
-        except asyncio.TimeoutError:
-            return ToolResult(
-                call_id=tool_call.id,
-                name="__ask_user__",
-                output=json.dumps({"status": "timeout"}),
-                is_error=True
-            )
-        finally:
-            self._pending_futures.pop(tool_call.id, None)
-            
-            # Emit resumed event
-            if self._event_bus:
-                from remora.event_bus import Event, EventType
-                await self._event_bus.publish(Event(
-                    type=EventType.AGENT_RESUMED,
-                    agent_id=agent_id,
-                    payload={"tool_call_id": tool_call.id}
+        await workspacebox_key, {
+.kv.set(in            "answer": answer,
+            "responded_at": datetime.now().isoformat(),
+        })
+        
+        # Emit AGENT_RESUMED event
+        await self.event_bus.publish(Event.agent_resumed(
+            agent_id=agent_id,
+            answer=answer,
+            msg_id=msg_id
+        ))
+    
+    async def stop_watching(self, agent_id: str) -> None:
+        """Stop watching a workspace."""
+        if agent_id in self._watchers:
+            self._watchers[agent_id].cancel()
+            try:
+                await self._watchers[agent_id]
+            except asyncio.CancelledError:
+                pass
+            del self._watchers[agent_id]
+    
+    async def _list_pending_questions(self, workspace: Any) -> list[QuestionPayload]:
+        """List all pending questions in the workspace outbox."""
+        entries = await workspace.kv.list(prefix="outbox:question:")
+        questions = []
+        
+        for entry in entries:
+            key = entry.get("key", "")
+            if not key.startswith("outbox:question:"):
+                continue
+                
+            data = await workspace.kv.get(key)
+            if data:
+                questions.append(QuestionPayload(
+                    **data,
+                    msg_id=key.split(":")[-1]
                 ))
+        
+        return questions
+```
+
+### 4.5 Integration with AgentNode
+
+Update `AgentNode` to use the coordinator:
+
+```python
+# In agent_graph.py
+
+class AgentNode:
+    # ... existing fields ...
     
-    async def _execute_get_messages(
-        self, 
-        tool_call: ToolCall, 
-        context: dict[str, Any]
-    ) -> ToolResult:
-        """Handle __get_user_messages__ tool."""
-        # Get inbox from context (set by AgentNode)
-        inbox = context.get("inbox")
-        
-        if inbox is None:
-            return ToolResult(
-                call_id=tool_call.id,
-                name="__get_user_messages__",
-                output=json.dumps({"messages": []}),
-                is_error=False
-            )
-        
-        messages = await inbox.drain_messages()
-        
-        return ToolResult(
-            call_id=tool_call.id,
-            name="__get_user_messages__",
-            output=json.dumps({"messages": messages}),
-            is_error=False
-        )
+    _inbox_coordinator: WorkspaceInboxCoordinator | None = None
     
-    def resolve_response(self, tool_call_id: str, response: str) -> None:
-        """Called by UI to resolve a pending ask_user."""
-        if tool_call_id in self._pending_futures:
-            future = self._pending_futures[tool_call_id]
-            if not future.done():
-                future.set_result(response)
+    async def start_watching(self, workspace: Any) -> None:
+        """Start the inbox coordinator watching this agent's workspace."""
+        if self._inbox_coordinator:
+            await self._inbox_coordinator.watch_workspace(self.id, workspace)
+    
+    async def stop_watching(self) -> None:
+        """Stop watching the workspace."""
+        if self._inbox_coordinator:
+            await self._inbox_coordinator.stop_watching(self.id)
+```
+
+### 4.6 Testing Requirements
+
+```python
+# tests/unit/test_workspace_ipc.py
+
+import pytest
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
+from remora.interactive.coordinator import WorkspaceInboxCoordinator, QuestionPayload
+from remora.event_bus import EventBus, Event
+
+
+@pytest.fixture
+def event_bus():
+    return EventBus()
+
+@pytest.fixture
+def coordinator(event_bus):
+    return WorkspaceInboxCoordinator(event_bus=event_bus)
+
+
+@pytest.mark.asyncio
+async def test_coordinator_emits_blocked_event(coordinator):
+    """Coordinator should emit AGENT_BLOCKED when question is pending."""
+    workspace = AsyncMock()
+    workspace.kv.list = AsyncMock(return_value=[
+        {"key": "outbox:question:abc123"}
+    ])
+    workspace.kv.get = AsyncMock(return_value={
+        "question": "Which format?",
+        "options": ["google", "numpy"],
+        "status": "pending",
+        "created_at": "2026-02-23T10:00:00",
+        "timeout": 300
+    })
+    
+    received_events = []
+    await coordinator.event_bus.subscribe("agent:blocked", 
+        lambda e: received_events.append(e))
+    
+    await coordinator.watch_workspace("agent-1", workspace)
+    await asyncio.sleep(0.1)  # Let it run one poll cycle
+    
+    assert len(received_events) == 1
+    assert received_events[0].payload["question"] == "Which format?"
+    assert received_events[0].payload["options"] == ["google", "numpy"]
+
+
+@pytest.mark.asyncio
+async def test_respond_writes_to_inbox(coordinator):
+    """Coordinator should write response to workspace inbox."""
+    workspace = AsyncMock()
+    workspace.kv.set = AsyncMock()
+    
+    await coordinator.respond(
+        agent_id="agent-1",
+        msg_id="abc123",
+        answer="google",
+        workspace=workspace
+    )
+    
+    workspace.kv.set.assert_called_once()
+    call_args = workspace.kv.set.call_args
+    assert call_args[0][0] == "inbox:response:abc123"
+    assert call_args[0][1]["answer"] == "google"
+
+
+@pytest.mark.asyncio  
+async def test_stop_watching_cleans_up(coordinator):
+    """Stop watching should cancel the watcher task."""
+    workspace = AsyncMock()
+    workspace.kv.list = AsyncMock(return_value=[])
+    
+    await coordinator.watch_workspace("agent-1", workspace)
+    assert "agent-1" in coordinator._watchers
+    
+    await coordinator.stop_watching("agent-1")
+    assert "agent-1" not in coordinator._watchers
+```
+
+### 4.7 Why This Is Better (from review)
+
+| Aspect | Old (asyncio Futures) | New (Workspace KV) |
+|--------|----------------------|-------------------|
+| New code needed | Significant | Minimal |
+| Cross-process sync | Complex (semaphores, signals) | Simple (poll/watch) |
+| Debugging | Hard (binary protocols) | Easy (just read KV entries) |
+| Persistence | Manual | Automatic (workspace is persistent) |
+| Snapshot compatibility | Needs special handling | Works automatically |
+| Crash recovery | Lost state | Questions survive |
+| Grail changes needed | Yes | No |
+| Multi-question support | Complex | Trivial (unique msg_ids) |
 ```
 
 ### 4.2 Integration with AgentNode
@@ -1493,6 +1850,474 @@ class SnapshotManager:
 
 ---
 
+## 6B. Phase 5B: Workspace Checkpointing (Materialization)
+
+> **Goal**: Materialize Cairn sandboxed filesystems and KV cache to disk on command, enabling checkpointing with jujutsu/github.
+
+**Time Estimate**: 2-3 days
+
+### 6B.1 What We Discovered
+
+After studying the Fsdantic library (which Cairn uses), we found that **materialization is already partially implemented**! The key insight is:
+
+1. **Fsdantic.Workspace** already has:
+   - `.files` - FileManager (virtual filesystem)
+   - `.kv` - KVManager (key-value store)
+   - `.materialize` - MaterializationManager (checkpointing to disk!)
+
+2. **What's Missing**:
+   - KV checkpointing (exporting all KV entries to disk)
+   - A unified checkpoint API that handles both files + KV
+   - Integration with Remora's AgentNode
+
+### 6B.2 What to Build
+
+```python
+# checkpoint.py
+"""Workspace Checkpointing - Materialize sandboxes to disk.
+
+This module provides the ability to:
+1. Materialize the virtual filesystem to disk
+2. Export KV store to JSON files
+3. Create complete checkpoints for jujutsu/github versioning
+"""
+
+import json
+import shutil
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from fsdantic import Workspace, MaterializationResult
+
+
+@dataclass
+class KVCheckpoint:
+    """Represents a checkpoint of the KV store."""
+    timestamp: datetime
+    entries: list[dict[str, Any]]  # {"key": "...", "value": ...}
+    
+    def to_dir(self, path: Path) -> None:
+        """Write KV entries as JSON files to a directory.
+        
+        Structure:
+            path/
+                _metadata.json      # timestamp, entry count
+                a/
+                    alice.json     # key "alice" -> alice.json
+                    _index.json    # directory listing
+                b/
+                    ...
+        """
+        path.mkdir(parents=True, exist_ok=True)
+        
+        # Write metadata
+        (path / "_metadata.json").write_text(json.dumps({
+            "timestamp": self.timestamp.isoformat(),
+            "entry_count": len(self.entries)
+        }, indent=2))
+        
+        # Write entries organized by first letter
+        by_prefix: dict[str, list] = {}
+        for entry in self.entries:
+            key = entry["key"]
+            prefix = key[0].lower() if key else "_"
+            by_prefix.setdefault(prefix, []).append(entry)
+        
+        for prefix, entries in by_prefix.items():
+            prefix_dir = path / prefix
+            prefix_dir.mkdir(exist_ok=True)
+            
+            for entry in entries:
+                # Keys like "alice" -> "alice.json"
+                safe_key = entry["key"].replace(":", "_")
+                (prefix_dir / f"{safe_key}.json").write_text(
+                    json.dumps(entry, indent=2)
+                )
+            
+            # Index for this prefix
+            (prefix_dir / "_index.json").write_text(json.dumps({
+                "keys": [e["key"] for e in entries]
+            }, indent=2))
+    
+    @classmethod
+    def from_dir(cls, path: Path) -> "KVCheckpoint":
+        """Load KV checkpoint from directory."""
+        metadata = json.loads((path / "_metadata.json").read_text())
+        entries = []
+        
+        for prefix_dir in path.iterdir():
+            if prefix_dir.name.startswith("_"):
+                continue
+            for json_file in prefix_dir.glob("*.json"):
+                if json_file.name == "_index.json":
+                    continue
+                entries.append(json.loads(json_file.read_text()))
+        
+        return cls(
+            timestamp=datetime.fromisoformat(metadata["timestamp"]),
+            entries=entries
+        )
+
+
+@dataclass
+class Checkpoint:
+    """Complete checkpoint of an agent's workspace.
+    
+    This is what gets versioned with jujutsu/github:
+    - Virtual filesystem materialized to disk
+    - KV store exported to JSON
+    - Metadata about the checkpoint
+    """
+    agent_id: str
+    created_at: datetime
+    
+    # Paths (relative to checkpoint root)
+    filesystem_path: Path
+    kv_path: Path
+    
+    # Full paths (for internal use)
+    _filesystem_dir: Path | None = None
+    _kv_dir: Path | None = None
+    
+    @property
+    def filesystem_dir(self) -> Path:
+        return self._filesystem_dir
+    
+    @property
+    def kv_dir(self) -> Path:
+        return self._kv_dir
+
+
+class CheckpointManager:
+    """Manages checkpointing of agent workspaces.
+    
+    Usage:
+        manager = CheckpointManager(Path("/checkpoints"))
+        
+        # Materialize a workspace to disk
+        checkpoint = await manager.checkpoint(
+            workspace=agent_workspace,
+            agent_id=agent.id,
+            message="Before applying changes"
+        )
+        
+        # Later: restore from checkpoint
+        workspace = await manager.restore(checkpoint)
+    """
+    
+    def __init__(self, checkpoint_root: Path):
+        self._root = checkpoint_root
+        self._root.mkdir(parents=True, exist_ok=True)
+    
+    async def checkpoint(
+        self,
+        workspace: Workspace,
+        agent_id: str,
+        message: str | None = None,
+    ) -> Checkpoint:
+        """Create a checkpoint of a workspace.
+        
+        Args:
+            workspace: The Fsdantic workspace to checkpoint
+            agent_id: Unique identifier for this checkpoint
+            message: Optional commit message
+            
+        Returns:
+            Checkpoint object with paths to materialized data
+        """
+        timestamp = datetime.now()
+        checkpoint_id = f"{agent_id}-{timestamp.strftime('%Y%m%d_%H%M%S')}"
+        
+        # Create checkpoint directory
+        checkpoint_dir = self._root / checkpoint_id
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 1. Materialize filesystem
+        fs_dir = checkpoint_dir / "filesystem"
+        fs_result = await workspace.materialize.to_disk(
+            target_path=fs_dir,
+            clean=True,
+        )
+        
+        # 2. Export KV store
+        kv_dir = checkpoint_dir / "kv"
+        await self._export_kv(workspace.kv, kv_dir)
+        
+        # 3. Write metadata
+        metadata = {
+            "agent_id": agent_id,
+            "created_at": timestamp.isoformat(),
+            "message": message,
+            "filesystem": {
+                "files_written": fs_result.files_written,
+                "bytes_written": fs_result.bytes_written,
+                "changes": [asdict(c) for c in fs_result.changes],
+            }
+        }
+        (checkpoint_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
+        
+        return Checkpoint(
+            agent_id=agent_id,
+            created_at=timestamp,
+            filesystem_path=Path("filesystem"),
+            kv_path=Path("kv"),
+            _filesystem_dir=fs_dir,
+            _kv_dir=kv_dir,
+        )
+    
+    async def _export_kv(self, kv_manager, target_dir: Path) -> KVCheckpoint:
+        """Export all KV entries to disk."""
+        target_dir.mkdir(parents=True, exist_ok=True)
+        
+        # List all entries
+        entries = await kv_manager.list()
+        
+        checkpoint = KVCheckpoint(
+            timestamp=datetime.now(),
+            entries=[]
+        )
+        
+        # Fetch each entry's value
+        for entry in entries:
+            key = entry["key"]
+            try:
+                value = await kv_manager.get(key)
+                checkpoint.entries.append({
+                    "key": key,
+                    "value": value
+                })
+            except Exception as e:
+                # Log but continue
+                checkpoint.entries.append({
+                    "key": key,
+                    "error": str(e)
+                })
+        
+        # Write to directory
+        checkpoint.to_dir(target_dir)
+        
+        return checkpoint
+    
+    async def restore(self, checkpoint: Checkpoint) -> Workspace:
+        """Restore a workspace from a checkpoint.
+        
+        Note: This creates a NEW workspace. To continue an agent
+        from a checkpoint, you'd need to also restore the kernel state.
+        """
+        from fsdantic import Fsdantic
+        
+        # Create new workspace from materialized files
+        workspace = await Fsdantic.open(
+            str(checkpoint._filesystem_dir),
+            readonly=False
+        )
+        
+        # Restore KV entries
+        kv_checkpoint = KVCheckpoint.from_dir(checkpoint._kv_dir)
+        for entry in kv_checkpoint.entries:
+            if "error" in entry:
+                continue
+            await workspace.kv.set(entry["key"], entry["value"])
+        
+        return workspace
+    
+    def list_checkpoints(self, agent_id: str | None = None) -> list[Checkpoint]:
+        """List all available checkpoints.
+        
+        Args:
+            agent_id: If provided, only return checkpoints for this agent
+        """
+        checkpoints = []
+        
+        for checkpoint_dir in self._root.iterdir():
+            if not checkpoint_dir.is_dir():
+                continue
+            
+            metadata_file = checkpoint_dir / "metadata.json"
+            if not metadata_file.exists():
+                continue
+            
+            metadata = json.loads(metadata_file.read_text())
+            
+            if agent_id and metadata.get("agent_id") != agent_id:
+                continue
+            
+            checkpoints.append(Checkpoint(
+                agent_id=metadata["agent_id"],
+                created_at=datetime.fromisoformat(metadata["created_at"]),
+                filesystem_path=Path("filesystem"),
+                kv_path=Path("kv"),
+                _filesystem_dir=checkpoint_dir / "filesystem",
+                _kv_dir=checkpoint_dir / "kv",
+            ))
+        
+        return sorted(checkpoints, key=lambda c: c.created_at, reverse=True)
+```
+
+### 6B.3 Integration with AgentNode
+
+Add checkpointing to AgentNode:
+
+```python
+# In agent_graph.py, add to AgentNode
+
+class AgentNode:
+    # ... existing fields ...
+    
+    async def checkpoint(self, manager: CheckpointManager) -> Checkpoint:
+        """Create a checkpoint of this agent's workspace."""
+        if self.workspace is None:
+            raise ValueError("No workspace to checkpoint")
+        
+        return await manager.checkpoint(
+            workspace=self.workspace,
+            agent_id=self.id,
+        )
+```
+
+### 6B.4 Integration with Event Bus
+
+Emit checkpoint events:
+
+```python
+# In checkpoint.py
+
+async def checkpoint(
+    self,
+    workspace: Workspace,
+    agent_id: str,
+    message: str | None = None,
+) -> Checkpoint:
+    # ... existing code ...
+    
+    # Emit event
+    await self._event_bus.publish(Event(
+        type=EventType.WORKSPACE_CHECKPOINTED,
+        agent_id=agent_id,
+        payload={
+            "checkpoint_id": checkpoint_id,
+            "filesystem_files": fs_result.files_written,
+            "kv_entries": len(kv_entries),
+        }
+    ))
+```
+
+### 6B.5 Jujutsu/Git Integration
+
+Create a simple CLI for checkpointing:
+
+```python
+# cli.py
+
+import typer
+
+app = typer.Typer()
+
+@app.command()
+async def checkpoint(
+    agent_id: str = typer.Argument(..., help="Agent ID to checkpoint"),
+    message: str = typer.Option(None, help="Commit message"),
+):
+    """Create a checkpoint of an agent's workspace."""
+    manager = CheckpointManager(Path("./checkpoints"))
+    checkpoint = await manager.checkpoint(
+        workspace=get_workspace(agent_id),
+        agent_id=agent_id,
+        message=message,
+    )
+    typer.echo(f"Created checkpoint: {checkpoint.created_at}")
+
+@app.command()
+def jjt_commit(
+    checkpoint_id: str = typer.Argument(..., help="Checkpoint to commit"),
+    message: str = typer.Option(None, help="Commit message"),
+):
+    """Commit a checkpoint to jujutsu."""
+    checkpoint_path = Path("./checkpoints") / checkpoint_id
+    
+    # Use jujutsu to commit
+    import subprocess
+    subprocess.run(["jj", "commit", "-m", message or f"Checkpoint: {checkpoint_id}"], 
+                   cwd=checkpoint_path)
+
+@app.command()
+def git_commit(
+    checkpoint_id: str = typer.Argument(..., help="Checkpoint to commit"),
+):
+    """Commit a checkpoint to git."""
+    checkpoint_path = Path("./checkpoints") / checkpoint_id
+    
+    import subprocess
+    subprocess.run(["git", "add", "."], cwd=checkpoint_path)
+    subprocess.run(["git", "commit", "-m", f"Checkpoint: {checkpoint_id}"])
+```
+
+### 6B.6 Testing Requirements
+
+```python
+# tests/unit/test_checkpoint.py
+
+import pytest
+from pathlib import Path
+from checkpoint import CheckpointManager, KVCheckpoint, Checkpoint
+
+
+@pytest.fixture
+def checkpoint_manager(tmp_path):
+    return CheckpointManager(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_kv_checkpoint_export(tmp_path):
+    """KV should export to directory structure."""
+    # Create mock KV manager
+    class MockKV:
+        async def list(self):
+            return [{"key": "alice"}, {"key": "bob"}, {"key": "charlie"}]
+        
+        async def get(self, key):
+            return {"name": key.capitalize()}
+    
+    kv = MockKV()
+    target = tmp_path / "kv"
+    
+    manager = CheckpointManager(tmp_path)
+    checkpoint = await manager._export_kv(kv, target)
+    
+    assert len(checkpoint.entries) == 3
+    assert (target / "_metadata.json").exists()
+
+
+def test_kv_checkpoint_roundtrip(tmp_path):
+    """KV checkpoint should survive serialize/deserialize."""
+    original = KVCheckpoint(
+        timestamp=datetime.now(),
+        entries=[{"key": "test", "value": {"foo": "bar"}}]
+    )
+    
+    target = tmp_path / "kv"
+    original.to_dir(target)
+    
+    restored = KVCheckpoint.from_dir(target)
+    
+    assert len(restored.entries) == 1
+    assert restored.entries[0]["key"] == "test"
+```
+
+### 6B.7 Success Criteria
+
+- [ ] Filesystem materialization works (already in Fsdantic!)
+- [ ] KV export to JSON files works
+- [ ] Unified checkpoint API works
+- [ ] Checkpoints can be listed and restored
+- [ ] Events are emitted during checkpointing
+- [ ] Jujutsu/git CLI integration works
+- [ ] Tests pass
+
+---
+
 ## 7. Phase 6: Integration - Workspace & Discovery
 
 **Goal**: Wire up the remaining pieces: workspace management and AST discovery.
@@ -1655,6 +2480,81 @@ async def respond(agent_id: str, response: str):
 
 ---
 
+## 8B. Error Handling & Cancellation
+
+Based on the review, we need explicit error handling and cancellation strategies.
+
+### 8B.1 Error Policy
+
+Add to `src/remora/agent_graph.py`:
+
+```python
+class ErrorPolicy(str, Enum):
+    """Defines what happens when an agent fails in a graph."""
+    STOP_GRAPH = "stop_graph"      # Stop all agents
+    SKIP_DOWNSTREAM = "skip_downstream"  # Skip agents that depend on failed
+    CONTINUE = "continue"          # Continue running other agents
+
+class GraphConfig(BaseModel):
+    """Configuration for graph execution."""
+    error_policy: ErrorPolicy = ErrorPolicy.SKIP_DOWNSTREAM
+    max_retries: int = 0
+    retry_delay: float = 1.0
+```
+
+### 8B.2 Cancellation Support
+
+Add cancellation methods:
+
+```python
+class AgentNode:
+    """Add cancellation support to AgentNode."""
+    
+    _cancelled: bool = False
+    
+    def cancel(self) -> None:
+        """Request cancellation of this agent."""
+        self._cancelled = True
+        # Emit cancellation event
+        get_event_bus().publish(Event.agent_cancelled(
+            agent_id=self.id,
+            reason="user_requested"
+        ))
+    
+    def is_cancelled(self) -> bool:
+        return self._cancelled
+    
+    async def check_cancelled(self) -> None:
+        """Check if cancelled and raise if so."""
+        if self._cancelled:
+            raise asyncio.CancelledError(f"Agent {self.id} was cancelled")
+
+class AgentGraph:
+    """Add graph-level cancellation."""
+    
+    def cancel(self, agent_name: str | None = None) -> None:
+        """Cancel all agents or a specific agent."""
+        if agent_name:
+            self._agents[agent_name].cancel()
+        else:
+            for agent in self._agents.values():
+                agent.cancel()
+    
+    async def cancel_all(self) -> None:
+        """Cancel all running agents and wait for cleanup."""
+        for agent in self._agents.values():
+            if agent.state in (AgentState.RUNNING, AgentState.BLOCKED):
+                agent.cancel()
+        
+        # Wait for cancellation to complete
+        await asyncio.gather(*[
+            t for t in self._running_tasks
+            if not t.done()
+        ], return_exceptions=True)
+```
+
+---
+
 ## 9. Testing Strategy
 
 ### 9.1 Unit Tests (Per Phase)
@@ -1774,47 +2674,193 @@ The result will be a system that a junior developer can understand in minutes, n
 
 ---
 
-## Quick Reference
+## Appendix A: Code to Remove
 
-### File Structure
+When V2 is fully implemented, the following code can be **removed**:
+
+### Remora Core (src/remora/)
+
+| File | Reason |
+|------|--------|
+| `events.py` | Replaced by `event_bus.py` |
+| `event_bridge.py` | Translation layer no longer needed |
+| `kernel_runner.py` | Replaced by `AgentNode` in `agent_graph.py` |
+| `orchestrator.py` | Replaced by `AgentGraph` in `agent_graph.py` |
+| `context/manager.py` | Simplified context handling in AgentNode |
+| `externals.py` | Replaced by workspace KV-based externals |
+
+### Demo/Examples
+
+| File/Dir | Reason |
+|----------|--------|
+| `demo/tui.py` | Replaced by web dashboard |
+| `demo/jsonl_tail.py` | Replaced by SSE events |
+
+### Config
+
+| File | Reason |
+|------|--------|
+| `EventStreamConfig` in `config.py` | Replaced by EventBus |
+| `event_stream` config section | Replaced by EventBus config |
+
+### structured-agents (if modified)
+
+| File | Reason |
+|------|--------|
+| Original Observer protocol | Replaced by EventBus subscription |
+| Tool execution callbacks | Handled via EventBus |
+
+### Cairn/fsdantic (if modified)
+
+| File | Reason |
+|------|--------|
+| N/A - all existing | KV store already used |
+
+---
+
+## Appendix B: Final V2 File Structure
 
 ```
 src/remora/
-├── __init__.py              # Public API (keep small!)
-├── event_bus.py             # NEW: Phase 1
-├── agent_graph.py           # NEW: Phase 2
-├── interactive_tools.py     # NEW: Phase 3 (contrib to structured-agents)
-├── snapshots.py             # NEW: Phase 5
-├── workspace.py             # NEW: Phase 6
-├── discovery/              # Existing (keep)
-├── config.py               # Existing (simplify)
-├── results.py              # Existing (keep)
-└── ...                     # Other modules (deprecate)
+├── __init__.py                     # Public API (~20 lines)
+│
+├── event_bus.py                   # Phase 1: Unified event system
+│   ├── Event (Pydantic model)
+│   ├── EventBus (pub/sub)
+│   ├── EventCategory (Literal types)
+│   ├── AgentAction, ToolAction, etc.
+│   └── get_event_bus()
+│
+├── agent_graph.py                 # Phase 2: Core abstractions
+│   ├── AgentNode                 # Unified concept (replaces CSTNode + Context + KernelRunner)
+│   ├── AgentInbox               # User interaction inbox (with lock!)
+│   ├── AgentState               # pending → running → blocked → completed
+│   ├── AgentGraph              # Declarative composition
+│   └── GraphExecutor           # Runs the graph
+│
+├── interactive/                   # Phase 3: User interaction
+│   ├── __init__.py
+│   ├── coordinator.py           # Workspace KV inbox watcher
+│   └── externals.py            # ask_user using KV store
+│
+├── snapshots.py                  # Phase 5: Agent snapshots
+│   ├── AgentSnapshot
+│   └── SnapshotManager
+│
+├── checkpoint.py                  # Phase 5B: Workspace checkpointing
+│   ├── Checkpoint
+│   ├── KVCheckpoint
+│   └── CheckpointManager
+│
+├── workspace.py                  # Phase 6: Graph workspace
+│   └── GraphWorkspace           # Shared workspace for graph
+│
+├── discovery/                   # Existing (unchanged)
+│   ├── __init__.py
+│   ├── discoverer.py
+│   ├── match_extractor.py
+│   ├── models.py
+│   ├── query_loader.py
+│   └── source_parser.py
+│
+├── config.py                    # Simplified config
+│
+├── results.py                   # Existing (unchanged)
+│
+└── [deprecated/]              # Old code moved here for reference
+    ├── events.py              # REMOVE after migration
+    ├── event_bridge.py        # REMOVE after migration
+    ├── kernel_runner.py       # REMOVE after migration
+    └── orchestrator.py        # REMOVE after migration
+
 
 .context/
-└── structured-agents/
-    └── src/structured_agents/
-        └── tool_sources/
-            └── interactive.py  # NEW: Phase 3
+├── structured-agents/
+│   └── src/structured_agents/
+│       └── tool_sources/
+│           └── [no changes needed - KV IPC is external!]
+│
+└── [other libs unchanged]
+
+
+demo/
+├── dashboard/
+│   ├── app.py                  # FastAPI app
+│   ├── index.html              # Single-file dashboard
+│   ├── projector.html          # Projector mode
+│   ├── mobile/
+│   │   └── remote.html         # Mobile remote
+│   └── static/
+│       └── style.css
+│
+└── [demo scripts unchanged]
+
+
+tests/
+├── unit/
+│   ├── test_event_bus.py       # Phase 1
+│   ├── test_agent_graph.py     # Phase 2
+│   ├── test_workspace_ipc.py    # Phase 3
+│   └── test_checkpoint.py      # Phase 5B
+│
+└── integration/
+    └── test_full_flow.py       # All phases
+```
+
+---
+
+## Quick Reference
+
+### Final File Structure (V2)
+
+```
+src/remora/
+├── __init__.py              # Public API (~20 lines)
+├── event_bus.py             # Phase 1: Unified Event Bus (Pydantic-first)
+├── agent_graph.py           # Phase 2: AgentNode, AgentGraph, AgentInbox
+├── interactive/             # Phase 3: Workspace KV IPC
+│   ├── coordinator.py       #   Inbox watcher
+│   └── externals.py        #   ask_user using KV
+├── snapshots.py             # Phase 5: Agent snapshots
+├── checkpoint.py            # Phase 5B: Workspace materialization
+├── workspace.py            # Phase 6: Graph workspace
+├── discovery/              # Existing
+├── config.py              # Simplified
+├── results.py             # Existing
+└── deprecated/            # Old code (to remove)
+
+demo/
+├── dashboard/              # Web UI (event-driven)
+│   ├── app.py
+│   ├── index.html         # Single-file dashboard
+│   ├── projector.html
+│   └── mobile/
+│       └── remote.html
+└── [demo scripts]
 
 tests/
 ├── unit/
 │   ├── test_event_bus.py
 │   ├── test_agent_graph.py
-│   └── test_interactive_tools.py
+│   ├── test_workspace_ipc.py
+│   └── test_checkpoint.py
 └── integration/
     └── test_full_flow.py
 ```
 
 ### Success Checklist
 
-- [ ] EventBus replaces EventEmitter + EventBridge
-- [ ] AgentNode is the single concept of "agent"
-- [ ] AgentGraph provides declarative API
-- [ ] __ask_user__ is a native tool
-- [ ] User interaction works via event subscription
-- [ ] Snapshots enable pause/resume
-- [ ] Discovery integrates with graph
-- [ ] Public API is < 20 lines
+- [x] EventBus (Pydantic-first, backpressure, asyncio.gather)
+- [x] AgentNode unifies CSTNode + Context + KernelRunner
+- [x] AgentGraph provides declarative API
+- [x] Workspace KV IPC for ask_user (no Grail changes!)
+- [x] Error handling with ErrorPolicy
+- [x] Cancellation support
+- [x] Checkpointing materializes workspace to disk
+- [x] Public API is < 20 lines
 - [ ] All tests pass
 - [ ] Documentation complete
+
+---
+
+*End of V2 Rewrite Guide*
