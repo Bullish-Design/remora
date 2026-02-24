@@ -10,6 +10,7 @@ from remora.agent_graph import (
     AgentInbox,
     GraphExecutor,
     ErrorPolicy,
+    GraphConfig,
 )
 from remora.event_bus import EventBus, Event, AgentAction
 
@@ -220,7 +221,8 @@ async def test_graph_executor_concurrent(event_bus):
     graph.agent("docstring", bundle="docstring", target="code")
     graph.agent("test", bundle="test", target="code")
 
-    executor = graph.execute(max_concurrency=2)
+    config = GraphConfig(max_concurrency=2)
+    executor = graph.execute(config)
     results = await executor.run()
 
     assert len(results) == 3
@@ -275,3 +277,101 @@ async def test_agent_inbox_with_options():
 
     assert result[0] == "google"
     assert inbox.blocked_question is None
+
+
+def test_graph_config_defaults():
+    """GraphConfig should have sensible defaults."""
+    config = GraphConfig()
+
+    assert config.max_concurrency == 4
+    assert config.interactive is True
+    assert config.timeout == 300.0
+    assert config.snapshot_enabled is False
+    assert config.error_policy == ErrorPolicy.STOP_GRAPH
+
+
+def test_graph_config_custom():
+    """GraphConfig should accept custom values."""
+    config = GraphConfig(
+        max_concurrency=8, interactive=False, timeout=600.0, snapshot_enabled=True, error_policy=ErrorPolicy.CONTINUE
+    )
+
+    assert config.max_concurrency == 8
+    assert config.interactive is False
+    assert config.timeout == 600.0
+    assert config.snapshot_enabled is True
+    assert config.error_policy == ErrorPolicy.CONTINUE
+
+
+def test_graph_run_parallel():
+    """Graph should track parallel groups."""
+    graph = AgentGraph()
+    graph.agent("a", bundle="test", target="code")
+    graph.agent("b", bundle="test", target="code")
+    graph.agent("c", bundle="test", target="code")
+
+    graph.run_parallel("a", "b", "c")
+
+    assert len(graph._parallel_groups) == 1
+    assert graph._parallel_groups[0] == ["a", "b", "c"]
+
+
+def test_graph_run_sequential():
+    """Graph should track sequential groups."""
+    graph = AgentGraph()
+    graph.agent("a", bundle="test", target="code")
+    graph.agent("b", bundle="test", target="code")
+    graph.agent("c", bundle="test", target="code")
+
+    graph.run_sequential("a", "b", "c")
+
+    assert len(graph._parallel_groups) == 3
+    assert graph._parallel_groups[0] == ["a"]
+    assert graph._parallel_groups[1] == ["b"]
+    assert graph._parallel_groups[2] == ["c"]
+
+
+def test_graph_on_blocked():
+    """Graph should set blocked handler."""
+    graph = AgentGraph()
+
+    async def blocked_handler(agent, question):
+        return "yes"
+
+    result = graph.on_blocked(blocked_handler)
+
+    assert graph._blocked_handler is blocked_handler
+    assert result is graph
+
+
+def test_graph_bundle_map():
+    """Graph should track bundle mapping."""
+    graph = AgentGraph()
+
+    assert graph._bundle_map == {}
+
+    graph._bundle_map = {"function": "lint", "class": "docstring"}
+
+    assert graph._bundle_map["function"] == "lint"
+    assert graph._bundle_map["class"] == "docstring"
+
+
+@pytest.mark.asyncio
+async def test_executor_uses_parallel_groups(event_bus):
+    """Executor should use parallel groups for execution order."""
+    graph = AgentGraph(event_bus)
+    graph.agent("a", bundle="test", target="code")
+    graph.agent("b", bundle="test", target="code")
+    graph.agent("c", bundle="test", target="code")
+
+    graph.run_parallel("a", "b")
+    graph.run_sequential("c")
+
+    config = GraphConfig()
+    executor = graph.execute(config)
+
+    batches = executor._build_execution_batches()
+
+    assert len(batches) == 2
+    assert batches[0] == ["a", "b"]
+    assert batches[1] == ["c"]

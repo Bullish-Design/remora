@@ -8,6 +8,7 @@ This module provides:
 
 import asyncio
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -35,6 +36,17 @@ class ErrorPolicy(StrEnum):
     STOP_GRAPH = "stop_graph"
     SKIP_DOWNSTREAM = "skip_downstream"
     CONTINUE = "continue"
+
+
+@dataclass
+class GraphConfig:
+    """Configuration for graph execution."""
+
+    max_concurrency: int = 4
+    interactive: bool = True
+    timeout: float = 300.0
+    snapshot_enabled: bool = False
+    error_policy: ErrorPolicy = ErrorPolicy.STOP_GRAPH
 
 
 @dataclass
@@ -187,6 +199,91 @@ class AgentGraph:
         self._agents: dict[str, AgentNode] = {}
         self._execution_order: list[list[str]] = []
         self._running_tasks: set[asyncio.Task] = set()
+        self._blocked_handler: Callable[[AgentNode, str], Awaitable[str]] | None = None
+        self._bundle_map: dict[str, str] = {}
+        self._parallel_groups: list[list[str]] = []
+
+    def discover(
+        self,
+        root_dirs: list[Path],
+        bundles: dict[str, str] | None = None,
+        query_pack: str = "remora_core",
+    ) -> "AgentGraph":
+        """Auto-discover code structure and create agents.
+
+        Args:
+            root_dirs: Directories or files to scan
+            bundles: Mapping of node_type -> bundle name
+                   e.g., {"function": "lint", "class": "docstring"}
+            query_pack: Query pack name (default: "remora_core")
+
+        Returns:
+            Self for chaining
+        """
+        if bundles:
+            self._bundle_map = bundles
+
+        from remora.discovery.discoverer import TreeSitterDiscoverer
+
+        discoverer = TreeSitterDiscoverer(
+            root_dirs=root_dirs,
+            query_pack=query_pack,
+        )
+        nodes = discoverer.discover()
+
+        for node in nodes:
+            bundle = self._bundle_map.get(str(node.node_type), "default")
+            agent_name = f"{bundle}-{node.name}"
+
+            self.agent(
+                name=agent_name,
+                bundle=bundle,
+                target=node.text or "",
+                target_path=node.file_path,
+                target_type=str(node.node_type),
+            )
+
+        return self
+
+    def run_parallel(self, *agent_names: str) -> "AgentGraph":
+        """Run these agents in parallel (same batch).
+
+        Args:
+            *agent_names: Names of agents to run in parallel
+
+        Returns:
+            Self for chaining
+        """
+        self._parallel_groups.append(list(agent_names))
+        return self
+
+    def run_sequential(self, *agent_names: str) -> "AgentGraph":
+        """Run these agents sequentially (each in its own batch).
+
+        Args:
+            *agent_names: Names of agents to run sequentially
+
+        Returns:
+            Self for chaining
+        """
+        for name in agent_names:
+            self._parallel_groups.append([name])
+        return self
+
+    def on_blocked(self, handler: Callable[[AgentNode, str], Awaitable[str]]) -> "AgentGraph":
+        """Set handler for when agent asks user a question.
+
+        This is how the UI integrates: provide a handler that
+        shows the question to the user and returns their response.
+
+        Args:
+            handler: Async function that takes (agent, question) and returns answer
+
+        Returns:
+            Self for chaining
+        """
+        self._blocked_handler = handler
+        return self
 
     def agent(
         self, name: str, bundle: str, target: str, target_path: Path | None = None, target_type: str = "unknown"
@@ -207,13 +304,23 @@ class AgentGraph:
         """Start building dependencies from this agent."""
         return _GraphBuilder(self, agent_name)
 
-    def execute(self, max_concurrency: int = 4, interactive: bool = True) -> "GraphExecutor":
-        """Execute the graph and return an executor."""
+    def execute(self, config: GraphConfig | None = None) -> "GraphExecutor":
+        """Execute the graph and return an executor.
+
+        Args:
+            config: Optional GraphConfig. If not provided, uses defaults.
+
+        Returns:
+            GraphExecutor instance
+        """
+        if config is None:
+            config = GraphConfig()
+
         return GraphExecutor(
             graph=self,
-            max_concurrency=max_concurrency,
-            interactive=interactive,
+            config=config,
             event_bus=self._event_bus,
+            blocked_handler=self._blocked_handler,
         )
 
     def agents(self) -> dict[str, AgentNode]:
@@ -260,17 +367,15 @@ class GraphExecutor:
     def __init__(
         self,
         graph: AgentGraph,
-        max_concurrency: int,
-        interactive: bool,
+        config: GraphConfig,
         event_bus: EventBus,
-        error_policy: ErrorPolicy = ErrorPolicy.STOP_GRAPH,
+        blocked_handler: Callable[[AgentNode, str], Awaitable[str]] | None = None,
     ):
         self._graph = graph
-        self._max_concurrency = max_concurrency
-        self._interactive = interactive
+        self._config = config
         self._event_bus = event_bus
-        self._error_policy = error_policy
-        self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._blocked_handler = blocked_handler
+        self._semaphore = asyncio.Semaphore(config.max_concurrency)
 
     async def run(self) -> dict[str, Any]:
         """Execute all agents in dependency order."""
@@ -280,7 +385,7 @@ class GraphExecutor:
             tasks = [asyncio.create_task(self._run_agent(name)) for name in batch]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            if self._error_policy == ErrorPolicy.STOP_GRAPH:
+            if self._config.error_policy == ErrorPolicy.STOP_GRAPH:
                 for result in results:
                     if isinstance(result, Exception):
                         break
@@ -289,6 +394,8 @@ class GraphExecutor:
 
     def _build_execution_batches(self) -> list[list[str]]:
         """Build batches of agents that can run in parallel."""
+        if self._graph._parallel_groups:
+            return self._graph._parallel_groups
         return [list(self._graph.agents().keys())]
 
     async def _run_agent(self, name: str) -> None:
