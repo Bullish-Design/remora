@@ -26,6 +26,7 @@ dependencies = [
   "cairn",
   "structured-agents",
   "textual",
+  #"stario",
 ]
 
 [tool.uv.sources]
@@ -39,6 +40,7 @@ remora = "remora.cli:app"
 remora-hub = "remora.hub.cli:main"
 remora-tui = "scripts.remora_tui:app"
 remora-demo = "scripts.remora_demo:app"
+remora-dashboard = "scripts.remora_dashboard:main"
 remora-flood = "scripts.stress_vllm:app"
 jsonl-convert = "scripts.jsonl_to_readable:main"
 ast-summary = "demo.cli:app"
@@ -82,6 +84,7 @@ include = [
 
 [tool.uv]
 prerelease = "allow"
+python-downloads = "automatic"
 # Keep the default behavior; this section is here so you can extend it later if needed.
 
 [tool.pytest.ini_options]
