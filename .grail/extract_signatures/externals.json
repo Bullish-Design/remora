@@ -1,0 +1,17 @@
+{
+  "externals": [
+    {
+      "name": "read_file",
+      "async": true,
+      "parameters": [
+        {
+          "name": "path",
+          "type": "str",
+          "default": null
+        }
+      ],
+      "return_type": "str",
+      "docstring": "Read file contents (provided by host)."
+    }
+  ]
+}

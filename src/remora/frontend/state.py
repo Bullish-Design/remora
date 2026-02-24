@@ -19,7 +19,7 @@ class DashboardState:
     completed_agents: int = 0
 
     def record(self, event: Event) -> None:
-        self.events.append(event.model_dump())
+        self.events.append(event.model_dump(mode="json"))
 
         if event.category == "agent" and event.agent_id:
             agent_id = event.agent_id

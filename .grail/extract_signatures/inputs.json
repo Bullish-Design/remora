@@ -1,0 +1,10 @@
+{
+  "inputs": [
+    {
+      "name": "file_path",
+      "type": "str",
+      "required": true,
+      "default": null
+    }
+  ]
+}

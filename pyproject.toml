@@ -1,6 +1,6 @@
 [project]
 name = "remora"
-version = "0.3.0"
+version = "0.3.1"
 description = "Local code analysis and enhancement with FunctionGemma subagents."
 readme = "docs/CONCEPT.md"
 requires-python = ">=3.13"
