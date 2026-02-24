@@ -155,8 +155,7 @@ async def ask_user(node: AstNode, message: str) -> str:
     return reply
 ```
 
-    return reply
-```
+
 
 ### User-Initiated (Asynchronous) Agent Inbox
 
