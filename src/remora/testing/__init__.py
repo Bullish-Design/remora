@@ -1,7 +1,6 @@
-"""Test utilities for Remora.
+"""Test utilities for Remora V2.
 
-This module provides fakes, factories, and patches for testing Remora
-components. It can be used both internally and by downstream projects.
+This module provides fakes for testing V2 components.
 """
 
 from remora.testing.fakes import (
@@ -14,18 +13,8 @@ from remora.testing.fakes import (
     FakeToolCall,
     FakeToolCallFunction,
 )
-from remora.testing.factories import (
-    make_ctx,
-    make_node,
-    make_runner_config,
-    make_server_config,
-    tool_call_message,
-    tool_schema,
-)
-from remora.testing.mock_vllm_server import MockVLLMServer
 
 __all__ = [
-    # Fakes
     "FakeAsyncOpenAI",
     "FakeChatCompletions",
     "FakeCompletionChoice",
@@ -34,14 +23,4 @@ __all__ = [
     "FakeGrailExecutor",
     "FakeToolCall",
     "FakeToolCallFunction",
-    # Factories
-    "make_ctx",
-    "make_node",
-    "make_runner_config",
-    "make_server_config",
-    "tool_call_message",
-    "tool_schema",
-    # Patches
-    # Mock server
-    "MockVLLMServer",
 ]

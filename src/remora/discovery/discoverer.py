@@ -6,6 +6,7 @@ import concurrent.futures
 import importlib.resources
 import logging
 import time
+from enum import Enum
 from pathlib import Path
 from typing import Iterable
 
@@ -14,7 +15,20 @@ from remora.discovery.match_extractor import MatchExtractor
 from remora.discovery.models import CSTNode, DiscoveryError
 from remora.discovery.query_loader import QueryLoader
 from remora.discovery.source_parser import SourceParser
-from remora.events import EventName, EventStatus
+
+
+class EventName(str, Enum):
+    """Event names for discovery."""
+
+    DISCOVERY = "discovery"
+
+
+class EventStatus(str, Enum):
+    """Event status values."""
+
+    OK = "ok"
+    ERROR = "error"
+
 
 logger = logging.getLogger(__name__)
 

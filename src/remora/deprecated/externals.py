@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import contextvars
+import time
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -45,26 +49,22 @@ def create_remora_externals(
     async def run_json_command(cmd: str, args: list[str]) -> dict[str, Any] | list[Any]:
         """Run a command and parse its stdout as JSON."""
         import json
+
         run_command = base_externals.get("run_command")
         if not run_command:
             return {"error": "run_command not found in base_externals"}
-        
+
         result = await run_command(cmd=cmd, args=args)
         stdout = str(result.get("stdout", ""))
         stderr = str(result.get("stderr", ""))
         exit_code = int(result.get("exit_code", 0) or 0)
-        
+
         try:
             if not stdout.strip():
                 return []
             return json.loads(stdout)
         except json.JSONDecodeError:
-            return {
-                "error": "Failed to parse JSON", 
-                "stdout": stdout, 
-                "stderr": stderr,
-                "exit_code": exit_code
-            }
+            return {"error": "Failed to parse JSON", "stdout": stdout, "stderr": stderr, "exit_code": exit_code}
 
     # Remora-specific overrides or additions
     base_externals["get_node_source"] = get_node_source
@@ -111,3 +111,99 @@ def create_resume_tool_schema() -> dict[str, Any]:
             },
         },
     }
+
+
+_workspace_var: contextvars.ContextVar[Workspace | None] = contextvars.ContextVar("workspace", default=None)
+
+
+def set_workspace(workspace: Workspace | None) -> None:
+    """Set the current workspace for ask_user and get_user_messages."""
+    _workspace_var.set(workspace)
+
+
+def get_workspace() -> Workspace:
+    """Get the current workspace or raise RuntimeError."""
+    ws = _workspace_var.get()
+    if ws is None:
+        raise RuntimeError("ask_user called outside workspace context")
+    return ws
+
+
+def ask_user(
+    question: str, options: list[str] | None = None, timeout: float = 300.0, poll_interval: float = 0.5
+) -> str:
+    """Ask the user a question and wait for their response.
+
+    This function writes to the workspace KV store and polls for a response.
+    No async needed - just synchronous KV operations that Grail supports.
+
+    Args:
+        question: The question to ask the user
+        options: Optional constrained choices (makes UI easier)
+        timeout: How long to wait for response (default 300s)
+        poll_interval: How often to check for response (default 0.5s)
+
+    Returns:
+        The user's response string
+
+    Raises:
+        TimeoutError: If the user doesn't respond within timeout
+    """
+    workspace = get_workspace()
+
+    msg_id = uuid.uuid4().hex[:8]
+    outbox_key = f"outbox:question:{msg_id}"
+    inbox_key = f"inbox:response:{msg_id}"
+
+    workspace.kv.set(
+        outbox_key,
+        {
+            "question": question,
+            "options": options,
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "timeout": timeout,
+        },
+    )
+
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        response = workspace.kv.get(inbox_key)
+        if response is not None:
+            current = workspace.kv.get(outbox_key) or {}
+            workspace.kv.set(outbox_key, {**current, "status": "answered"})
+            return response.get("answer", "")
+
+        time.sleep(poll_interval)
+
+    current = workspace.kv.get(outbox_key) or {}
+    workspace.kv.set(outbox_key, {**current, "status": "timeout"})
+    raise TimeoutError(f"User did not respond within {timeout}s")
+
+
+def get_user_messages() -> list[str]:
+    """Get any async messages the user has sent to this agent.
+
+    Call this at the start of each turn to check for new context from the user.
+
+    Returns:
+        List of messages from the user
+    """
+    workspace = get_workspace()
+
+    messages = []
+    prefix = "inbox:user_message:"
+
+    try:
+        entries = workspace.kv.list(prefix=prefix)
+        for entry in entries:
+            key = entry.get("key", "") if isinstance(entry, dict) else str(entry)
+            if key.startswith(prefix):
+                msg = workspace.kv.get(key)
+                if msg:
+                    messages.append(msg.get("content", ""))
+                workspace.kv.delete(key)
+    except Exception:
+        pass
+
+    return messages

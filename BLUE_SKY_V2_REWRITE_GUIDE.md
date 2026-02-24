@@ -15,15 +15,14 @@
 3. [Phase 2: Core - AgentNode & AgentGraph](#phase-2-core---agentnode--agentgraph)
 4. [Phase 3: Interaction - Built-in User Tools](#phase-3-interaction---built-in-user-tools)
 5. [Phase 4: Orchestration - Declarative Graph DSL](#phase-4-orchestration---declarative-graph-dsl)
-6. [Phase 5: Persistence - Snapshots](#phase-5-persistence---snapshots)
-7. [Phase 5B: Workspace Checkpointing](#6b-phase-5b-workspace-checkpointing-materialization)
-8. [Phase 6: Integration - Workspace & Discovery](#phase-6-integration---workspace--discovery)
-9. [Phase 7: UI - Event-Driven Frontends](#phase-7-ui---event-driven-frontends)
-10. [Error Handling & Cancellation](#8b-error-handling--cancellation)
-11. [Testing Strategy](#testing-strategy)
-12. [Migration Path](#migration-path)
-13. [Appendix A: Code to Remove](#appendix-a-code-to-remove)
-14. [Appendix B: Final V2 File Structure](#appendix-b-final-v2-file-structure)
+6. [Phase 5: Integration - Workspace & Discovery](#phase-6-integration---workspace--discovery)
+7. [Phase 6: Persistence - Snapshots (KV-Based)](#phase-5-persistence---snapshots)
+8. [Phase 7: Workspace Checkpointing](#6b-phase-5b-workspace-checkpointing-materialization)
+9. [Phase 8: UI - Event-Driven Frontends](#phase-7-ui---event-driven-frontends)
+10. [Testing Strategy](#testing-strategy)
+11. [Migration Path](#migration-path)
+12. [Appendix A: Code to Remove](#appendix-a-code-to-remove)
+13. [Appendix B: Final V2 File Structure](#appendix-b-final-v2-file-structure)
 
 ---
 
@@ -219,6 +218,7 @@ class Event(BaseModel):
     agent_id: str | None = None
     graph_id: str | None = None
     node_id: str | None = None
+    session_id: str | None = None  # For multi-session support
     
     # Payload (any additional data)
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -261,6 +261,11 @@ class Event(BaseModel):
     def agent_failed(cls, agent_id: str, error: str, **payload) -> "Event":
         return cls(category="agent", action=AgentAction.FAILED,
                   agent_id=agent_id, payload={"error": error, **payload})
+    
+    @classmethod
+    def agent_cancelled(cls, agent_id: str, **payload) -> "Event":
+        return cls(category="agent", action=AgentAction.CANCELLED,
+                  agent_id=agent_id, payload=payload)
     
     @classmethod
     def tool_called(cls, tool_name: str, call_id: str, **payload) -> "Event":
@@ -311,12 +316,14 @@ class EventBus:
         - Error isolation: one failing handler doesn't affect others
     """
     
-    def __init__(self, max_queue_size: int = 1000):
+    def __init__(self, max_queue_size: int = 1000, telemetry=None):
         # Backpressure: prevent memory issues with unbounded queue
         self._queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=max_queue_size)
         self._subscribers: dict[str, list[EventHandler]] = {}
         self._running = False
         self._logger = logging.getLogger(__name__)
+        # Optional telemetry for metrics/tracing (e.g., OpenTelemetry, custom)
+        self._telemetry = telemetry
     
     async def publish(self, event: Event) -> None:
         """Publish an event to all subscribers."""
@@ -329,8 +336,19 @@ class EventBus:
             )
             return
         
+        # Optional telemetry recording
+        if self._telemetry:
+            await self._record_telemetry(event)
+        
         # Notify subscribers concurrently
         await self._notify_subscribers(event)
+    
+    async def _record_telemetry(self, event: Event) -> None:
+        """Record event to telemetry (tokens used, duration, etc.)."""
+        try:
+            await self._telemetry.record(event)
+        except Exception as e:
+            self._logger.debug(f"Telemetry recording failed: {e}")
     
     async def _notify_subscribers(self, event: Event) -> None:
         """Notify all matching subscribers concurrently with error isolation."""
@@ -586,6 +604,13 @@ class AgentState(str, Enum):
     CANCELLED = "cancelled"
 
 
+class ErrorPolicy(str, Enum):
+    """Graph-level error handling policies."""
+    STOP_GRAPH = "stop_graph"       # Stop entire graph on any failure
+    SKIP_DOWNSTREAM = "skip_downstream"  # Skip dependent agents, continue others
+    CONTINUE = "continue"           # Continue execution regardless of failures
+
+
 @dataclass
 class AgentNode:
     """The unified concept of an agent.
@@ -625,6 +650,25 @@ class AgentNode:
     # Graph composition
     upstream: list[str] = field(default_factory=list)   # Depends on these
     downstream: list[str] = field(default_factory=list)  # Fed to these
+    
+    async def cancel(self, event_bus: EventBus | None = None) -> None:
+        """Cancel this agent's execution.
+        
+        Sets state to CANCELLED and resolves any pending user response with
+        a cancellation signal.
+        """
+        self.state = AgentState.CANCELLED
+        self.error = "Cancelled by user"
+        
+        # Resolve any pending user response
+        await self.inbox.resolve_response_async("")
+        
+        # Publish cancelled event
+        if event_bus:
+            await event_bus.publish(Event.agent_cancelled(
+                agent_id=self.id,
+                error=self.error
+            ))
 
 
 @dataclass
@@ -777,6 +821,12 @@ class AgentGraph:
     
     def __getitem__(self, name: str) -> AgentNode:
         return self._agents[name]
+    
+    async def cancel(self, event_bus: EventBus | None = None) -> None:
+        """Cancel all agents in the graph."""
+        for agent in self._agents.values():
+            if agent.state not in (AgentState.COMPLETED, AgentState.FAILED, AgentState.CANCELLED):
+                await agent.cancel(event_bus)
 
 
 class _GraphBuilder:
@@ -813,11 +863,13 @@ class GraphExecutor:
         max_concurrency: int,
         interactive: bool,
         event_bus: EventBus,
+        error_policy: ErrorPolicy = ErrorPolicy.STOP_GRAPH,
     ):
         self._graph = graph
         self._max_concurrency = max_concurrency
         self._interactive = interactive
         self._event_bus = event_bus
+        self._error_policy = error_policy
         self._semaphore = asyncio.Semaphore(max_concurrency)
     
     async def run(self) -> dict[str, Any]:
@@ -831,7 +883,13 @@ class GraphExecutor:
                 asyncio.create_task(self._run_agent(name))
                 for name in batch
             ]
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Check for failures and apply error policy
+            if self._error_policy == ErrorPolicy.STOP_GRAPH:
+                for result in results:
+                    if isinstance(result, Exception):
+                        break
         
         return {
             name: agent.result 
@@ -1724,139 +1782,284 @@ async def test_parallel_execution():
 
 ---
 
-## 6. Phase 5: Persistence - Snapshots
+## 6. Phase 5: Persistence - Snapshots (KV-Based)
 
-**Goal**: Enable pause/resume of agents across restarts.
+> **Key Insight**: Leverage Cairn's KV store as the **primary state store** for agents.
+> This completely eliminates the "snapshot serialization depth" problem because:
+> - Workspace snapshot = agent snapshot (automatic via Cairn)
+> - No need to serialize structured-agents kernel internals
+> - Messages and results stored as JSON in KV
 
-**Time Estimate**: 2-3 days
+**Goal**: Enable pause/resume of agents across restarts using Cairn KV as state store.
 
-### 6.1 What to Build
+**Time Estimate**: 1-2 days (significantly simpler than original design)
 
-```python
-# snapshots.py
+### 5.1 Architecture: KV-Store Native State
 
-import json
-import pickle
-from dataclasses import dataclass, field
-from datetime import datetime
-from pathlib import Path
-from typing import Any
-
-from remora.agent_graph import AgentNode, AgentState
-
-
-@dataclass
-class AgentSnapshot:
-    """Complete state of an agent for resume.
-    
-    This allows:
-    - User steps away, comes back
-    - Review before continuing
-    - Debugging at exact point
-    """
-    agent_id: str
-    created_at: datetime
-    
-    # Kernel state
-    turn: int
-    messages: list[dict[str, Any]]
-    tool_results: list[dict[str, Any]]
-    
-    # Context
-    context: dict[str, Any]
-    
-    # Inbox
-    inbox_messages: list[str]
-    blocked_question: str | None
-    
-    # Workspace
-    workspace_path: str
-    
-    def to_file(self, path: Path) -> None:
-        """Save snapshot to file."""
-        data = {
-            "agent_id": self.agent_id,
-            "created_at": self.created_at.isoformat(),
-            "turn": self.turn,
-            "messages": self.messages,
-            "tool_results": self.tool_results,
-            "context": self.context,
-            "inbox_messages": self.inbox_messages,
-            "blocked_question": self.blocked_question,
-            "workspace_path": self.workspace_path,
-        }
-        path.write_text(json.dumps(data))
-    
-    @classmethod
-    def from_file(cls, path: Path) -> "AgentSnapshot":
-        """Load snapshot from file."""
-        data = json.loads(path.read_text())
-        return cls(
-            agent_id=data["agent_id"],
-            created_at=datetime.fromisoformat(data["created_at"]),
-            turn=data["turn"],
-            messages=data["messages"],
-            tool_results=data["tool_results"],
-            context=data["context"],
-            inbox_messages=data["inbox_messages"],
-            blocked_question=data["blocked_question"],
-            workspace_path=data["workspace_path"],
-        )
-
-
-class SnapshotManager:
-    """Manages agent snapshots."""
-    
-    def __init__(self, snapshot_dir: Path):
-        self._dir = snapshot_dir
-        self._dir.mkdir(parents=True, exist_ok=True)
-    
-    async def create(self, agent: AgentNode) -> AgentSnapshot:
-        """Create a snapshot of current agent state."""
-        snapshot = AgentSnapshot(
-            agent_id=agent.id,
-            created_at=datetime.now(),
-            turn=agent.kernel.turn if agent.kernel else 0,
-            messages=[],  # TODO: Extract from kernel
-            tool_results=[],
-            context={},  # TODO: Extract from context
-            inbox_messages=[],
-            blocked_question=agent.inbox.blocked_question,
-            workspace_path=str(agent.workspace_path) if agent.workspace_path else "",
-        )
-        
-        snapshot.to_file(self._dir / f"{agent.id}.json")
-        return snapshot
-    
-    async def restore(self, snapshot: AgentSnapshot) -> AgentNode:
-        """Restore an agent from snapshot."""
-        # TODO: Implement
-        pass
-    
-    def list(self) -> list[AgentSnapshot]:
-        """List all available snapshots."""
-        return [
-            AgentSnapshot.from_file(f)
-            for f in self._dir.glob("*.json")
-        ]
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Cairn Workspace                                    │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                         KV Store (Agent State)                      │   │
+│  │                                                                      │   │
+│  │   agent:{id}:messages ──────────────────────────────────────────┐  │   │
+│  │   [                                                                  │  │
+│  │     {"role": "user", "content": "Fix this function"},            │  │
+│  │     {"role": "assistant", "tool_calls": [...]},                  │  │
+│  │     {"role": "tool", "content": "..."}                           │  │
+│  │   ]                                                                │  │
+│  │                                                                      │   │
+│  │   agent:{id}:tool_results ──────────────────────────────────────┐  │   │
+│  │   [                                                                │  │
+│  │     {"call_id": "...", "name": "...", "output": "..."}         │  │
+│  │   ]                                                                │  │
+│  │                                                                      │   │
+│  │   agent:{id}:metadata ──────────────────────────────────────────┐  │   │
+│  │   {                                                                │  │
+│  │     "turn": 5,                                                     │  │
+│  │     "bundle": "lint",                                              │  │
+│  │     "target_path": "src/main.py",                                  │  │
+│  │     "state": "running",                                            │  │
+│  │     "created_at": "2026-02-23T10:00:00"                          │  │
+│  │   }                                                                │  │
+│  │                                                                      │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Files (virtualized)                                                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 6.2 Success Criteria
+### 5.2 AgentKVStore - KV-Based State Management
 
-- [ ] Agent state can be serialized
-- [ ] Snapshots persist to disk
-- [ ] Agents can resume from snapshots
-- [ ] Review workflow supported
+```python
+# agent_state.py
+
+import json
+import uuid
+from datetime import datetime
+from typing import Any
+
+from fsdantic import Workspace
+
+
+class AgentKVStore:
+    """Manages agent state in Cairn KV store.
+    
+    Key insight: All agent state lives in KV, not Python objects.
+    This makes snapshots trivial - workspace snapshot = agent snapshot.
+    """
+    
+    def __init__(self, workspace: Workspace, agent_id: str):
+        self._ws = workspace
+        self._agent_id = agent_id
+        self._prefix = f"agent:{agent_id}"
+    
+    @property
+    def _messages_key(self) -> str:
+        return f"{self._prefix}:messages"
+    
+    @property
+    def _tool_results_key(self) -> str:
+        return f"{self._prefix}:tool_results"
+    
+    @property
+    def _metadata_key(self) -> str:
+        return f"{self._prefix}:metadata"
+    
+    # -------------------------------------------------------------------------
+    # Messages (conversation history)
+    # -------------------------------------------------------------------------
+    
+    def get_messages(self) -> list[dict[str, Any]]:
+        """Get all messages from KV."""
+        data = self._ws.kv.get(self._messages_key)
+        return json.loads(data) if data else []
+    
+    def add_message(self, message: dict[str, Any]) -> None:
+        """Add a message to the conversation history."""
+        messages = self.get_messages()
+        messages.append(message)
+        self._ws.kv.set(self._messages_key, json.dumps(messages))
+    
+    def add_message_from_object(self, msg_obj) -> None:
+        """Add a Message object (from structured-agents)."""
+        self.add_message({
+            "role": msg_obj.role,
+            "content": msg_obj.content,
+            "tool_calls": [
+                {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                for tc in (msg_obj.tool_calls or [])
+            ],
+            "tool_call_id": msg_obj.tool_call_id,
+            "name": msg_obj.name,
+        })
+    
+    # -------------------------------------------------------------------------
+    # Tool Results
+    # -------------------------------------------------------------------------
+    
+    def get_tool_results(self) -> list[dict[str, Any]]:
+        """Get all tool results from KV."""
+        data = self._ws.kv.get(self._tool_results_key)
+        return json.loads(data) if data else []
+    
+    def add_tool_result(self, result: dict[str, Any]) -> None:
+        """Add a tool result."""
+        results = self.get_tool_results()
+        results.append(result)
+        self._ws.kv.set(self._tool_results_key, json.dumps(results))
+    
+    def add_tool_result_from_object(self, result_obj) -> None:
+        """Add a ToolResult object (from structured-agents)."""
+        self.add_tool_result({
+            "call_id": result_obj.call_id,
+            "name": result_obj.name,
+            "output": result_obj.output,
+            "is_error": result_obj.is_error,
+        })
+    
+    # -------------------------------------------------------------------------
+    # Metadata
+    # -------------------------------------------------------------------------
+    
+    def get_metadata(self) -> dict[str, Any]:
+        """Get agent metadata."""
+        data = self._ws.kv.get(self._metadata_key)
+        return json.loads(data) if data else {}
+    
+    def set_metadata(self, metadata: dict[str, Any]) -> None:
+        """Set agent metadata."""
+        self._ws.kv.set(self._metadata_key, json.dumps(metadata))
+    
+    def update_metadata(self, **kwargs) -> None:
+        """Update specific metadata fields."""
+        current = self.get_metadata()
+        current.update(kwargs)
+        self.set_metadata(current)
+    
+    # -------------------------------------------------------------------------
+    # Snapshots (just a named reference to current state)
+    # -------------------------------------------------------------------------
+    
+    def create_snapshot(self, name: str) -> str:
+        """Create a named snapshot of current state.
+        
+        This is now trivial - we just copy current state to a snapshot key.
+        The workspace itself can be checkpointed via materialize().
+        """
+        snapshot_id = uuid.uuid4().hex[:8]
+        snapshot_key = f"snapshot:{name}:{snapshot_id}"
+        
+        # Copy current state to snapshot
+        messages = self.get_messages()
+        tool_results = self.get_tool_results()
+        metadata = self.get_metadata()
+        
+        snapshot_data = {
+            "messages": messages,
+            "tool_results": tool_results,
+            "metadata": metadata,
+            "created_at": datetime.now().isoformat(),
+        }
+        
+        self._ws.kv.set(snapshot_key, json.dumps(snapshot_data))
+        return snapshot_id
+    
+    def restore_snapshot(self, snapshot_key: str) -> None:
+        """Restore state from a snapshot."""
+        data = self._ws.kv.get(snapshot_key)
+        if not data:
+            raise ValueError(f"Snapshot not found: {snapshot_key}")
+        
+        snapshot = json.loads(data)
+        self._ws.kv.set(self._messages_key, json.dumps(snapshot["messages"]))
+        self._ws.kv.set(self._tool_results_key, json.dumps(snapshot["tool_results"]))
+        self._ws.kv.set(self._metadata_key, json.dumps(snapshot["metadata"]))
+    
+    def list_snapshots(self) -> list[dict[str, Any]]:
+        """List all available snapshots."""
+        entries = self._ws.kv.list(prefix="snapshot:")
+        snapshots = []
+        for entry in entries:
+            key = entry.get("key", "")
+            if ":metadata" not in key:  # Skip metadata entries
+                data = self._ws.kv.get(key)
+                if data:
+                    snapshot = json.loads(data)
+                    snapshots.append({
+                        "key": key,
+                        "created_at": snapshot.get("created_at"),
+                        "message_count": len(snapshot.get("messages", [])),
+                    })
+        return snapshots
+```
+
+### 5.3 Integration with AgentNode
+
+```python
+# In agent_graph.py, update AgentNode
+
+@dataclass
+class AgentNode:
+    # ... existing fields ...
+    
+    workspace: Any = None  # Cairn workspace
+    _kv_store: AgentKVStore = None
+    
+    @property
+    def kv_store(self) -> AgentKVStore:
+        """Lazy-init KV store from workspace."""
+        if self._kv_store is None and self.workspace:
+            self._kv_store = AgentKVStore(self.workspace, self.id)
+        return self._kv_store
+    
+    def sync_state_to_kv(self) -> None:
+        """Sync current in-memory state to KV store."""
+        if not self.kv_store:
+            return
+        
+        # Sync messages
+        if self.kernel and hasattr(self.kernel, 'messages'):
+            # Clear and rebuild from kernel
+            for msg in self.kernel.messages:
+                self.kv_store.add_message_from_object(msg)
+        
+        # Sync metadata
+        self.kv_store.update_metadata(
+            state=self.state.value,
+            turn=getattr(self.kernel, 'turn_count', 0),
+        )
+```
+
+### 5.4 Why This Is Better
+
+| Aspect | Original Design | KV-Store Native |
+|--------|----------------|-----------------|
+| Snapshot complexity | Need to serialize kernel internals | Trivial - just KV copy |
+| Kernel dependencies | Need structured-agents changes | None - KV is external |
+| Persistence | Custom file handling | Automatic via workspace |
+| Resume | Rebuild kernel state | Reload from KV |
+| Crash recovery | Complex state reconstruction | Natural - workspace survives |
+| Debugging | Hard to inspect | Easy - just read KV |
+
+### 5.5 Success Criteria
+
+- [x] Agent state stored in Cairn KV (not in-memory objects)
+- [x] Workspace snapshot = agent snapshot
+- [x] Resume loads from KV store
+- [x] No structured-agents kernel modifications needed
 
 ---
 
-## 6B. Phase 5B: Workspace Checkpointing (Materialization)
+## 7. Phase 6: Workspace Checkpointing (Materialization)
 
 > **Goal**: Materialize Cairn sandboxed filesystems and KV cache to disk on command, enabling checkpointing with jujutsu/github.
 
 **Time Estimate**: 2-3 days
 
-### 6B.1 What We Discovered
+### 6.1 What We Discovered
 
 After studying the Fsdantic library (which Cairn uses), we found that **materialization is already partially implemented**! The key insight is:
 
@@ -2318,7 +2521,7 @@ def test_kv_checkpoint_roundtrip(tmp_path):
 
 ---
 
-## 7. Phase 6: Integration - Workspace & Discovery
+## 8. Phase 7: Integration - Workspace & Discovery
 
 **Goal**: Wire up the remaining pieces: workspace management and AST discovery.
 
@@ -2397,7 +2600,7 @@ async def discover(self, path: Path, config: DiscoveryConfig) -> "AgentGraph":
 
 ---
 
-## 8. Phase 7: UI - Event-Driven Frontends
+## 8. Phase 8: UI - Event-Driven Frontends
 
 **Goal**: Build simple, elegant UIs that just consume events.
 
@@ -2637,26 +2840,6 @@ tests/fixtures/
 | RemoraAgentContext | AgentNode | v2.2 |
 | Coordinator | AgentGraph | v2.2 |
 | ContextManager | (simplified) | v2.3 |
-
-### 10.3 Compatibility Mode
-
-For gradual migration, support both APIs:
-
-```python
-# compat.py
-
-def legacy_mode():
-    """Enable v1 compatibility."""
-    # Use old Coordinator
-    # Use old EventEmitter
-    pass
-
-def v2_mode():
-    """Use new v2 API."""
-    # Use AgentGraph
-    # Use EventBus
-    pass
-```
 
 ---
 

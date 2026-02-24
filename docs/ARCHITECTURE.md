@@ -1,107 +1,85 @@
-# Remora Architecture
+# Remora V2 Architecture
+
+Remora V2 is built around three nouns: **events**, **agents**, and **workspaces**. Every state change, user interaction, tool call, and dashboard update flows through the same `EventBus`. Agent logic is expressed declaratively via `AgentGraph`, and every run executes inside a `GraphWorkspace` backed by Cairn + Fsdantic file/KV stores. The dashboard and any other UI simply listen to that event stream.
 
 ## System Overview
 
-Remora is a local orchestration layer that runs structured, tool-calling agents on Python code. The pipeline is:
-
-1. **Discovery** — tree-sitter extracts CST nodes from Python files.
-2. **Orchestration** — a coordinator fans out each node to enabled operations.
-3. **Kernel Execution** — `KernelRunner` drives a structured-agents kernel and Grail tool execution.
-4. **Results + Review** — results are aggregated and (optionally) merged from Cairn workspaces.
-
-Inference is performed by an OpenAI-compatible server (typically vLLM) using FunctionGemma adapters.
-
-## Architecture Layers
-
 ```
-┌───────────────────────────────────────────────────────────┐
-│ Application Layer                                         │
-│  - CLI (remora)                                           │
-│  - Config (Pydantic)                                      │
-│  - Watch mode (watchfiles)                                │
-│  - Hub daemon (optional)                                  │
-└───────────────────────────────────────────────────────────┘
-                        ↓
-┌───────────────────────────────────────────────────────────┐
-│ Discovery Layer                                           │
-│  - Tree-sitter parser + queries                           │
-│  - CSTNode extraction                                     │
-└───────────────────────────────────────────────────────────┘
-                        ↓
-┌───────────────────────────────────────────────────────────┐
-│ Orchestration Layer                                       │
-│  - Coordinator + concurrency control                      │
-│  - Result aggregation                                     │
-└───────────────────────────────────────────────────────────┘
-                        ↓
-┌───────────────────────────────────────────────────────────┐
-│ Kernel Execution Layer                                    │
-│  - Structured-agents AgentKernel                          │
-│  - Grail backend for .pym tools                            │
-│  - ContextManager + Decision Packet                       │
-└───────────────────────────────────────────────────────────┘
-                        ↓
-┌───────────────────────────────────────────────────────────┐
-│ Workspace Layer                                           │
-│  - Cairn workspaces per agent run                          │
-│  - CairnWorkspaceBridge handles manual or auto-merge       │
-└───────────────────────────────────────────────────────────┘
+            ┌────────────┐         ┌────────────┐
+            │   User     │◀────▶│    UI /    │
+            │ Interface  │      │  Dashboard │
+            └────────────┘      └────────────┘
+                   │                  ▲
+                   ▼                  │
+                ┌────────────────────Event Bus────────────────────┐
+                │  Publishes agent events, tool calls, checkpoints │
+                └────────────────────┬────────────────────────────┘
+                                     │
+         ┌──────────────┬────────────┴─────────────┬──────────────┐
+         │ AgentGraph   │ GraphWorkspace / KV Store │ Coordinator  │
+         │ (nodes + DSL)│ (per-agent files + KV)    │ (optional)   │
+         └──────────────┴────────────┬─────────────┴──────────────┘
+                                     │
+                          AgentKernel + Tool Execution
 ```
 
 ## Core Components
 
-### CLI (`remora.cli`)
+### Event Bus (`remora.event_bus.EventBus`)
 
-Commands include `analyze`, `watch`, `config`, and `list-agents`. The CLI resolves config overrides and drives the analysis workflow.
+- Pydantic-first events (`Event`, `EventCategory`, convenience constructors)
+- Backpressure queue plus `asyncio.gather` for concurrent subscribers
+- `stream()` exposes SSE/WebSocket-ready iterators used by the dashboard, CLI, and mobile remotes.
+- Every agent lifecycle change (`agent_started`, `agent_blocked`, `agent_completed`, `workspace_checkpointed`, etc.) is emitted here.
 
-### Discovery (`remora.discovery`)
+### Agent Graph (`remora.agent_graph`)
 
-`TreeSitterDiscoverer` loads `.scm` query packs from `src/remora/queries`, parses source files (Python, TOML, Markdown, etc.) concurrently via `ThreadPoolExecutor`, and returns immutable `CSTNode` objects. Language support is configured via the `LANGUAGES` dict in `config.py`.
+- `AgentNode` unifies identity, bundle, target, inbox, kernel, KV state, and result tracking.
+- `AgentGraph` exposes `.agent()`, `.after().run()`, `.run_parallel()`, `.discover()`, and `.on_blocked()` for building declarative workflows.
+- `GraphExecutor` handles concurrency, emits each agent event, and integrates blocked/resumed handling via injected handlers.
 
-### Coordinator (`remora.orchestrator.Coordinator`)
+### Workspaces & State (`remora.workspace`, `remora.agent_state`, `remora.checkpoint`)
 
-The coordinator enforces concurrency limits, builds `KernelRunner` instances, and aggregates `NodeResult` outputs. The Coordinator can also spawn the Hub as an `in-process` task. Each operation produces a unique `agent_id` used as the workspace identifier.
+- `GraphWorkspace` creates agent directories, shared space, and a snapshot of the original source under `remora_workspaces/`.
+- `AgentKVStore` (Phase 5) stores conversation history, tool results, metadata, and snapshots entirely inside the KV store.
+- `CheckpointManager` materializes files + KV entries, exports them to disk, and restores new workspaces for checkpoint playback or versioning.
 
-### KernelRunner (`remora.kernel_runner.KernelRunner`)
+### Interactive Layer (`remora.interactive`)
 
-`KernelRunner` loads a bundle (`agents/<op>/bundle.yaml`), configures a structured-agents kernel, and runs a multi-turn tool-calling loop. It also:
+- `WorkspaceInboxCoordinator` polls Cairn KV for `outbox:question:*`, emits `agent:blocked`, and writes answers to `inbox:response:*`.
+- `ask_user()` writes a question, polls the KV inbox, and resumes once the coordinator responds.
+- `get_user_messages()` flushes async user messages sent via KV and integrates them into agent turns.
 
-- Builds initial messages using bundle templates.
-- Injects per-turn context from the Decision Packet.
-- Executes Grail tools in Cairn workspaces.
-- Formats the final `AgentResult` using the termination tool output.
+### UI & Dashboard (`demo/dashboard`)
 
-### Context Manager (`remora.context`)
+- FastAPI app streams events via `/events` (SSE) and `/ws/events` (WebSocket).
+- User responses are posted to `/agent/{agent_id}/respond` and reflected back through `EventBus` (`Event.agent_resumed`).
+- `/projector` and `/mobile` endpoints render simplified views for presentation or touch interactions.
+- Static assets live under `demo/dashboard/static/` and talk to `/static/dashboard.js`.
 
-The Decision Packet summarizes recent tool activity and errors for prompt injection. It can pull additional context from the optional Hub daemon (`remora-hub`), which can run either as a separate process or as an in-process asyncio task inside the `Coordinator`.
+### Public API (`src/remora/__init__.py`)
 
-### Events and Logs (`remora.events`, `remora.llm_logger`)
+Exports are intentionally minimal:
 
-Event emitters produce JSONL event streams for dashboards and debugging. When enabled, `LlmConversationLogger` writes human-readable transcripts.
+- `AgentGraph`, `GraphConfig`
+- `EventBus`, `Event`, `get_event_bus`
+- `discover`, `CSTNode`, `TreeSitterDiscoverer`
+- `GraphWorkspace`, `WorkspaceManager`
 
-## Bundle Layout
-
-Each operation lives under `agents/<operation>` and contains:
-
-- `bundle.yaml` — structured-agents bundle manifest.
-- `tools/` — Grail `.pym` tool scripts.
-- `context/` — optional context providers.
-
-## Workspace Management
-
-Grail tools run inside Cairn workspaces stored under `~/.cache/remora/workspaces/<agent_id>` (or `cairn.home`). Successful runs can be merged into the project root via `RemoraAnalyzer.accept()` or `--auto-accept`, which delegates to the `CairnWorkspaceBridge`.
+This keeps the dependency surface clean while allowing consumers to compose graphs, subscribe to events, and orchestrate UI/CLI workflows.
 
 ## Data Flow
 
-```
-remora analyze src/
-  → load config
-  → discover CST nodes
-  → for each node + operation:
-      - load bundle
-      - run structured-agents kernel
-      - execute tools in workspace
-      - emit events + logs
-  → aggregate results (table/json)
-  → optional accept/reject
-```
+1. `discover()` parses the target paths via Tree-sitter and yields `CSTNode` objects.
+2. `AgentGraph` adds agents, wires dependencies, and optionally sets `.on_blocked()`.
+3. `GraphExecutor` runs each agent:
+   - publishes `agent_started`
+   - executes structured-agents kernel (bundles + tools)
+   - writes conversation + tool results via `AgentKVStore`
+   - publishes `agent_completed` / `agent_failed`
+4. The dashboard or CLI consumes `EventBus.stream()` to display progress and resolve questions.
+5. Workspaces can be checkpointed via `CheckpointManager`, materializing both files and KV entries for versioning.
+
+## Testing Strategy
+
+Each phase ships with dedicated unit tests (`tests/unit/test_event_bus.py`, `test_agent_graph.py`, etc.) and an integration suite under `tests/integration/` that uses the new graph API plus interactive handlers. The event bus tests guarantee wildcard matching, SSE clients, and telemetry; agent_graph tests cover dependency wiring and agent inbox interactions; workspace tests verify directories, snapshots, and cleanup.

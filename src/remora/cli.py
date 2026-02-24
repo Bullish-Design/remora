@@ -19,7 +19,7 @@ from remora.analyzer import RemoraAnalyzer
 from remora.presenter import ResultPresenter
 from remora.config import ConfigError, RemoraConfig, load_config, serialize_config
 from remora.constants import DEFAULT_OPERATIONS
-from structured_agents import load_bundle
+from remora.backend import BackendDependencyMissing, require_backend_extra
 
 app = typer.Typer(help="Remora CLI.")
 console = Console()
@@ -423,7 +423,10 @@ def _fetch_models(server_config: Any) -> set[str]:
     """Fetch available models from vLLM server."""
     try:
         import openai
+    except (ImportError, RuntimeError):
+        return set()
 
+    try:
         client = openai.OpenAI(
             base_url=server_config.base_url,
             api_key=server_config.api_key,
@@ -479,6 +482,13 @@ def list_agents(
         _print_config_error(ConfigError.code, str(exc))
         raise typer.Exit(code=1) from exc
 
+    structured_agents_module = None
+    backend_warning: str | None = None
+    try:
+        structured_agents_module = require_backend_extra()
+    except BackendDependencyMissing as exc:
+        backend_warning = str(exc)
+
     # Fetch available models
     available_models = _fetch_models(config.server)
     server_reachable = bool(available_models)
@@ -494,9 +504,9 @@ def list_agents(
         # Check Grail validation if YAML exists
         grail_valid = False
         grail_warnings = []
-        if yaml_exists:
+        if yaml_exists and structured_agents_module:
             try:
-                bundle = load_bundle(yaml_path.parent)
+                bundle = structured_agents_module.load_bundle(yaml_path.parent)
 
                 from dataclasses import dataclass
                 from remora.tool_registry import GrailToolRegistry
@@ -548,6 +558,9 @@ def list_agents(
                 "model_available": model_available,
             }
         )
+
+    if backend_warning:
+        console.print(f"[yellow]{backend_warning}[/yellow]\n")
 
     # Output
     if output_format.lower() == "json":

@@ -7,8 +7,16 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from remora.backend import BackendDependencyMissing, require_backend_extra
 from remora.config import load_config
-from structured_agents import load_bundle
+
+try:
+    _structured_agents = require_backend_extra()
+except BackendDependencyMissing as exc:
+    print(exc)
+    raise SystemExit(1)
+
+load_bundle = _structured_agents.load_bundle
 
 
 async def validate_agent(agent_name: str, agents_dir: Path) -> bool:
@@ -54,7 +62,7 @@ async def main() -> int:
     print("Validating production agents...\n")
 
     config = load_config(None)
-    config.agents_dir = "agents"
+    config.agents_dir = Path("agents")
     agents_dir = Path(config.agents_dir)
 
     agents = ["harness", "docstring", "lint", "test", "sample_data"]
