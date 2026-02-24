@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Remora Remote</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid #30363d;
+        }
+        
+        h1 {
+            font-size: 1.25rem;
+            color: #58a6ff;
+        }
+        
+        .status {
+            font-size: 0.75rem;
+            color: #8b949e;
+        }
+        
+        .status::before {
+            content: '';
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #f85149;
+            margin-right: 0.25rem;
+        }
+        
+        .status.connected::before {
+            background: #3fb950;
+        }
+        
+        .card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .card h2 {
+            font-size: 0.875rem;
+            color: #8b949e;
+            margin-bottom: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .agent {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem;
+            background: #0d1117;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+            gap: 0.75rem;
+        }
+        
+        .agent:last-child {
+            margin-bottom: 0;
+        }
+        
+        .agent .indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        
+        .agent .indicator.pending { background: #6e7681; }
+        .agent .indicator.running { background: #58a6ff; }
+        .agent .indicator.blocked { background: #d29922; }
+        .agent .indicator.completed { background: #3fb950; }
+        
+        .agent .name {
+            flex: 1;
+            font-size: 0.875rem;
+        }
+        
+        .agent .state {
+            font-size: 0.625rem;
+            color: #8b949e;
+            text-transform: uppercase;
+        }
+        
+        .blocked {
+            background: #1c1a10;
+            border-left: 3px solid #d29922;
+        }
+        
+        .blocked .question {
+            font-size: 1rem;
+            margin-bottom: 0.75rem;
+        }
+        
+        .blocked input {
+            width: 100%;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            color: #e6edf3;
+            padding: 0.75rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .blocked button {
+            width: 100%;
+            background: #238636;
+            color: white;
+            border: none;
+            padding: 0.75rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+        
+        .progress {
+            margin-bottom: 0.5rem;
+        }
+        
+        .progress-bar {
+            height: 8px;
+            background: #0d1117;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #3fb950;
+            transition: width 0.3s;
+        }
+        
+        .progress-text {
+            font-size: 0.75rem;
+            color: #8b949e;
+            text-align: center;
+            margin-top: 0.25rem;
+        }
+        
+        .empty {
+            color: #6e7681;
+            font-size: 0.875rem;
+            text-align: center;
+            padding: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Remora Remote</h1>
+        <span id="status" class="status">Connecting</span>
+    </header>
+    
+    <div class="card">
+        <h2>Progress</h2>
+        <div class="progress">
+            <div class="progress-bar">
+                <div id="progress" class="progress-fill" style="width: 0%"></div>
+            </div>
+            <div id="progress-text" class="progress-text">Waiting...</div>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h2>Agents</h2>
+        <div id="agents">
+            <div class="empty">No agents</div>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h2>Waiting for Input</h2>
+        <div id="blocked">
+            <div class="empty">No questions</div>
+        </div>
+    </div>
+    
+    <script>
+        const statusEl = document.getElementById('status');
+        const progressEl = document.getElementById('progress');
+        const progressTextEl = document.getElementById('progress-text');
+        const agentsEl = document.getElementById('agents');
+        const blockedEl = document.getElementById('blocked');
+        
+        const agents = new Map();
+        const blocked = new Map();
+        
+        function render() {
+            const total = agents.size;
+            const completed = Array.from(agents.values()).filter(a => 
+                a.state === 'completed' || a.state === 'failed'
+            ).length;
+            
+            progressEl.style.width = total > 0 ? `${(completed / total) * 100}%` : '0%';
+            progressTextEl.textContent = total > 0 ? `${completed}/${total}` : 'Waiting...';
+            
+            if (agents.size === 0) {
+                agentsEl.innerHTML = '<div class="empty">No agents</div>';
+            } else {
+                agentsEl.innerHTML = Array.from(agents.values()).map(a => `
+                    <div class="agent">
+                        <span class="indicator ${a.state}"></span>
+                        <span class="name">${a.name || a.id}</span>
+                        <span class="state">${a.state}</span>
+                    </div>
+                `).join('');
+            }
+            
+            if (blocked.size === 0) {
+                blockedEl.innerHTML = '<div class="empty">No questions</div>';
+            } else {
+                const b = Array.from(blocked.values())[0];
+                blockedEl.innerHTML = `
+                    <div class="agent blocked">
+                        <div class="question">${b.question}</div>
+                        <input type="text" id="response" placeholder="Your answer..." />
+                        <button onclick="send()">Send</button>
+                    </div>
+                `;
+            }
+        }
+        
+        function send() {
+            const input = document.getElementById('response');
+            const answer = input?.value;
+            if (!answer || blocked.size === 0) return;
+            
+            const b = Array.from(blocked.values())[0];
+            fetch(`/agent/${b.agent_id}/respond`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: b.question, answer })
+            });
+        }
+        
+        function handle(e) {
+            if (e.category === 'agent') {
+                const id = e.agent_id;
+                if (!id) return;
+                
+                if (!agents.has(id)) agents.set(id, { id, state: 'pending', name: e.payload?.name || id });
+                const a = agents.get(id);
+                a.state = e.action;
+                
+                if (e.action === 'blocked') blocked.set(id, { agent_id: id, question: e.payload?.question || '?' });
+                else if (e.action === 'resumed') blocked.delete(id);
+            }
+            render();
+        }
+        
+        const ws = new WebSocket(`ws://${location.host}/ws/events`);
+        ws.onopen = () => { statusEl.textContent = 'Connected'; statusEl.classList.add('connected'); };
+        ws.onclose = () => { statusEl.textContent = 'Disconnected'; statusEl.classList.remove('connected'); };
+        ws.onmessage = (e) => handle(JSON.parse(e.data));
+    </script>
+</body>
+</html>

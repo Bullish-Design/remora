@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remora Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Remora Dashboard</h1>
+        <span id="connection-status" class="status">Connecting...</span>
+    </header>
+    
+    <main>
+        <div id="events-panel">
+            <div id="events-header">
+                Events Stream
+                <button id="clear-events" title="Clear events">×</button>
+            </div>
+            <div id="events-list"></div>
+        </div>
+        
+        <div id="main-panel">
+            <div class="card">
+                <h2>Blocked Agents</h2>
+                <div id="blocked-agents">
+                    <div class="empty-state">No agents waiting for input</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Agent Status</h2>
+                <div id="agent-status">
+                    <div class="empty-state">No agents running</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Results</h2>
+                <div id="results">
+                    <div class="empty-state">No results yet</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Graph Execution</h2>
+                <div id="execution-progress">
+                    <div class="progress-bar">
+                        <div id="progress-fill" class="progress-fill" style="width: 0%"></div>
+                    </div>
+                    <div id="progress-text" class="progress-text">Ready</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>

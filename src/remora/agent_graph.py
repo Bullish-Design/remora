@@ -161,6 +161,18 @@ class AgentNode:
     upstream: list[str] = field(default_factory=list)
     downstream: list[str] = field(default_factory=list)
 
+    workspace: Any = field(default=None, repr=False)
+    _kv_store: Any = field(default=None, repr=False)
+
+    @property
+    def kv_store(self) -> Any:
+        """Lazy-init KV store from workspace."""
+        if self._kv_store is None and self.workspace:
+            from remora.agent_state import AgentKVStore
+
+            self._kv_store = AgentKVStore(self.workspace, self.id)
+        return self._kv_store
+
     async def cancel(self, event_bus: EventBus | None = None) -> None:
         """Cancel this agent's execution.
 

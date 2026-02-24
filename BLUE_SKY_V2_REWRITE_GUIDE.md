@@ -2841,26 +2841,6 @@ tests/fixtures/
 | Coordinator | AgentGraph | v2.2 |
 | ContextManager | (simplified) | v2.3 |
 
-### 10.3 Compatibility Mode
-
-For gradual migration, support both APIs:
-
-```python
-# compat.py
-
-def legacy_mode():
-    """Enable v1 compatibility."""
-    # Use old Coordinator
-    # Use old EventEmitter
-    pass
-
-def v2_mode():
-    """Use new v2 API."""
-    # Use AgentGraph
-    # Use EventBus
-    pass
-```
-
 ---
 
 ## Summary

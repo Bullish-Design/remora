@@ -1,23 +1,20 @@
-"""Remora library package."""
+"""Remora V2 - Simple, elegant agent graph workflows."""
 
-from remora.analyzer import RemoraAnalyzer, WorkspaceState
-from remora.presenter import ResultPresenter
-from remora.config import RemoraConfig, load_config
-from remora.discovery import CSTNode, NodeType, TreeSitterDiscoverer
-from remora.kernel_runner import KernelRunner
-from remora.results import AgentResult, AnalysisResults, NodeResult
+from remora.agent_graph import AgentGraph, GraphConfig
+from remora.config import RemoraConfig
+from remora.discovery import CSTNode, TreeSitterDiscoverer
+from remora.event_bus import Event, EventBus, get_event_bus
+from remora.workspace import GraphWorkspace, WorkspaceManager
 
 __all__ = [
-    "RemoraAnalyzer",
-    "ResultPresenter",
-    "WorkspaceState",
-    "RemoraConfig",
-    "load_config",
+    "AgentGraph",
+    "GraphConfig",
+    "get_event_bus",
+    "EventBus",
+    "Event",
     "CSTNode",
-    "NodeType",
     "TreeSitterDiscoverer",
-    "AgentResult",
-    "AnalysisResults",
-    "NodeResult",
-    "KernelRunner",
+    "RemoraConfig",
+    "GraphWorkspace",
+    "WorkspaceManager",
 ]
