@@ -24,6 +24,7 @@ dependencies = [
   "grail",
   "cairn",
   "textual",
+  "datastar-py",
 ]
 
 [project.optional-dependencies]
