@@ -1,6 +1,6 @@
 # Remora
 
-Local code analysis and enhancement using FunctionGemma-style agent bundles, tree-sitter discovery, and Grail tool execution.
+Local code analysis and enhancement using easily swappable agent bundles, tree-sitter discovery, and Grail tool execution.
 
 Remora scans Python projects into CST nodes, runs specialized agent bundles (lint, test, docstring, sample_data) against each node, and lets you review or auto-merge changes produced inside isolated Cairn workspaces. Inference is performed via an OpenAI-compatible server (typically vLLM).
 
