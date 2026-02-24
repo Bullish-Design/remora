@@ -1,6 +1,0 @@
-*   **S-NIAH (Single Needle-in-a-Haystack):** A benchmark task where the model must find one specific fact hidden in a massive document. Characterized as having a *constant* scaling of information density (only one thing matters, regardless of size).
-*   **BrowseComp-Plus:** A multi-hop question-answering benchmark where the model must synthesize facts across multiple documents.
-*   **OOLONG:** A benchmark requiring semantic transformation and aggregation across nearly every line of the context. Characterized as *linear* complexity.
-*   **OOLONG-Pairs:** A synthetic benchmark requiring the aggregation of pairs of chunks. Characterized as *quadratic* complexity (the hardest task).
-*   **Context Compaction / Summary Agent:** A competing baseline method where a massive context is iteratively summarized down to fit into a model's context window. (The RLM outperforms this by a wide margin).
-*   **CodeAct:** A competing baseline agent architecture that can execute Python code (acting), but unlike an RLM, it still loads the massive context string directly into its LLM prompt rather than keeping it isolated in the environment.

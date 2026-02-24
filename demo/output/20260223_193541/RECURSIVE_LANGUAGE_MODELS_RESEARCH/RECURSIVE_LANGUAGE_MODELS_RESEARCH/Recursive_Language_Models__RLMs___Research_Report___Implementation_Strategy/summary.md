@@ -1,1 +1,0 @@
-This heading introduces a research report on Recursive Language Models (RLMs), which proposes a hierarchical, iterative architecture to enhance contextual understanding and long-range coherence in language generation. The child summary outlines the foundational paper that introduces the RLM architecture and its mechanism of iterative refinement through recursive processing.

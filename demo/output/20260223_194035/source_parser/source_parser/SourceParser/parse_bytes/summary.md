@@ -1,1 +1,0 @@
-Parses raw bytes into a Tree object using the underlying parser, useful for testing without file I/O.

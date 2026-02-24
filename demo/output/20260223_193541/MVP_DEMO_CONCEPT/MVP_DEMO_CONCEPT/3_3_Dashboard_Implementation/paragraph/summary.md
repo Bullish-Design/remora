@@ -1,1 +1,0 @@
-The code leverages `rich` and `textual` to create an interactive, visually appealing terminal-based dashboard for demonstrating impactful user experiences.

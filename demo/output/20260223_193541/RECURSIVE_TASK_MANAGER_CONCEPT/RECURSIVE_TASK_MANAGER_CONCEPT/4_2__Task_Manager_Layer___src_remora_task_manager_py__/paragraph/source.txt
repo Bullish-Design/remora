@@ -1,1 +1,0 @@
-The OOP entry point for managing the lifecycle of these tree-based tasks, leveraging the `HubClient` and `CairnWorkspaceBridge`.

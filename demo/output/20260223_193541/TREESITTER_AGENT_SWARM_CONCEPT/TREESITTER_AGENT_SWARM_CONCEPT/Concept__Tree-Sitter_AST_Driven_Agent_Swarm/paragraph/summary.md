@@ -1,1 +1,0 @@
-The document proposes an experimental decentralized system for Remora that uses Tree-sitter's AST as a graph to coordinate a swarm of fine-tuned micro-agents.

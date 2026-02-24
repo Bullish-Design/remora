@@ -1,1 +1,0 @@
-This data structure defines a task in a decomposition-based workflow, specifying its unique identity, parent relationship, type, intent, environment, agent configuration, status, and list of child sub-tasks.

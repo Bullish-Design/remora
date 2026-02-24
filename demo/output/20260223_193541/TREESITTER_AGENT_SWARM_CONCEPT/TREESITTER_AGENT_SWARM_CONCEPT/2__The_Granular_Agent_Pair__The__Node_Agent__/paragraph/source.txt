@@ -1,1 +1,0 @@
-For any given node, its assigned intelligence consists of:

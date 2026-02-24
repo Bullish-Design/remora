@@ -1,1 +1,0 @@
-> "Watch as Remora creates a dedicated environment for each code node. The agent researches your codebase, pulls documentation, evaluates options—and you can see every file it creates in real-time. This isn't a black box. This is transparent AI reasoning."

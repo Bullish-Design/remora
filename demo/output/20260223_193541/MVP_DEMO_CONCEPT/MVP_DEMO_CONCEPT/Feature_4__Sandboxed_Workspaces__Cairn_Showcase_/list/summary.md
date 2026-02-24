@@ -1,1 +1,0 @@
-The system enables agents to work in isolated environments, with real-time diff visualization of changes, a final merge showing the transformation outcome, and built-in rollback functionality.

@@ -1,1 +1,0 @@
-The file `scripts/demo_walkthrough.md` likely contains a step-by-step guide or demonstration of how to use a specific script or feature, providing instructions for users to follow.

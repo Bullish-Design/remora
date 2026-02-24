@@ -1,1 +1,0 @@
-Extracts and deduplicates CSTNodes from a source file by running multiple compiled queries against a parsed tree, returning a sorted list of unique nodes.

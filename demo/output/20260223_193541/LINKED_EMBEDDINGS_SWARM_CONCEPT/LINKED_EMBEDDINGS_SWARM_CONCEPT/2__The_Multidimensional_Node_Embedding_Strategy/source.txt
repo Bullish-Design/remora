@@ -1,1 +1,0 @@
-Instead of a single massive embedding for a file or a chunk, every significant AST node is processed into a **Linked Node Entity** with pointers to separate vector spaces.

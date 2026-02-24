@@ -1,9 +1,0 @@
-To train the dozens/hundreds of specific "Node Agents" and the multi-vector embeddings, a massive autonomous data generation pipeline is required:
-
-1. **Source Material:** Curate a list of top-tier, canonical Python repositories known for exceptional code quality, consistent docstrings, and robust patterns.
-2. **Teacher Model (Large LLM) Annotation:**
-   * A highly capable LLM traverses the source ASTs using Tree-sitter.
-   * For *every node*, it generates extensive metadata: descriptive summaries, edge-case analysis, structural graph data, and inferred types.
-   * It executes the code where possible, capturing runtime state, inputs, and outputs to inject into the semantic vector space.
-3. **Dataset Splitting:** This rich metadata is partitioned. The code text goes to the Syntax dataset, summaries to the Semantic dataset, structure to the Topological dataset. 
-4. **LoRA/Model Fine-tuning:** We train the "Tiny" reasoning models exclusively on these tightly scoped slices—yielding models that are incredibly cheap to run, but possess genius-level intuition for a very specific AST structural pattern.

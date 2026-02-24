@@ -1,1 +1,0 @@
-This defines a standardized structure that every node workspace must adhere to, ensuring consistency in organization and functionality across different node workspaces.

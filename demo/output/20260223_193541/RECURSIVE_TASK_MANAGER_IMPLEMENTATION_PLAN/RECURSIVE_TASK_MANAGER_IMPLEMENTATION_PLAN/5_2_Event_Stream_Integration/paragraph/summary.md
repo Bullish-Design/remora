@@ -1,1 +1,0 @@
-Listens for task completion events and routes them to the `handle_task_completion` function.

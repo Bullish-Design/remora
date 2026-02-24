@@ -1,1 +1,0 @@
-Extends workspace metadata with a `parent_workspace_id` field, implements a workspace bridge to mount the parent workspace as a read-only overlay, and adds context key filtering to restrict agent access to specific Hub keys.

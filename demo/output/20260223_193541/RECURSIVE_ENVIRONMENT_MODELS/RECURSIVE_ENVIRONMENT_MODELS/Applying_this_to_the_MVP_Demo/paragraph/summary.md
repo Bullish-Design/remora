@@ -1,1 +1,0 @@
-Remora addresses context limitations in massive codebases by using Recursive Environment Models to dynamically create and manage isolated, LoRA-tuned Micro-Environments that execute targeted refactors in parallel, all coordinated through a shared KV memory bus.

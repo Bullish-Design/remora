@@ -1,9 +1,0 @@
-1. **Workspace as Communication**: No stdin/stdout streaming. Agents write files, Neovim watches files.
-
-2. **Physical Evidence**: Every agent action produces a file. User can see exactly what the agent researched, drafted, and decided.
-
-3. **Interruptible**: User can browse workspace mid-execution. Agent can be stopped and resumed.
-
-4. **Node Isolation**: Each AST node (function, class) gets its own workspace. No cross-contamination.
-
-5. **Live Updates**: File watcher triggers UI refresh. Changes appear instantly.

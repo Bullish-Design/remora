@@ -1,1 +1,0 @@
-Analyzes existing tests in the semantic space to infer testing patterns and generates new tests that align with the codebase's established conventions.

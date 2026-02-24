@@ -1,1 +1,0 @@
-The code models AST transformation using matrix operations, where the graph structure of the AST is represented by an adjacency matrix to enable efficient computation of transformations.

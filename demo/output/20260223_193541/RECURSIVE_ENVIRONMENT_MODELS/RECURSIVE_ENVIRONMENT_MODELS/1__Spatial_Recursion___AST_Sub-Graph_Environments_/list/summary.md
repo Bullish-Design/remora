@@ -1,1 +1,0 @@
-This system enables an agent architecture where the `architect` uses AST traversal tools to analyze code structure and spawns sub-tasks for worker agents via `spawn_node_environment`, enabling recursive, decentralized code analysis through specialized node implementations.

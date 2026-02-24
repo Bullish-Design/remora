@@ -1,4 +1,0 @@
-- Fine-tuned EmbeddingGemma with MRL
-- CodeGemma 2B with LoRA
-- T5Gemma for transformations
-- FunctionGemma for orchestration

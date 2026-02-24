@@ -1,1 +1,0 @@
-This concept explores integrating Recursive Language Models with Remora's architectural components to enable deeper syntactic and semantic recursion in language understanding through combined KV caching, sandboxed execution, and tree-sitter-based AST analysis.

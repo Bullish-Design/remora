@@ -1,1 +1,0 @@
-The File Root module orchestrates the loading and compilation of SCM-formatted query files by leveraging the QueryLoader to parse and structure queries via Tree-sitter, and the CompiledQuery to store and manage query metadata for efficient retrieval and execution.

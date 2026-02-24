@@ -1,1 +1,0 @@
-This heading introduces the rationale behind the MVP, highlighting how the Cairn Workspace View demo enhances user understanding of agent reasoning through interactive, tangible visualization.

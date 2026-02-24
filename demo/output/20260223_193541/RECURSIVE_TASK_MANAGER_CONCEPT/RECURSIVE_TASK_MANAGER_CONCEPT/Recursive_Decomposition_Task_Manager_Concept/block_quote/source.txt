@@ -1,2 +1,0 @@
-> **Status**: Concept / Prototype
-> **Related**: RECURSIVE_ENVIRONMENT_MODELS.md, LINKED_EMBEDDINGS_SWARM_CONCEPT.md

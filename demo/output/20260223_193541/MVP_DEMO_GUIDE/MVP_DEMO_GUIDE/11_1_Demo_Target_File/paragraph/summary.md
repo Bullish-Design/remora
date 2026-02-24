@@ -1,1 +1,0 @@
-The file `examples/demo_target.py` demonstrates how to use a target-based approach in a system, likely showing how to define, configure, and execute target-specific operations or workflows.

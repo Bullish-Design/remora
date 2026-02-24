@@ -1,1 +1,0 @@
-Initializes the discoverer by resolving root directories, setting query pack and directory, and configuring language support, with optional event emission and language overrides.

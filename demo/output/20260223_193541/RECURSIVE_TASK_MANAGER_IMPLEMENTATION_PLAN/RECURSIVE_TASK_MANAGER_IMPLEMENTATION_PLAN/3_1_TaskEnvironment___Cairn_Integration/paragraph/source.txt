@@ -1,1 +1,0 @@
-**Existing Component**: `src/remora/workspace.py` (WorkspaceCache, WorkspaceState)

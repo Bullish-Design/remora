@@ -1,1 +1,0 @@
-By aligning the embedding spaces, agents can perform semantic arithmetic to isolate specific nodes or divine intent.

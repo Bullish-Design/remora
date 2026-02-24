@@ -1,1 +1,0 @@
-This configuration specifies the required dependencies for the project, including Pydantic (version 2.0 or higher) for data validation and Tree-sitter (version 0.24 or higher) for parsing and analyzing source code syntax.

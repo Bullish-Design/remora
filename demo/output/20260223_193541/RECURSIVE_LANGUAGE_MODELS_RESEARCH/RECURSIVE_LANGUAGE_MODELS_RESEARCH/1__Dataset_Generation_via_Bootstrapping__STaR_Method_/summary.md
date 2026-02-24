@@ -1,1 +1,0 @@
-This heading introduces the STaR method's dataset generation process, where self-generated trajectories replace human-written ones by using an AI model to autonomously explore and refine codebases, creating a high-quality, accurate dataset of code-based problem-solving steps through automated, algorithmic reasoning.

@@ -1,1 +1,0 @@
-This code defines a set of model classes that inherit from `fsdantic.VersionedKVRecord` to support safe, version-controlled data storage in the `remora.hub.db` system.

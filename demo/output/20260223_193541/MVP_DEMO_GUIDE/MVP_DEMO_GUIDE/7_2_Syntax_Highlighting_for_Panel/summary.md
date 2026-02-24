@@ -1,1 +1,0 @@
-This heading introduces a section on enhancing syntax highlighting for Remora panel code, with the child element providing custom highlighting rules to improve readability and code clarity within the Remora interface.

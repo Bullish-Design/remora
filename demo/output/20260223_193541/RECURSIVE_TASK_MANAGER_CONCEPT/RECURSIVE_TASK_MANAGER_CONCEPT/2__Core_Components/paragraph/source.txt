@@ -1,1 +1,0 @@
-To achieve "The Remora Way", the system uses strictly typed Pydantic models persisted via the Hub:

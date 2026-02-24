@@ -1,1 +1,0 @@
-This shortcut suggests using the same base model with varying system prompts for initial demonstrations, avoiding the need for true fine-tuning until later stages.

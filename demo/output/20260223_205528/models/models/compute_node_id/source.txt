@@ -1,8 +1,0 @@
-def compute_node_id(file_path: Path, node_type: NodeType, name: str) -> str:
-    """Compute a stable node ID.
-
-    Hash: sha256(resolved_file_path:node_type:name), truncated to 16 hex chars.
-    Stable across reformatting because it does NOT include byte offsets.
-    """
-    digest_input = f"{file_path.resolve()}:{node_type}:{name}".encode("utf-8")
-    return hashlib.sha256(digest_input).hexdigest()[:16]

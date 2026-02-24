@@ -1,1 +1,0 @@
-This heading outlines key design choices in the paper's implementation, including an asymmetric model pairing strategy to optimize cost and performance, asynchronous parallel execution for efficiency, and tailored system prompts to minimize redundant sub-LM calls. The children detail how these components work together to enhance both efficiency and effectiveness.

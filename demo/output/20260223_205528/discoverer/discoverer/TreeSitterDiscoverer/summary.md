@@ -1,1 +1,0 @@
-The TreeSitterDiscoverer identifies and parses source files from root directories using tree-sitter grammars, extracting and deduplicating CST nodes by language and file extension, leveraging child functions to locate files, configure language support, and apply query packs for node extraction.

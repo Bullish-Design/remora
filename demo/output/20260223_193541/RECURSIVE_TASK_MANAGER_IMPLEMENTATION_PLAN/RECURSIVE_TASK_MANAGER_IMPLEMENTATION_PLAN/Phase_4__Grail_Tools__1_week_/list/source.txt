@@ -1,3 +1,0 @@
-- [ ] `spawn_sub_task.pym` tool
-- [ ] `hub_write.pym` and `hub_read.pym` tools
-- [ ] Context injection for `task_manager` and `hub_client`

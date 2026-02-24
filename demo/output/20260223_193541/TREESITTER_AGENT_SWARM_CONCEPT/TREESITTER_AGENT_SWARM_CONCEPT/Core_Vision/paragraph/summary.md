@@ -1,1 +1,0 @@
-The system breaks down code into Tree-sitter nodes and assigns each node type to a specialized, fine-tuned tiny reasoning model combined with FunctionGemma for tool calling, enabling efficient and precise processing of different code structures.

@@ -1,1 +1,0 @@
-This document outlines a conceptual design for recursive environment models, focusing on how environments can be recursively embedded and interact with each other, potentially leveraging comprehensive embeddings to enable dynamic, self-referential modeling of complex systems.

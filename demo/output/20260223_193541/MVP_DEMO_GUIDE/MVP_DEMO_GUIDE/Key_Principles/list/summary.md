@@ -1,1 +1,0 @@
-This system enables agents to operate within isolated, file-based workspaces where all actions are logged as physical files, allowing real-time visibility, interruption, and live updates without relying on stdin/stdout streams. Each AST node has its own isolated workspace to prevent interference, and changes are instantly reflected in the UI through file watching.

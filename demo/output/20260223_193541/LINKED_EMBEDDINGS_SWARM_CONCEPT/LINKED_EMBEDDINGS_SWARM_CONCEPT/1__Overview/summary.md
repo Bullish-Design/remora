@@ -1,1 +1,0 @@
-The "1. Overview" section introduces the core concept of using Linked Embeddings Swarms and Recursive Environment Models to navigate and manipulate code through specialized agents, with children explaining how embeddings represent code elements and how REM-driven agents iteratively refine tasks in a sandboxed environment.

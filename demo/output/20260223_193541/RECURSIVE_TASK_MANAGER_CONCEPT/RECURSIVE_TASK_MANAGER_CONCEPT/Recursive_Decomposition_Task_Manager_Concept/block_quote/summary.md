@@ -1,1 +1,0 @@
-This document outlines a conceptual prototype for recursive environment models with linked embeddings, exploring how environments and embeddings can dynamically interact through recursive structures to enable adaptive, self-referential learning systems.

@@ -1,1 +1,0 @@
-The concept of representing code as "Linked Node Entities" across multidimensional spaces strongly aligns with current advancements in **Code Representation Learning**.

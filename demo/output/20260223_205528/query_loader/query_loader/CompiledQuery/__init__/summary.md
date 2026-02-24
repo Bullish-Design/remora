@@ -1,1 +1,0 @@
-Initializes an object with query data, source file path, query text, and query name, storing them as instance attributes.

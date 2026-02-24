@@ -1,1 +1,0 @@
-The dashboard is critical for demo impact. Use `rich` + `textual` for TUI:

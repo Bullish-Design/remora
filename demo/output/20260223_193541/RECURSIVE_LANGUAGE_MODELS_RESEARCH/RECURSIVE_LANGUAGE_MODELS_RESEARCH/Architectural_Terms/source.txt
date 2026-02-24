@@ -1,6 +1,0 @@
-*   **RLM (Recursive Language Model):** An inference strategy where an LLM is placed in a sandbox and given tools to write code that interacts with its input context. It can recursively call sub-LLMs over parsed chunks of that context.
-*   **REPL (Read-Eval-Print Loop):** An interactive programming environment (like a Jupyter notebook or a Python console) where the LLM writes code, executes it, and observes the printed output to make its next decision.
-*   **Root LM / Depth=0 LM:** The primary LLM process that receives the initial user query and the REPL environment. It manages the high-level planning and orchestrates the sub-calls.
-*   **Recursive LM / Sub-LM / Depth=1 LM:** A secondary LLM process called programmatically by the Root LM using a function like `llm_query(prompt, context_chunk)`. In the paper's experiments, this is restricted to a depth of 1 (the sub-LM cannot call another sub-LM).
-*   **Context Rot / Context Degradation:** The observed phenomenon where an LLM's reasoning and recall abilities decrease as the number of tokens in its context window increases.
-*   **Information Density:** A categorization of how difficult a task is based on how much of the context must be processed to find the answer. The paper argues that LLMs experience Context Rot much faster on information-dense tasks.

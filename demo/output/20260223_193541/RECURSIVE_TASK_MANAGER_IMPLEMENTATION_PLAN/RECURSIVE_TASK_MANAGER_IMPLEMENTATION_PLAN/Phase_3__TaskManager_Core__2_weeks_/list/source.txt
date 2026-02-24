@@ -1,3 +1,0 @@
-- [ ] `TaskManager` class with all methods from concept
-- [ ] Event stream integration for completion handling
-- [ ] Async sub-task spawning with event coordination

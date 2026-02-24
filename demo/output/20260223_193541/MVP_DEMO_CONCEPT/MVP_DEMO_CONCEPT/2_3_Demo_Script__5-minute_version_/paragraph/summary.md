@@ -1,1 +1,0 @@
-This scene outlines the process of designing and planning the architectural structure of a system, focusing on key components, scalability, and integration strategies within a 45-second timeframe.

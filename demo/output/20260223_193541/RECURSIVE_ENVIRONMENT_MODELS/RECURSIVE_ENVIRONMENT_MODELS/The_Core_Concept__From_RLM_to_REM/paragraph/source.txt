@@ -1,1 +1,0 @@
-Grounding this in the `examples/treesitter_swarm` and the `FEATURE_ASSEMBLY_LINE_CONCEPT`, here are three distinct directions we can take this paradigm:

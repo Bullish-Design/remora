@@ -1,3 +1,0 @@
-1. Add `parent_workspace_id` field to workspace metadata
-2. Create workspace bridge that can mount parent workspace as read-only overlay
-3. Add context key filtering to limit what Hub keys the agent can access

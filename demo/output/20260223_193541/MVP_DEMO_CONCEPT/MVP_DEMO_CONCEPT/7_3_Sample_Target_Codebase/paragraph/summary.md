@@ -1,1 +1,0 @@
-Adds rate limiting (100 requests per minute) and caching (5-minute TTL) to all GET endpoints to improve performance and prevent abuse.

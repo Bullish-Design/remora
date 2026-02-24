@@ -1,1 +1,0 @@
-The Recursive Decomposition Task Manager Concept introduces a framework for recursive environment models that use linked embeddings to enable adaptive, self-referential learning through dynamic interactions between environments and their representations. Its child summary elaborates on the conceptual foundation and mechanism of recursive interaction within the model.

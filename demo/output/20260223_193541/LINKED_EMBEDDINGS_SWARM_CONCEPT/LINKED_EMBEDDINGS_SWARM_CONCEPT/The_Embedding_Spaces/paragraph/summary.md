@@ -1,1 +1,0 @@
-Golden Reference Libraries are pre-embedded in a multidimensional format to serve as a high-quality, searchable knowledge base for reference and retrieval.

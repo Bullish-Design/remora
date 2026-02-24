@@ -1,1 +1,0 @@
-Verifies that Neovim, Tree-sitter Python, plenary.nvim, the Remora configuration directory, and the Remora CLI are properly installed and accessible.

@@ -1,1 +1,0 @@
-The system prompt for an RLM establishes sandbox rules and constraints without including contextual information, guiding the model's behavior within a defined environment.

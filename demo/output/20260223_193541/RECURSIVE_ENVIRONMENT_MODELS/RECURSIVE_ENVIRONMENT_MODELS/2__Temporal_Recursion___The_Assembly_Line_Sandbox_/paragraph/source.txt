@@ -1,2 +1,0 @@
-**The Concept:**
-Recursion in code usually implies drilling *down* into data structures. But we can also recurse *forward in time* across the feature lifecycle.

@@ -1,1 +1,0 @@
-The authors provided deep insights into their system prompting strategy and shared several "negative results" detailing what failed during their experiments (documented in Appendix A and D of the paper).

@@ -1,5 +1,0 @@
-Standard RLMs (Recursive Language Models) view the "environment" as a simple Python REPL holding a massive string of context.
-
-In Remora, we can reframe this into **Recursive Environment Models (REMs)**. Here, the "Environment" is not just a bland REPL; it is a **highly structured, context-aware Sandbox** (powered by Grail and Cairn) that bounds the LLM's reality. When an LLM recursively spawns a sub-task, it isn't just calling another LLM—it is spinning up a new, tightly-scoped *Environment* tailored specifically for the sub-task.
-
-Grounding this in the `examples/treesitter_swarm` and the `FEATURE_ASSEMBLY_LINE_CONCEPT`, here are three distinct directions we can take this paradigm:

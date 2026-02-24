@@ -1,1 +1,0 @@
-The Heading3 "9.1 Watcher Module" outlines the implementation of a file watcher in the Remora plugin that monitors file changes and triggers updates to Neovim's buffers or UI. The child file `~/.config/nvim/lua/remora/watcher.lua` contains the core Lua logic enabling this functionality.

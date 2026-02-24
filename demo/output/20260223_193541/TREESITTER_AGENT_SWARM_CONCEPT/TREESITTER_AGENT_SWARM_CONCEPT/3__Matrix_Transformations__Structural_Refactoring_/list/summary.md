@@ -1,1 +1,0 @@
-The system uses isomorphism checking to identify structurally identical code patterns (like nested loops) for refactoring or deduplication, and AST matrix multiplication to compute indirect dependencies, enabling rapid analysis of how changes propagate through the codebase.

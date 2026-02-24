@@ -1,1 +1,0 @@
-The agent analyzes large, complex files or evaluates potential changes by breaking them down into manageable components, assessing context, and making informed decisions based on patterns, structure, and potential impacts.

@@ -1,1 +1,0 @@
-The "6.2 Configuration Module" configures the Remora plugin for Neovim by setting up keybindings, themes, and user preferences to improve the editing experience, with its child elements detailing specific configuration settings.

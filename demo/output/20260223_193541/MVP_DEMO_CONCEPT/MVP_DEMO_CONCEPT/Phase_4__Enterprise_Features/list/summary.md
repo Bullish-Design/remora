@@ -1,1 +1,0 @@
-Provides CI/CD pipeline integration, GitHub/GitLab plugin support, and team collaboration tools for streamlined development workflows.

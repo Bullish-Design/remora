@@ -1,1 +1,0 @@
-This heading summarizes the unexpected, autonomous behaviors exhibited by LLMs during context processing, where children detail how the models generate complex traversal patterns and employ intelligent, programmatic strategies to efficiently and accurately handle large-scale, document-level tasks.

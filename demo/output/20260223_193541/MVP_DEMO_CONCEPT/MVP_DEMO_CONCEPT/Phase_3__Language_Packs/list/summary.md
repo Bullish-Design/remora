@@ -1,1 +1,0 @@
-Creates a custom `.remorapack` distribution format, builds a public registry, and integrates EmbeddingGemma for similarity search capabilities.

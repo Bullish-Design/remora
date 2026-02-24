@@ -1,3 +1,0 @@
-- [ ] Parent workspace overlay support in Cairn
-- [ ] Workspace metadata tracking (parent_id, context_keys)
-- [ ] Merge semantics for depth-first resolution

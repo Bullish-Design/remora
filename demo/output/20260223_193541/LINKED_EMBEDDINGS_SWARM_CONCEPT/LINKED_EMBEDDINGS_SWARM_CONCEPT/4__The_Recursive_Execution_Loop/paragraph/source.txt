@@ -1,1 +1,0 @@
-Agents don't just prompt-stuff the embeddings; they act recursively inside a Grail sandbox.

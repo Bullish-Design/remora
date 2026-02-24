@@ -1,9 +1,0 @@
-**File**: `scripts/demo_walkthrough.md`
-
-> "I've selected the calculate_total function.
-> When I run RemoraAnalyze, watch what happens..."
-
-**The panel slides in from the right**
-
-> "A workspace was created just for this function.
-> Let's look at what the agent is doing."

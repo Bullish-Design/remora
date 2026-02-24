@@ -1,1 +1,0 @@
-The File Root orchestrates the AST Summary Engine's core functionality by organizing and presenting its capabilities, including code parsing, recursive summarization, real-time monitoring, and isolated environment execution, with its children providing detailed explanations of how each feature operates and contributes to the overall code analysis workflow.

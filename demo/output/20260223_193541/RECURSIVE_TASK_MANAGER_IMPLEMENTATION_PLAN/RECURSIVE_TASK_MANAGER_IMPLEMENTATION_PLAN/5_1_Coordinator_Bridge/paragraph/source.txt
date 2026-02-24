@@ -1,1 +1,0 @@
-The existing `Coordinator` handles agent execution. The `TaskManager` should delegate to it:

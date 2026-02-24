@@ -1,1 +1,0 @@
-Configures Neovim's Treesitter integration, enabling syntax highlighting, code folding, and language support for various programming languages.

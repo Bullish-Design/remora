@@ -1,1 +1,0 @@
-Subscribe to completion events and route to `handle_task_completion`:

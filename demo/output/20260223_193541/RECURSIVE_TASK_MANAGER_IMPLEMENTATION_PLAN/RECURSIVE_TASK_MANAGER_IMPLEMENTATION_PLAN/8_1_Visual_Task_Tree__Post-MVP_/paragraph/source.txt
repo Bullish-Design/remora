@@ -1,1 +1,0 @@
-A TUI dashboard showing the task tree in real-time:

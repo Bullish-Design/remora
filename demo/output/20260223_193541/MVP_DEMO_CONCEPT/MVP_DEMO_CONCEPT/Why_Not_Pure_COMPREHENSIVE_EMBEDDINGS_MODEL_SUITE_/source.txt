@@ -1,8 +1,0 @@
-The language pack concept requires:
-
-- Fine-tuned EmbeddingGemma with MRL
-- CodeGemma 2B with LoRA
-- T5Gemma for transformations
-- FunctionGemma for orchestration
-
-Four different model architectures is too complex for MVP. We simplify to FunctionGemma-only with prompt engineering for different roles.

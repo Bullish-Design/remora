@@ -1,1 +1,0 @@
-This heading introduces a section that compares features using a legend to visually distinguish primary (✓) and secondary/limited (○) features, with the legend providing context for interpreting the feature scope and importance.

@@ -1,1 +1,0 @@
-The entry point is a deeply integrated developer tool (e.g., a Neovim plugin):

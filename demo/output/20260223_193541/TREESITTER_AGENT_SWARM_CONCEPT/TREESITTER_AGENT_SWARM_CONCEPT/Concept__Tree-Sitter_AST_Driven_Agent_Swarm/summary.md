@@ -1,1 +1,0 @@
-This heading introduces a novel decentralized agent system for Remora that leverages Tree-sitter's AST as a coordination graph for a swarm of micro-agents. The child summary explains the system's experimental nature, its use of AST structure, and how micro-agents are fine-tuned and coordinated within this framework.

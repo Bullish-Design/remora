@@ -1,3 +1,0 @@
-1. Complete `HubDaemon.start()` implementation
-2. Implement `HubClient.watch()` for event subscription
-3. Add FSdantic record versioning for conflict detection

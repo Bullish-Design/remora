@@ -1,1 +1,0 @@
-The system analyzes a selected function using three specialized agents—Structure, Style, and Doc—that examine its code structure, formatting, and documentation, then combine their insights into a unified, improved version.

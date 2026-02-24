@@ -1,1 +1,0 @@
-This heading outlines the mechanism for resuming task work after a restart by saving and restoring the task tree's state. The child element describes how progress is persisted and resumed, enabling continuity of task work.

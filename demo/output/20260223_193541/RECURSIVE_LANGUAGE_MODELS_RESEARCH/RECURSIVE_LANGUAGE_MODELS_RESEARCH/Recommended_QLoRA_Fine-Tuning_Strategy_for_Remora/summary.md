@@ -1,1 +1,0 @@
-The Heading3 element outlines a cost-effective QLoRA fine-tuning strategy for Remora that enhances base models with domain-specific knowledge. Its children detail how low-cost adapters improve handling of coding vs. querying, `FINAL` tag formatting, and context management in RLMs while optimizing resource usage.

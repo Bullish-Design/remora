@@ -1,1 +1,0 @@
-The system uses Recursive Environment Models (REM) to deploy a swarm of specialized agents, each with LoRA adapters and tools, that navigate the codebase by traversing embedding spaces, querying reference libraries, and iteratively refining task lists in a sandboxed environment to achieve the user's goal.

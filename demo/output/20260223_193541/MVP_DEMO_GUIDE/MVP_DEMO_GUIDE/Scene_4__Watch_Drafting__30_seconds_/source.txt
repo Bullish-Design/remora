@@ -1,7 +1,0 @@
-> "Now in scratch/, the agent is drafting.
-> Draft 1... let's see the evaluation..."
-
-**Click on draft_001_eval.md**
-
-> "It evaluated its own work and decided to refine.
-> Draft 2 looks better."

@@ -1,3 +1,0 @@
-For the MVP demo, you need these adapters:
-
-**Shortcut:** For initial demos, these can be the same base model with different system prompts. True fine-tuning can come later.

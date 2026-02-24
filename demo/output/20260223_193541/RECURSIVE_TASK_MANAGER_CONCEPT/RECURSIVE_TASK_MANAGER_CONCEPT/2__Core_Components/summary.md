@@ -1,1 +1,0 @@
-This heading introduces the core data structures of the system, where strictly typed Pydantic models in the Hub ensure data integrity and consistency through type safety and declarative persistence, aligning with "The Remora Way." The child summary details how these models enable reliable and maintainable data handling.

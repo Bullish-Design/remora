@@ -1,1 +1,0 @@
-Manages LoRA adapter swapping with event emission, dashboard visualization, preloading hints, and fallback to the base model.

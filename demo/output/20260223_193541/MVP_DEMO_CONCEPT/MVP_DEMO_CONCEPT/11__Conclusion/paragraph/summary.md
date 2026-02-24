@@ -1,1 +1,0 @@
-The Code Evolution Pipeline demo illustrates how AI can iteratively improve and evolve code through feedback loops, balancing accuracy, efficiency, and maintainability in a realistic development workflow.

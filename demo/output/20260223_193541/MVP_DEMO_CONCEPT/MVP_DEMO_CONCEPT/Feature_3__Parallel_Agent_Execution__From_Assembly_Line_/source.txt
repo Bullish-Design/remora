@@ -1,4 +1,0 @@
-- Architect agent plans the transformation
-- Multiple implementation agents work in parallel
-- Test generation runs alongside implementation
-- Final lint/validation phase

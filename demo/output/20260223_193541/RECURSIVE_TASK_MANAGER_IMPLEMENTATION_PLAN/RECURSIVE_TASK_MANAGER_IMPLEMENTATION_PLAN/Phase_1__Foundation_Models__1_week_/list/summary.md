@@ -1,1 +1,0 @@
-Defines models for task management in the Remora Hub, including TaskNode, TaskEnvironment, and TaskResult, integrates with FSdantic for persistent storage, and includes unit tests to verify model serialization and deserialization.

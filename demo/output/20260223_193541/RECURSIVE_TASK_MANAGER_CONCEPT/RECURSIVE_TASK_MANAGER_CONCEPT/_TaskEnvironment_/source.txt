@@ -1,5 +1,0 @@
-Defines the spatial and temporal boundaries for a task.
-
-*   **`workspace_id`**: Links to a Cairn Workspace `workspace.db`. Every environment is isolated.
-*   **`parent_workspace_id`**: For temporal or spatial recursion, a sub-task can overlay or inherit context from its parent.
-*   **`context_keys`**: List of keys in the Hub DB that this environment is allowed to read.

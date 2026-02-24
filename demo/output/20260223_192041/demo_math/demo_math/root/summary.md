@@ -1,1 +1,0 @@
-The File Root module organizes and executes a basic arithmetic calculator application by leveraging the Calculator class to perform mathematical operations and the main function to initialize and display results.

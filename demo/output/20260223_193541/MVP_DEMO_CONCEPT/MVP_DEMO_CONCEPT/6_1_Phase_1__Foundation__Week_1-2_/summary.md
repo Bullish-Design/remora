@@ -1,1 +1,0 @@
-This heading introduces Phase 1 of the project, focusing on establishing foundational components for the live dashboard TUI during Weeks 1-2, with child elements detailing event stream integration, AST visualization, and agent status monitoring.

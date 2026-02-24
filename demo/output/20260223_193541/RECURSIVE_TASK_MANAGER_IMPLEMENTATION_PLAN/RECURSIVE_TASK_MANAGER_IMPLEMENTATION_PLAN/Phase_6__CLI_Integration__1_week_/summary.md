@@ -1,1 +1,0 @@
-Phase 6: CLI Integration enables users to interact with the system via command-line interface for task execution, visualization, and status monitoring. It defines deliverables as the final outputs and provides CLI commands to recursively execute tasks, visualize task trees, and monitor task statuses.

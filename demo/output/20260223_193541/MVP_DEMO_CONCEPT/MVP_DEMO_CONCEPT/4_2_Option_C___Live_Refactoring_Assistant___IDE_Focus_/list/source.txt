@@ -1,5 +1,0 @@
-1. Open VS Code/Neovim with Remora LSP
-2. Hover over function - see rich context
-3. Select code - request refactoring
-4. Watch agents collaborate to refactor
-5. Accept/reject changes inline

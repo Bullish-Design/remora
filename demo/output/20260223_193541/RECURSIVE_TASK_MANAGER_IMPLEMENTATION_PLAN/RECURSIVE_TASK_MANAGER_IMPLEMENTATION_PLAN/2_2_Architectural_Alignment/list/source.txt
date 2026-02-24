@@ -1,7 +1,0 @@
-1. **FSdantic Integration**: Using `VersionedKVRecord` for task persistence is correct. The Hub's KV store is designed for exactly this.
-
-2. **Workspace Isolation**: Each `TaskEnvironment` mapping to a Cairn workspace leverages existing isolation guarantees.
-
-3. **Event-Driven Coordination**: The `handle_task_completion` async handler fits naturally with `RemoraEventBridge`.
-
-4. **Agent Bundle Flexibility**: Different `task_type` values (DECOMPOSITION, RESEARCH, EXECUTION, VERIFICATION) can map to different bundles.

@@ -1,5 +1,0 @@
-- [ ] Demo script automation
-- [ ] Sample target codebase
-- [ ] Recording capability
-- [ ] Error recovery flows
-- [ ] Presentation materials

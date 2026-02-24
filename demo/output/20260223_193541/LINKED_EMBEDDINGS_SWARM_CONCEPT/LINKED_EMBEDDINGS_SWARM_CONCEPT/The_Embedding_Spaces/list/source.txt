@@ -1,6 +1,0 @@
-1.  **Semantic/Docstring Space**: Contains the natural language explanation, comments, and docstrings of the node.
-    *   *Agent Query*: "Find the node that handles rate-limiting middleware."
-2.  **Structural/Code Space**: Contains the raw logic and syntax, stripped of comments.
-    *   *Agent Query*: "Find nodes that use a `dict` comprehension to filter responses."
-3.  **Relational/Graph Space**: Embeddings that encode the Tree-sitter AST relationships (caller/callee, parent/child, interfaces).
-    *   *Agent Query*: "Find all nodes that invoke the `get_db_session` utility."

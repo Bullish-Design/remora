@@ -1,1 +1,0 @@
-**File**: `src/remora/workspace_manager.py` (NEW)

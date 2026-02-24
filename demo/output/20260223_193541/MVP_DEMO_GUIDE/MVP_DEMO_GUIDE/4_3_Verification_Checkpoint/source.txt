@@ -1,5 +1,0 @@
-- [ ] Neovim 0.10.0+ installed
-- [ ] Tree-sitter Python parser working
-- [ ] plenary.nvim available
-- [ ] `.remora/` directory writable
-- [ ] Remora CLI in PATH

@@ -1,1 +1,0 @@
-This section outlines the implementation of a Retrieval-Augmented Language Model (RLM) through system prompts and scaffolding, leveraging existing models without retraining to efficiently integrate knowledge. The child summary explains how this approach enables effective and efficient knowledge integration.

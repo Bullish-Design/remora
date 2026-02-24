@@ -1,3 +1,0 @@
-def subtract(self, x: int, y: int) -> int:
-        """Subtract y from x."""
-        return x - y

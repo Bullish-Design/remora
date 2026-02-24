@@ -1,1 +1,0 @@
-This method uses a high-performance AI model with a detailed system prompt to autonomously explore and modify codebases through algorithmic queries, filtering and retaining only successful, correct reasoning chains to create a high-quality dataset of accurate code-based problem-solving trajectories.

@@ -1,1 +1,0 @@
-This module provides tree-sitter-based node discovery functionality for Remora, enabling the extraction and matching of code structure nodes using syntax trees, with support for queries, parsing, and node identification.

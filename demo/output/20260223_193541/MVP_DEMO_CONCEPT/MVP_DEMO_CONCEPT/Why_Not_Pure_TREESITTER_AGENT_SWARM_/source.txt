@@ -1,8 +1,0 @@
-The full swarm concept requires:
-
-- Training 50+ node-specific LoRA adapters
-- Implementing Louvain community detection
-- Building Bayesian infection propagation
-- Creating vector arithmetic tooling
-
-This is 6-12 months of work. The MVP extracts the most impressive elements (AST visualization, multi-agent coordination) without requiring the full mathematical infrastructure.

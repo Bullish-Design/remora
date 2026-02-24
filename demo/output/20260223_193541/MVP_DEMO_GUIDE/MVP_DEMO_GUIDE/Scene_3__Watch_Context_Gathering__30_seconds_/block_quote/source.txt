@@ -1,2 +1,0 @@
-> "It found these similar functions that might help
-> it understand how I want my docstrings written."

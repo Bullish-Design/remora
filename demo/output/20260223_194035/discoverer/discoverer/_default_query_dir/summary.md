@@ -1,1 +1,0 @@
-Returns the path to the built-in queries directory within the remora package.

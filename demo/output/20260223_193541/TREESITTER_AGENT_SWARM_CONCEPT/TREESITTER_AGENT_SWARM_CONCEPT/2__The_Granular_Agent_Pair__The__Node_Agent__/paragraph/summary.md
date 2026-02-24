@@ -1,1 +1,0 @@
-The assigned intelligence of a node refers to the collective cognitive capabilities or decision-making power attributed to that node within a system, such as in a distributed AI or networked intelligence architecture.

@@ -1,4 +1,0 @@
-> **Status**: Implementation Guide
-> **Author**: Claude Opus 4.5
-> **Date**: 2026-02-22
-> **Approach**: Neovim + Cairn Workspace Views + Tree-sitter Integration

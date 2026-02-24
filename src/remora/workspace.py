@@ -3,11 +3,113 @@
 This module provides:
 1. GraphWorkspace: A workspace that spans an entire agent graph
 2. Integration with Cairn/Fsdantic workspaces
+3. WorkspaceKV: Key-value store for IPC between agents and frontend
 """
 
+import asyncio
+import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+
+class WorkspaceKV:
+    """Key-value store for workspace IPC.
+
+    Used for communication between agents and the frontend dashboard.
+    Supports listing keys with prefix, getting, setting, and deleting values.
+
+    Keys follow patterns:
+    - outbox:question:{msg_id} - Questions from agent to user
+    - inbox:response:{msg_id} - Responses from user to agent
+    - agent:{agent_id}:state - Agent state information
+    """
+
+    def __init__(self, kv_dir: Path):
+        self._dir = kv_dir
+        self._dir.mkdir(parents=True, exist_ok=True)
+        self._cache: dict[str, Any] = {}
+        self._lock = asyncio.Lock()
+        self._load_all()
+
+    def _load_all(self) -> None:
+        """Load all KV pairs from disk into memory."""
+        if not self._dir.exists():
+            return
+        for file in self._dir.rglob("*.json"):
+            try:
+                rel_path = file.relative_to(self._dir)
+                key = str(rel_path.with_suffix("")).replace("/", ":")
+                self._cache[key] = json.loads(file.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    def _key_to_path(self, key: str) -> Path:
+        """Convert key to file path."""
+        parts = key.split(":")
+        return self._dir / Path(*parts).with_suffix(".json")
+
+    async def list(self, prefix: str = "") -> list[dict[str, str]]:
+        """List all keys with optional prefix.
+
+        Args:
+            prefix: Only return keys starting with this prefix
+
+        Returns:
+            List of dicts with 'key' field for each matching entry
+        """
+        async with self._lock:
+            results = []
+            for key in self._cache.keys():
+                if key.startswith(prefix):
+                    results.append({"key": key})
+            return results
+
+    async def get(self, key: str) -> dict[str, Any] | None:
+        """Get a value by key.
+
+        Args:
+            key: The key to retrieve
+
+        Returns:
+            The stored value dict, or None if not found
+        """
+        async with self._lock:
+            return self._cache.get(key)
+
+    async def set(self, key: str, value: dict[str, Any]) -> None:
+        """Set a value by key.
+
+        Args:
+            key: The key to store under
+            value: The value to store (must be JSON-serializable dict)
+        """
+        async with self._lock:
+            self._cache[key] = value
+            path = self._key_to_path(key)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(value, separators=(",", ":")))
+
+    async def delete(self, key: str) -> None:
+        """Delete a key.
+
+        Args:
+            key: The key to delete
+        """
+        async with self._lock:
+            self._cache.pop(key, None)
+            path = self._key_to_path(key)
+            if path.exists():
+                path.unlink()
+
+    async def clear(self) -> None:
+        """Clear all keys."""
+        async with self._lock:
+            self._cache.clear()
+            if self._dir.exists():
+                shutil.rmtree(self._dir)
+                self._dir.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass
@@ -26,6 +128,18 @@ class GraphWorkspace:
     _agent_spaces: dict[str, Path] = field(default_factory=dict)
     _shared_space: Path | None = None
     _original_source: Path | None = None
+    _kv: WorkspaceKV | None = None
+
+    @property
+    def kv(self) -> WorkspaceKV:
+        """Key-value store for agent-frontend IPC.
+
+        Returns:
+            WorkspaceKV instance for storing/retrieving IPC data
+        """
+        if self._kv is None:
+            self._kv = WorkspaceKV(self.root / "kv")
+        return self._kv
 
     def agent_space(self, agent_id: str) -> Path:
         """Private space for an agent.
@@ -136,6 +250,7 @@ class GraphWorkspace:
         (workspace.root / "agents").mkdir(exist_ok=True)
         workspace.shared_space()
         workspace.original_source()
+        workspace.kv  # Initialize KV store
 
         return workspace
 
@@ -146,6 +261,7 @@ class GraphWorkspace:
         self._agent_spaces.clear()
         self._shared_space = None
         self._original_source = None
+        self._kv = None
 
 
 @dataclass

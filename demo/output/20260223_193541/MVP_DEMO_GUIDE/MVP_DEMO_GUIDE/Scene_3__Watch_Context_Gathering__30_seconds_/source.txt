@@ -1,8 +1,0 @@
-> "See the context/ folder? The agent is researching.
-> It found the source code, looked for similar functions,
-> and analyzed docstring patterns in my codebase."
-
-**Click on related_functions.md**
-
-> "It found these similar functions that might help
-> it understand how I want my docstrings written."

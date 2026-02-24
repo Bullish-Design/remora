@@ -6,6 +6,7 @@ from remora.frontend.registry import workspace_registry
 from remora.frontend.state import dashboard_state
 from remora.frontend.views import dashboard_view
 from remora.interactive import WorkspaceInboxCoordinator
+from remora.workspace import GraphWorkspace
 
 
 @dataclass
@@ -25,6 +26,37 @@ def get_coordinator(event_bus: EventBus | None = None) -> WorkspaceInboxCoordina
     if _coordinator is None:
         _coordinator = WorkspaceInboxCoordinator(bus)
     return _coordinator
+
+
+async def register_agent_workspace(
+    agent_id: str,
+    workspace: GraphWorkspace,
+    workspace_id: str | None = None,
+) -> None:
+    """Register an agent with a workspace for KV-based communication.
+
+    This must be called when an agent starts, before any blocking occurs.
+
+    Args:
+        agent_id: Unique identifier for the agent
+        workspace: The GraphWorkspace the agent is using
+        workspace_id: Optional workspace ID (defaults to workspace.id)
+    """
+    ws_id = workspace_id or workspace.id
+    await workspace_registry.register(agent_id, ws_id, workspace)
+    coordinator = get_coordinator()
+    await coordinator.watch_workspace(agent_id, workspace)
+
+
+async def unregister_agent(agent_id: str) -> None:
+    """Unregister an agent and stop watching its workspace.
+
+    Args:
+        agent_id: Unique identifier for the agent
+    """
+    coordinator = get_coordinator()
+    await coordinator.stop_watching(agent_id)
+    workspace_registry.unregister(agent_id)
 
 
 def register_routes(app: Stario, event_bus: EventBus | None = None) -> WorkspaceInboxCoordinator:

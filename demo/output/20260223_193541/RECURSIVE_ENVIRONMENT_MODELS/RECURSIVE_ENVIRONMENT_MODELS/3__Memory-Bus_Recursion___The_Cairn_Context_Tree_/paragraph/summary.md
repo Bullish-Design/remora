@@ -1,1 +1,0 @@
-The concept contrasts traditional RLMs, which serialize context into prompts for sub-calls, with REMs, which use a shared asynchronous memory bus (Cairn KV) to enable efficient, real-time context sharing across environments.

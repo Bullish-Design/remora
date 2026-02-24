@@ -1,1 +1,0 @@
-The code provides a clean, well-documented interface where users can accept (by pressing 'a') a feature or change they like.

@@ -1,1 +1,0 @@
-Manages the lifecycle of tree-based tasks using OOP, integrating with HubClient and CairnWorkspaceBridge for execution and state management.

@@ -1,7 +1,0 @@
-1. User selects a single function in codebase
-2. Show 3 specialized agents analyzing it:
-   - Structure Agent (AST analysis)
-   - Style Agent (linting/formatting)
-   - Doc Agent (docstring generation)
-3. Agents communicate via shared workspace
-4. Final merged result

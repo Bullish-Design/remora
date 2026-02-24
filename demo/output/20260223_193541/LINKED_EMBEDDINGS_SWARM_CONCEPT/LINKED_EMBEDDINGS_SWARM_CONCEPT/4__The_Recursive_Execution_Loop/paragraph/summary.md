@@ -1,1 +1,0 @@
-Agents recursively reason within a Grail sandbox, dynamically generating and executing actions rather than simply prompting and stuffing embeddings.

@@ -1,3 +1,0 @@
-Create a simple FastAPI app for transformation:
-
-**Transformation Goal:** Add rate limiting (100 req/min) and caching (5 min TTL) to GET endpoints.

@@ -1,1 +1,0 @@
-This code defines the output structure for a sandbox execution, capturing mutated files, artifacts emitted to the Hub, and the success status of verification tasks.

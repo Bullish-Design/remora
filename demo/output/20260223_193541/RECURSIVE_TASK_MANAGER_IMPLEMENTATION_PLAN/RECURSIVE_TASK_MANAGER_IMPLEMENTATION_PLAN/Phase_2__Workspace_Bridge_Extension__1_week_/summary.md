@@ -1,1 +1,0 @@
-Phase 2: Workspace Bridge Extension enables workspace overlay support and metadata tracking with depth-first merge semantics in Cairn, enhancing workspace hierarchy and context management.

@@ -1,2 +1,0 @@
-> "Now in scratch/, the agent is drafting.
-> Draft 1... let's see the evaluation..."

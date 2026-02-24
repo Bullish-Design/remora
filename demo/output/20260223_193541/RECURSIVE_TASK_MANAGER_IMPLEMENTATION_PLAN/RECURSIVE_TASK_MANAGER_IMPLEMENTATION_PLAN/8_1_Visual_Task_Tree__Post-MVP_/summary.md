@@ -1,1 +1,0 @@
-The Heading3 element "8.1 Visual Task Tree (Post-MVP)" introduces a text-based user interface dashboard that visualizes and dynamically updates the task tree structure, enabling users to monitor task hierarchy and progress in real time. Its child component provides the real-time visualization and interactive monitoring of the task tree through the TUI dashboard.

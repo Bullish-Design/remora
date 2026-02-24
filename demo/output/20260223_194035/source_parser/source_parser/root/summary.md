@@ -1,1 +1,0 @@
-The File Root module serves as the central entry point for source code analysis, orchestrating the parsing of source files or raw bytes into structured tree representations. It leverages the SourceParser class to initialize and manage grammar-based parsing, enabling robust and flexible analysis of source code through its file and byte-level parsing capabilities.

@@ -1,1 +1,0 @@
-The Linked Embeddings Swarm Concept proposes a framework for recursively embedding environments to enable dynamic, self-referential modeling of complex systems through interconnected embeddings. Its child elements detail the recursive embedding mechanism and the role of comprehensive embeddings in facilitating interactive, recursive environment modeling.

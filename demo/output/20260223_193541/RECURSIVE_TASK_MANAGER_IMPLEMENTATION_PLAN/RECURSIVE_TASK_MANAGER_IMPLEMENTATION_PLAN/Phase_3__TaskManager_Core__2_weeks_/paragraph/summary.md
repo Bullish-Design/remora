@@ -1,1 +1,0 @@
-Deliverables refer to the final outputs or products expected from a project, task, or process.

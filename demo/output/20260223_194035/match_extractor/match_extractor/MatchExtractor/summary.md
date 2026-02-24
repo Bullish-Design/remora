@@ -1,1 +1,0 @@
-The MatchExtractor class identifies and deduplicates CST nodes from a source file by executing compiled queries on the parsed tree, leveraging child functions to extract nodes based on capture patterns and construct structured node objects with metadata like type, name, and location.

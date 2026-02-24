@@ -1,1 +1,0 @@
-**Goal**: Agents write context files that user can see.

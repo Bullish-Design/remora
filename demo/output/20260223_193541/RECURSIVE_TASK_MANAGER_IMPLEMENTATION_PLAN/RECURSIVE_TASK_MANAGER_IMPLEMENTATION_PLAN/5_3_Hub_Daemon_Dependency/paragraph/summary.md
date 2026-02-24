@@ -1,1 +1,0 @@
-The TaskManager requires an operational Hub daemon to coordinate task distribution, monitor task execution, and maintain communication between tasks and the central management system.

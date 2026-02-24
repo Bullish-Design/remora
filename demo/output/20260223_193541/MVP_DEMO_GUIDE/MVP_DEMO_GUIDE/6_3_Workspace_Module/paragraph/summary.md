@@ -1,1 +1,0 @@
-This Lua file configures Neovim's workspace functionality, likely handling workspace management, buffer handling, or project-specific settings for a development environment.

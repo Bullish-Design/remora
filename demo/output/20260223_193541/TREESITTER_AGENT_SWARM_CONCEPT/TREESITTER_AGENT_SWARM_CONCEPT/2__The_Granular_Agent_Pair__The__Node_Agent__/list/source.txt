@@ -1,5 +1,0 @@
-*   **A Fine-Tuned Reasoning Model:** Trained specifically to understand and manipulate that exact structural concept (e.g., a "Function Definition Expert").
-*   **A FunctionGemma Model:** Trained for accurate tool execution, armed with advanced Grail mathematical scripts.
-*   **Sandbox Access:** A dedicated `Cairn` KV sandbox instance isolating the agent's work.
-*   **Grail Tools:** Access to `.pym` and `.py` scripts for running actual codebase capabilities.
-*   **Local State:** Access to the codebase embeddings and its targeted multi-vector search space.

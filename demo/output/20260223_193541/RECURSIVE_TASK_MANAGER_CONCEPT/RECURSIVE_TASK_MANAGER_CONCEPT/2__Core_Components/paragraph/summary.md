@@ -1,1 +1,0 @@
-The system implements strictly typed Pydantic models stored in the Hub to enforce data integrity and enable consistent, reliable handling of data structures in a declarative manner, embodying "The Remora Way" through type safety and persistence.

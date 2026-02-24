@@ -1,1 +1,0 @@
-This heading introduces a method that assigns unique vector embeddings to each AST node, allowing specialized representations in distinct vector spaces while preserving structural links through pointers, with the child summary explaining the decomposition and embedding mechanism.

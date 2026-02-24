@@ -1,1 +1,0 @@
-The Effort Estimate heading indicates the expected time investment for a task, with its child summarizing the total duration as approximately 13 days.

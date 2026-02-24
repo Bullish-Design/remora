@@ -1,1 +1,0 @@
-The function discovers and parses source files in specified languages by grouping them by file extension, loading language-specific queries, parsing each file in parallel using tree-sitter, and extracting CST nodes while deduplicating results by node ID.

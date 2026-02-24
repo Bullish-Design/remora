@@ -1,2 +1,0 @@
-**Status:** Research Aggregation
-**Source Material:** "Recursive Language Models" by Alex L. Zhang (MIT OASYS lab, 2025)

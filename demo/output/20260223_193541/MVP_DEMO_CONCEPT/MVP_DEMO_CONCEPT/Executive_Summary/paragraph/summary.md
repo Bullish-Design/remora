@@ -1,1 +1,0 @@
-The document recommends a focused MVP demo strategy to deliver a high-impact "wow" factor using Remora's existing infrastructure, balancing innovation with feasibility.

@@ -1,4 +1,0 @@
-- Each agent operates in isolated workspace
-- Changes visible as diffs in real-time
-- Final merge step shows transformation result
-- Rollback capability demonstrated

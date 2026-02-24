@@ -1,5 +1,0 @@
-This concept bridges the best aspects of your existing research into a unified, highly visual demo.
-
-*   **From `RECURSIVE_ENVIRONMENT_MODELS.md`**: The agents use their Cairn Workspaces to algorithmically query distinct vector databases to refine their context before acting, leaving a physical trail of evidence (context files, drafts) in the workspace.
-*   **From `COMPREHENSIVE_EMBEDDINGS_MODEL_SUITE.md`**: We showcase FunctionGemma orchestrating the searches and EmbeddingGemma (with MRL) enabling ultra-fast, multi-space retrieval.
-*   **From `MVP_DEMO_CONCEPT.md`**: The dashboard visualizes agents updating a living, breathing markdown task list while dynamically swapping LoRA adapters based on which embedding space they are currently navigating.

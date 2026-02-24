@@ -1,3 +1,0 @@
-- CI/CD integration
-- GitHub/GitLab plugins
-- Team collaboration features

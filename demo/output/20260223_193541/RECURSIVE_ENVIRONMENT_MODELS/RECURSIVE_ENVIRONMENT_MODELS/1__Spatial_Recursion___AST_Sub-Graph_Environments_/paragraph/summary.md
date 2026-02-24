@@ -1,1 +1,0 @@
-The Root Architect uses a queryable Tree-sitter AST to programmatically navigate and manipulate code structure, enabling flexible and context-aware code analysis without being limited by rigid traversal rules.

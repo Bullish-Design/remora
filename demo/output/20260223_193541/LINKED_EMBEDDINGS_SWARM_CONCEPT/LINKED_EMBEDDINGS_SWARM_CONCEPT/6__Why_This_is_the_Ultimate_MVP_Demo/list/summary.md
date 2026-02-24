@@ -1,1 +1,0 @@
-The system enables agents to dynamically refine their context by querying multiple vector databases via FunctionGemma and EmbeddingGemma with MRL, updating a real-time markdown task list and switching LoRA adapters based on the current embedding space, all visualized in a dashboard.

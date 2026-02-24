@@ -1,1 +1,0 @@
-The Heading3 element "6.3 Workspace Module" outlines the configuration of Neovim's workspace functionality, with its child Lua file managing workspace, buffer, and project-specific settings for a development environment.

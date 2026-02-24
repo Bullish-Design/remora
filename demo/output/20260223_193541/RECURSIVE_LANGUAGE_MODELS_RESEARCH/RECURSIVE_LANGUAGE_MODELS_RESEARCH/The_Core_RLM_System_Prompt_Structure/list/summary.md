@@ -1,1 +1,0 @@
-The system defines a structured workflow for processing data within a context using recursive LLM queries, featuring syntactic rules, in-context examples for chunking and regex operations, and a clear termination mechanism to conclude the loop with final answers or variable outputs.

@@ -1,1 +1,0 @@
-This file initializes the Remora plugin for Neovim, likely configuring keybindings, plugins, and settings to enhance editor functionality.

@@ -1,6 +1,0 @@
-def parse_bytes(self, source_bytes: bytes) -> Tree:
-        """Parse raw bytes and return a tree-sitter Tree.
-
-        Useful for testing without writing to disk.
-        """
-        return self._parser.parse(source_bytes)

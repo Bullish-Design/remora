@@ -1,1 +1,0 @@
-The code defines strictly typed Pydantic models and a stateful orchestration layer to enforce data integrity and manage state transitions in a structured, type-safe manner.

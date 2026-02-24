@@ -1,1 +1,0 @@
-Deliverables refer to the final products or outcomes expected from a project, such as code, documentation, reports, or other tangible results.

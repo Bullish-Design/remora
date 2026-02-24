@@ -1,1 +1,0 @@
-The **Cairn Workspace View** demo creates maximum "wow factor" by making agent reasoning *physically visible*:

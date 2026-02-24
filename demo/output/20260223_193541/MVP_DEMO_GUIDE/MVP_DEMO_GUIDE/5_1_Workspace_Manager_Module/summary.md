@@ -1,1 +1,0 @@
-The Heading3 element "5.1 Workspace Manager Module" outlines the purpose of the WorkspaceManager class, which manages workspaces including their creation, configuration, and lifecycle within a Remora application, with its child elements detailing the class's responsibilities and functionality.

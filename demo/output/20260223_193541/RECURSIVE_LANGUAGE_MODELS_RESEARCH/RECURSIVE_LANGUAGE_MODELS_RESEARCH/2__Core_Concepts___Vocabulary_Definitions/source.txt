@@ -1,1 +1,0 @@
-The paper relies on several key concepts and acronyms to define its architecture and evaluation methodologies.

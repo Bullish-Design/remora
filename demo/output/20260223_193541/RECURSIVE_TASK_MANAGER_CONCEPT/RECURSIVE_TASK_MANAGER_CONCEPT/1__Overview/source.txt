@@ -1,3 +1,0 @@
-The **Recursive Decomposition Task Manager** brings the theory of Recursive Environment Models (REM) into code. It completely abandons linear task execution in favor of **Extreme Recursion**. The manager starts by treating the user's prompt *itself* as a problem to be decomposed, spawning exploratory environments to gather context, define "done", and build the actual execution tree.
-
-Every node in this tree corresponds to a completely isolated **Cairn Workspace Sandbox**. The state, intent, and architectural constraints of these sandboxes are synchronized through Remora's central **Hub Daemon** using versioned object models (FSdantic), acting as the "Memory Bus" for the swarm.

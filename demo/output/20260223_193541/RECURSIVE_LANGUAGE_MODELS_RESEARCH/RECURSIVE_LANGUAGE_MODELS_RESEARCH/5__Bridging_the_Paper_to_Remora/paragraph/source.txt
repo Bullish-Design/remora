@@ -1,1 +1,0 @@
-In Remora's implementation of this concept (as explored in `RECURSIVE_ENVIRONMENT_MODELS.md`):

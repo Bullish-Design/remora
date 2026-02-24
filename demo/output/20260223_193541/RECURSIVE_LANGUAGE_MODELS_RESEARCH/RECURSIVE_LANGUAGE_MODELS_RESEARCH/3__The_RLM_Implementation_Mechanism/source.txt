@@ -1,1 +1,0 @@
-The paper's implementation of an RLM is surprisingly simple. It does not require retraining the base model; it relies entirely on clever scaffolding and system prompts.

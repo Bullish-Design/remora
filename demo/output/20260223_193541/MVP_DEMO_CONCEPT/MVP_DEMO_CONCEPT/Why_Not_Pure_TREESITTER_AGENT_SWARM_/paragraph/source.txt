@@ -1,1 +1,0 @@
-This is 6-12 months of work. The MVP extracts the most impressive elements (AST visualization, multi-agent coordination) without requiring the full mathematical infrastructure.

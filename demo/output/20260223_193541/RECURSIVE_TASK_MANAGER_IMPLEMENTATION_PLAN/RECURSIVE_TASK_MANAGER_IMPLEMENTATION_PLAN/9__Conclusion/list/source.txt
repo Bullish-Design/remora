@@ -1,3 +1,0 @@
-1. **New code**: ~1,500 lines (models, task manager, tools)
-2. **Extended code**: ~300 lines (workspace, coordinator, CLI)
-3. **Dependencies**: Complete Hub daemon implementation

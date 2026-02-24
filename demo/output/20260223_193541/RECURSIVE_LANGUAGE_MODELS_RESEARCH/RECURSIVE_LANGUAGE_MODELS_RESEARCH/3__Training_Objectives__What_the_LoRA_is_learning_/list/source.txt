@@ -1,4 +1,0 @@
-*   **Tool Cadence:** Learning to write one clean Python script, stop generation, wait for the Grail standard output, and then write the next step.
-*   **Sub-Calling Restraint:** Learning *not* to use `llm_query` iteratively on 10,000 individual nodes, but to use native Python (like Tree-sitter AST filters) to narrow the context first, then batch sending via a localized sub-environment.
-*   **Graceful Degradation:** Teaching the model to capture `try/except` errors in its own REPL scripts rather than crashing the loop.
-*   **Termination Formatting:** Perfectly conforming to the `FINAL_VAR()` output constraints so the parsing engine never fails.

@@ -1,3 +1,0 @@
-def _default_query_dir() -> Path:
-    """Return the built-in query directory inside the remora package."""
-    return Path(importlib.resources.files("remora")) / "queries"  # type: ignore[arg-type]

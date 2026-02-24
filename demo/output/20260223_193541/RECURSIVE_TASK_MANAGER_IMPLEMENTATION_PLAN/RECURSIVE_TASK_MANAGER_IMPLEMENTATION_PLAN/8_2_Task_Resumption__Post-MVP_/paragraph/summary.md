@@ -1,1 +1,0 @@
-Saves the current state of a task tree to persist progress and resumes from that state upon restart.

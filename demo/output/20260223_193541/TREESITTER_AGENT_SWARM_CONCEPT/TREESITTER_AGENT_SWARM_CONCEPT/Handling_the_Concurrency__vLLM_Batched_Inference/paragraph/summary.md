@@ -1,1 +1,0 @@
-The backend inference engine uses vLLM with batched inference and on-demand LoRA adapter loading to enable efficient, scalable model serving.

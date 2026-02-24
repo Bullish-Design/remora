@@ -1,1 +1,0 @@
-The `task_manager.py` component manages task execution, scheduling, and state tracking within the Remora system, likely coordinating workflows and ensuring tasks are processed efficiently and reliably.

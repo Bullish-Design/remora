@@ -1,1 +1,0 @@
-The code demonstrates the AST (Abstract Syntax Tree) Summary feature, which extracts and summarizes key structural and semantic information from Python code to provide an overview of its components and logic.

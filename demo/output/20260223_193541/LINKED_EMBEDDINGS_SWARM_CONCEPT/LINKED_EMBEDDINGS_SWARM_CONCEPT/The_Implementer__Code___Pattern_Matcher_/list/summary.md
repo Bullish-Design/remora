@@ -1,1 +1,0 @@
-The role executes coding tasks by querying both the target repository's code space and the Golden Reference Libraries to understand how the Golden Library implemented a specific AST structure, enabling informed, standards-aligned code generation.

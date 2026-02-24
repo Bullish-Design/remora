@@ -1,1 +1,0 @@
-When a user initiates a request, the system triggers a decentralized "Swarm" workflow:

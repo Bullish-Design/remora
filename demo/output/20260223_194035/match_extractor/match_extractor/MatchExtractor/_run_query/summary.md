@@ -1,1 +1,0 @@
-This function runs a query on a given source file's CST tree, extracts matching nodes based on capture patterns (e.g., @function.def, @function.name), and constructs CSTNode objects with their type, name, file path, and byte range, using the query file name to determine the expected node type.

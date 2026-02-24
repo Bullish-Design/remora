@@ -1,1 +1,0 @@
-This method subtracts integer y from integer x and returns the result.

@@ -1,1 +1,0 @@
-The paper implements a Retrieval-Augmented Language Model (RLM) using system prompts and scaffolding instead of retraining the base model, enabling efficient and effective knowledge integration.

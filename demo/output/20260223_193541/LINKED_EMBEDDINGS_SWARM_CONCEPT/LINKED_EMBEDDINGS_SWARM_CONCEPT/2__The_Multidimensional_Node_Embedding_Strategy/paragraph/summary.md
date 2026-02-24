@@ -1,1 +1,0 @@
-This approach breaks down each significant AST node into a linked entity with its own vector representation, enabling separate and specialized embeddings in distinct vector spaces while maintaining structural relationships through pointers.

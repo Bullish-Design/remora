@@ -1,1 +1,0 @@
-`TaskEnvironment` defines the geographic and temporal scope of a task execution within a Cairn Workspace, and configures an isolated environment by specifying the workspace ID, optional parent workspace, and permitted Hub DB keys for data access. Its children establish the spatial, temporal, and data-access boundaries that constrain and enable task operations.

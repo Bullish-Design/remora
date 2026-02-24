@@ -1,1 +1,0 @@
-This heading introduces the overarching concept of the MVP demo, presenting a strategic recommendation for implementation. The child summary provides the foundational context by citing the strategic guidance from Claude Opus 4.5, establishing the basis for the recommendation and implementation plan.

@@ -1,1 +1,0 @@
-The calculate_total function computes the total value by summing up individual components, likely used in financial or data analysis calculations within the RemoraAnalyze tool.

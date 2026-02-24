@@ -1,1 +1,0 @@
-This heading introduces Phase 4 of the configuration, which sets up Neovim's Treesitter integration to enable syntax highlighting, code folding, and language support. The child element configures Treesitter features, providing the necessary setup for enhanced code navigation and editing.

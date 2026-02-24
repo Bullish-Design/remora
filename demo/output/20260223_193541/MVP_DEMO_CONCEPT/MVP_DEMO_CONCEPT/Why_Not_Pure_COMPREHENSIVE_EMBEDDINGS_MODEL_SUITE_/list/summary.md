@@ -1,1 +1,0 @@
-These are specialized models: Fine-tuned EmbeddingGemma with MRL for embedding tasks, CodeGemma 2B with LoRA for code generation, T5Gemma for text transformations, and FunctionGemma for function orchestration.

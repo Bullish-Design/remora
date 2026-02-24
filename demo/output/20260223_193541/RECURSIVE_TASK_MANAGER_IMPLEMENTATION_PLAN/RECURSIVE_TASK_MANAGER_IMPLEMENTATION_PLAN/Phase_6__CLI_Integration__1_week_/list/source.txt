@@ -1,3 +1,0 @@
-- [ ] `remora task <prompt>` command for recursive execution
-- [ ] Task tree visualization in CLI
-- [ ] Task status monitoring

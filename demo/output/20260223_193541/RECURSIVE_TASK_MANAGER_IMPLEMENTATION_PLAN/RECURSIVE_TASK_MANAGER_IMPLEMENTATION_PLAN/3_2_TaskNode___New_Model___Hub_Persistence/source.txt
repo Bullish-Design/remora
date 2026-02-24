@@ -1,3 +1,0 @@
-**New Component**: `src/remora/hub/tasks.py`
-
-The TaskNode model from the concept is well-designed. Implementation should:

@@ -1,1 +1,0 @@
-Scene 5: Review Output guides users through reviewing and accepting a final code proposal via a diff, with children enabling the user to view the change and accept it with a simple 'a' action.

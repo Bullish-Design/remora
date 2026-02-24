@@ -1,1 +1,0 @@
-Parses a source file into a tree structure and returns the parsed tree along with the raw source bytes, handling read errors and warning about parse errors.

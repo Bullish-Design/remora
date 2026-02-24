@@ -1,1 +1,0 @@
-The code defines a legend system where ✓ denotes primary features and ○ denotes secondary or limited features, providing a visual or symbolic representation of feature importance or scope.

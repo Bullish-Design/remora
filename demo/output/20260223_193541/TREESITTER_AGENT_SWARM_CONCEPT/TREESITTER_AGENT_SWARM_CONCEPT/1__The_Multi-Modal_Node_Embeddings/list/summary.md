@@ -1,1 +1,0 @@
-This defines a node's structure and behavior by specifying its source code, associated documentation, input/output types, and its position and connections within a computational graph.

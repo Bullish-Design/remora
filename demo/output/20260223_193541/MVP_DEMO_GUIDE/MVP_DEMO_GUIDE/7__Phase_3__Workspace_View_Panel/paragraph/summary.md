@@ -1,1 +1,0 @@
-Displays real-time workspace contents in a side panel for immediate visibility and interaction.

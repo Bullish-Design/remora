@@ -1,4 +1,0 @@
-- [ ] Live Dashboard TUI skeleton
-- [ ] Event stream → Dashboard bridge
-- [ ] AST visualization component
-- [ ] Agent status panel

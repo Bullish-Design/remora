@@ -1,1 +1,0 @@
-`TaskResult` defines the structured output of a `TaskNode` execution, capturing mutated files, emitted artifacts, and verification success status to represent the outcome of a sandbox execution. Its children specify the data components that compose this output, enabling consistent tracking and validation of task execution results.

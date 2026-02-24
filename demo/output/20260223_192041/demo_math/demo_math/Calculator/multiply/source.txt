@@ -1,3 +1,0 @@
-def multiply(self, x: int, y: int) -> int:
-        """Multiply two numbers."""
-        return x * y

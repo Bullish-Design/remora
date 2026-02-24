@@ -4,7 +4,13 @@ from remora.event_bus import Event, EventBus, get_event_bus
 from remora.interactive import WorkspaceInboxCoordinator
 
 from remora.frontend.registry import WorkspaceInfo, WorkspaceRegistry, workspace_registry
-from remora.frontend.routes import RespondSignals, get_coordinator, register_routes
+from remora.frontend.routes import (
+    RespondSignals,
+    get_coordinator,
+    register_agent_workspace,
+    register_routes,
+    unregister_agent,
+)
 from remora.frontend.state import DashboardState, EventAggregator, dashboard_state
 from remora.frontend.views import dashboard_view
 
@@ -22,5 +28,7 @@ __all__ = [
     "dashboard_view",
     "register_routes",
     "get_coordinator",
+    "register_agent_workspace",
+    "unregister_agent",
     "RespondSignals",
 ]

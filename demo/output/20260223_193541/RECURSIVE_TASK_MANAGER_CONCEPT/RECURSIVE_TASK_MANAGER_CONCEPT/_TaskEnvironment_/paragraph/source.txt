@@ -1,1 +1,0 @@
-Defines the spatial and temporal boundaries for a task.

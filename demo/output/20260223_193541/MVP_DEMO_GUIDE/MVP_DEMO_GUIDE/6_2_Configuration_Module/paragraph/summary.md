@@ -1,1 +1,0 @@
-This file configures the Remora plugin for Neovim, setting up keybindings, themes, and other user preferences to enhance the editing experience.

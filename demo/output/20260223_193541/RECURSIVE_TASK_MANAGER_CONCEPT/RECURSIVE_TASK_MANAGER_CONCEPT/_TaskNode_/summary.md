@@ -1,1 +1,0 @@
-`TaskNode` represents a task in a decomposition-based workflow, defining its identity, structure, and execution context, with children enabling coordination, status tracking, and hierarchical task management.

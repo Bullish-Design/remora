@@ -1,1 +1,0 @@
-The TaskNode model from the concept is well-designed. Implementation should:

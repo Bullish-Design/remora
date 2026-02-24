@@ -1,1 +1,0 @@
-Runs multiple compiled queries on a parsed tree to extract and deduplicate CSTNodes, then returns them sorted by file path, start byte, node type, and name.

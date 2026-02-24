@@ -1,1 +1,0 @@
-The heading "11.1 Demo Target File" introduces a demonstration of using a target-based approach in a system, with the child file `examples/demo_target.py` providing a practical example of defining, configuring, and executing target-specific operations or workflows.

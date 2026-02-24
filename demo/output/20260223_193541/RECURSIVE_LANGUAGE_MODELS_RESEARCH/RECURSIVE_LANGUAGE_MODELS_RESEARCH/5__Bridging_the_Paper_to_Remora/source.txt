@@ -1,8 +1,0 @@
-The research presented in this paper perfectly validates the architecture of Remora. The paper proves that placing an LLM in a REPL sandbox with programmatic access to a context object is vastly superior to prompt-stuffing.
-
-In Remora's implementation of this concept (as explored in `RECURSIVE_ENVIRONMENT_MODELS.md`):
-
-*   Remora's **Grail `.pym` execution engine** serves as the robust Python REPL.
-*   Instead of just string blobs, Remora injects the **Tree-sitter AST Graph** into the REPL, giving the Root LM far more powerful query tooling than basic Regex.
-*   Remora's **vLLM Continuous Batching** natively solves the paper's primary limitation (slow, blocking inference), allowing the Root LM to spawn asynchronous, parallel sub-Agent workspaces instantly.
-*   Remora's **Cairn KV Memory Bus** handles the passing of variables and intent between the Root LM and the sub-LMs, replacing the brittle string manipulation of the paper's basic `llm_query` function.

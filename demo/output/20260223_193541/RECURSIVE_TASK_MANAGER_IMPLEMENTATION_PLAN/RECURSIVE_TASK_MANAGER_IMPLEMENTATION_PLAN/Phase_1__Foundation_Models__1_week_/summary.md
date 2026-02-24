@@ -1,1 +1,0 @@
-Establishes the foundational data models for task management in the Remora Hub, defining TaskNode, TaskEnvironment, and TaskResult with integration to FSdantic for storage and validation through unit tests.

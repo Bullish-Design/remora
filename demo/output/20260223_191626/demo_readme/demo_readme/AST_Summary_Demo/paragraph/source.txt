@@ -1,1 +1,0 @@
-This is a demonstration of the AST Summary feature.

@@ -1,2 +1,0 @@
-**Status:** Conceptual Riffing
-**Context:** Merging the theory of Recursive Language Models (RLMs) with Remora's existing architectural patterns (Cairn KV, Grail Sandbox, Tree-sitter AST).

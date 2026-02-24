@@ -1,1 +1,0 @@
-The entry point is a deeply integrated developer tool, such as a Neovim plugin, designed to enhance coding productivity through seamless integration with the editor's workflow.

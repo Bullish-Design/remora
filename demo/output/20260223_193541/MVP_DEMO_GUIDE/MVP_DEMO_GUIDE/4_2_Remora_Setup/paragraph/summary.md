@@ -1,1 +1,0 @@
-Verifies the functionality and correctness of the Remora CLI tool by testing its commands and outputs.

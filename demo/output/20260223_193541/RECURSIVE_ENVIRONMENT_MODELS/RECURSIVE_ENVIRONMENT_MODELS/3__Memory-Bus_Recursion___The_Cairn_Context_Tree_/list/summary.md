@@ -1,1 +1,0 @@
-The system decouples task intent propagation by having the Root Architect store the intent in a shared key and allowing sub-environments to access it dynamically via a tool, rather than receiving the full intent in their initial setup, enabling selective, on-demand retrieval of context.

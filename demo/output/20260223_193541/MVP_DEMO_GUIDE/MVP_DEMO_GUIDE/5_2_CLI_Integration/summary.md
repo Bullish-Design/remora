@@ -1,1 +1,0 @@
-The Heading3 "5.2 CLI Integration" outlines the command-line interface implementation for Remora, enabling users to manage workspaces through terminal commands. The children detail the CLI's structure and functionality, including workspace management commands implemented in `src/remora/cli.py`.

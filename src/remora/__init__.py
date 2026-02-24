@@ -4,7 +4,7 @@ from remora.agent_graph import AgentGraph, GraphConfig
 from remora.config import RemoraConfig
 from remora.discovery import CSTNode, TreeSitterDiscoverer
 from remora.event_bus import Event, EventBus, get_event_bus
-from remora.workspace import GraphWorkspace, WorkspaceManager
+from remora.workspace import GraphWorkspace, WorkspaceKV, WorkspaceManager
 
 __all__ = [
     "AgentGraph",
@@ -16,5 +16,6 @@ __all__ = [
     "TreeSitterDiscoverer",
     "RemoraConfig",
     "GraphWorkspace",
+    "WorkspaceKV",
     "WorkspaceManager",
 ]

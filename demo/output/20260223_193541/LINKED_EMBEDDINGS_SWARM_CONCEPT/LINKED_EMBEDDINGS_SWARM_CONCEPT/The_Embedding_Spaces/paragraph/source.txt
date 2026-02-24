@@ -1,1 +1,0 @@
-Furthermore, **Golden Reference Libraries** (e.g., high-quality open-source projects or company standards) are pre-embedded in the exact same multidimensional format to act as a searchable knowledge base.

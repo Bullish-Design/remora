@@ -1,1 +1,0 @@
-The system initiates a decentralized Swarm workflow in response to a user request, distributing and parallelizing task execution across multiple nodes to enhance processing efficiency and resilience.

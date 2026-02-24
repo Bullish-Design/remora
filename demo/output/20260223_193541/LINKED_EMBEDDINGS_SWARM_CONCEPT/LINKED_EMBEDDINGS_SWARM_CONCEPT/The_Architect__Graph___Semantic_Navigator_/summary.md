@@ -1,1 +1,0 @@
-The Architect (Graph & Semantic Navigator) determines the scope of a prompt by analyzing semantic and graph data, then initializes a task file in the Cairn KV memory system to manage and store the request's context and expansion. Its child component handles the semantic and graph analysis to define the request scope and creates the task file for context management.

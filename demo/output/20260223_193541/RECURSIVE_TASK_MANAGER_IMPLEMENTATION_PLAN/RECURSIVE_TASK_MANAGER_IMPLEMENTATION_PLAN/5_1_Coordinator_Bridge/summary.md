@@ -1,1 +1,0 @@
-The Heading3 "5.1 Coordinator Bridge" outlines the coordination mechanism where the TaskManager delegates agent execution tasks to the Coordinator to manage and execute agent processes. The child element describes how task delegation enables the Coordinator to handle agent execution efficiently.

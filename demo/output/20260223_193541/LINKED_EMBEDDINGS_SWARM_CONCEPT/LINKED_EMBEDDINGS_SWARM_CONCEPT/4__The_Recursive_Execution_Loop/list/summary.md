@@ -1,1 +1,0 @@
-The system ingests a development goal, iteratively refines it through context exploration and tool-based searches, spawns specialized agents to handle sub-tasks, and implements solutions by referencing high-quality code from a Golden Reference Library, all while maintaining a traceable, sandboxed workflow.

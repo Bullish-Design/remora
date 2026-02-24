@@ -1,1 +1,0 @@
-The system orchestrates a parallel development pipeline where an architect plans transformations, multiple agents simultaneously implement and generate tests, and a final linting/validation phase ensures code quality.

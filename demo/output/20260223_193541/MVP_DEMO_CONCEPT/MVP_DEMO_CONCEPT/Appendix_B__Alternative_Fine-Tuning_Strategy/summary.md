@@ -1,1 +1,0 @@
-This heading introduces an alternative approach to fine-tuning by proposing to fall back to either fine-tuning the base model or using prompt tuning as a minimal viable product solution. The child summary outlines these specific fallback options that support the strategy's implementation.

@@ -1,1 +1,0 @@
-This heading introduces Phase 6, which focuses on context providers by generating context files that agents produce, allowing users to view and access the contextual information generated during agent operations. The child element details how these context files are created and made accessible to users.

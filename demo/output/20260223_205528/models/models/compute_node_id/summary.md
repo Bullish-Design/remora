@@ -1,1 +1,0 @@
-Computes a stable, 16-character hexadecimal SHA-256 hash of a file path, node type, and name, ensuring consistency across reformatting by excluding byte offsets.

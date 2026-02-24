@@ -1,1 +1,0 @@
-The design leverages Fsdantic for versioned task persistence, ensures workspace isolation via TaskEnvironment, uses event-driven coordination with RemoraEventBridge, and supports flexible agent bundle mapping based on task type.

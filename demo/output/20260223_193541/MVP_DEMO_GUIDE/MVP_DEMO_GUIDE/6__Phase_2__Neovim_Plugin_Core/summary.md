@@ -1,1 +1,0 @@
-This heading introduces Phase 2 of the Neovim plugin, which establishes a core system that manages workspaces as first-class entities, improving efficiency by replacing subprocesses with a centralized workspace management approach. The child summary details how the plugin's structure enables this centralized management, enhancing performance and usability.

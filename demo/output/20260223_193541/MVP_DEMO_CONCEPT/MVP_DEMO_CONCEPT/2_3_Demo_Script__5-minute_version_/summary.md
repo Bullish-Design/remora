@@ -1,1 +1,0 @@
-This heading outlines the demonstration of a 5-minute script that integrates system design, parallel computation, testing, and validation to showcase a complete software workflow. Its children illustrate key stages—from initial discovery and architectural planning to implementation, testing, and final result visualization—providing a cohesive, end-to-end demonstration.

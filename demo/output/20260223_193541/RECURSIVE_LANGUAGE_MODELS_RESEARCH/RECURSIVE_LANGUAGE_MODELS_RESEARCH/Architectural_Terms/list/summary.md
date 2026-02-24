@@ -1,1 +1,0 @@
-The text defines key concepts in a recursive language modeling (RLM) framework, including the roles of Root and Recursive LLMs, the use of REPL environments for code execution, and the phenomenon of context rot—where LLM performance degrades with increasing context size, particularly on information-dense tasks.

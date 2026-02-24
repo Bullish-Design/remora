@@ -1,1 +1,0 @@
-I'm ready to assist you with your request. Could you please clarify what specific action or task you'd like me to perform?

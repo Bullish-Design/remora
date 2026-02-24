@@ -1,1 +1,0 @@
-Generates comprehensive documentation for a codebase in parallel, including API docs, README, and architecture diagrams, with real-time progress tracking in the terminal.

@@ -1,1 +1,0 @@
-Sets the geographic area and time period over which a task is executed.

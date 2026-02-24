@@ -1,1 +1,0 @@
-This heading outlines a 45-second demo workflow that uses Neovim, the `vaf` command, and Remora to analyze code, generate context, draft and refine suggestions, and apply the final change to the source file. Its children detail each step of the automated, self-correcting development process.

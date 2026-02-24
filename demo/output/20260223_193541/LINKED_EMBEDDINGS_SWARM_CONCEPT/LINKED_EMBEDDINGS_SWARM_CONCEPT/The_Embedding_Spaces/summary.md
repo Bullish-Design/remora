@@ -1,1 +1,0 @@
-The Embedding Spaces enable agents to understand and query code through semantic, structural, and relational perspectives, with Golden Reference Libraries providing a pre-embedded, searchable knowledge base to support accurate code retrieval and comprehension.

@@ -1,1 +1,0 @@
-A critical enabler of this architecture is the backend inference engine. Using `vLLM` with batched inference and dynamically loaded on-demand LoRA adapters allows this to scale efficiently.

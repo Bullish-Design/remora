@@ -1,3 +1,0 @@
-**File**: `~/.config/nvim/lua/remora/treesitter.lua`
-
-(Same as before, no changes needed)
