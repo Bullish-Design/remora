@@ -12,8 +12,15 @@ import urllib.request
 
 import pytest
 
+try:
+    from remora.deprecated.mock_vllm_server import MockVLLMServer
+
+    _mock_available = True
+except ImportError:
+    MockVLLMServer = None
+    _mock_available = False
+
 from remora.config import ServerConfig
-from remora.testing.mock_vllm_server import MockVLLMServer
 
 SERVER_URL = os.environ.get("REMORA_SERVER_URL", "http://remora-server:8000/v1")
 SERVER = ServerConfig(base_url=SERVER_URL)
@@ -145,6 +152,9 @@ def skip_integration_if_unavailable(vllm_available: bool, request: pytest.Fixtur
 @pytest.fixture
 async def mock_vllm_server():
     """Fixture that provides a running mock vLLM server."""
+    if MockVLLMServer is None:
+        pytest.skip("Mock vLLM server shim is unavailable")
+
     server = MockVLLMServer()
     url = await server.start()
 
