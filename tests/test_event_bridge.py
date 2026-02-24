@@ -3,7 +3,10 @@
 from unittest.mock import MagicMock
 
 import pytest
-from structured_agents import ModelRequestEvent, ToolResultEvent
+
+structured_agents = pytest.importorskip("structured_agents")
+ModelRequestEvent = structured_agents.ModelRequestEvent
+ToolResultEvent = structured_agents.ToolResultEvent
 
 from remora.event_bridge import RemoraEventBridge
 from remora.events import EventName

@@ -1,12 +1,9 @@
-import asyncio
 from pathlib import Path
 
 from stario import RichTracer, Stario
 from stario.http.writer import CompressionConfig
 
-from . import dashboard_state
-from . import handlers
-from . import views
+from remora.frontend import register_routes
 
 tracer = RichTracer()
 
@@ -15,9 +12,7 @@ with tracer:
 
     app.assets("/static", Path(__file__).parent / "static")
 
-    app.get("/", handlers.home)
-    app.get("/events", handlers.events)
-    app.post("/agent/{agent_id}/respond", handlers.respond)
+    register_routes(app)
 
 
 if __name__ == "__main__":

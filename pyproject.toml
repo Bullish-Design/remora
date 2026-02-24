@@ -17,35 +17,32 @@ dependencies = [
   "pyyaml>=6",
   "jinja2>=3",
   "watchfiles>=0.21",  # transitive via cairn; kept explicit for watch command
-  "openai>=1.0",
   "tree-sitter>=0.24",
   "tree-sitter-python>=0.23",
   "tree-sitter-toml",
   "tree-sitter-markdown",
   "grail",
   "cairn",
-  "structured-agents",
   "textual",
-  #"stario",
 ]
 
-[tool.uv.sources]
-fsdantic = { git = "https://github.com/Bullish-Design/fsdantic.git" }
-grail = { git = "https://github.com/Bullish-Design/grail.git" }
-cairn = { git = "https://github.com/Bullish-Design/cairn.git" }
-structured-agents = { git = "https://github.com/Bullish-Design/structured-agents.git" }
-
-[project.scripts]
-remora = "remora.cli:app"
-remora-hub = "remora.hub.cli:main"
-remora-tui = "scripts.remora_tui:app"
-remora-demo = "scripts.remora_demo:app"
-remora-dashboard = "scripts.remora_dashboard:main"
-remora-flood = "scripts.stress_vllm:app"
-jsonl-convert = "scripts.jsonl_to_readable:main"
-ast-summary = "demo.cli:app"
-
 [project.optional-dependencies]
+frontend = [
+  "stario>=0.1.0",
+  "uvicorn>=0.23",
+  "httpx>=0.27",
+]
+backend = [
+  "structured-agents>=0.2",
+  "vllm>=0.6",
+  "xgrammar>=0.1",
+  "openai>=1.0",
+]
+full = [
+  "frontend",
+  "backend",
+]
+
 dev = [
   "pytest>=7.0",
   "pytest-cov>=4.1",
@@ -58,6 +55,23 @@ dev = [
   "pytest-timeout>=2.3.1",
   "syrupy",
 ]
+
+[tool.uv.sources]
+fsdantic = { git = "https://github.com/Bullish-Design/fsdantic.git" }
+grail = { git = "https://github.com/Bullish-Design/grail.git" }
+cairn = { git = "https://github.com/Bullish-Design/cairn.git" }
+structured-agents = { git = "https://github.com/Bullish-Design/structured-agents.git" }
+
+[project.scripts]
+
+remora = "remora.cli:app"
+remora-hub = "remora.hub.cli:main"
+remora-tui = "scripts.remora_tui:app"
+remora-demo = "scripts.remora_demo:app"
+remora-dashboard = "scripts.remora_dashboard:main"
+remora-flood = "scripts.stress_vllm:app"
+jsonl-convert = "scripts.jsonl_to_readable:main"
+ast-summary = "demo.cli:app"
 
 #[project.urls]
 #homepage = "https://github.com/Bullish-Design/template-py"

@@ -161,4 +161,4 @@ Because none of this code touches `structured-agents`, the Stario library can st
 
 ## Summary
 
-By splitting the dependency surface into frontend and backend extras, exposing a dedicated `remora.frontend` API, and guarding backend imports, the standalone Stario library can now install `remora[frontend]` on Python 3.14 and interact with the backend through the shared event bus and coordinator. Backend developers retain access to `structured-agents`, `vllm`, and the CLI grail tooling via the `backend` extra, while documentation and tests clearly describe the new install paths.
+By splitting the dependency surface into frontend and backend extras, exposing a dedicated `remora.frontend` API, and guarding backend imports, the standalone Stario library can now install `remora[frontend]` on Python 3.14 and interact with the backend through the shared event bus and coordinator. Backend developers retain access to `structured-agents`, `vllm`, and the CLI grail tooling via the `backend` extra, while documentation (see `docs/INSTALLATION.md`) and tests clearly describe the new install paths.

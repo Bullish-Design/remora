@@ -1,3 +1,3 @@
-from .state import DashboardState
+from remora.frontend.state import DashboardState, dashboard_state
 
-dashboard_state = DashboardState()
+__all__ = ["DashboardState", "dashboard_state"]

@@ -25,6 +25,17 @@ uvicorn demo.dashboard.app:app --reload
 
 The dashboard, projector view (`/projector`), and mobile remote (`/mobile`) all subscribe to the same SSE/WebSocket feed driven by `remora.event_bus.EventBus`.
 
+## Installation Options
+
+Remora ships with a lightweight core plus two optional extras so the standalone Stario dashboard library can stay on Python 3.14 while backend tooling keeps using the Grail + vLLM stack on ≤3.13.
+
+- `pip install remora` – installs the base runtime with the event bus, CLI framework, and analyzer/orchestrator plumbing that every consumer needs.
+- `pip install "remora[frontend]"` – adds `stario`, `uvicorn`, and the `remora.frontend` helpers (dashboard view, SSE routes, `WorkspaceInboxCoordinator`, `register_routes`) required by the Stario library. This extra targets Python 3.14 because `stario` requires it; a 3.13 install will fail with a clear pip error from `stario`.
+- `pip install "remora[backend]"` – pulls in `structured-agents`, `vllm`, `xgrammar`, and `openai` so CLI commands like `list-agents` or `scripts/validate_agents.py` can validate Grail bundles and query a vLLM server.
+- `pip install "remora[full]"` – convenience meta extra that installs both slices for environments that run dashboards and local inference together.
+
+See `docs/INSTALLATION.md` for more detail, including guidance on when to install each extra and how the new Stario dashboard integration uses the shared event bus.
+
 ## Public API Highlights
 
 - `AgentGraph`, `GraphConfig`: declaratively compose agents, dependencies, parallel groups, and execute with interactive handlers.

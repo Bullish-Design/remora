@@ -10,7 +10,9 @@ import pytest
 from pathlib import Path
 
 from remora.config import load_config
-from structured_agents import load_bundle
+
+structured_agents = pytest.importorskip("structured_agents")
+load_bundle = structured_agents.load_bundle
 
 pytestmark = [pytest.mark.acceptance, pytest.mark.integration]
 
