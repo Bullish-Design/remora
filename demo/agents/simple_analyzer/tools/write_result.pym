@@ -1,0 +1,13 @@
+"""Write result tool - returns analysis result."""
+
+from grail import Input
+
+
+analysis: str = Input("analysis", description="The analysis text to return")
+
+result = {
+    "analysis": analysis,
+    "success": True,
+}
+
+result

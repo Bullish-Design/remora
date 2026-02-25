@@ -1,0 +1,10 @@
+{
+  "inputs": [
+    {
+      "name": "analysis",
+      "type": "str",
+      "required": true,
+      "default": null
+    }
+  ]
+}
