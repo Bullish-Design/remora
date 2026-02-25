@@ -65,7 +65,17 @@ class HubServer:
 
         await self._event_bus.subscribe("agent:*", self._on_event)
 
-        self._app = Starlette(
+        self._app = self._build_app()
+
+        import uvicorn
+
+        config = uvicorn.Config(self._app, host=self.host, port=self.port, log_level="info")
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    def _build_app(self) -> Starlette:
+        """Build the Starlette application (exposed for testing)."""
+        return Starlette(
             routes=[
                 Route("/", self.home),
                 Route("/subscribe", self.subscribe),
@@ -76,12 +86,6 @@ class HubServer:
                 Mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static"),
             ],
         )
-
-        import uvicorn
-
-        config = uvicorn.Config(self._app, host=self.host, port=self.port, log_level="info")
-        server = uvicorn.Server(config)
-        await server.serve()
 
     async def _on_event(self, event: Event) -> None:
         """Handle incoming events - update state."""
