@@ -26,6 +26,10 @@ tools:
   - name: write_result
     registry: grail
     description: Write analysis result to workspace
+    inputs_override:
+      analysis:
+        type: string
+        description: The analysis summary to write to the workspace
 
 registries:
   - type: grail
