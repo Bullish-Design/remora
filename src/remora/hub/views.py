@@ -1,3 +1,6 @@
+import html
+import json
+
 from datastar_py import attribute_generator as data
 
 
@@ -145,6 +148,83 @@ def blocked_list_view(blocked: list[dict]) -> str:
     return render_tag("div", id="blocked-agents", class_="blocked-agents", content=cards)
 
 
+def graph_launcher_card_view() -> str:
+    """Card that lets users configure and start a graph."""
+    defaults = {
+        "graphLauncher": {
+            "graphId": "",
+            "bundle": "default",
+            "target": "",
+        }
+    }
+    signals_attr = html.escape(json.dumps(defaults), quote=True)
+
+    graph_id_input = render_tag(
+        "input",
+        placeholder="Graph ID (required)",
+        type="text",
+        **{"data-bind": "graphLauncher.graphId"},
+    )
+    bundle_input = render_tag(
+        "input",
+        placeholder="Bundle (optional)",
+        type="text",
+        **{"data-bind": "graphLauncher.bundle"},
+    )
+    target_input = render_tag(
+        "input",
+        placeholder="Target description (optional)",
+        type="text",
+        **{"data-bind": "graphLauncher.target"},
+    )
+
+    button = render_tag(
+        "button",
+        content="Start Graph",
+        type="button",
+        **{
+            "data-on": "click",
+            "data-on-click": """
+                const graphId = $graphLauncher?.graphId?.trim();
+                if (!graphId) {
+                    alert('Graph ID is required to launch a graph.');
+                    return;
+                }
+                const payload = {
+                    graph_id: graphId,
+                    bundle: $graphLauncher?.bundle?.trim() || 'default',
+                };
+                const targetValue = $graphLauncher?.target?.trim();
+                if (targetValue) {
+                    payload.target = targetValue;
+                }
+                @post('/graph/execute', payload);
+                $graphLauncher.graphId = '';
+            """,
+        },
+    )
+
+    form = render_tag(
+        "div",
+        class_="graph-launcher-form",
+        content=graph_id_input + bundle_input + target_input + button,
+    )
+
+    signals_div = render_tag(
+        "div",
+        **{
+            "data-signals__ifmissing": signals_attr,
+            "style": "display:none",
+        },
+    )
+
+    return render_tag(
+        "div",
+        class_="card graph-launcher-card",
+        content=render_tag("div", content="Launch Graph") + form + signals_div,
+    )
+
+
 def agent_item_view(agent_id: str, state_info: dict) -> str:
     """Single agent status."""
     state = state_info.get("state", "pending")
@@ -250,6 +330,8 @@ def dashboard_view(view_data: dict) -> str:
         content=render_tag("div", id="events-header", content="Events Stream") + events_list_view(events),
     )
 
+    graph_launcher_card = graph_launcher_card_view()
+
     blocked_card = render_tag(
         "div", class_="card", content=render_tag("div", content="Blocked Agents") + blocked_list_view(blocked)
     )
@@ -269,7 +351,11 @@ def dashboard_view(view_data: dict) -> str:
         + progress_bar_view(progress["total"], progress["completed"]),
     )
 
-    main_panel = render_tag("div", id="main-panel", content=blocked_card + status_card + results_card + progress_card)
+    main_panel = render_tag(
+        "div",
+        id="main-panel",
+        content=graph_launcher_card + blocked_card + status_card + results_card + progress_card,
+    )
 
     main = render_tag("div", class_="main", content=events_panel + main_panel)
 

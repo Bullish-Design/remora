@@ -159,6 +159,9 @@ class HubConfig(BaseModel):
     # Database location (relative to project root)
     db_path: Path | None = None  # Default: .remora/hub.db
 
+    # Workspace base for file browsing (frontend file picker)
+    workspace_base: Path | None = None  # Default: /tmp/remora/workspaces
+
     # Indexing behavior
     index_on_startup: bool = True
     watch_for_changes: bool = True

@@ -125,6 +125,36 @@ body {
     background: #218838;
 }
 
+.graph-launcher-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+
+.graph-launcher-form input {
+    width: 100%;
+    padding: 0.65rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.95rem;
+}
+
+.graph-launcher-form button {
+    align-self: flex-start;
+    padding: 0.65rem 1.5rem;
+    background: #0066cc;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.graph-launcher-form button:hover {
+    background: #0056b3;
+}
+
 .agent-item {
     display: flex;
     align-items: center;

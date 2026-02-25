@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -33,10 +34,13 @@ class HubServer:
         workspace_path: Path,
         host: str = "0.0.0.0",
         port: int = 8000,
+        workspace_base: Path | None = None,
     ):
         self.workspace_path = workspace_path
         self.host = host
         self.port = port
+        self.workspace_base = workspace_base or Path(os.environ.get("WORKSPACE_BASE", "/tmp/remora/workspaces"))
+        self.workspace_base.mkdir(parents=True, exist_ok=True)
 
         self._event_bus: EventBus | None = None
         self._coordinator: WorkspaceInboxCoordinator | None = None
@@ -63,6 +67,7 @@ class HubServer:
                 Route("/", self.home),
                 Route("/subscribe", self.subscribe),
                 Route("/graph/execute", self.execute_graph, methods=["POST"]),
+                Route("/api/files", self.list_workspace_files),
                 Route("/agent/{agent_id}/respond", self.respond, methods=["POST"]),
                 Mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static"),
             ],
@@ -102,7 +107,50 @@ class HubServer:
                 view_data = self._hub_state.get_view_data()
                 yield SSE.patch_elements(dashboard_view(view_data))
 
-        return await event_stream(request)
+        return await event_stream()
+
+    async def list_workspace_files(self, request: Request) -> JSONResponse:
+        """
+        List files under workspace_base.
+
+        Query params:
+        - path: relative path from workspace_base (default: "")
+
+        Returns:
+        {
+            "path": "subdir",
+            "entries": [
+                {"name": "file.py", "type": "file", "size": 1234},
+                {"name": "subdir", "type": "directory"},
+            ]
+        }
+        """
+        query = request.query_params.get("path", "")
+
+        # SECURITY: Prevent directory traversal
+        resolved = (self.workspace_base / query).resolve()
+        if not str(resolved).startswith(str(self.workspace_base.resolve())):
+            return JSONResponse({"error": "Invalid path"}, status_code=400)
+
+        if not resolved.exists():
+            return JSONResponse({"error": "Path not found"}, status_code=404)
+
+        entries = []
+        for item in sorted(resolved.iterdir()):
+            entries.append(
+                {
+                    "name": item.name,
+                    "type": "directory" if item.is_dir() else "file",
+                    "size": item.stat().st_size if item.is_file() else None,
+                }
+            )
+
+        return JSONResponse(
+            {
+                "path": query,
+                "entries": entries,
+            }
+        )
 
     async def execute_graph(self, request: Request) -> JSONResponse:
         """Execute an agent graph - starts agents in the graph."""
@@ -229,9 +277,10 @@ async def run_hub(
     workspace_path: Path = Path(".remora/hub.workspace"),
     host: str = "0.0.0.0",
     port: int = 8000,
+    workspace_base: Path | None = None,
 ) -> None:
     """Run the Remora Hub server."""
-    server = HubServer(workspace_path, host, port)
+    server = HubServer(workspace_path, host, port, workspace_base)
     await server.start()
 
 
