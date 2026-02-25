@@ -62,7 +62,7 @@ async def execute_graph(self, request: Request) -> JSONResponse:
 ### New Flow (Auto-generate Graph ID)
 
 1. User opens browser to `http://localhost:8001`
-2. User optionally fills in Bundle, Target, or uses "Browse" to select a file
+2. User optionally fills in Bundle, Target, or uses "Browse" to select a file *or directory*
 3. User clicks "Start Graph" **without entering a Graph ID**
 4. Frontend sends POST to `/graph/execute` **without** `graph_id` (or with empty string)
 5. Hub generates a unique graph ID (e.g., using UUID or timestamp-based)

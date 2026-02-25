@@ -30,8 +30,8 @@ nodes = discoverer.discover()
 
 ### Step 2: Showcase Dynamic Model Routing & Agent Switching
 Instead of relying on a single default `vLLM` adapter, demonstrate `structured-agents` flexibility.
-- For `function` nodes: Load the `agents/lint` bundle. Configure its `KernelConfig` to use the `function_gemma` plugin and a specific fast adapter (e.g., `google/functiongemma-270m-it`).
-- For `class` nodes: Load the `agents/docstring` bundle. Configure its `KernelConfig` to use a different adapter or even a different plugin (`QwenPlugin`).
+- For `function` nodes: Load the `agents/lint` bundle. Configure its `KernelConfig` to use the `QwenPlugin` plugin and a specific fast adapter (e.g., `Qwen/Qwen3-4B-Instruct-2507-FP`).
+- For `class` nodes: Load the `agents/docstring` bundle. Configure its `KernelConfig` to use qwen as well.
 
 **Key Concept to Highlight:** How quickly we can stitch together a `registry`, `backend`, and `KernelConfig` per Agent Node before executing the `AgentGraph`.
 

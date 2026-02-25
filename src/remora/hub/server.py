@@ -79,6 +79,7 @@ class HubServer:
             routes=[
                 Route("/", self.home),
                 Route("/subscribe", self.subscribe),
+                Route("/events", self.events),  # Raw SSE events for API clients
                 Route("/graph/execute", self.execute_graph, methods=["POST"]),
                 Route("/graph/list", self.list_graphs, methods=["GET"]),
                 Route("/api/files", self.list_workspace_files),
@@ -116,6 +117,29 @@ class HubServer:
                 yield SSE.patch_elements(dashboard_view(view_data))
 
         return await event_stream()
+
+    async def events(self, request: Request):
+        """
+        Raw SSE endpoint - streams events as JSON.
+
+        Unlike /subscribe which returns Datastar HTML patches for the dashboard,
+        this endpoint returns raw event JSON for API clients.
+        """
+        from starlette.responses import StreamingResponse
+
+        async def event_generator():
+            try:
+                async for event in self._event_bus.stream():
+                    event_type = f"{event.category}:{event.action}"
+                    data = event.model_dump_json()
+                    yield f"event: {event_type}\ndata: {data}\n\n"
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error in events stream")
+                pass
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
 
     async def list_workspace_files(self, request: Request) -> JSONResponse:
         """
@@ -162,7 +186,18 @@ class HubServer:
 
     async def execute_graph(self, request: Request) -> JSONResponse:
         """Execute an agent graph - starts agents in the graph."""
+        # Handle both Datastar signals and regular JSON POST
         signals = await read_signals(request) or {}
+
+        # If signals is empty, try reading plain JSON body
+        if not signals and request.method == "POST":
+            try:
+                body = await request.body()
+                if body:
+                    signals = json.loads(body)
+            except json.JSONDecodeError:
+                signals = {}
+
         graph_id = signals.get("graph_id", "")
 
         if not graph_id:

@@ -467,24 +467,29 @@ class GraphExecutor:
     async def _execute_agent(self, agent: AgentNode) -> Any:
         """Execute an agent.
 
-        This is where the actual agent execution happens. The implementation
-        should:
-        1. Load the agent's bundle/tool definition
-        2. Execute with the kernel
-        3. Handle user interaction via ask_user()
-
-        For now, this is a placeholder that demonstrates the flow.
-        In production, this would integrate with structured-agents.
+        This is where the actual agent execution happens.
         """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         from structured_agents import load_bundle
 
         bundle_path = self._get_bundle_path(agent.bundle)
+        logger.info(f"EXECUTE AGENT: bundle={agent.bundle}, path={bundle_path}")
+
         if bundle_path and bundle_path.exists():
-            bundle = load_bundle(bundle_path)
+            logger.info(f"Loading bundle from: {bundle_path}")
+            try:
+                bundle = load_bundle(bundle_path)
+                logger.info(f"Bundle loaded: {bundle.name}")
+                result = await self._run_kernel(agent, bundle)
+                return result
+            except Exception as e:
+                logger.error(f"Bundle execution failed: {e}")
+                return await self._simulate_execution(agent)
 
-            result = await self._run_kernel(agent, bundle)
-            return result
-
+        logger.warning(f"Bundle not found for {agent.bundle}, using simulation")
         return await self._simulate_execution(agent)
 
     def _get_bundle_path(self, bundle_name: str) -> Path | None:
@@ -498,10 +503,14 @@ class GraphExecutor:
         search_paths = [
             Path.cwd() / "agents" / bundle_name,
             Path(__file__).parent.parent.parent / "agents" / bundle_name,
+            Path.cwd() / ".grail" / "agents" / bundle_name,
+            Path(__file__).parent.parent.parent / ".grail" / "agents" / bundle_name,
+            Path.cwd() / "demo" / "agents" / bundle_name,
+            Path(__file__).parent.parent.parent / "demo" / "agents" / bundle_name,
         ]
 
         for path in search_paths:
-            if path.exists() and (path / "bundle.yaml").exists():
+            if path.exists() and (path / "bundle.yaml").exists() or (path / "monty_code.py").exists():
                 return path
 
         return None
@@ -509,14 +518,89 @@ class GraphExecutor:
     async def _run_kernel(self, agent: AgentNode, bundle: Any) -> Any:
         """Run the agent with structured-agents kernel.
 
-        This is a placeholder - the actual implementation would:
-        1. Create AgentKernel with bundle
-        2. Configure with model backend
-        3. Run with workspace context
-        4. Handle tool calls including ask_user()
+        Uses:
+        - AgentKernel for the agent loop
+        - QwenPlugin for model interaction
+        - GrailBackend for tool execution
         """
-        await asyncio.sleep(0.1)
-        return {"status": "completed", "bundle": getattr(bundle, "name", "unknown")}
+        from structured_agents import (
+            AgentKernel,
+            KernelConfig,
+            Message,
+            QwenPlugin,
+            GrailBackend,
+            GrailBackendConfig,
+            RegistryBackendToolSource,
+        )
+        from structured_agents.registries import GrailRegistry, GrailRegistryConfig
+        from structured_agents.grammar.config import GrammarConfig
+
+        # Configuration for vLLM
+        config = KernelConfig(
+            base_url="http://remora-server:8000/v1",
+            model="Qwen/Qwen3-4B-Instruct-2507-FP8",
+            temperature=0.1,
+            max_tokens=512,
+            tool_choice="auto",
+        )
+
+        # Setup Grail backend and registry
+        agents_dir = bundle.path / "tools"
+
+        if not agents_dir.exists():
+            return {"error": f"Tools directory not found: {agents_dir}"}
+
+        registry = GrailRegistry(GrailRegistryConfig(agents_dir=agents_dir))
+        backend = GrailBackend(GrailBackendConfig(grail_dir=agents_dir))
+        tool_source = RegistryBackendToolSource(registry, backend)
+
+        # Create kernel with Qwen plugin
+        plugin = QwenPlugin()
+        grammar_config = GrammarConfig(
+            mode="ebnf",
+            allow_parallel_calls=False,
+        )
+
+        kernel = AgentKernel(
+            config=config,
+            plugin=plugin,
+            tool_source=tool_source,
+            grammar_config=grammar_config,
+        )
+
+        # Build messages from bundle templates
+        context = {"target": agent.target, "input": agent.target}
+        messages = bundle.build_initial_messages(context)
+
+        # Context provider to pass workspace
+        async def provide_context():
+            return {
+                "workspace_path": str(agent.workspace.path) if agent.workspace else "",
+            }
+
+        # Run the agent
+        result = await kernel.run(
+            messages,
+            tools=bundle.tool_schemas,
+            max_turns=bundle.max_turns,
+            context_provider=provide_context,
+        )
+
+        # Extract tool result from history
+        tool_result = None
+        for msg in result.history:
+            if msg.role == "tool" and msg.content:
+                tool_result = msg.content
+                break
+
+        await kernel.close()
+
+        return {
+            "status": "completed",
+            "result": tool_result or result.final_message.content,
+            "turns": result.turn_count,
+            "termination": result.termination_reason,
+        }
 
     async def _simulate_execution(self, agent: AgentNode) -> Any:
         """Simulate agent execution for demo purposes.
