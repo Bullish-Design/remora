@@ -1,0 +1,6 @@
+discovery:
+  query_pack: remora_core
+server:
+  base_url: http://remora-server:8000/v1
+  default_adapter: Qwen/Qwen3-4B-Instruct-2507-FP8
+  default_plugin: function_gemma
