@@ -320,6 +320,11 @@ class WorkspaceManager:
         if id in self._workspaces:
             return self._workspaces[id]
 
+        if root is None:
+            root = self._base_dir / id
+        elif isinstance(root, str):
+            root = Path(root)
+
         workspace = await GraphWorkspace.create(id, root)
         self._workspaces[id] = workspace
         return workspace
