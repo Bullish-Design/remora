@@ -1,0 +1,33 @@
+name: simple_analyzer
+description: A simple code analyzer that calls vLLM and writes results to workspace
+version: 0.1.0
+
+model:
+  plugin: qwen
+  grammar:
+    mode: ebnf
+    allow_parallel_calls: false
+    args_format: escaped_strings
+
+initial_context:
+  system_prompt: |
+    You are a code analyzer. Analyze the provided Python code and provide a brief summary.
+    Use the write_result tool to save your analysis.
+  user_template: |
+    Analyze this Python code and write your summary:
+    
+    {{target}}
+
+max_turns: 3
+
+termination_tool: write_result
+
+tools:
+  - name: write_result
+    registry: grail
+    description: Write analysis result to workspace
+
+registries:
+  - type: grail
+    config:
+      agents_dir: tools
