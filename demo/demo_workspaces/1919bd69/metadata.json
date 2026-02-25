@@ -1,0 +1,1 @@
+{"graph_id":"1919bd69","bundle":"simple_analyzer","target":"def format_greeting(name: str) -> str:\n    return f\"Hello, {name}!\"","target_path":"demo_input/src/utils/helpers.py","created_at":"2026-02-25T13:21:53.688100+00:00","status":"running"}
