@@ -1,6 +1,9 @@
 import asyncio
+import json
 import logging
 import os
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -57,7 +60,7 @@ class HubServer:
         logger.info(f"Starting Remora Hub at {self.host}:{self.port}")
 
         self._event_bus = get_event_bus()
-        self._workspace_manager = WorkspaceManager()
+        self._workspace_manager = WorkspaceManager(base_dir=self.workspace_base)
         self._coordinator = WorkspaceInboxCoordinator(self._event_bus)
 
         await self._event_bus.subscribe("agent:*", self._on_event)
@@ -67,6 +70,7 @@ class HubServer:
                 Route("/", self.home),
                 Route("/subscribe", self.subscribe),
                 Route("/graph/execute", self.execute_graph, methods=["POST"]),
+                Route("/graph/list", self.list_graphs, methods=["GET"]),
                 Route("/api/files", self.list_workspace_files),
                 Route("/agent/{agent_id}/respond", self.respond, methods=["POST"]),
                 Mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static"),
@@ -158,9 +162,23 @@ class HubServer:
         graph_id = signals.get("graph_id", "")
 
         if not graph_id:
-            return JSONResponse({"error": "graph_id required"}, status_code=400)
+            graph_id = uuid.uuid4().hex[:8]
 
         workspace = await self._workspace_manager.create(graph_id)
+
+        target_path = signals.get("target_path")
+        if target_path:
+            await workspace.snapshot_original(Path(target_path))
+
+        metadata = {
+            "graph_id": graph_id,
+            "bundle": signals.get("bundle", "default"),
+            "target": signals.get("target", ""),
+            "target_path": target_path or "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "status": "running",
+        }
+        await workspace.save_metadata(metadata)
 
         graph = self._build_agent_graph(graph_id, workspace, signals)
 
@@ -271,6 +289,26 @@ class HubServer:
                 "answer": answer,
             }
         )
+
+    async def list_graphs(self, request: Request) -> JSONResponse:
+        """List all existing workspaces (root nodes of each graph)."""
+        workspaces = await self._workspace_manager.list_all()
+
+        graphs = []
+        for ws in workspaces:
+            metadata = await ws.load_metadata()
+            graphs.append(
+                {
+                    "graph_id": ws.id,
+                    "bundle": metadata.get("bundle", "default") if metadata else "default",
+                    "target": metadata.get("target", "") if metadata else "",
+                    "target_path": metadata.get("target_path", "") if metadata else "",
+                    "created_at": metadata.get("created_at", "") if metadata else "",
+                    "status": metadata.get("status", "unknown") if metadata else "unknown",
+                }
+            )
+
+        return JSONResponse({"graphs": graphs})
 
 
 async def run_hub(

@@ -6,6 +6,8 @@ This module provides:
 3. WorkspaceKV: Key-value store for IPC between agents and frontend
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import shutil
@@ -178,7 +180,7 @@ class GraphWorkspace:
             self._original_source.mkdir(parents=True, exist_ok=True)
         return self._original_source
 
-    def snapshot_original(self, source_path: Path) -> None:
+    async def snapshot_original(self, source_path: Path) -> None:
         """Create a snapshot of the original source code.
 
         Args:
@@ -263,8 +265,27 @@ class GraphWorkspace:
         self._original_source = None
         self._kv = None
 
+    async def save_metadata(self, metadata: dict[str, Any]) -> None:
+        """Save graph metadata to workspace.
 
-@dataclass
+        Args:
+            metadata: Dict containing graph metadata (graph_id, bundle, target, etc.)
+        """
+        metadata_path = self.root / "metadata.json"
+        metadata_path.write_text(json.dumps(metadata, separators=(",", ":")))
+
+    async def load_metadata(self) -> dict[str, Any] | None:
+        """Load graph metadata from workspace.
+
+        Returns:
+            Dict containing graph metadata, or None if not found
+        """
+        metadata_path = self.root / "metadata.json"
+        if not metadata_path.exists():
+            return None
+        return json.loads(metadata_path.read_text())
+
+
 class WorkspaceManager:
     """Manages multiple GraphWorkspaces.
 
@@ -284,10 +305,14 @@ class WorkspaceManager:
         await manager.delete("graph-123")
     """
 
-    _workspaces: dict[str, GraphWorkspace] = field(default_factory=dict)
-    _base_dir: Path = field(default_factory=lambda: Path("./remora_workspaces"))
-
-    def __post_init__(self):
+    def __init__(self, base_dir: Path | str | None = None):
+        self._workspaces: dict[str, GraphWorkspace] = {}
+        if base_dir is None:
+            self._base_dir = Path("./remora_workspaces")
+        elif isinstance(base_dir, str):
+            self._base_dir = Path(base_dir)
+        else:
+            self._base_dir = base_dir
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
     async def create(self, id: str, root: Path | str | None = None) -> GraphWorkspace:
@@ -306,6 +331,24 @@ class WorkspaceManager:
     def list(self) -> list[GraphWorkspace]:
         """List all workspaces."""
         return list(self._workspaces.values())
+
+    async def list_all(self) -> list[GraphWorkspace]:
+        """List all workspaces including persisted ones on disk.
+
+        Returns:
+            List of all GraphWorkspace instances (in-memory and from disk)
+        """
+        all_workspaces = list(self._workspaces.values())
+
+        if self._base_dir.exists():
+            for item in self._base_dir.iterdir():
+                if item.is_dir():
+                    ws_id = item.name
+                    if ws_id not in self._workspaces:
+                        ws = GraphWorkspace(id=ws_id, root=item)
+                        all_workspaces.append(ws)
+
+        return all_workspaces
 
     async def delete(self, id: str) -> None:
         """Delete a workspace."""
