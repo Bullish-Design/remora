@@ -117,7 +117,7 @@ async def main():
     graph_ids = []
 
     gid = await trigger_execution(
-        agent_bundle="run_linter",
+        agent_bundle="simple_analyzer",
         file_path="demo_input/src/main.py",
         target_code="def calculate_sum(a, b):\n    result = a + b\n    return result",
     )
@@ -127,7 +127,7 @@ async def main():
     await asyncio.sleep(0.2)
 
     gid = await trigger_execution(
-        agent_bundle="write_docstring",
+        agent_bundle="simple_analyzer",
         file_path="demo_input/src/utils/helpers.py",
         target_code='def format_greeting(name: str) -> str:\n    return f"Hello, {name}!"',
     )
