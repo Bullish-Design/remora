@@ -18,7 +18,7 @@ initial_context:
     
     {{target}}
 
-max_turns: 3
+max_turns: 10
 
 termination_tool: write_result
 
@@ -27,9 +27,13 @@ tools:
     registry: grail
     description: Write analysis result to workspace
     inputs_override:
-      analysis:
-        type: string
-        description: The analysis summary to write to the workspace
+      type: object
+      properties:
+        analysis:
+          type: string
+          description: The analysis summary to write to the workspace
+      required:
+        - analysis
 
 registries:
   - type: grail
