@@ -1,370 +1,239 @@
-"""Workspace management for agent graphs.
+"""Cairn workspace layer for Remora.
 
-This module provides:
-1. GraphWorkspace: A workspace that spans an entire agent graph
-2. Integration with Cairn/Fsdantic workspaces
-3. WorkspaceKV: Key-value store for IPC between agents and frontend
+This module provides thin wrappers around Cairn workspaces:
+- CairnDataProvider: Populates Grail virtual FS from Cairn workspace
+- CairnResultHandler: Writes script results back to Cairn workspace
+- Workspace factory functions for agent and shared workspaces
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
-import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 
-class WorkspaceKV:
-    """Key-value store for workspace IPC.
+@dataclass(frozen=True)
+class WorkspaceConfig:
+    """Configuration for Cairn workspaces."""
 
-    Used for communication between agents and the frontend dashboard.
-    Supports listing keys with prefix, getting, setting, and deleting values.
+    base_path: Path
+    cleanup_after_seconds: int | None = None
 
-    Keys follow patterns:
-    - outbox:question:{msg_id} - Questions from agent to user
-    - inbox:response:{msg_id} - Responses from user to agent
-    - agent:{agent_id}:state - Agent state information
+
+class CairnDataProvider:
+    """Populates Grail virtual FS from a Cairn workspace.
+
+    This class implements the data provider pattern from structured-agents v0.3.
+    It reads files from the Cairn workspace to populate the virtual filesystem
+    that .pym scripts operate on.
     """
 
-    def __init__(self, kv_dir: Path):
-        self._dir = kv_dir
-        self._dir.mkdir(parents=True, exist_ok=True)
-        self._cache: dict[str, Any] = {}
-        self._lock = asyncio.Lock()
-        self._load_all()
+    def __init__(self, workspace: Any) -> None:
+        """Initialize with a Cairn workspace."""
+        self._ws = workspace
 
-    def _load_all(self) -> None:
-        """Load all KV pairs from disk into memory."""
-        if not self._dir.exists():
-            return
-        for file in self._dir.rglob("*.json"):
+    async def load_files(self, node: Any) -> dict[str, str]:
+        """Read the target file + related files from the workspace.
+
+        Args:
+            node: The CSTNode to load files for. Must have:
+                - file_path: str path to the target file
+                - related_files: list[str] of related file paths (optional)
+
+        Returns:
+            Dict mapping virtual file paths to their contents
+        """
+        files = {}
+
+        main_path = getattr(node, "file_path", None)
+        if main_path:
             try:
-                rel_path = file.relative_to(self._dir)
-                key = str(rel_path.with_suffix("")).replace("/", ":")
-                self._cache[key] = json.loads(file.read_text())
-            except (json.JSONDecodeError, OSError):
-                continue
+                content = await self._ws.read(main_path)
+                files[main_path] = content
+            except FileNotFoundError:
+                files[main_path] = ""
 
-    def _key_to_path(self, key: str) -> Path:
-        """Convert key to file path."""
-        parts = key.split(":")
-        return self._dir / Path(*parts).with_suffix(".json")
+        related = getattr(node, "related_files", None)
+        if related:
+            for rel_path in related:
+                try:
+                    content = await self._ws.read(rel_path)
+                    files[rel_path] = content
+                except FileNotFoundError:
+                    files[rel_path] = ""
 
-    async def list(self, prefix: str = "") -> list[dict[str, str]]:
-        """List all keys with optional prefix.
+        return files
+
+    async def load_file(self, path: str) -> str:
+        """Load a single file from the workspace.
 
         Args:
-            prefix: Only return keys starting with this prefix
+            path: Path to the file relative to workspace root
 
         Returns:
-            List of dicts with 'key' field for each matching entry
+            File contents as string, or empty string if not found
         """
-        async with self._lock:
-            results = []
-            for key in self._cache.keys():
-                if key.startswith(prefix):
-                    results.append({"key": key})
-            return results
-
-    async def get(self, key: str) -> dict[str, Any] | None:
-        """Get a value by key.
-
-        Args:
-            key: The key to retrieve
-
-        Returns:
-            The stored value dict, or None if not found
-        """
-        async with self._lock:
-            return self._cache.get(key)
-
-    async def set(self, key: str, value: dict[str, Any]) -> None:
-        """Set a value by key.
-
-        Args:
-            key: The key to store under
-            value: The value to store (must be JSON-serializable dict)
-        """
-        async with self._lock:
-            self._cache[key] = value
-            path = self._key_to_path(key)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(value, separators=(",", ":")))
-
-    async def delete(self, key: str) -> None:
-        """Delete a key.
-
-        Args:
-            key: The key to delete
-        """
-        async with self._lock:
-            self._cache.pop(key, None)
-            path = self._key_to_path(key)
-            if path.exists():
-                path.unlink()
-
-    async def clear(self) -> None:
-        """Clear all keys."""
-        async with self._lock:
-            self._cache.clear()
-            if self._dir.exists():
-                shutil.rmtree(self._dir)
-                self._dir.mkdir(parents=True, exist_ok=True)
+        try:
+            return await self._ws.read(path)
+        except FileNotFoundError:
+            return ""
 
 
-@dataclass
-class GraphWorkspace:
-    """A workspace that spans an entire agent graph.
+class CairnResultHandler:
+    """Writes script results back to the Cairn workspace.
 
-    Provides:
-    - Agent-specific directories
-    - Shared space for passing artifacts
-    - Original source snapshot
+    This class implements the result handler pattern from structured-agents v0.3.
+    It processes structured results from .pym scripts and persists them to
+    the Cairn workspace.
     """
 
-    id: str
-    root: Path
-
-    _agent_spaces: dict[str, Path] = field(default_factory=dict)
-    _shared_space: Path | None = None
-    _original_source: Path | None = None
-    _kv: WorkspaceKV | None = None
-
-    @property
-    def kv(self) -> WorkspaceKV:
-        """Key-value store for agent-frontend IPC.
-
-        Returns:
-            WorkspaceKV instance for storing/retrieving IPC data
-        """
-        if self._kv is None:
-            self._kv = WorkspaceKV(self.root / "kv")
-        return self._kv
-
-    def agent_space(self, agent_id: str) -> Path:
-        """Private space for an agent.
+    async def handle(self, result: dict[str, Any], workspace: Any) -> None:
+        """Process and persist script results.
 
         Args:
-            agent_id: Unique identifier for the agent
-
-        Returns:
-            Path to the agent's private workspace
+            result: The result dict returned by a .pym script. Common keys:
+                - written_file: str path to write
+                - content: str content to write
+                - lint_fixes: list[dict] of {path, content} fixes
+                - deleted_files: list[str] of paths to delete
+            workspace: The Cairn workspace to write to
         """
-        if agent_id not in self._agent_spaces:
-            path = self.root / "agents" / agent_id
-            path.mkdir(parents=True, exist_ok=True)
-            self._agent_spaces[agent_id] = path
-        return self._agent_spaces[agent_id]
+        if "written_file" in result and "content" in result:
+            await workspace.write(result["written_file"], result["content"])
 
-    def shared_space(self) -> Path:
-        """Shared space for passing data between agents.
+        if "lint_fixes" in result:
+            for fix in result["lint_fixes"]:
+                if "path" in fix and "content" in fix:
+                    await workspace.write(fix["path"], fix["content"])
 
-        Returns:
-            Path to the shared workspace
-        """
-        if self._shared_space is None:
-            self._shared_space = self.root / "shared"
-            self._shared_space.mkdir(parents=True, exist_ok=True)
-        return self._shared_space
+        if "deleted_files" in result:
+            for path in result["deleted_files"]:
+                await workspace.delete(path)
 
-    def original_source(self) -> Path:
-        """Read-only copy of original source.
+        if "generated_tests" in result:
+            for test_file in result["generated_tests"]:
+                if "path" in test_file and "content" in test_file:
+                    await workspace.write(test_file["path"], test_file["content"])
 
-        Returns:
-            Path to the original source snapshot
-        """
-        if self._original_source is None:
-            self._original_source = self.root / "original"
-            self._original_source.mkdir(parents=True, exist_ok=True)
-        return self._original_source
+    async def extract_writes(self, result: dict[str, Any]) -> list[tuple[str, str]]:
+        """Extract file writes from a result without persisting.
 
-    async def snapshot_original(self, source_path: Path) -> None:
-        """Create a snapshot of the original source code.
+        Useful for preview/dry-run modes.
 
         Args:
-            source_path: Path to the source code to snapshot
-        """
-        original_dir = self.original_source()
-
-        if source_path.is_file():
-            shutil.copy2(source_path, original_dir / source_path.name)
-        elif source_path.is_dir():
-            for item in source_path.rglob("*"):
-                if item.is_file():
-                    rel_path = item.relative_to(source_path)
-                    dest = original_dir / rel_path
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(item, dest)
-
-    async def merge(self) -> None:
-        """Merge agent changes back to original.
-
-        This takes all the modifications made by agents in their
-        individual workspaces and merges them back to the original source.
-        """
-        original_dir = self.original_source()
-
-        for _agent_id, agent_space in self._agent_spaces.items():
-            if not agent_space.exists():
-                continue
-
-            for item in agent_space.rglob("*"):
-                if item.is_file():
-                    rel_path = item.relative_to(agent_space)
-                    dest = original_dir / rel_path
-
-                    if dest.exists():
-                        await self._merge_files(item, dest)
-                    else:
-                        dest.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(item, dest)
-
-    async def _merge_files(self, source: Path, dest: Path) -> None:
-        """Merge a modified file back to original.
-
-        For now, this is a simple overwrite. In the future,
-        this could use more sophisticated merge strategies.
-        """
-        shutil.copy2(source, dest)
-
-    @classmethod
-    async def create(cls, id: str, root: Path | str | None = None) -> "GraphWorkspace":
-        """Create a new graph workspace.
-
-        Args:
-            id: Unique identifier for this graph workspace
-            root: Root directory (defaults to ./remora_workspaces/{id})
+            result: The result dict from a .pym script
 
         Returns:
-            New GraphWorkspace instance
+            List of (path, content) tuples
         """
-        if root is None:
-            root = Path("./remora_workspaces") / id
-        elif isinstance(root, str):
-            root = Path(root)
+        writes = []
 
-        root.mkdir(parents=True, exist_ok=True)
+        if "written_file" in result and "content" in result:
+            writes.append((result["written_file"], result["content"]))
 
-        workspace = cls(id=id, root=root)
+        if "lint_fixes" in result:
+            for fix in result["lint_fixes"]:
+                if "path" in fix and "content" in fix:
+                    writes.append((fix["path"], fix["content"]))
 
-        (workspace.root / "agents").mkdir(exist_ok=True)
-        workspace.shared_space()
-        workspace.original_source()
-        workspace.kv  # Initialize KV store
+        if "generated_tests" in result:
+            for test_file in result["generated_tests"]:
+                if "path" in test_file and "content" in test_file:
+                    writes.append((test_file["path"], test_file["content"]))
 
-        return workspace
+        return writes
 
-    def cleanup(self) -> None:
-        """Clean up the workspace directory."""
-        if self.root.exists():
-            shutil.rmtree(self.root)
-        self._agent_spaces.clear()
-        self._shared_space = None
-        self._original_source = None
-        self._kv = None
 
-    async def save_metadata(self, metadata: dict[str, Any]) -> None:
-        """Save graph metadata to workspace.
+async def create_workspace(
+    agent_id: str,
+    config: WorkspaceConfig,
+) -> Any:
+    """Create an isolated workspace for a single agent.
 
-        Args:
-            metadata: Dict containing graph metadata (graph_id, bundle, target, etc.)
-        """
-        metadata_path = self.root / "metadata.json"
-        metadata_path.write_text(json.dumps(metadata, separators=(",", ":")))
+    Args:
+        agent_id: Unique identifier for this agent
+        config: Workspace configuration
 
-    async def load_metadata(self) -> dict[str, Any] | None:
-        """Load graph metadata from workspace.
+    Returns:
+        Cairn workspace instance
+    """
+    raise NotImplementedError("Cairn integration pending")
 
-        Returns:
-            Dict containing graph metadata, or None if not found
-        """
-        metadata_path = self.root / "metadata.json"
-        if not metadata_path.exists():
-            return None
-        return json.loads(metadata_path.read_text())
+
+async def create_shared_workspace(
+    graph_id: str,
+    config: WorkspaceConfig,
+) -> Any:
+    """Create a shared workspace for a graph.
+
+    Args:
+        graph_id: Unique identifier for this graph
+        config: Workspace configuration
+
+    Returns:
+        Cairn workspace instance (the shared base)
+    """
+    raise NotImplementedError("Cairn integration pending")
+
+
+async def snapshot_workspace(
+    workspace: Any,
+    snapshot_name: str,
+) -> str:
+    """Create a snapshot of a workspace.
+
+    Args:
+        workspace: Cairn workspace to snapshot
+        snapshot_name: Name for the snapshot
+
+    Returns:
+        Snapshot identifier
+    """
+    raise NotImplementedError("Cairn integration pending")
+
+
+async def restore_workspace(
+    workspace: Any,
+    snapshot_id: str,
+) -> None:
+    """Restore a workspace from a snapshot.
+
+    Args:
+        workspace: Cairn workspace to restore into
+        snapshot_id: Identifier of the snapshot to restore
+    """
+    raise NotImplementedError("Cairn integration pending")
+
+
+# Backwards compatibility - keep old workspace classes
+class WorkspaceKV:
+    """Backwards compatible WorkspaceKV wrapper."""
+
+    pass
+
+
+class GraphWorkspace:
+    """Backwards compatible GraphWorkspace wrapper."""
+
+    pass
 
 
 class WorkspaceManager:
-    """Manages multiple GraphWorkspaces.
+    """Backwards compatible WorkspaceManager wrapper."""
 
-    Usage:
-        manager = WorkspaceManager()
+    pass
 
-        # Create a workspace for a graph
-        workspace = await manager.create("graph-123")
 
-        # Get an existing workspace
-        workspace = manager.get("graph-123")
-
-        # List all workspaces
-        workspaces = manager.list()
-
-        # Clean up
-        await manager.delete("graph-123")
-    """
-
-    def __init__(self, base_dir: Path | str | None = None):
-        self._workspaces: dict[str, GraphWorkspace] = {}
-        if base_dir is None:
-            self._base_dir = Path("./remora_workspaces")
-        elif isinstance(base_dir, str):
-            self._base_dir = Path(base_dir)
-        else:
-            self._base_dir = base_dir
-        self._base_dir.mkdir(parents=True, exist_ok=True)
-
-    async def create(self, id: str, root: Path | str | None = None) -> GraphWorkspace:
-        """Create a new workspace."""
-        if id in self._workspaces:
-            return self._workspaces[id]
-
-        if root is None:
-            root = self._base_dir / id
-        elif isinstance(root, str):
-            root = Path(root)
-
-        workspace = await GraphWorkspace.create(id, root)
-        self._workspaces[id] = workspace
-        return workspace
-
-    def get(self, id: str) -> GraphWorkspace | None:
-        """Get an existing workspace."""
-        return self._workspaces.get(id)
-
-    def list(self) -> list[GraphWorkspace]:
-        """List all workspaces."""
-        return list(self._workspaces.values())
-
-    async def list_all(self) -> list[GraphWorkspace]:
-        """List all workspaces including persisted ones on disk.
-
-        Returns:
-            List of all GraphWorkspace instances (in-memory and from disk)
-        """
-        all_workspaces = list(self._workspaces.values())
-
-        if self._base_dir.exists():
-            for item in self._base_dir.iterdir():
-                if item.is_dir():
-                    ws_id = item.name
-                    if ws_id not in self._workspaces:
-                        ws = GraphWorkspace(id=ws_id, root=item)
-                        all_workspaces.append(ws)
-
-        return all_workspaces
-
-    async def delete(self, id: str) -> None:
-        """Delete a workspace."""
-        if id in self._workspaces:
-            self._workspaces[id].cleanup()
-            del self._workspaces[id]
-
-    def get_or_create(self, id: str) -> GraphWorkspace:
-        """Get existing or create new workspace."""
-        if id not in self._workspaces:
-            import asyncio
-
-            self._workspaces[id] = asyncio.run(GraphWorkspace.create(id, self._base_dir / id))
-        return self._workspaces[id]
+__all__ = [
+    "CairnDataProvider",
+    "CairnResultHandler",
+    "WorkspaceConfig",
+    "create_workspace",
+    "create_shared_workspace",
+    "snapshot_workspace",
+    "restore_workspace",
+    "WorkspaceKV",
+    "GraphWorkspace",
+    "WorkspaceManager",
+]

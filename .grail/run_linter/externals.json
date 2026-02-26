@@ -1,0 +1,22 @@
+{
+  "externals": [
+    {
+      "name": "run_ruff_check",
+      "async": true,
+      "parameters": [
+        {
+          "name": "path",
+          "type": "str",
+          "default": null
+        },
+        {
+          "name": "fix",
+          "type": "bool",
+          "default": null
+        }
+      ],
+      "return_type": "dict[str, Any]",
+      "docstring": "Run ruff linter check on a file."
+    }
+  ]
+}

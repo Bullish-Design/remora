@@ -1,0 +1,30 @@
+{
+  "file": "agents/sample_data/tools/write_fixture_file.pym",
+  "valid": false,
+  "errors": [
+    {
+      "line": 0,
+      "column": 0,
+      "code": "E100",
+      "message": "Type error: error[unresolved-reference]: Name `format_input` used when not defined\n  --> write_fixture_file.pym:66:15\n   |\n64 |     if not isinstance(fixtures, list) or not fixtures:\n65 |         raise ValueError('Fixtures must be a non-empty list.')\n66 |     fmt = str(format_input or 'json').lower()\n   |               ^^^^^^^^^^^^\n67 |     if fmt in {'yaml', 'yml'}:\n68 |         content = _to_yaml(fixtures)\n   |\ninfo: rule `unresolved-reference` is enabled by default\n\n",
+      "suggestion": "Fix the type error indicated above"
+    }
+  ],
+  "warnings": [
+    {
+      "line": 5,
+      "column": 0,
+      "code": "W003",
+      "message": "Input 'format' is declared but never referenced"
+    }
+  ],
+  "info": {
+    "externals_count": 0,
+    "inputs_count": 3,
+    "lines_of_code": 121,
+    "monty_features_used": [
+      "f_string",
+      "for_loop"
+    ]
+  }
+}

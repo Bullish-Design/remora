@@ -1,56 +1,17 @@
 name: sample_data_agent
-version: '1.0'
-model:
-  plugin: function_gemma
-  adapter: google/functiongemma-270m-it
-  grammar:
-    mode: ebnf
-    allow_parallel_calls: true
-    args_format: permissive
-initial_context:
-  system_prompt: 'You are a model that can do function calling with the following
-    functions.
+model: qwen
+grammar: ebnf
+limits: default
 
-    <task_description>You are a Python fixture generator. Analyze the function
+system_prompt: |
+  You are a fixture generation agent. Read the provided Python code,
+  analyze function signatures, and generate appropriate fixture data
+  for use in tests.
 
-    signature and generate appropriate fixture data. If required arguments are
-
-    missing, omit them from the function call.</task_description>
-
-
-    Respond with a single tool call each turn. Do not output any text outside
-
-    the tool call.
-
-    '
-  user_template: 'Code to generate fixtures for:
-
-    {{ node_text }}
-
-    '
-max_turns: 12
-termination_tool: submit_result
 tools:
-- name: analyze_signature
-  registry: grail
-  description: Extract the function signature, parameter names, and types from the
-    Python code to determine what fixture data is needed.
-  context_providers:
-  - context/existing_fixtures.pym
-- name: write_fixture_file
-  registry: grail
-  description: Write generated fixture data to a file for use in tests.
-  inputs_override:
-    fixtures:
-      type: string
-      description: List of fixture data objects to write.
-    format_input:
-      type: string
-      description: The output format for fixtures. Defaults to json.
-- name: submit_result
-  registry: grail
-  description: Submit the final result after fixture generation is complete.
-registries:
-- type: grail
-  config:
-    agents_dir: tools
+  - tools/analyze_signature.pym
+  - tools/write_fixture_file.pym
+  - tools/submit_result.pym
+
+termination: submit_result
+max_turns: 6

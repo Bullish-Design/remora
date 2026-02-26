@@ -1,47 +1,7 @@
-from grail import Input, external
-from typing import Any
+from grail import Input
 
-node_text_input: str | None = Input("node_text", default=None)
-target_file_input: str | None = Input("target_file", default=None)
-
-
-@external
-async def read_file(path: str) -> str:
-    """Read the text contents of a file."""
-    ...
-
-
-@external
-async def file_exists(path: str) -> bool:
-    """Check if a file or directory exists."""
-    ...
-
-
-async def _read_optional(path: str) -> str | None:
-    if await file_exists(path=path):
-        return await read_file(path=path)
-    return None
-
-
-async def _resolve_target_file() -> str | None:
-    if target_file_input:
-        return target_file_input.strip()
-    stored = await _read_optional(path=".remora/target_file")
-    if stored:
-        return stored.strip()
-    return None
-
-
-async def _load_node_text() -> str:
-    if node_text_input:
-        return node_text_input
-    stored = await _read_optional(path=".remora/node_text")
-    if stored:
-        return stored
-    target_file = await _resolve_target_file()
-    if target_file and await file_exists(path=target_file):
-        return await read_file(path=target_file)
-    return ""
+source_code: str = Input("source_code")
+file_path: str = Input("file_path")
 
 
 def _find_signature_line(source: str) -> str | None:
@@ -75,8 +35,10 @@ def _parse_return_type(line: str) -> str | None:
 
 
 try:
-    source = await _load_node_text()
-    signature_line = _find_signature_line(source)
+    if not source_code:
+        raise ValueError("Source code is required.")
+    
+    signature_line = _find_signature_line(source_code)
     if not signature_line:
         error_message = "No function definition found in node text."
         result = {

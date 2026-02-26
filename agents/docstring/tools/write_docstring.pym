@@ -1,51 +1,9 @@
-from grail import Input, external
+from grail import Input
 
+source_code: str = Input("source_code")
+file_path: str = Input("file_path")
 docstring: str = Input("docstring")
-style: str = Input("style")
-node_text_input: str | None = Input("node_text", default=None)
-target_file_input: str | None = Input("target_file", default=None)
-
-
-@external
-async def read_file(path: str) -> str:
-    """Read the text contents of a file."""
-    ...
-
-
-@external
-async def write_file(path: str, content: str) -> bool:
-    """Write text content to a file."""
-    ...
-
-
-@external
-async def file_exists(path: str) -> bool:
-    """Check if a file or directory exists."""
-    ...
-
-
-async def _read_optional(path: str) -> str | None:
-    if await file_exists(path=path):
-        return await read_file(path=path)
-    return None
-
-
-async def _resolve_target_file() -> str | None:
-    if target_file_input:
-        return target_file_input.strip()
-    stored = await _read_optional(path=".remora/target_file")
-    if stored:
-        return stored.strip()
-    return None
-
-
-async def _load_node_text() -> str:
-    if node_text_input:
-        return node_text_input
-    stored = await _read_optional(path=".remora/node_text")
-    if stored:
-        return stored
-    return ""
+style: str = Input("style", default="google")
 
 
 def _find_function_name(source: str) -> str | None:
@@ -61,12 +19,12 @@ def _find_function_name(source: str) -> str | None:
 def _format_docstring(text: str, indent: str) -> list[str]:
     lines = text.splitlines()
     if not lines:
-        return [f"{indent}\"\"\"\"\"\""]
+        return [f'{indent}""" """']
     if len(lines) == 1:
-        return [f"{indent}\"\"\"{lines[0]}\"\"\""]
-    formatted = [f"{indent}\"\"\""]
+        return [f'{indent}""" {lines[0]} """']
+    formatted = [f'{indent}"""']
     formatted.extend(f"{indent}{line}" for line in lines)
-    formatted.append(f"{indent}\"\"\"")
+    formatted.append(f'{indent}"""')
     return formatted
 
 
@@ -101,25 +59,21 @@ def _find_docstring_block(lines: list[str], start_index: int, base_indent: int) 
 
 try:
     _ = style
+    if not source_code:
+        raise ValueError("Source code is required.")
     if not docstring:
         raise ValueError("Docstring text is required.")
 
-    target_file = await _resolve_target_file()
-    if not target_file:
-        raise ValueError("Target file not found for docstring insertion.")
+    trailing_newline = source_code.endswith("\n")
+    lines = source_code.splitlines()
 
-    content = await read_file(path=target_file)
-    trailing_newline = content.endswith("\n")
-    lines = content.splitlines()
-
-    node_text = await _load_node_text()
-    function_name = _find_function_name(node_text)
+    function_name = _find_function_name(source_code)
     if not function_name:
-        raise ValueError("Function definition not found in node text.")
+        raise ValueError("Function definition not found in source code.")
 
     location = _find_function_line(lines, function_name)
     if not location:
-        raise ValueError("Function definition not found in target file.")
+        raise ValueError("Function definition not found in source code.")
 
     def_line_index, base_indent = location
     indent = " " * (base_indent + 4)
@@ -140,11 +94,10 @@ try:
     if trailing_newline:
         updated_content += "\n"
 
-    await write_file(path=target_file, content=updated_content)
     raw_result = {
         "success": True,
         "replaced_existing": replaced_existing,
-        "target_file": target_file,
+        "target_file": file_path,
     }
     summary = "Replaced existing docstring" if replaced_existing else "Inserted new docstring"
     result = {
@@ -153,9 +106,11 @@ try:
         "knowledge_delta": {
             "docstring_updated": True,
             "docstring_replaced": replaced_existing,
-            "docstring_target_file": target_file,
+            "docstring_target_file": file_path,
         },
         "outcome": "success",
+        "written_file": file_path,
+        "content": updated_content,
     }
 except Exception as exc:
     result = {

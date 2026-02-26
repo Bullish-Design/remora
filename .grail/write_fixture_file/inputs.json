@@ -1,0 +1,22 @@
+{
+  "inputs": [
+    {
+      "name": "fixtures",
+      "type": "list[object]",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "format",
+      "type": "str",
+      "required": false,
+      "default": "json"
+    },
+    {
+      "name": "source_code",
+      "type": "str",
+      "required": false,
+      "default": ""
+    }
+  ]
+}

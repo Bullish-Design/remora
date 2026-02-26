@@ -1,54 +1,16 @@
 name: harness_agent
-version: '1.0'
-model:
-  plugin: function_gemma
-  adapter: google/functiongemma-270m-it
-  grammar:
-    mode: ebnf
-    allow_parallel_calls: true
-    args_format: permissive
-initial_context:
-  system_prompt: 'You are a model that can do function calling with the following
-    functions.
+model: qwen
+grammar: ebnf
+limits: strict
 
-    <task_description>You are a tool invocation tester. Given a request, call
+system_prompt: |
+  You are a tool invocation testing harness. Given a request payload,
+  call the specified tool with the payload and return a summary of
+  the result. This is used for testing agent tool calls.
 
-    simple_tool first using the payload in the request. Then call submit_result
-
-    with a short summary and an empty changed_files list.</task_description>
-
-
-    Respond with a single tool call each turn. Do not output any text outside
-
-    the tool call.
-
-    '
-  user_template: 'Request:
-
-    {{ node_text }}
-
-    '
-max_turns: 5
-termination_tool: submit_result
 tools:
-- name: simple_tool
-  registry: grail
-  description: Call this tool to echo a payload for tool-call testing.
-  inputs_override:
-    payload:
-      type: string
-      description: The payload string to echo back.
-- name: submit_result
-  registry: grail
-  description: Submit the final harness result after calling simple_tool.
-  inputs_override:
-    summary:
-      type: string
-      description: Short summary of the harness run.
-    changed_files:
-      type: array
-      description: List of modified files (empty for harness).
-registries:
-- type: grail
-  config:
-    agents_dir: tools
+  - tools/simple_tool.pym
+  - tools/submit_result.pym
+
+termination: submit_result
+max_turns: 3

@@ -1,0 +1,10 @@
+{
+  "inputs": [
+    {
+      "name": "remora_config",
+      "type": "str",
+      "required": false,
+      "default": ""
+    }
+  ]
+}

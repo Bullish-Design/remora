@@ -1,33 +1,15 @@
-from grail import Input, external
+from grail import Input
 from typing import Any
 
 fixtures: list[object] = Input("fixtures")
-format_input: str = Input("format", default="json")
-node_text_input: str | None = Input("node_text", default=None)
-
-
-@external
-async def read_file(path: str) -> str:
-    """Read the text contents of a file."""
-    ...
-
-
-@external
-async def write_file(path: str, content: str) -> bool:
-    """Write text content to a file."""
-    ...
-
-
-@external
-async def file_exists(path: str) -> bool:
-    """Check if a file or directory exists."""
-    ...
+format: str = Input("format", default="json")
+source_code: str = Input("source_code", default="")
 
 
 def _json_escape(text: str) -> str:
     return (
         text.replace("\\", "\\\\")
-        .replace('"', "\\\"")
+        .replace('"', '\\"')
         .replace("\n", "\\n")
         .replace("\r", "\\r")
         .replace("\t", "\\t")
@@ -42,7 +24,7 @@ def _to_json(value: Any) -> str:
     if isinstance(value, int) or isinstance(value, float):
         return str(value)
     if isinstance(value, str):
-        return f"\"{_json_escape(value)}\""
+        return f'"{_json_escape(value)}"'
     if isinstance(value, list):
         inner = ", ".join(_to_json(item) for item in value)
         return f"[{inner}]"
@@ -56,7 +38,7 @@ def _to_json(value: Any) -> str:
 
 def _yaml_escape(value: str) -> str:
     if value == "" or any(ch in value for ch in [":", "#", "\n", "\r", "\t"]):
-        return f"\"{value.replace('"', '\\"')}\""
+        return f'"{value.replace('"', '\\"')}"'
     return value
 
 
@@ -87,12 +69,6 @@ def _to_yaml(values: list[object]) -> str:
     return "\n".join(lines)
 
 
-async def _read_optional(path: str) -> str | None:
-    if await file_exists(path=path):
-        return await read_file(path=path)
-    return None
-
-
 def _find_function_name(source: str) -> str:
     for line in source.splitlines():
         stripped = line.strip()
@@ -101,15 +77,6 @@ def _find_function_name(source: str) -> str:
         if stripped.startswith("async def "):
             return stripped[len("async def ") :].split("(", 1)[0].strip()
     return "fixture"
-
-
-async def _load_node_text() -> str:
-    if node_text_input:
-        return node_text_input
-    stored = await _read_optional(path=".remora/node_text")
-    if stored:
-        return stored
-    return ""
 
 
 try:
@@ -126,11 +93,9 @@ try:
     else:
         raise ValueError(f"Unsupported fixture format: {fmt}")
 
-    node_text = await _load_node_text()
-    function_name = _find_function_name(node_text) if node_text else "fixture"
+    function_name = _find_function_name(source_code) if source_code else "fixture"
     target_path = f"fixtures/{function_name}_fixtures.{extension}"
 
-    await write_file(path=target_path, content=content)
     raw_result = {"success": True, "path": target_path, "format": extension}
     result = {
         "result": raw_result,
@@ -141,6 +106,8 @@ try:
             "fixtures_count": len(fixtures),
         },
         "outcome": "success",
+        "written_file": target_path,
+        "content": content,
     }
 except Exception as exc:
     result = {

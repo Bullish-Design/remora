@@ -1,23 +1,9 @@
-from grail import Input, external
+from grail import Input
 
 DEFAULT_STYLE = "google"
 ALLOWED_STYLES = {"google", "numpy", "sphinx"}
 
-noop: bool = Input("noop", default=False)
-
-_ = noop
-
-
-@external
-async def read_file(path: str) -> str:
-    """Read the text contents of a file."""
-    ...
-
-
-@external
-async def file_exists(path: str) -> bool:
-    """Check if a file or directory exists."""
-    ...
+remora_config: str = Input("remora_config", default="")
 
 
 def _extract_style(content: str) -> str | None:
@@ -58,9 +44,8 @@ def _extract_style(content: str) -> str | None:
 
 
 try:
-    if await file_exists(path="remora.yaml"):
-        raw = await read_file(path="remora.yaml")
-        style = _extract_style(raw)
+    if remora_config:
+        style = _extract_style(remora_config)
         if style in ALLOWED_STYLES:
             result = style
         else:

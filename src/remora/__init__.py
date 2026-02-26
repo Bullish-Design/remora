@@ -1,10 +1,45 @@
 """Remora V2 - Simple, elegant agent graph workflows."""
 
 from remora.agent_graph import AgentGraph, GraphConfig
-from remora.config import RemoraConfig
+from remora.config import ConfigError, RemoraConfig, load_config, serialize_config
 from remora.discovery import CSTNode, TreeSitterDiscoverer
 from remora.event_bus import Event, EventBus, get_event_bus
-from remora.workspace import GraphWorkspace, WorkspaceKV, WorkspaceManager
+from remora.events import (
+    GraphStartEvent,
+    GraphCompleteEvent,
+    GraphErrorEvent,
+    AgentStartEvent,
+    AgentCompleteEvent,
+    AgentErrorEvent,
+    HumanInputRequestEvent,
+    HumanInputResponseEvent,
+    KernelStartEvent,
+    KernelEndEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+    ModelRequestEvent,
+    ModelResponseEvent,
+    TurnComplete,
+    RestartEvent,
+    RemoraEvent,
+)
+from remora.graph import AgentNode, build_graph, get_ready_nodes, topological_sort, get_execution_batches
+from remora import context as _context_module
+from remora.context import ContextBuilder, RecentAction
+from remora.executor import GraphExecutor, ExecutorState, ExecutionConfig, ErrorPolicy, execute_agent
+from remora.workspace import (
+    GraphWorkspace,
+    WorkspaceKV,
+    WorkspaceManager,
+    CairnDataProvider,
+    CairnResultHandler,
+    WorkspaceConfig,
+    create_workspace,
+    create_shared_workspace,
+    snapshot_workspace,
+    restore_workspace,
+)
+from remora.checkpoint import CheckpointManager, JsonStore
 
 __all__ = [
     "AgentGraph",
@@ -15,7 +50,46 @@ __all__ = [
     "CSTNode",
     "TreeSitterDiscoverer",
     "RemoraConfig",
+    "load_config",
     "GraphWorkspace",
     "WorkspaceKV",
     "WorkspaceManager",
+    "GraphStartEvent",
+    "GraphCompleteEvent",
+    "GraphErrorEvent",
+    "AgentStartEvent",
+    "AgentCompleteEvent",
+    "AgentErrorEvent",
+    "HumanInputRequestEvent",
+    "HumanInputResponseEvent",
+    "KernelStartEvent",
+    "KernelEndEvent",
+    "ToolCallEvent",
+    "ToolResultEvent",
+    "ModelRequestEvent",
+    "ModelResponseEvent",
+    "RestartEvent",
+    "TurnComplete",
+    "RemoraEvent",
+    "AgentNode",
+    "build_graph",
+    "get_ready_nodes",
+    "topological_sort",
+    "get_execution_batches",
+    "ContextBuilder",
+    "RecentAction",
+    "GraphExecutor",
+    "ExecutorState",
+    "ExecutionConfig",
+    "ErrorPolicy",
+    "execute_agent",
+    "CairnDataProvider",
+    "CairnResultHandler",
+    "WorkspaceConfig",
+    "create_workspace",
+    "create_shared_workspace",
+    "snapshot_workspace",
+    "restore_workspace",
+    "CheckpointManager",
+    "JsonStore",
 ]

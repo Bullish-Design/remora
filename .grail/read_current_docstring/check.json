@@ -1,0 +1,22 @@
+{
+  "file": "agents/docstring/tools/read_current_docstring.pym",
+  "valid": true,
+  "errors": [],
+  "warnings": [
+    {
+      "line": 4,
+      "column": 0,
+      "code": "W003",
+      "message": "Input 'file_path' is declared but never referenced"
+    }
+  ],
+  "info": {
+    "externals_count": 0,
+    "inputs_count": 2,
+    "lines_of_code": 82,
+    "monty_features_used": [
+      "f_string",
+      "for_loop"
+    ]
+  }
+}

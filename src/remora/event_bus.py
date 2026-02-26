@@ -1,226 +1,204 @@
 """Unified Event Bus - the central nervous system of Remora.
 
-This module provides a single event system that:
-1. All components publish to (agents, kernels, tools)
-2. All consumers subscribe from (UI, logging, metrics)
-3. Supports both in-process and distributed consumers
+This module provides a single event system that unifies:
+1. Remora's graph-level events (AgentStart, AgentComplete, etc.)
+2. structured-agents' kernel events (ToolCall, ModelResponse, etc.)
 
 Design:
-- Pydantic-first for public API (validation, type safety)
-- Category + Action pattern for extensibility
-- Backpressure on queue for stability
-- Concurrent subscriber notification with error isolation
+- Type-based subscription instead of string patterns
+- Implements structured-agents Observer protocol
+- Supports async streaming and wait_for patterns
+- Error isolation: one failing handler doesn't affect others
 """
 
 import asyncio
 import logging
-import uuid
-from collections.abc import Awaitable, Callable
-from datetime import datetime
-from typing import Any, Literal
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing_extensions import TypeAlias
 
-EventCategory = Literal["agent", "tool", "model", "user", "graph"]
-
-
-class AgentAction:
-    """Pre-defined agent actions for type safety."""
-
-    STARTED = "started"
-    BLOCKED = "blocked"
-    RESUMED = "resumed"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+from remora.events import RemoraEvent
 
 
-class ToolAction:
-    """Pre-defined tool actions."""
-
-    CALLED = "called"
-    STARTED = "started"
-    COMPLETED = "completed"
-    FAILED = "failed"
+T = TypeVar("T", bound=RemoraEvent)
 
 
-class ModelAction:
-    """Pre-defined model actions."""
-
-    REQUEST = "request"
-    RESPONSE = "response"
+EventHandler: TypeAlias = Callable[[RemoraEvent], Awaitable[None]]
 
 
-class GraphAction:
-    """Pre-defined graph actions."""
+@dataclass
+class Subscription:
+    """Tracks an active subscription for cleanup."""
 
-    STARTED = "started"
-    PROGRESS = "progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-class Event(BaseModel):
-    """Every event in the system has this shape.
-
-    Design decisions:
-    - frozen=True: Events are immutable once created
-    - Literal category: Type-safe categories
-    - action as string: Extensible without enum changes
-    - .type property: Human-readable for logging
-
-    Usage:
-        # Create events
-        event = Event(category="agent", action="blocked", agent_id="123",
-                      payload={"question": "Which format?"})
-
-        # Or use convenience constructors
-        event = Event.agent_blocked(agent_id="123", question="Which format?")
-
-        # Subscribe to patterns
-        await bus.subscribe("agent:blocked", handler)
-        await bus.subscribe("tool:*", handler)  # All tool events
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex[:8])
-    timestamp: datetime = Field(default_factory=datetime.now)
-
-    category: EventCategory
-
-    action: str
-
-    agent_id: str | None = None
-    graph_id: str | None = None
-    node_id: str | None = None
-    session_id: str | None = None
-
-    payload: dict[str, Any] = Field(default_factory=dict)
-
-    @property
-    def type(self) -> str:
-        """Human-readable type for logging. Returns 'agent_blocked'."""
-        return f"{self.category}_{self.action}"
-
-    @property
-    def subscription_key(self) -> str:
-        """Key for subscription matching. Returns 'agent:blocked'."""
-        return f"{self.category}:{self.action}"
-
-    @classmethod
-    def agent_started(cls, agent_id: str, **payload: Any) -> "Event":
-        return cls(category="agent", action=AgentAction.STARTED, agent_id=agent_id, payload=payload)
-
-    @classmethod
-    def agent_blocked(cls, agent_id: str, question: str, **payload: Any) -> "Event":
-        return cls(
-            category="agent", action=AgentAction.BLOCKED, agent_id=agent_id, payload={"question": question, **payload}
-        )
-
-    @classmethod
-    def agent_resumed(cls, agent_id: str, answer: str, **payload: Any) -> "Event":
-        return cls(
-            category="agent", action=AgentAction.RESUMED, agent_id=agent_id, payload={"answer": answer, **payload}
-        )
-
-    @classmethod
-    def agent_completed(cls, agent_id: str, **payload: Any) -> "Event":
-        return cls(category="agent", action=AgentAction.COMPLETED, agent_id=agent_id, payload=payload)
-
-    @classmethod
-    def agent_failed(cls, agent_id: str, error: str, **payload: Any) -> "Event":
-        return cls(category="agent", action=AgentAction.FAILED, agent_id=agent_id, payload={"error": error, **payload})
-
-    @classmethod
-    def agent_cancelled(cls, agent_id: str, **payload: Any) -> "Event":
-        return cls(category="agent", action=AgentAction.CANCELLED, agent_id=agent_id, payload=payload)
-
-    @classmethod
-    def tool_called(cls, tool_name: str, call_id: str, **payload: Any) -> "Event":
-        return cls(
-            category="tool", action=ToolAction.CALLED, payload={"tool_name": tool_name, "call_id": call_id, **payload}
-        )
-
-    @classmethod
-    def tool_result(cls, tool_name: str, call_id: str, **payload: Any) -> "Event":
-        return cls(
-            category="tool",
-            action=ToolAction.COMPLETED,
-            payload={"tool_name": tool_name, "call_id": call_id, **payload},
-        )
-
-
-EventHandler = Callable[[Event], Awaitable[None]]
+    event_type: type
+    handler: EventHandler
 
 
 class EventBus:
     """The single source of truth for all events.
 
+    Implements structured-agents' Observer protocol and adds Remora's
+    pub/sub features on top.
+
     Usage:
         # Publish events
-        await event_bus.publish(Event.agent_blocked(
-            agent_id="agent-123",
-            question="Which format?"
+        await event_bus.emit(AgentStartEvent(
+            graph_id="graph-1",
+            agent_id="agent-1",
+            node={}
         ))
 
-        # Subscribe to specific events
-        await event_bus.subscribe("agent:blocked", my_handler)
+        # Subscribe to specific types
+        async def handle_agent_start(event: AgentStartEvent):
+            print(f"Agent {event.agent_id} started")
 
-        # Subscribe to patterns
-        await event_bus.subscribe("agent:*", all_agent_handler)
-        await event_bus.subscribe("tool:*", all_tool_handler)
+        event_bus.subscribe(AgentStartEvent, handle_agent_start)
 
-        # Get stream for consumption (e.g., SSE)
-        async for event in event_bus.stream():
+        # Stream filtered events (e.g., for SSE)
+        async for event in event_bus.stream(AgentStartEvent, AgentCompleteEvent):
             print(event)
 
+        # Wait for specific event (e.g., human input)
+        response = await event_bus.wait_for(
+            HumanInputResponseEvent,
+            lambda e: e.request_id == request_id,
+            timeout=300
+        )
+
     Design:
-        - maxsize=1000 on queue for backpressure
-        - asyncio.gather() for concurrent subscriber notification
-        - Error isolation: one failing handler doesn't affect others
+        - No queue: direct handler invocation for low latency
+        - asyncio.gather for concurrent notification
+        - Error isolation via try/except in each handler
     """
 
-    def __init__(self, max_queue_size: int = 1000, telemetry: Any = None):
-        self._queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=max_queue_size)
-        self._subscribers: dict[str, list[EventHandler]] = {}
-        self._running = False
+    def __init__(self):
+        self._handlers: dict[type, list[EventHandler]] = {}
+        self._all_handlers: list[EventHandler] = []
+        self._subscriptions: list[Subscription] = []
         self._logger = logging.getLogger(__name__)
-        self._telemetry: Any = telemetry
 
-    async def publish(self, event: Event) -> None:
-        """Publish an event to all subscribers."""
+    async def emit(self, event: RemoraEvent) -> None:
+        """Observer protocol method - receives all events.
+
+        This is the entry point for structured-agents to emit events
+        through Remora's EventBus.
+        """
+        await self._notify_handlers(event)
+
+    def subscribe(self, event_type: type, handler: EventHandler) -> None:
+        """Subscribe to a specific event type.
+
+        Args:
+            event_type: The event class to subscribe to
+            handler: Async function to call when event is emitted
+        """
+        if event_type not in self._handlers:
+            self._handlers[event_type] = []
+        self._handlers[event_type].append(handler)  # type: ignore[arg-type]
+        self._subscriptions.append(Subscription(event_type, handler))
+
+    def unsubscribe(self, handler: EventHandler) -> None:
+        """Remove a subscription by handler.
+
+        Args:
+            handler: The handler function to remove
+        """
+        for event_type in self._handlers:
+            self._handlers[event_type] = [h for h in self._handlers[event_type] if h != handler]
+
+        self._all_handlers = [h for h in self._all_handlers if h != handler]
+
+        self._subscriptions = [s for s in self._subscriptions if s.handler != handler]
+
+    def subscribe_all(self, handler: EventHandler) -> None:
+        """Subscribe to ALL events.
+
+        Useful for logging, metrics, debugging.
+        """
+        self._all_handlers.append(handler)
+
+    @asynccontextmanager
+    async def _event_queue(self) -> AsyncIterator[asyncio.Queue[RemoraEvent]]:
+        """Create a queue for streaming events."""
+        queue: asyncio.Queue[RemoraEvent] = asyncio.Queue()
         try:
-            self._queue.put_nowait(event)
-        except asyncio.QueueFull:
-            self._logger.warning(f"Event queue full, dropping event: {event.type}")
-            return
+            yield queue
+        finally:
+            while not queue.empty():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
 
-        if self._telemetry:
-            await self._record_telemetry(event)
+    def stream(self, *event_types: type) -> "EventStream":
+        """Get an async iterator filtered to specific event types.
 
-        await self._notify_subscribers(event)
+        Args:
+            event_types: Event types to filter. If empty, yields all events.
 
-    async def _record_telemetry(self, event: Event) -> None:
-        """Record event to telemetry (tokens used, duration, etc.)."""
+        Returns:
+            EventStream async iterator
+        """
+        return EventStream(self, set(event_types) if event_types else None)
+
+    async def wait_for(
+        self,
+        event_type: type[T],
+        predicate: Callable[[T], bool],
+        timeout: float = 60.0,
+    ) -> T:
+        """Wait for an event matching the predicate.
+
+        This is the key primitive for human-in-the-loop IPC:
+        1. Agent emits HumanInputRequestEvent
+        2. Calls wait_for(HumanInputResponseEvent, lambda e: e.request_id == request_id)
+        3. Dashboard receives request via stream, user responds
+        4. HumanInputResponseEvent is emitted
+        5. wait_for resolves with the response
+
+        Args:
+            event_type: The event type to wait for
+            predicate: Function that returns True when the desired event arrives
+            timeout: Maximum seconds to wait (default 60)
+
+        Returns:
+            The matching event
+
+        Raises:
+            asyncio.TimeoutError: If timeout expires before matching event
+        """
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[T] = loop.create_future()
+
+        async def handler(event: RemoraEvent) -> None:
+            try:
+                if isinstance(event, event_type) and predicate(event):
+                    future.set_result(event)
+            except Exception as e:
+                future.set_exception(e)
+
+        self.subscribe(event_type, handler)  # type: ignore[arg-type]
+
         try:
-            await self._telemetry.record(event)
-        except Exception as e:
-            self._logger.debug(f"Telemetry recording failed: {e}")
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            raise
+        finally:
+            self.unsubscribe(handler)  # type: ignore[arg-type]
 
-    async def _notify_subscribers(self, event: Event) -> None:
-        """Notify all matching subscribers concurrently with error isolation."""
-        event_key = event.subscription_key
+    async def _notify_handlers(self, event: RemoraEvent) -> None:
+        """Notify all matching handlers with error isolation."""
+        handlers: list[EventHandler] = []
 
-        handlers = []
+        event_type = type(event)
+        for t, h in self._handlers.items():
+            if isinstance(event, t):
+                handlers.extend(h)
 
-        handlers.extend(self._subscribers.get(event_key, []))
-
-        for pattern, pattern_handlers in self._subscribers.items():
-            if pattern.endswith("*"):
-                prefix = pattern[:-1]
-                if event_key.startswith(prefix):
-                    handlers.extend(pattern_handlers)
+        handlers.extend(self._all_handlers)
 
         if not handlers:
             return
@@ -231,49 +209,97 @@ class EventBus:
             if isinstance(result, Exception):
                 self._logger.exception(f"Event handler {handlers[i]} failed: {result}")
 
-    async def _safe_handler(self, handler: EventHandler, event: Event) -> None:
+    async def _safe_handler(self, handler: EventHandler, event: RemoraEvent) -> None:
         """Execute handler with error isolation."""
         try:
             await handler(event)
         except Exception:
             raise
 
-    async def subscribe(self, pattern: str, handler: EventHandler) -> None:
-        """Subscribe to events matching the pattern.
-
-        Args:
-            pattern: Subscription pattern (e.g., "agent:blocked", "tool:*", "agent:*")
-            handler: Async function to call when event matches
-        """
-        if pattern not in self._subscribers:
-            self._subscribers[pattern] = []
-        self._subscribers[pattern].append(handler)
-
-    async def unsubscribe(self, pattern: str, handler: EventHandler) -> None:
-        """Remove a subscription."""
-        if pattern in self._subscribers:
-            self._subscribers[pattern] = [h for h in self._subscribers[pattern] if h != handler]
-
-    def stream(self) -> "EventStream":
-        """Get an async iterator of events for consumption."""
-        return EventStream(self._queue)
-
-    async def send_sse(self, event: Event) -> str:
-        """Format event for Server-Sent Events."""
-        return f"data: {event.model_dump_json()}\n\n"
-
 
 class EventStream:
-    """Async iterator for consuming events from the bus."""
+    """Async iterator for consuming events from the bus.
 
-    def __init__(self, queue: asyncio.Queue[Event]):
-        self._queue = queue
+    Supports filtering by event type.
+    """
+
+    def __init__(
+        self,
+        event_bus: EventBus,
+        event_types: set[type] | None = None,
+    ):
+        self._bus = event_bus
+        self._types = event_types
+        self._queue: asyncio.Queue[RemoraEvent] = asyncio.Queue()
+        self._handler: EventHandler | None = None
+        self._running = False
 
     def __aiter__(self) -> "EventStream":
         return self
 
-    async def __anext__(self) -> Event:
-        return await self._queue.get()
+    async def __anext__(self) -> RemoraEvent:
+        if self._handler is None:
+            self._handler = self._enqueue
+            self._bus.subscribe_all(self._handler)
+            self._running = True
+
+        if not self._running:
+            raise StopAsyncIteration
+
+        try:
+            event = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+
+            if self._types and type(event) not in self._types:
+                return await self.__anext__()
+
+            return event
+        except asyncio.TimeoutError:
+            if not self._running:
+                raise StopAsyncIteration
+            raise
+
+    async def _enqueue(self, event: RemoraEvent) -> None:
+        """Handler that enqueues events for the stream."""
+        try:
+            self._queue.put_nowait(event)
+        except asyncio.QueueFull:
+            self._bus._logger.warning("Event stream queue full, dropping event")
+
+    def close(self) -> None:
+        """Stop the stream and clean up."""
+        self._running = False
+        if self._handler:
+            self._bus._all_handlers = [h for h in self._bus._all_handlers if h != self._handler]
+            self._handler = None
+
+
+# Backwards compatibility - keep old Event class
+from dataclasses import dataclass as _dataclass
+import uuid as _uuid
+from datetime import datetime as _datetime
+
+
+@_dataclass
+class Event:
+    """Backwards compatible Event class."""
+
+    id: str = field(default_factory=lambda: _uuid.uuid4().hex[:8])
+    timestamp: _datetime = field(default_factory=_datetime.now)
+    category: str = ""
+    action: str = ""
+    agent_id: str | None = None
+    graph_id: str | None = None
+    node_id: str | None = None
+    session_id: str | None = None
+    payload: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def type(self) -> str:
+        return f"{self.category}_{self.action}"
+
+    @property
+    def subscription_key(self) -> str:
+        return f"{self.category}:{self.action}"
 
 
 _event_bus: EventBus | None = None
@@ -285,3 +311,20 @@ def get_event_bus() -> EventBus:
     if _event_bus is None:
         _event_bus = EventBus()
     return _event_bus
+
+
+def set_event_bus(bus: EventBus) -> None:
+    """Set the global event bus instance."""
+    global _event_bus
+    _event_bus = bus
+
+
+__all__ = [
+    "EventBus",
+    "EventStream",
+    "Subscription",
+    "get_event_bus",
+    "set_event_bus",
+    "Event",
+    "RemoraEvent",
+]

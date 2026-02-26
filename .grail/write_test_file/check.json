@@ -1,0 +1,29 @@
+{
+  "file": "agents/test/tools/write_test_file.pym",
+  "valid": false,
+  "errors": [
+    {
+      "line": 0,
+      "column": 0,
+      "code": "E100",
+      "message": "Type error: error[unresolved-reference]: Name `path_value` used when not defined\n --> write_test_file.pym:2:12\n  |\n1 | try:\n2 |     if not path_value:\n  |            ^^^^^^^^^^\n3 |         raise ValueError('Test file path is required.')\n4 |     if not content:\n  |\ninfo: rule `unresolved-reference` is enabled by default\n\nerror[unresolved-reference]: Name `path_value` used when not defined\n --> write_test_file.pym:6:44\n  |\n4 |     if not content:\n5 |         raise ValueError('Test content is required.')\n6 |     raw_result = {'success': True, 'path': path_value}\n  |                                            ^^^^^^^^^^\n7 |     result = {'result': raw_result, 'summary': f'Wrote test file {path_value}', 'knowledge_delta': {'test_file_written': path_value}, '\u2026\n8 | except Exception as exc:\n  |\ninfo: rule `unresolved-reference` is enabled by default\n\nerror[unresolved-reference]: Name `path_value` used when not defined\n --> write_test_file.pym:7:67\n  |\n5 |         raise ValueError('Test content is required.')\n6 |     raw_result = {'success': True, 'path': path_value}\n7 |     result = {'result': raw_result, 'summary': f'Wrote test file {path_value}', 'knowledge_delta': {'test_file_written': path_value}, \u2026\n  |                                                                   ^^^^^^^^^^\n8 | except Exception as exc:\n9 |     result = {'result': {'success': False, 'error': str(exc)}, 'summary': f'Error: {exc}', 'knowledge_delta': {}, 'outcome': 'error', \u2026\n  |\ninfo: rule `unresolved-reference` is enabled by default\n\nerror[unresolved-reference]: Name `path_value` used when not defined\n --> write_test_file.pym:7:122\n  |\n5 | \u2026\n6 | \u2026\n7 | \u2026file {path_value}', 'knowledge_delta': {'test_file_written': path_value}, 'outcome': 'success', 'written_file': path_value, 'content'\u2026\n  |                                                               ^^^^^^^^^^\n8 | \u2026\n9 | \u2026}, 'summary': f'Error: {exc}', 'knowledge_delta': {}, 'outcome': 'error', 'error': str(exc)}\n  |\ninfo: rule `unresolved-reference` is enabled by default\n\nerror[unresolved-reference]: Name `path_value` used when not defined\n --> write_test_file.pym:7:173\n  |\n5 | \u2026\n6 | \u2026\n7 | \u2026written': path_value}, 'outcome': 'success', 'written_file': path_value, 'content': content}\n  |                                                               ^^^^^^^^^^\n8 | \u2026\n9 | \u2026}, 'outcome': 'error', 'error': str(exc)}\n  |\ninfo: rule `unresolved-reference` is enabled by default\n\n",
+      "suggestion": "Fix the type error indicated above"
+    }
+  ],
+  "warnings": [
+    {
+      "line": 4,
+      "column": 0,
+      "code": "W003",
+      "message": "Input 'path' is declared but never referenced"
+    }
+  ],
+  "info": {
+    "externals_count": 0,
+    "inputs_count": 2,
+    "lines_of_code": 31,
+    "monty_features_used": [
+      "f_string"
+    ]
+  }
+}

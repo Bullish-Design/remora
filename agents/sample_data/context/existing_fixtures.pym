@@ -1,36 +1,36 @@
-from grail import Input, external
+from grail import Input
 
-noop: bool = Input("noop", default=False)
-
-_ = noop
+existing_fixtures: str = Input("existing_fixtures", default="")
 
 
-@external
-async def list_dir(path: str = ".") -> list[str]:
-    """List file names in a directory."""
-    ...
+fixtures_list: list[dict[str, str]] = []
 
-
-@external
-async def file_exists(path: str) -> bool:
-    """Check if a file or directory exists."""
-    ...
-
-
-async def _safe_list_dir(path: str) -> list[str]:
+if existing_fixtures:
     try:
-        return await list_dir(path=path)
+        lines = existing_fixtures.splitlines()
+        for line in lines:
+            line = line.strip()
+            if line.startswith("{"):
+                name = ""
+                path = ""
+                if '"name"' in line:
+                    start = line.find('"name"') + 6
+                    end = line.find('}', start)
+                    if start > 5 and end > start:
+                        name_val = line[start:end].strip()
+                        if name_val.startswith('"') and name_val.endswith('"'):
+                            name = name_val[1:-1]
+                if '"path"' in line:
+                    start = line.find('"path"') + 6
+                    end = line.find('}', start)
+                    if start > 5 and end > start:
+                        path_val = line[start:end].strip()
+                        if path_val.startswith('"') and path_val.endswith('"'):
+                            path = path_val[1:-1]
+                if name or path:
+                    fixtures_list.append({"name": name, "path": path})
     except Exception:
-        return []
+        pass
 
-
-fixtures_dir = "fixtures"
-fixtures: list[dict[str, str]] = []
-
-if await file_exists(path=fixtures_dir):
-    entries = await _safe_list_dir(path=fixtures_dir)
-    for name in sorted(entries):
-        fixtures.append({"name": name, "path": f"{fixtures_dir}/{name}"})
-
-result = fixtures
+result = fixtures_list
 result

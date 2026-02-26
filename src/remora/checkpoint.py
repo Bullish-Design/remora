@@ -1,311 +1,307 @@
-"""Workspace Checkpointing - Materialize sandboxes to disk.
+"""Cairn-Native Checkpointing.
 
-This module provides the ability to:
-1. Materialize the virtual filesystem to disk
-2. Export KV store to JSON files
-3. Create complete checkpoints for jujutsu/github versioning
+This module provides checkpointing for graph execution state using Cairn's
+native snapshot/restore capabilities. Replaces the old file-backed KV store
+approach with Cairn workspace snapshots.
+
+Usage:
+    manager = CheckpointManager(Path(".remora/checkpoints"))
+
+    # Save checkpoint
+    checkpoint_id = await manager.save(
+        graph_id="graph-1",
+        executor_state=executor_state,
+    )
+
+    # Restore checkpoint
+    restored_state = await manager.restore(checkpoint_id)
+
+    # List checkpoints
+    checkpoints = await manager.list_checkpoints(graph_id="graph-1")
+
+    # Delete checkpoint
+    await manager.delete(checkpoint_id)
 """
 
+from __future__ import annotations
+
 import json
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from remora.executor import ExecutorState
 
 
-@dataclass
-class KVCheckpoint:
-    """Represents a checkpoint of the KV store."""
+class JsonStore:
+    """Simple JSON file-based store for checkpoint metadata.
 
-    timestamp: datetime
-    entries: list[dict[str, Any]] = field(default_factory=list)
-
-    def to_dir(self, path: Path) -> None:
-        """Write KV entries as JSON files to a directory.
-
-        Structure:
-            path/
-                _metadata.json      # timestamp, entry count
-                a/
-                    alice.json     # key "alice" -> alice.json
-                    _index.json    # directory listing
-                b/
-                    ...
-        """
-        path.mkdir(parents=True, exist_ok=True)
-
-        (path / "_metadata.json").write_text(
-            json.dumps({"timestamp": self.timestamp.isoformat(), "entry_count": len(self.entries)}, indent=2)
-        )
-
-        by_prefix: dict[str, list] = {}
-        for entry in self.entries:
-            key = entry.get("key", "")
-            prefix = key[0].lower() if key else "_"
-            by_prefix.setdefault(prefix, []).append(entry)
-
-        for prefix, entries_list in by_prefix.items():
-            prefix_dir = path / prefix
-            prefix_dir.mkdir(exist_ok=True)
-
-            for entry in entries_list:
-                safe_key = entry.get("key", "").replace(":", "_")
-                (prefix_dir / f"{safe_key}.json").write_text(json.dumps(entry, indent=2))
-
-            (prefix_dir / "_index.json").write_text(
-                json.dumps({"keys": [e.get("key") for e in entries_list]}, indent=2)
-            )
-
-    @classmethod
-    def from_dir(cls, path: Path) -> "KVCheckpoint":
-        """Load KV checkpoint from directory."""
-        metadata = json.loads((path / "_metadata.json").read_text())
-        entries = []
-
-        for prefix_dir in path.iterdir():
-            if prefix_dir.name.startswith("_"):
-                continue
-            for json_file in prefix_dir.glob("*.json"):
-                if json_file.name == "_index.json":
-                    continue
-                entries.append(json.loads(json_file.read_text()))
-
-        return cls(timestamp=datetime.fromisoformat(metadata["timestamp"]), entries=entries)
-
-    @classmethod
-    def from_workspace(cls, workspace: Any) -> "KVCheckpoint":
-        """Create KV checkpoint from workspace."""
-        entries = []
-        try:
-            for entry in workspace.kv.list(prefix=""):
-                key = entry.get("key", "") if isinstance(entry, dict) else str(entry)
-                value = workspace.kv.get(key)
-                entries.append({"key": key, "value": value})
-        except Exception:
-            pass
-
-        return cls(timestamp=datetime.now(), entries=entries)
-
-
-@dataclass
-class Checkpoint:
-    """Complete checkpoint of an agent's workspace.
-
-    This is what gets versioned with jujutsu/github:
-    - Virtual filesystem materialized to disk
-    - KV store exported to JSON
-    - Metadata about the checkpoint
+    Provides basic key-value storage using JSON files.
+    Replaces fsdantic for simplicity.
     """
 
-    agent_id: str
-    created_at: datetime
+    def __init__(self, store_path: Path):
+        """Initialize the store.
 
-    filesystem_path: Path | None = None
-    kv_path: Path | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-    _root: Path | None = field(default=None, repr=False)
+        Args:
+            store_path: Directory for JSON files
+        """
+        self._path = store_path
+        self._path.mkdir(parents=True, exist_ok=True)
 
-    @classmethod
-    def create(
-        cls,
-        agent_id: str,
-        workspace: Any,
-        base_path: Path,
-    ) -> "Checkpoint":
-        """Create a complete checkpoint from workspace."""
-        checkpoint = cls(
-            agent_id=agent_id,
-            created_at=datetime.now(),
-            filesystem_path=base_path / agent_id / "filesystem",
-            kv_path=base_path / agent_id / "kv",
-            metadata={
-                "agent_id": agent_id,
-                "created_at": datetime.now().isoformat(),
-            },
-        )
+    async def put(self, key: str, value: dict[str, Any]) -> None:
+        """Store a value.
 
-        checkpoint.kv_path.mkdir(parents=True, exist_ok=True)
+        Args:
+            key: The key to store
+            value: The value (must be JSON-serializable dict)
+        """
+        file_path = self._path / f"{key}.json"
+        file_path.write_text(json.dumps(value, indent=2))
 
-        kv_checkpoint = KVCheckpoint.from_workspace(workspace)
-        kv_checkpoint.to_dir(checkpoint.kv_path)
+    async def get(self, key: str) -> dict[str, Any] | None:
+        """Retrieve a value.
 
-        return checkpoint
+        Args:
+            key: The key to retrieve
 
-    def load(self) -> KVCheckpoint:
-        """Load KV checkpoint from disk."""
-        if self.kv_path and self.kv_path.exists():
-            return KVCheckpoint.from_dir(self.kv_path)
-        return KVCheckpoint(timestamp=self.created_at, entries=[])
+        Returns:
+            The stored dict, or None if not found
+        """
+        file_path = self._path / f"{key}.json"
+        if not file_path.exists():
+            return None
+        return json.loads(file_path.read_text())
+
+    async def delete(self, key: str) -> None:
+        """Delete a value.
+
+        Args:
+            key: The key to delete
+        """
+        file_path = self._path / f"{key}.json"
+        if file_path.exists():
+            file_path.unlink()
+
+    async def list(self) -> list[dict[str, Any]]:
+        """List all stored values.
+
+        Returns:
+            List of all stored dicts
+        """
+        results = []
+        for file_path in self._path.glob("*.json"):
+            try:
+                results.append(json.loads(file_path.read_text()))
+            except (json.JSONDecodeError, IOError):
+                continue
+        return results
+
+
+def _serialize_result(result: Any) -> dict[str, Any]:
+    """Serialize a RunResult to JSON-serializable dict.
+
+    Args:
+        result: The RunResult or result dict to serialize
+
+    Returns:
+        JSON-serializable dict
+    """
+    if result is None:
+        return {"type": "none"}
+
+    if isinstance(result, dict):
+        return {"type": "dict", "data": result}
+
+    if hasattr(result, "model_dump"):
+        return {"type": "model_dump", "data": result.model_dump()}
+
+    if hasattr(result, "dict"):
+        return {"type": "dict_attr", "data": result.dict()}
+
+    return {"type": "str", "data": str(result)}
+
+
+def _deserialize_result(data: dict[str, Any]) -> Any:
+    """Deserialize a dict back to a RunResult-like object.
+
+    Args:
+        data: The serialized dict
+
+    Returns:
+        The deserialized result (typically a dict)
+    """
+    if data is None:
+        return None
+
+    result_type = data.get("type", "dict")
+    result_data = data.get("data", data)
+
+    if result_type in ("none", None):
+        return None
+
+    if result_type in ("dict", "dict_attr"):
+        return result_data
+
+    if result_type == "model_dump":
+        return result_data
+
+    if result_type == "str":
+        return result_data
+
+    return result_data
 
 
 class CheckpointManager:
-    """Manages checkpointing of agent workspaces.
+    """Save and restore graph execution state via Cairn snapshots.
+
+    This replaces the old CheckpointManager that used file-backed KV stores.
+    Now uses Cairn's native snapshot/restore for workspaces.
 
     Usage:
-        manager = CheckpointManager(Path("/checkpoints"))
+        manager = CheckpointManager(Path(".remora/checkpoints"))
 
-        # Materialize a workspace to disk
-        checkpoint = await manager.checkpoint(
-            workspace=agent_workspace,
-            agent_id=agent.id,
-            message="Before applying changes"
-        )
+        # Save
+        checkpoint_id = await manager.save(graph_id, executor_state)
 
-        # Later: restore from checkpoint
-        workspace = await manager.restore(checkpoint)
+        # Restore
+        state = await manager.restore(checkpoint_id)
     """
 
-    def __init__(self, checkpoint_root: Path):
-        self._root = checkpoint_root
-        self._root.mkdir(parents=True, exist_ok=True)
-
-    async def checkpoint(
-        self,
-        workspace: Any,
-        agent_id: str,
-        message: str | None = None,
-    ) -> Checkpoint:
-        """Create a checkpoint of a workspace.
+    def __init__(self, store_path: Path):
+        """Initialize the CheckpointManager.
 
         Args:
-            workspace: The Fsdantic workspace to checkpoint
-            agent_id: Unique identifier for this checkpoint
-            message: Optional commit message
+            store_path: Directory to store checkpoints
+        """
+        self._store_path = store_path
+        self._store: JsonStore | None = None
+
+    async def _get_store(self) -> JsonStore:
+        """Lazy initialization of the metadata store.
 
         Returns:
-            Checkpoint object with paths to materialized data
+            The JsonStore instance
         """
-        timestamp = datetime.now()
-        checkpoint_id = f"{agent_id}-{timestamp.strftime('%Y%m%d_%H%M%S')}"
+        if self._store is None:
+            self._store = JsonStore(self._store_path / "_metadata")
+        return self._store
 
-        checkpoint_dir = self._root / checkpoint_id
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
-
-        fs_dir = checkpoint_dir / "filesystem"
-
-        if hasattr(workspace, "materialize"):
-            try:
-                fs_result = await workspace.materialize.to_disk(
-                    target_path=fs_dir,
-                    clean=True,
-                )
-            except Exception:
-                fs_dir.mkdir(parents=True, exist_ok=True)
-                fs_result = None
-        else:
-            fs_dir.mkdir(parents=True, exist_ok=True)
-            fs_result = None
-
-        kv_dir = checkpoint_dir / "kv"
-        await self._export_kv(workspace.kv, kv_dir)
-
-        metadata = {
-            "agent_id": agent_id,
-            "created_at": timestamp.isoformat(),
-            "message": message,
-        }
-        if fs_result:
-            metadata["filesystem"] = {
-                "files_written": getattr(fs_result, "files_written", 0),
-                "bytes_written": getattr(fs_result, "bytes_written", 0),
-            }
-        (checkpoint_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
-
-        return Checkpoint(
-            agent_id=agent_id,
-            created_at=timestamp,
-            filesystem_path=Path("filesystem"),
-            kv_path=Path("kv"),
-            metadata=metadata,
-        )
-
-    async def _export_kv(self, kv_manager: Any, target_dir: Path) -> KVCheckpoint:
-        """Export all KV entries to disk."""
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        entries = []
-        try:
-            kv_list = kv_manager.list(prefix="") if hasattr(kv_manager, "list") else []
-            for entry in kv_list:
-                key = entry.get("key", "") if isinstance(entry, dict) else str(entry)
-                try:
-                    value = kv_manager.get(key) if hasattr(kv_manager, "get") else None
-                    entries.append({"key": key, "value": value})
-                except Exception as e:
-                    entries.append({"key": key, "error": str(e)})
-        except Exception:
-            pass
-
-        checkpoint = KVCheckpoint(timestamp=datetime.now(), entries=entries)
-        checkpoint.to_dir(target_dir)
-
-        return checkpoint
-
-    async def restore(self, checkpoint: Checkpoint) -> Any:
-        """Restore a workspace from a checkpoint.
-
-        Note: This creates a NEW workspace. To continue an agent
-        from a checkpoint, you'd need to also restore the kernel state.
-        """
-        from fsdantic import Workspace
-
-        checkpoint_dir = checkpoint._root / f"{checkpoint.agent_id}-{checkpoint.created_at.strftime('%Y%m%d_%H%M%S')}"
-        fs_dir = checkpoint_dir / "filesystem"
-        kv_dir = checkpoint_dir / "kv"
-
-        workspace = Workspace(str(fs_dir))
-
-        kv_checkpoint = KVCheckpoint.from_dir(kv_dir)
-        for entry in kv_checkpoint.entries:
-            if "error" in entry:
-                continue
-            try:
-                workspace.kv.set(entry["key"], entry["value"])
-            except Exception:
-                pass
-
-        return workspace
-
-    def list_checkpoints(self, agent_id: str | None = None) -> list[Checkpoint]:
-        """List all available checkpoints.
+    async def save(
+        self,
+        graph_id: str,
+        executor_state: "ExecutorState",
+    ) -> str:
+        """Snapshot all agent workspaces + execution state.
 
         Args:
-            agent_id: If provided, only return checkpoints for this agent
+            graph_id: ID of the graph being checkpointed
+            executor_state: Current executor state with workspaces and results
+
+        Returns:
+            Checkpoint ID that can be used to restore
         """
-        checkpoints = []
+        checkpoint_id = f"{graph_id}_{datetime.now().isoformat()}"
+        checkpoint_dir = self._store_path / checkpoint_id
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        if not self._root.exists():
-            return checkpoints
+        for agent_id, workspace in executor_state.workspaces.items():
+            agent_dir = checkpoint_dir / agent_id
+            await workspace.snapshot(str(agent_dir))
 
-        for checkpoint_dir in self._root.iterdir():
-            if not checkpoint_dir.is_dir():
-                continue
+        metadata = {
+            "checkpoint_id": checkpoint_id,
+            "graph_id": graph_id,
+            "timestamp": datetime.now().isoformat(),
+            "completed": list(executor_state.completed.keys()),
+            "results": {aid: _serialize_result(res) for aid, res in executor_state.completed.items()},
+            "pending": list(executor_state.pending),
+            "agent_workspaces": list(executor_state.workspaces.keys()),
+        }
 
-            metadata_file = checkpoint_dir / "metadata.json"
-            if not metadata_file.exists():
-                continue
+        store = await self._get_store()
+        await store.put(checkpoint_id, metadata)
 
-            try:
-                metadata = json.loads(metadata_file.read_text())
-            except Exception:
-                continue
+        return checkpoint_id
 
-            if agent_id and metadata.get("agent_id") != agent_id:
-                continue
+    async def restore(self, checkpoint_id: str) -> "ExecutorState":
+        """Restore workspaces and execution state from checkpoint.
 
-            try:
-                created_at = datetime.fromisoformat(metadata.get("created_at", datetime.now().isoformat()))
-            except Exception:
-                created_at = datetime.now()
+        Args:
+            checkpoint_id: ID of the checkpoint to restore
 
-            checkpoints.append(
-                Checkpoint(
-                    agent_id=metadata.get("agent_id", "unknown"),
-                    created_at=created_at,
-                    filesystem_path=Path("filesystem"),
-                    kv_path=Path("kv"),
-                    metadata=metadata,
-                )
-            )
+        Returns:
+            Restored ExecutorState
 
-        return sorted(checkpoints, key=lambda c: c.created_at, reverse=True)
+        Raises:
+            KeyError: If checkpoint not found
+        """
+        store = await self._get_store()
+        metadata = await store.get(checkpoint_id)
+
+        if metadata is None:
+            raise KeyError(f"Checkpoint not found: {checkpoint_id}")
+
+        from remora.executor import ExecutorState
+
+        checkpoint_dir = self._store_path / checkpoint_id
+        workspaces = {}
+
+        for agent_id in metadata["agent_workspaces"]:
+            agent_dir = checkpoint_dir / agent_id
+            if agent_dir.exists():
+                from cairn import CairnWorkspace
+
+                workspace = await CairnWorkspace.from_snapshot(str(agent_dir))
+                workspaces[agent_id] = workspace
+
+        results = {aid: _deserialize_result(res) for aid, res in metadata.get("results", {}).items()}
+
+        return ExecutorState(
+            graph_id=metadata["graph_id"],
+            nodes={},
+            completed=results,
+            pending=set(metadata.get("pending", [])),
+            workspaces=workspaces,
+        )
+
+    async def list_checkpoints(
+        self,
+        graph_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List available checkpoints.
+
+        Args:
+            graph_id: Optional filter by graph ID
+
+        Returns:
+            List of checkpoint metadata dicts
+        """
+        store = await self._get_store()
+        all_checkpoints = await store.list()
+
+        if graph_id:
+            return [cp for cp in all_checkpoints if cp.get("graph_id") == graph_id]
+        return all_checkpoints
+
+    async def delete(self, checkpoint_id: str) -> None:
+        """Delete a checkpoint.
+
+        Args:
+            checkpoint_id: ID of checkpoint to delete
+        """
+        store = await self._get_store()
+        await store.delete(checkpoint_id)
+
+        checkpoint_dir = self._store_path / checkpoint_id
+        if checkpoint_dir.exists():
+            shutil.rmtree(checkpoint_dir)
+
+
+__all__ = [
+    "CheckpointManager",
+    "JsonStore",
+]

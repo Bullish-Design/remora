@@ -1,20 +1,7 @@
-from grail import Input, external
+from grail import Input
 
-noop: bool = Input("noop", default=False)
-
-_ = noop
-
-
-@external
-async def read_file(path: str) -> str:
-    """Read the text contents of a file."""
-    ...
-
-
-@external
-async def file_exists(path: str) -> bool:
-    """Check if a file or directory exists."""
-    ...
+ruff_config: str = Input("ruff_config", default="")
+pyproject_config: str = Input("pyproject_config", default="")
 
 
 def _extract_tool_section(content: str, section: str) -> str:
@@ -36,11 +23,10 @@ def _extract_tool_section(content: str, section: str) -> str:
 
 
 try:
-    if await file_exists(path="ruff.toml"):
-        result = await read_file(path="ruff.toml")
-    elif await file_exists(path="pyproject.toml"):
-        content = await read_file(path="pyproject.toml")
-        result = _extract_tool_section(content, "tool.ruff")
+    if ruff_config:
+        result = ruff_config
+    elif pyproject_config:
+        result = _extract_tool_section(pyproject_config, "tool.ruff")
     else:
         result = ""
 except Exception:

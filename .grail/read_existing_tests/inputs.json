@@ -1,0 +1,22 @@
+{
+  "inputs": [
+    {
+      "name": "source_code",
+      "type": "str",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "file_path",
+      "type": "str",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "existing_tests",
+      "type": "str",
+      "required": false,
+      "default": ""
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "externals": [
+    {
+      "name": "run_pytest",
+      "async": true,
+      "parameters": [
+        {
+          "name": "path",
+          "type": "str",
+          "default": null
+        }
+      ],
+      "return_type": "dict[str, Any]",
+      "docstring": "Run pytest on a test file and return results."
+    }
+  ]
+}

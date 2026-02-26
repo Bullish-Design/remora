@@ -1,0 +1,22 @@
+{
+  "externals": [
+    {
+      "name": "apply_ruff_fix",
+      "async": true,
+      "parameters": [
+        {
+          "name": "path",
+          "type": "str",
+          "default": null
+        },
+        {
+          "name": "issue_code",
+          "type": "str",
+          "default": null
+        }
+      ],
+      "return_type": "dict[str, Any]",
+      "docstring": "Apply ruff fix for a specific issue code."
+    }
+  ]
+}

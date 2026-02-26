@@ -1,0 +1,22 @@
+{
+  "file": "agents/test/tools/run_tests.pym",
+  "valid": true,
+  "errors": [],
+  "warnings": [
+    {
+      "line": 5,
+      "column": 0,
+      "code": "W003",
+      "message": "Input 'target_file' is declared but never referenced"
+    }
+  ],
+  "info": {
+    "externals_count": 1,
+    "inputs_count": 2,
+    "lines_of_code": 181,
+    "monty_features_used": [
+      "f_string",
+      "list_comprehension"
+    ]
+  }
+}

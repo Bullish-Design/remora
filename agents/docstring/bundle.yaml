@@ -1,70 +1,18 @@
 name: docstring_agent
-version: '1.0'
-model:
-  plugin: function_gemma
-  adapter: google/functiongemma-270m-it
-  grammar:
-    mode: ebnf
-    allow_parallel_calls: true
-    args_format: permissive
-initial_context:
-  system_prompt: 'You are a model that can do function calling with the following
-    functions.
+model: qwen
+grammar: ebnf
+limits: default
 
-    <task_description>You are a Python documentation tool. Read the existing
+system_prompt: |
+  You are a docstring generation agent. Read the provided Python code,
+  analyze existing docstrings and type hints, then write or update
+  appropriate docstrings in the requested style.
 
-    docstring and type hints, then write an appropriate docstring. If required
-
-    arguments are missing, omit them from the function call.</task_description>
-
-
-    Respond with a single tool call each turn. Do not output any text outside
-
-    the tool call.
-
-    '
-  user_template: 'Code to document:
-
-    {{ node_text }}
-
-    '
-max_turns: 15
-termination_tool: submit_result
 tools:
-- name: read_current_docstring
-  registry: grail
-  description: Read the existing docstring from the current Python function or class.
-    Returns the docstring text if one exists.
-- name: read_type_hints
-  registry: grail
-  description: Extract parameter type annotations and return type from the Python
-    function signature.
-- name: write_docstring
-  registry: grail
-  description: Write or replace a docstring on the current Python function or class.
-  inputs_override:
-    docstring:
-      type: string
-      description: The docstring text to write.
-    style:
-      type: string
-      description: The docstring style format to use, e.g. google or numpy.
-  context_providers:
-  - context/docstring_style.pym
-- name: submit_result
-  registry: grail
-  description: Submit the final result after docstring work is complete.
-  inputs_override:
-    summary:
-      type: string
-      description: A short summary of what was done.
-    action:
-      type: string
-      description: 'The action taken: added, updated, or skipped.'
-    changed_files:
-      type: array
-      description: List of file paths that were modified.
-registries:
-- type: grail
-  config:
-    agents_dir: tools
+  - tools/read_current_docstring.pym
+  - tools/read_type_hints.pym
+  - tools/write_docstring.pym
+  - tools/submit_result.pym
+
+termination: submit_result
+max_turns: 6

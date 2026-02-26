@@ -1,59 +1,27 @@
 from grail import Input, external
 from typing import Any
 
+source_code: str = Input("source_code")
+file_path: str = Input("file_path")
 check_only: bool = Input("check_only", default=True)
-target_file_input: str | None = Input("target_file", default=None)
 
 
 @external
-async def read_file(path: str) -> str:
-    """Read the text contents of a file."""
+async def run_ruff_check(path: str, fix: bool) -> dict[str, Any]:
+    """Run ruff linter check on a file."""
     ...
 
-
-@external
-async def file_exists(path: str) -> bool:
-    """Check if a file or directory exists."""
-    ...
-
-
-@external
-async def run_command(cmd: str, args: list[str]) -> dict[str, Any]:
-    """Run a command in the sandbox."""
-    ...
-
-
-@external
-async def run_json_command(cmd: str, args: list[str]) -> Any:
-    """Run a command and parse its stdout as JSON."""
-    ...
-
-
-async def _read_optional(path: str) -> str | None:
-    if await file_exists(path=path):
-        return await read_file(path=path)
-    return None
-
-
-async def _resolve_target_file() -> str | None:
-    if target_file_input:
-        return target_file_input.strip()
-    stored = await _read_optional(path=".remora/target_file")
-    if stored:
-        return stored.strip()
-    return None
 
 try:
-    target_file = await _resolve_target_file()
-    if not target_file:
-        raise ValueError("Target file not found for linting.")
+    if not source_code:
+        raise ValueError("Source code is required.")
 
-    command_args = ["check", "--output-format", "json", "--select", "E,W,F"]
+    args = ["check", "--output-format", "json", "--select", "E,W,F"]
     if not check_only:
-        command_args.append("--fix")
-    command_args.append(target_file)
+        args.append("--fix")
+    args.append(file_path)
 
-    issues_raw = await run_json_command(cmd="ruff", args=command_args)
+    issues_raw = await run_ruff_check(path=file_path, fix=not check_only)
 
     if isinstance(issues_raw, dict) and "error" in issues_raw:
         error_message = issues_raw.get("stderr", "").strip() or f"ruff exit code {issues_raw.get('exit_code')}"

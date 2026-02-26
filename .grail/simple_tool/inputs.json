@@ -1,0 +1,40 @@
+{
+  "inputs": [
+    {
+      "name": "node_text_input",
+      "type": "str | None",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "node_text",
+      "type": "str | None",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "target_file_input",
+      "type": "str | None",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "target_file",
+      "type": "str | None",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "workspace_id",
+      "type": "str | None",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "payload",
+      "type": "str",
+      "required": false,
+      "default": "ping"
+    }
+  ]
+}

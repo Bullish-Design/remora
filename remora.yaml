@@ -7,6 +7,30 @@ discovery:
 
 agents_dir: agents
 
+# Bundle metadata for agent graph configuration
+bundles:
+  metadata:
+    lint:
+      node_types: [function, class]
+      priority: 10
+      requires_context: true
+    docstring:
+      node_types: [function, class]
+      priority: 20
+      requires_context: true
+    test:
+      node_types: [function]
+      priority: 30
+      requires_context: true
+    sample_data:
+      node_types: [function]
+      priority: 40
+      requires_context: false
+    harness:
+      node_types: []
+      priority: 100
+      requires_context: false
+
 # vLLM server on your Tailscale network
 server:
   base_url: "http://remora-server:8000/v1"

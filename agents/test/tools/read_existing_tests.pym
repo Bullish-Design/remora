@@ -1,44 +1,8 @@
-from grail import Input, external
+from grail import Input
 
-node_text_input: str | None = Input("node_text", default=None)
-target_file_input: str | None = Input("target_file", default=None)
-
-
-@external
-async def read_file(path: str) -> str:
-    """Read the text contents of a file."""
-    ...
-
-
-@external
-async def file_exists(path: str) -> bool:
-    """Check if a file or directory exists."""
-    ...
-
-@external
-async def run_command(cmd: str, args: list[str]) -> dict[str, Any]:
-    """Run a command in the sandbox."""
-    ...
-
-@external
-async def run_json_command(cmd: str, args: list[str]) -> Any:
-    """Run a command and parse its stdout as JSON."""
-    ...
-
-
-async def _read_optional(path: str) -> str | None:
-    if await file_exists(path=path):
-        return await read_file(path=path)
-    return None
-
-
-async def _resolve_target_file() -> str | None:
-    if target_file_input:
-        return target_file_input.strip()
-    stored = await _read_optional(path=".remora/target_file")
-    if stored:
-        return stored.strip()
-    return None
+source_code: str = Input("source_code")
+file_path: str = Input("file_path")
+existing_tests: str = Input("existing_tests", default="")
 
 
 def _default_test_path(target_file: str) -> str:
@@ -48,12 +12,12 @@ def _default_test_path(target_file: str) -> str:
 
 
 try:
-    _ = node_text_input
-    target_file = await _resolve_target_file()
-    if not target_file:
-        raise ValueError("Target file not found for tests.")
-    test_path = _default_test_path(target_file)
-    if not await file_exists(path=test_path):
+    if not file_path:
+        raise ValueError("Target file is required.")
+    
+    test_path = _default_test_path(file_path)
+    
+    if not existing_tests:
         raw_result = {"content": "", "path": None}
         result = {
             "result": raw_result,
@@ -65,8 +29,7 @@ try:
             "outcome": "partial",
         }
     else:
-        content = await read_file(path=test_path)
-        raw_result = {"content": content, "path": test_path}
+        raw_result = {"content": existing_tests, "path": test_path}
         result = {
             "result": raw_result,
             "summary": f"Loaded existing tests from {test_path}",

@@ -1,0 +1,10 @@
+{
+  "inputs": [
+    {
+      "name": "existing_fixtures",
+      "type": "str",
+      "required": false,
+      "default": ""
+    }
+  ]
+}
