@@ -575,7 +575,7 @@ class GraphExecutor:
         # Context provider to pass workspace
         async def provide_context():
             return {
-                "workspace_path": str(agent.workspace.path) if agent.workspace else "",
+                "workspace_path": str(agent.workspace.root) if agent.workspace else "",
             }
 
         # Run the agent
