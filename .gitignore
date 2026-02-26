@@ -7,6 +7,7 @@ scripts/training_examples/**
 # Personal Dev Environment:
 .devenv/**
 .direnv/**
+.worktrees/
 #.tmuxp.yaml
 .python-version
 devenv.lock
