@@ -10,6 +10,15 @@
 
 This step consolidates the 5-file `discovery/` package into a single focused `discovery.py` module. The goal is to reduce complexity while preserving all existing functionality. This is a **consolidation, not a rewrite** — the tree-sitter parsing logic must remain identical.
 
+## Contract Touchpoints
+- `discover()` outputs `CSTNode` records used by `graph.build_graph()` and `CairnDataProvider` file selection.
+- Deterministic `node_id` values are required for checkpoints and bundle metadata mapping.
+
+## Done Criteria
+- [ ] `discover()` returns stable `CSTNode` IDs for the same file/name inputs.
+- [ ] Consolidated module imports cleanly and preserves `.scm` query behavior.
+- [ ] A discovery unit test verifies node count and ID stability.
+
 ---
 
 ## What This Step Does

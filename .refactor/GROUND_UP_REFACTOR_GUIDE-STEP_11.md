@@ -11,6 +11,15 @@
 
 This step extracts the daemon, indexing, and filesystem watching logic from `src/remora/hub/` into a new focused `src/remora/indexer/` package. This is Idea 3 from the design document: splitting the mixed "Hub" into two independent packages (`indexer` and `dashboard`).
 
+## Contract Touchpoints
+- Indexer writes to `NodeStateStore` as the system of record for node metadata.
+- Optional EventBus events should mirror node updates for dashboard use.
+
+## Done Criteria
+- [ ] Indexer can rebuild `NodeStateStore` from a cold scan.
+- [ ] Daemon emits updates on file changes and persists NodeState records.
+- [ ] CLI entry point starts/stops cleanly.
+
 ### What You're Creating
 
 ```

@@ -4,6 +4,15 @@
 
 This step implements **Idea 4: Flatten the Agent Graph** from the design document. It separates graph topology from execution, making `AgentNode` a pure frozen dataclass and `build_graph()` a pure function.
 
+## Contract Touchpoints
+- `build_graph()` uses Remora-owned `BundleMetadata` mapping (node types → bundle path + priority).
+- Graph output feeds `GraphExecutor` scheduling and `CheckpointManager` state.
+
+## Done Criteria
+- [ ] `AgentNode` is immutable and `build_graph()` is side-effect free.
+- [ ] Graph includes upstream/downstream sets and supports topological ordering.
+- [ ] Unit tests validate node filtering, ordering, and dependency wiring.
+
 ## What You're Building
 
 - **`src/remora/graph.py`** — `AgentNode` frozen dataclass + `build_graph()` function + helper functions

@@ -10,6 +10,16 @@ The goal is to replace Remora's three workspace abstractions (`WorkspaceKV`, `Gr
 - **Snapshot/restore** via built-in snapshot API
 - **Workspace lifecycle** management (no orphaned directories)
 
+## Contract Touchpoints
+- `CairnDataProvider` supplies the Grail `files` dict for `.pym` tools using the workspace overlay.
+- `CairnResultHandler` persists tool outputs back to the overlay and returns a structured summary.
+- Workspace snapshots must align with `CheckpointManager` expectations in Step 8.
+
+## Done Criteria
+- [ ] `CairnDataProvider.load_files()` returns the target file plus required neighbors/configs.
+- [ ] `CairnResultHandler.handle()` writes outputs without mutating the base layer.
+- [ ] Workspace creation/cleanup behavior is validated in a unit test or smoke test.
+
 ## Current State (What You're Replacing)
 
 ### Files Being Replaced

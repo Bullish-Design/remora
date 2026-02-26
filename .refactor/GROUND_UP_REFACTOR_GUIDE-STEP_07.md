@@ -2,7 +2,7 @@
 
 ## Context
 
-This guide is for implementing Step 7 of the Remora v1.0 ground-up refactor. This step creates the `GraphExecutor` that runs agents in dependency order using `structured-agents`' `Agent.from_bundle()`.
+This guide is for implementing Step 7 of the Remora v0.4.0 ground-up refactor. This step creates the `GraphExecutor` that runs agents in dependency order using `structured-agents`' `Agent.from_bundle()`.
 
 **Design document:** `.context/GROUND_UP_REFACTOR_IDEAS.md` (Ideas 2, 4)
 
@@ -12,6 +12,16 @@ A new `executor.py` module that:
 1. Defines `ExecutorState` dataclass for tracking execution progress
 2. Provides `execute_agent()` function for running individual agents via `Agent.from_bundle()`
 3. Implements `GraphExecutor` class for dependency-ordered batch execution with configurable concurrency
+
+## Contract Touchpoints
+- Set `STRUCTURED_AGENTS_BASE_URL` and `STRUCTURED_AGENTS_API_KEY` from `RemoraConfig.model` before bundle load.
+- Provide the shared `EventBus` as the structured-agents Observer.
+- Pass `CairnDataProvider` and `CairnResultHandler` to ensure Grail VFS + result persistence.
+
+## Done Criteria
+- [ ] `GraphExecutor` respects dependency ordering and concurrency limits.
+- [ ] Errors obey `stop_graph`/`skip_downstream`/`continue` policy and emit `AgentErrorEvent`.
+- [ ] Unit test runs an agent with a mocked bundle and verifies EventBus events.
 
 ## What You're Replacing
 
@@ -102,6 +112,8 @@ class ExecutorState:
 ### Step 7.2: Create execute_agent() Function
 
 **File:** `src/remora/executor.py`
+
+Before calling `Agent.from_bundle()`, set `STRUCTURED_AGENTS_BASE_URL` and `STRUCTURED_AGENTS_API_KEY` from `RemoraConfig.model` so the bundle loader uses the correct model endpoint.
 
 Add the `RunResult` type alias and `execute_agent()` function:
 

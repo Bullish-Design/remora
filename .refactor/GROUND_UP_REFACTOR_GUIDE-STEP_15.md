@@ -2,10 +2,19 @@
 
 ## Overview
 
-This step finalizes the Remora v1.0 refactor by removing all deprecated code, updating project configuration, and verifying the new architecture works correctly.
+This step finalizes the Remora v0.4.0 refactor by removing all deprecated code, updating project configuration, and verifying the new architecture works correctly.
 
 **Estimated Time:** 30-45 minutes  
 **Prerequisites:** Steps 1-14 complete, all new modules implemented and tested
+
+## Contract Touchpoints
+- Remove legacy modules superseded by EventBus, Cairn workspaces, and indexer/dashboard split.
+- Ensure dependency list includes `grail`, `cairn`, and `structured-agents`.
+
+## Done Criteria
+- [ ] Deprecated modules removed and imports cleaned up.
+- [ ] `pyproject.toml` reflects new entry points and dependencies.
+- [ ] Full test suite or smoke tests pass on the refactor branch.
 
 ---
 
@@ -16,7 +25,7 @@ The cleanup step performs final housekeeping:
 1. **Removes deprecated files** — Deletes old code that's been replaced by the new architecture
 2. **Updates configuration** — Aligns `pyproject.toml` with the new module structure and dependencies
 3. **Verifies integrity** — Runs type checking, linting, and tests to ensure everything works
-4. **Documents migration** — Creates an optional guide for users upgrading from v0.3
+4. **Documents migration** — Creates an optional guide for users upgrading from v0.3 to v0.4.0
 
 ---
 
@@ -153,7 +162,7 @@ Replace the `[project]`, `[project.scripts]`, and `[project.optional-dependencie
 ```toml
 [project]
 name = "remora"
-version = "1.0.0"
+version = "0.4.0"
 description = "AI-powered code analysis and transformation framework"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -248,9 +257,9 @@ python_functions = ["test_*"]
 Update the main package `__init__.py` to export the new public API:
 
 ```python
-"""Remora v1.0 — AI-powered code analysis and transformation framework."""
+"""Remora v0.4.0 — AI-powered code analysis and transformation framework."""
 
-__version__ = "1.0.0"
+__version__ = "0.4.0"
 
 from remora.discovery import CSTNode, discover
 from remora.graph import AgentNode, build_graph
@@ -461,36 +470,51 @@ remora-dashboard --help
 If you want to document the changes for users upgrading from v0.3, create `MIGRATION_GUIDE.md`:
 
 ```markdown
-# Migration Guide: v0.3 to v1.0
+# Migration Guide: v0.3 to v0.4.0
 
-## Overview
+Remora v0.4.0 is a complete ground-up refactor. This guide helps you migrate from v0.3.
 
-Remora v1.0 is a complete ground-up refactor. This guide helps you migrate from v0.3.
+## Key Changes
 
-## Breaking Changes
+### API Changes
 
-### Module Reorganization
+| v0.3 | v0.4.0 |
+|------|--------|
+| `AgentGraph` | Removed; use `build_graph()` |
+| `GraphExecutor` | Still available, simplified API |
+| `WorkspaceKV`, `GraphWorkspace`, `WorkspaceManager` | Replaced by Cairn |
+| `EventBus` | Still available, unified with structured-agents Observer |
 
-| v0.3 | v1.0 |
-|------|------|
-| `remora.agent_graph` | `remora.graph` + `remora.executor` |
-| `remora.workspace` | `remora.workspace` (Cairn wrappers) |
-| `remora.discovery` | `remora.discovery` (consolidated) |
-| `remora.context` | `remora.context` (simplified) |
-| `remora.hub` | `remora.indexer` + `remora.dashboard` |
+### Bundle Format
 
-### Configuration
+Bundles now use structured-agents v0.3.4 format (Remora metadata lives in `remora.yaml`):
 
-**Old (v0.3):**
 ```yaml
-server:
-  host: "0.0.0.0"
-  port: 8420
-runner:
-  max_concurrency: 4
+name: lint_agent
+model: qwen
+grammar: ebnf
+limits: default
+system_prompt: |
+  You are a linting agent...
+tools:
+  - tools/*.pym
+termination: submit_result
+max_turns: 8
 ```
 
-**New (v1.0):**
+Example Remora metadata mapping:
+
+```yaml
+bundles:
+  metadata:
+    lint:
+      node_types: [function, class]
+      priority: 10
+      requires_context: true
+```
+
+
+**New (v0.4.0):**
 ```yaml
 dashboard:
   host: "0.0.0.0"
@@ -502,8 +526,8 @@ execution:
 
 ### CLI Commands
 
-| v0.3 | v1.0 |
-|------|------|
+| v0.3 | v0.4.0 |
+|------|--------|
 | `python -m remora` | `remora` |
 | (no separate command) | `remora-index` |
 | (no separate command) | `remora-dashboard` |
@@ -517,25 +541,7 @@ execution:
 
 ### Bundle Format
 
-Bundles now use structured-agents v0.3 format:
-
-```yaml
-name: lint_agent
-model: qwen
-grammar: ebnf
-limits: default
-system_prompt: |
-  You are a linting agent...
-tools:
-  - tools/*.pym
-termination: submit_result
-max_turns: 8
-
-# Remora extensions
-node_types: [function, class]
-priority: 10
-requires_context: true
-```
+Bundles use structured-agents v0.3.4 format; Remora metadata is stored in `remora.yaml` as shown earlier in this guide.
 
 ## Migration Steps
 

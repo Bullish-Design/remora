@@ -4,6 +4,15 @@
 
 This step extracts and refactors the web dashboard code from `src/remora/hub/` into a focused `remora/dashboard/` package. This implements **Idea 3** from the design document: splitting the Hub into independent Indexer and Dashboard packages.
 
+## Contract Touchpoints
+- Dashboard streams events via `EventBus.stream()` and renders graph + kernel events.
+- `/answer` endpoint emits `HumanInputResponseEvent` for `ask_user` requests.
+
+## Done Criteria
+- [ ] SSE endpoint streams `RemoraEvent` payloads end-to-end.
+- [ ] Human input requests/responses flow through EventBus without polling.
+- [ ] Dashboard reads node metadata from `NodeStateStore` only.
+
 ## What You're Creating
 
 A focused dashboard package that provides:
@@ -88,12 +97,11 @@ class DashboardState:
     def record(self, event: RemoraEvent) -> None:
         """Process event and update state."""
         from remora.events import (
-            AgentStartedEvent,
-            AgentBlockedEvent,
-            AgentResumedEvent,
-            AgentCompletedEvent,
-            AgentFailedEvent,
-            AgentCancelledEvent,
+            AgentStartEvent,
+            AgentCompleteEvent,
+            AgentErrorEvent,
+            HumanInputRequestEvent,
+            HumanInputResponseEvent,
         )
         
         event_dict = {
@@ -103,41 +111,37 @@ class DashboardState:
             "timestamp": getattr(event, "timestamp", 0),
         }
         self.events.append(event_dict)
-
-        if isinstance(event, AgentStartedEvent):
+        
+        if isinstance(event, AgentStartEvent):
             self.agent_states[event.agent_id] = {
                 "state": "started",
                 "name": event.agent_id,
             }
             self.total_agents += 1
-
-        elif isinstance(event, AgentBlockedEvent):
-            key = f"{event.agent_id}:{event.question}"
+        
+        elif isinstance(event, HumanInputRequestEvent):
+            key = event.request_id
             self.blocked[key] = {
                 "agent_id": event.agent_id,
                 "question": event.question,
                 "options": getattr(event, "options", []),
-                "request_id": getattr(event, "request_id", ""),
+                "request_id": event.request_id,
             }
-
-        elif isinstance(event, AgentResumedEvent):
-            question = getattr(event, "question", "")
-            if question:
-                key = f"{event.agent_id}:{question}"
-                self.blocked.pop(key, None)
-
-        elif isinstance(event, (AgentCompletedEvent, AgentFailedEvent, AgentCancelledEvent)):
+        
+        elif isinstance(event, HumanInputResponseEvent):
+            self.blocked.pop(event.request_id, None)
+        
+        elif isinstance(event, (AgentCompleteEvent, AgentErrorEvent)):
             if event.agent_id in self.agent_states:
                 state_map = {
-                    AgentCompletedEvent: "completed",
-                    AgentFailedEvent: "failed",
-                    AgentCancelledEvent: "cancelled",
+                    AgentCompleteEvent: "completed",
+                    AgentErrorEvent: "failed",
                 }
                 self.agent_states[event.agent_id]["state"] = state_map[type(event)]
-                if isinstance(event, AgentCompletedEvent):
+                if isinstance(event, AgentCompleteEvent):
                     self.completed_agents += 1
-
-        if isinstance(event, AgentCompletedEvent):
+        
+        if isinstance(event, AgentCompleteEvent):
             self.results.insert(
                 0,
                 {
@@ -148,6 +152,7 @@ class DashboardState:
             )
             if len(self.results) > 50:
                 self.results.pop()
+
 
     def get_view_data(self) -> dict[str, Any]:
         """Data needed to render the dashboard view."""

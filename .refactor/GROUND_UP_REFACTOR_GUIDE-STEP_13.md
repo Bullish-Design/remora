@@ -6,6 +6,15 @@ This step creates unified CLI entry points that tie together discovery, executio
 
 This implements Idea 3 (Split the Hub Into Indexer and Dashboard) and Step 13 from the recommended implementation order in the design document.
 
+## Contract Touchpoints
+- CLI loads `RemoraConfig` once and wires a shared `EventBus` instance.
+- Entry points are `remora`, `remora-index`, `remora-dashboard`.
+
+## Done Criteria
+- [ ] Each CLI command starts and exits cleanly with `--help`.
+- [ ] Core CLI runs discovery → graph → executor using config slices.
+- [ ] Indexer and dashboard CLIs use the same `RemoraConfig` fields.
+
 ## Current State (What You're Replacing)
 
 The current CLI is fragmented across multiple files:

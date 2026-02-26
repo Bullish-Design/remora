@@ -1,12 +1,20 @@
 # Implementation Guide for Step 14: Integration Testing
 
-This guide covers end-to-end testing of the full Remora v1.0 pipeline and fixing any integration issues discovered.
+This guide covers end-to-end testing of the full Remora v0.4.0 pipeline and fixing any integration issues discovered.
 
 ## Prerequisites
 
 - All previous steps completed (Phase 1-6: Foundation, Core, Execution, Agents, Services)
 - Working CLI entry points: `remora`, `remora-index`, `remora-dashboard`
 - Test fixtures and mock agents in place
+
+## Contract Touchpoints
+- Integration tests must exercise Grail VFS + `CairnResultHandler` persistence.
+- Human-in-the-loop flow must traverse `HumanInputRequestEvent` → `HumanInputResponseEvent`.
+
+## Done Criteria
+- [ ] Smoke tests cover discovery, graph build, executor run, indexer daemon, and dashboard SSE.
+- [ ] At least one test validates `ask_user` event handling end-to-end.
 
 ## Test Environment Setup
 
@@ -110,16 +118,16 @@ remora discover src/
 remora discover src/ | python -c "import json, sys; nodes = json.load(sys.stdin); print(f'Discovered {len(nodes)} nodes'); assert len(nodes) >= 5, 'Should find 5+ nodes'"
 ```
 
-### Test 2: Graph Building
+### Test 2: Graph Building + Execution
 
-Verify graph construction:
+Verify graph construction and execution:
 
 ```bash
 cd /tmp/remora-test
-remora plan src/
+remora run src/ --run-once
 ```
 
-**Expected Output:** JSON showing agent nodes with dependencies.
+**Expected Output:** Logs showing discovery, graph build, and agent execution events.
 
 ### Test 3: Full Execution with Harness Agent
 
@@ -332,4 +340,4 @@ Once all integration tests pass, proceed to cleanup phase:
 - Remove all old code
 - Update `pyproject.toml` with new entry points
 - Update documentation
-- Tag release v1.0.0
+- Tag release v0.4.0

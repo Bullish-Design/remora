@@ -7,6 +7,15 @@ This step creates a two-level configuration system as described in Idea 10 of th
 - **Level 1: `remora.yaml`** — Project-level configuration (loaded once at startup)
 - **Level 2: `bundle.yaml`** — Per-agent configuration (structured-agents v0.3 format)
 
+## Contract Touchpoints
+- `RemoraConfig` is the single config surface; pass slices explicitly to discovery, executor, and services.
+- `BundleMetadata` (node types, priority, requires_context) lives in Remora-owned mappings, not in `bundle.yaml`.
+
+## Done Criteria
+- [ ] `RemoraConfig` loads once, is frozen, and respects `REMORA_*` overrides.
+- [ ] `remora.example.yaml` documents all top-level fields and bundle metadata mapping.
+- [ ] Configuration tests cover defaults, overrides, and immutability.
+
 ## Current State (What You're Replacing)
 
 - `src/remora/config.py` — 342 lines, deeply nested Pydantic models (ServerConfig, RunnerConfig, DiscoveryConfig, CairnConfig, HubConfig)

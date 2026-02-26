@@ -4,6 +4,15 @@
 
 This step implements **Idea 6: Simplify the Context System** from the design document. It transforms the 5-file context package into a single, elegant EventBus subscriber that implements the Two-Track Memory concept.
 
+## Contract Touchpoints
+- Consumes `ToolResultEvent` and `AgentCompleteEvent` emitted by EventBus.
+- Produces short-track summaries and optional long-track store lookups for prompts.
+
+## Done Criteria
+- [ ] `ContextBuilder.handle()` updates short-track and knowledge maps from events.
+- [ ] `build_context_for()` combines recent actions with optional indexer context.
+- [ ] Unit tests cover rolling window behavior and tool-error summaries.
+
 ## Prerequisites
 
 Before starting this step, complete:

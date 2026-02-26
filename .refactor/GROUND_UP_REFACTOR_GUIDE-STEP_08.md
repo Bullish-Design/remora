@@ -4,6 +4,15 @@
 
 This step implements **Idea 11: Checkpointing via Cairn Snapshots** from the design document. It rewrites checkpointing to use Cairn's native snapshot/restore capabilities instead of the old file-backed KV store approach.
 
+## Contract Touchpoints
+- Uses Cairn workspace snapshots and restores for per-graph checkpointing.
+- Serializes executor state (completed/pending/results) for resume.
+
+## Done Criteria
+- [ ] `CheckpointManager.save()` writes workspace snapshots and metadata JSON.
+- [ ] `CheckpointManager.restore()` reconstructs executor state and workspaces.
+- [ ] Unit tests cover save/restore and serialization round-trips.
+
 ## Prerequisites
 
 Before starting this step, complete:

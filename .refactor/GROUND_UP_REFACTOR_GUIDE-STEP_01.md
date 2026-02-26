@@ -4,6 +4,16 @@
 
 This step implements **Idea 5: Unify the Event System** from the design document. It creates the "nervous system" that will connect all components of the refactored Remora application.
 
+## Contract Touchpoints
+- EventBus must implement `structured_agents.events.observer.Observer` and re-emit kernel events.
+- Human-in-the-loop flows must rely on `HumanInputRequestEvent`/`HumanInputResponseEvent` and `EventBus.wait_for()`.
+- Use the structured-agents event classes directly (no production stubs).
+
+## Done Criteria
+- [ ] `events.py` exports Remora + structured-agents event types without stub fallbacks.
+- [ ] `EventBus` supports `subscribe`, `stream`, and `wait_for` and passes a basic unit test.
+- [ ] Kernel events and Remora graph events emit through the same bus instance.
+
 ## What You're Building
 
 - **`src/remora/events.py`** — All Remora event types as frozen dataclasses + union type
@@ -23,7 +33,7 @@ Define all Remora event types and re-export structured-agents events in a single
 
 ### Implementation
 
-Create `src/remora/events.py` with the following structure:
+Create `src/remora/events.py` with the following structure. Import structured-agents event classes directly; if the dependency is missing, raise an import error rather than defining stub events.
 
 ```python
 """Unified event types for Remora.
@@ -41,62 +51,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Union
 
 # Import structured-agents events
-# Note: These imports will need to be adjusted based on actual structured-agents exports
-# Check structured-agents source for exact event class names
-try:
-    from structured_agents.events import (
-        KernelStartEvent,
-        KernelEndEvent,
-        ToolCallEvent,
-        ToolResultEvent,
-        ModelRequestEvent,
-        ModelResponseEvent,
-    )
-    _HAS_STRUCTURED_AGENTS = True
-except ImportError:
-    # Stub types for type hints when structured-agents not available
-    @dataclass(frozen=True)
-    class KernelStartEvent:
-        """Stub when structured-agents not available."""
-        run_id: str = ""
-        timestamp: float = field(default_factory=time.time)
-    
-    @dataclass(frozen=True)
-    class KernelEndEvent:
-        """Stub when structured-agents not available."""
-        run_id: str = ""
-        timestamp: float = field(default_factory=time.time)
-    
-    @dataclass(frozen=True)
-    class ToolCallEvent:
-        """Stub when structured-agents not available."""
-        name: str = ""
-        call_id: str = ""
-        arguments: dict[str, Any] = field(default_factory=dict)
-        timestamp: float = field(default_factory=time.time)
-    
-    @dataclass(frozen=True)
-    class ToolResultEvent:
-        """Stub when structured-agents not available."""
-        name: str = ""
-        call_id: str = ""
-        output: Any = None
-        is_error: bool = False
-        timestamp: float = field(default_factory=time.time)
-    
-    @dataclass(frozen=True)
-    class ModelRequestEvent:
-        """Stub when structured-agents not available."""
-        prompt: str = ""
-        timestamp: float = field(default_factory=time.time)
-    
-    @dataclass(frozen=True)
-    class ModelResponseEvent:
-        """Stub when structured-agents not available."""
-        content: str = ""
-        timestamp: float = field(default_factory=time.time)
-    
-    _HAS_STRUCTURED_AGENTS = False
+from structured_agents.events import (
+    KernelStartEvent,
+    KernelEndEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+    ModelRequestEvent,
+    ModelResponseEvent,
+    RestartEvent,
+    TurnCompleteEvent,
+)
 
 
 # Conditional import for type hints only

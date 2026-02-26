@@ -2,7 +2,16 @@
 
 ## Overview
 
-This step updates all `bundle.yaml` files to use the structured-agents v0.3 format with Remora-specific extensions. This implements Idea 2 from the design document.
+This step updates all `bundle.yaml` files to use the structured-agents v0.3 format while keeping Remora-specific metadata in `remora.yaml` mappings. This implements Idea 2 from the design document.
+
+## Contract Touchpoints
+- `bundle.yaml` stays pure structured-agents v0.3 (no Remora-only fields).
+- Remora metadata (node types, priority, requires_context) lives in `remora.yaml` `BundleMetadata` mappings.
+
+## Done Criteria
+- [ ] All bundles load via `Agent.from_bundle()` without Remora-specific keys.
+- [ ] Remora metadata mappings exist in `remora.yaml` or equivalent config.
+- [ ] Bundle validation is tested with `structured-agents` bundle loader.
 
 ## Current State (What You're Replacing)
 
@@ -22,7 +31,7 @@ Old format characteristics:
 
 ## Target State
 
-All bundles use structured-agents v0.3 format with Remora extensions:
+All bundles use pure structured-agents v0.3 format; Remora metadata is stored in `remora.yaml`:
 
 ```yaml
 # Standard structured-agents v0.3 fields
@@ -39,12 +48,17 @@ tools:
 
 termination: submit_result
 max_turns: <number>
+```
 
-# Remora-specific extensions
-node_types:
-  - <node_type>
-priority: <number>
-requires_context: true
+Example Remora metadata mapping (in `remora.yaml`):
+
+```yaml
+bundles:
+  metadata:
+    lint:
+      node_types: [function, class]
+      priority: 10
+      requires_context: true
 ```
 
 ## Implementation Steps
@@ -70,11 +84,6 @@ tools:
 termination: submit_result
 max_turns: 8
 
-node_types:
-  - function
-  - class
-priority: 10
-requires_context: true
 ```
 
 ### Step 2: Update docstring bundle
@@ -100,11 +109,6 @@ tools:
 termination: submit_result
 max_turns: 6
 
-node_types:
-  - function
-  - class
-priority: 5
-requires_context: true
 ```
 
 ### Step 3: Update test bundle
@@ -131,10 +135,6 @@ tools:
 termination: submit_result
 max_turns: 10
 
-node_types:
-  - function
-priority: 15
-requires_context: true
 ```
 
 ### Step 4: Update sample_data bundle
@@ -159,10 +159,6 @@ tools:
 termination: submit_result
 max_turns: 6
 
-node_types:
-  - function
-priority: 8
-requires_context: true
 ```
 
 ### Step 5: Update harness bundle
@@ -186,10 +182,6 @@ tools:
 termination: submit_result
 max_turns: 3
 
-node_types:
-  - function
-priority: 1
-requires_context: false
 ```
 
 ### Step 6: Verify bundle loading
@@ -197,12 +189,11 @@ requires_context: false
 Test that each bundle can be loaded by structured-agents:
 
 ```bash
+STRUCTURED_AGENTS_BASE_URL=http://localhost:8000/v1 \
+STRUCTURED_AGENTS_API_KEY=EMPTY \
 python -c "import structured_agents as sa; print(sa.Agent.from_bundle('agents/lint/'))"
-python -c "import structured_agents as sa; print(sa.Agent.from_bundle('agents/docstring/'))"
-python -c "import structured_agents as sa; print(sa.Agent.from_bundle('agents/test/'))"
-python -c "import structured_agents as sa; print(sa.Agent.from_bundle('agents/sample_data/'))"
-python -c "import structured_agents as sa; print(sa.Agent.from_bundle('agents/harness/'))"
 ```
+
 
 ## Field Mapping Reference
 
@@ -217,9 +208,7 @@ python -c "import structured_agents as sa; print(sa.Agent.from_bundle('agents/ha
 | `tools[].registry` + path | `tools` (just path list) |
 | `tools[].inputs_override` | Removed (inferred from .pym) |
 | `tools[].context_providers` | Removed (handled by DataProvider) |
-| N/A | `node_types` (Remora extension) |
-| N/A | `priority` (Remora extension) |
-| N/A | `requires_context` (Remora extension) |
+| N/A | `BundleMetadata` mapping in `remora.yaml` (node_types, priority, requires_context) |
 
 ## Limits Preset Reference
 

@@ -6,6 +6,16 @@ This step converts all 22 `.pym` scripts from the old `@external` pattern to the
 
 **Goal:** Scripts use `Input()` for data injection, return structured result dicts, and have no `@external` for file operations.
 
+## Contract Touchpoints
+- Grail `.pym` scripts must follow Grail rules (imports only from `grail`, `typing`, `__future__`).
+- `Input()` declarations must match variable names and are populated via `CairnDataProvider`/Grail `files`.
+- `@external` is reserved for `ask_user` or true external services.
+
+## Done Criteria
+- [ ] All `.pym` tools use `Input()` for inputs and return structured dicts.
+- [ ] `ask_user` is the only built-in external, wired through EventBus.
+- [ ] `grail check` passes for each script (no E00x errors).
+
 ---
 
 ## 1. Understanding the New Pattern
