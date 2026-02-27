@@ -1,4 +1,9 @@
-from grail import Input
+from grail import Input, external
+
+
+@external
+async def submit_result(summary: str, changed_files: list[str]) -> bool:
+    ...
 
 summary: str = Input("summary")
 issues_fixed: int = Input("issues_fixed")
@@ -10,10 +15,12 @@ workspace_value = workspace_id or "unknown"
 
 try:
     status = "success" if issues_remaining == 0 else "failed"
+    normalized_files = [str(path) for path in changed_files]
+    await submit_result(str(summary), normalized_files)
     result = {
         "status": status,
         "workspace_id": workspace_value,
-        "changed_files": [str(path) for path in changed_files],
+        "changed_files": normalized_files,
         "summary": str(summary),
         "details": {
             "issues_fixed": int(issues_fixed),

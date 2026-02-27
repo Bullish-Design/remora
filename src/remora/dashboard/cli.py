@@ -1,11 +1,12 @@
 """Dashboard CLI entry point."""
 
+import asyncio
 import logging
 from pathlib import Path
 
 import typer
 
-from remora.config import load_config
+from remora.config import ConfigError, load_config
 from remora.dashboard.app import create_app
 
 app = typer.Typer(help="Remora Dashboard - Web UI for agent execution monitoring")
@@ -20,7 +21,7 @@ def run(
     debug: bool = typer.Option(False, help="Enable debug mode"),
     config_path: Path = typer.Option(
         Path("remora.yaml"),
-        exists=True,
+        exists=False,
         file_okay=True,
         dir_okay=False,
         help="Path to remora.yaml config file",
@@ -34,20 +35,24 @@ def run(
 
     try:
         config = load_config(config_path)
-    except Exception:
+    except ConfigError as exc:
+        logger.warning("Failed to load config: %s", exc)
         config = None
 
-    dashboard_config = {}
-    if config:
-        dashboard_config = getattr(config, "dashboard", {})
+    async def _build_app():
+        return await create_app(config=config)
+
+    starlette_app = asyncio.run(_build_app())
 
     import uvicorn
-
-    starlette_app = create_app({**dashboard_config, "debug": debug})
 
     logger.info(f"Starting Remora Dashboard at http://{host}:{port}")
     uvicorn.run(starlette_app, host=host, port=port)
 
 
-if __name__ == "__main__":
+def main() -> None:
     app()
+
+
+if __name__ == "__main__":
+    main()

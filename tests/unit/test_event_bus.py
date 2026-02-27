@@ -30,19 +30,18 @@ async def test_stream_filters_by_type() -> None:
     bus = EventBus()
     results: list[ToolCallEvent] = []
 
-    stream = bus.stream(ToolCallEvent)
-
     async def producer() -> None:
         await bus.emit(ModelResponseEvent(turn=1, duration_ms=0, content="ignored", tool_calls_count=0, usage=None))
         await bus.emit(ToolCallEvent(turn=1, tool_name="foo", call_id="foo-1", arguments={}))
         await bus.emit(ToolCallEvent(turn=2, tool_name="bar", call_id="bar-1", arguments={}))
 
     async def consumer() -> None:
-        for _ in range(2):
-            event = await stream.__anext__()
-            assert isinstance(event, ToolCallEvent)
-            results.append(event)
-        stream.close()
+        async with bus.stream(ToolCallEvent) as events:
+            async for event in events:
+                assert isinstance(event, ToolCallEvent)
+                results.append(event)
+                if len(results) >= 2:
+                    break
 
     consumer_task = asyncio.create_task(consumer())
     await asyncio.sleep(0)

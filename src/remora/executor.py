@@ -1,6 +1,6 @@
 """Graph executor for running agents in dependency order.
 
-Uses structured-agents Agent.from_bundle() for execution.
+Uses structured-agents kernels with Remora-managed tools.
 Configuration passed directly - no global environment variables.
 """
 
@@ -12,10 +12,16 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, cast
 
-from structured_agents import Agent
+from structured_agents.agent import get_response_parser, load_manifest
+from structured_agents.client import build_client
 from structured_agents.events import Event as StructuredEvent
 from structured_agents.events.observer import Observer
-from structured_agents.exceptions import KernelError
+from structured_agents.grammar.pipeline import ConstraintPipeline
+from structured_agents.kernel import AgentKernel
+from structured_agents.models.adapter import ModelAdapter
+from structured_agents.types import Message
+
+from cairn.orchestrator.lifecycle import SUBMISSION_KEY, SubmissionRecord
 
 from remora.config import ErrorPolicy, RemoraConfig
 from remora.context import ContextBuilder
@@ -31,7 +37,9 @@ from remora.events import (
 )
 from remora.event_bus import EventBus
 from remora.graph import AgentNode, get_execution_batches
-from remora.workspace import CairnDataProvider, WorkspaceManager
+from remora.cairn_bridge import CairnWorkspaceService
+from remora.tools.grail import build_virtual_fs, discover_grail_tools
+from remora.workspace import CairnDataProvider
 
 if TYPE_CHECKING:
     from structured_agents.types import RunResult
@@ -145,7 +153,8 @@ class GraphExecutor:
             )
         )
 
-        workspace_mgr = WorkspaceManager(self.config.workspace, graph_id)
+        workspace_service = CairnWorkspaceService(self.config.workspace, graph_id)
+        await workspace_service.initialize(sync=True)
         semaphore = asyncio.Semaphore(self.config.execution.max_concurrency)
 
         try:
@@ -157,7 +166,7 @@ class GraphExecutor:
                 if not runnable:
                     continue
 
-                tasks = [self._execute_agent(n, state, workspace_mgr, semaphore) for n in runnable]
+                tasks = [self._execute_agent(n, state, workspace_service, semaphore) for n in runnable]
 
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -184,7 +193,7 @@ class GraphExecutor:
             raise ExecutionError(f"Graph execution failed: {e}") from e
 
         finally:
-            await workspace_mgr.cleanup()
+            await workspace_service.close()
 
         return state.completed
 
@@ -192,7 +201,7 @@ class GraphExecutor:
         self,
         node: AgentNode,
         state: ExecutorState,
-        workspace_mgr: WorkspaceManager,
+        workspace_service: CairnWorkspaceService,
         semaphore: asyncio.Semaphore,
     ) -> ResultSummary:
         async with semaphore:
@@ -207,18 +216,35 @@ class GraphExecutor:
             )
 
             try:
-                workspace = await workspace_mgr.get_workspace(node.id)
+                workspace = await workspace_service.get_agent_workspace(node.id)
+                externals = workspace_service.get_externals(node.id, workspace)
 
                 data_provider = CairnDataProvider(workspace)
                 files = await data_provider.load_files(node.target)
 
                 prompt = self._build_prompt(node, files)
-                result = await self._run_agent(node, prompt)
+                manifest = load_manifest(node.bundle_path)
+
+                async def files_provider() -> dict[str, str | bytes]:
+                    current_files = await data_provider.load_files(node.target)
+                    return build_virtual_fs(current_files)
+
+                tools = discover_grail_tools(
+                    manifest.agents_dir,
+                    externals=externals,
+                    files_provider=files_provider,
+                )
+
+                result = await self._run_agent(manifest, prompt, tools)
                 agent_result = cast(Any, result)
                 output = getattr(agent_result, "output", None)
                 if output is None:
                     final_message = getattr(agent_result, "final_message", None)
                     output = getattr(final_message, "content", "") if final_message else ""
+
+                submission_summary = await self._load_submission_summary(workspace, node.id)
+                if submission_summary:
+                    output = submission_summary
 
                 summary = ResultSummary(
                     agent_id=node.id,
@@ -256,22 +282,55 @@ class GraphExecutor:
 
                 return summary
 
-    async def _run_agent(self, node: AgentNode, prompt: str) -> "RunResult":
-        agent = await Agent.from_bundle(
-            node.bundle_path,
+    async def _run_agent(self, manifest: Any, prompt: str, tools: list[Any]) -> "RunResult":
+        parser = get_response_parser(manifest.model)
+        pipeline = ConstraintPipeline(manifest.grammar_config) if manifest.grammar_config else None
+
+        adapter = ModelAdapter(
+            name=manifest.model,
+            response_parser=parser,
+            constraint_pipeline=pipeline,
+        )
+
+        model_name = self.config.model.default_model or manifest.model
+        client = build_client(
+            {
+                "base_url": self.config.model.base_url,
+                "api_key": self.config.model.api_key or "EMPTY",
+                "model": model_name,
+                "timeout": self.config.execution.timeout,
+            }
+        )
+
+        kernel = AgentKernel(
+            client=client,
+            adapter=adapter,
+            tools=tools,
             observer=self._observer,
-            base_url=self.config.model.base_url,
-            api_key=self.config.model.api_key or None,
-            model=self.config.model.default_model,
         )
 
         try:
-            return await agent.run(
-                prompt,
+            messages = [
+                Message(role="system", content=manifest.system_prompt),
+                Message(role="user", content=prompt),
+            ]
+            tool_schemas = [tool.schema for tool in tools]
+            if self.config.execution.timeout > 0:
+                return await asyncio.wait_for(
+                    kernel.run(
+                        messages,
+                        tool_schemas,
+                        max_turns=self.config.execution.max_turns,
+                    ),
+                    timeout=self.config.execution.timeout,
+                )
+            return await kernel.run(
+                messages,
+                tool_schemas,
                 max_turns=self.config.execution.max_turns,
             )
         finally:
-            await agent.close()
+            await kernel.close()
 
     def _build_prompt(self, node: AgentNode, files: dict[str, str]) -> str:
         sections: list[str] = []
@@ -291,6 +350,23 @@ class GraphExecutor:
             sections.append(context)
 
         return "\n".join(sections)
+
+    async def _load_submission_summary(self, workspace: Any, agent_id: str) -> str | None:
+        try:
+            repo = workspace.cairn.kv.repository(prefix="", model_type=SubmissionRecord)
+            record = await repo.load(SUBMISSION_KEY)
+        except Exception as exc:
+            logger.debug("No submission record for %s: %s", agent_id, exc)
+            return None
+
+        if not record or not record.submission:
+            return None
+
+        summary = record.submission.get("summary")
+        if not summary:
+            return None
+
+        return str(summary)
 
     async def _process_results(
         self,

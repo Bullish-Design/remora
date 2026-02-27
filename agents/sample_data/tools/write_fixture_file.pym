@@ -2,7 +2,7 @@ from grail import Input
 from typing import Any
 
 fixtures: list[object] = Input("fixtures")
-format: str = Input("format", default="json")
+format_name: str = Input("format", default="json")
 source_code: str = Input("source_code", default="")
 
 
@@ -38,7 +38,8 @@ def _to_json(value: Any) -> str:
 
 def _yaml_escape(value: str) -> str:
     if value == "" or any(ch in value for ch in [":", "#", "\n", "\r", "\t"]):
-        return f'"{value.replace('"', '\\"')}"'
+        escaped = value.replace('"', '\\"')
+        return f'"{escaped}"'
     return value
 
 
@@ -83,7 +84,7 @@ try:
     if not isinstance(fixtures, list) or not fixtures:
         raise ValueError("Fixtures must be a non-empty list.")
 
-    fmt = str(format_input or "json").lower()
+    fmt = str(format_name or "json").lower()
     if fmt in {"yaml", "yml"}:
         content = _to_yaml(fixtures)
         extension = "yaml"

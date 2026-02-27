@@ -1,13 +1,11 @@
-from pathlib import Path
+from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 import yaml
-from typer.testing import CliRunner
 
-from remora.cli import app
-from remora.config import ConfigError, load_config, serialize_config
+from remora.config import ErrorPolicy, RemoraConfig, load_config, serialize_config
 
 
 def _write_config(tmp_path: Path, data: dict) -> Path:
@@ -18,34 +16,44 @@ def _write_config(tmp_path: Path, data: dict) -> Path:
 
 def _sample_payload() -> dict:
     return {
-        "model_base_url": "https://api.local/v1",
-        "api_key": "secret",
-        "bundle_metadata": {
-            "lint": {
-                "path": "agents/lint/bundle.yaml",
-                "node_types": ["function"],
-                "priority": 10,
-                "requires_context": True,
-            }
+        "bundles": {
+            "path": "agents",
+            "mapping": {"function": "lint/bundle.yaml"},
+        },
+        "discovery": {
+            "paths": ["src/"],
+            "languages": ["python"],
+            "max_workers": 2,
+        },
+        "model": {
+            "base_url": "https://api.local/v1",
+            "api_key": "secret",
+            "default_model": "Qwen/Qwen3-4B",
+        },
+        "execution": {
+            "max_concurrency": 2,
+            "error_policy": "continue",
+            "timeout": 120,
+            "max_turns": 5,
+            "truncation_limit": 256,
         },
         "workspace": {"base_path": ".remora/ws", "cleanup_after": "30m"},
     }
 
 
-def test_load_config_reads_metadata(tmp_path: Path) -> None:
+def test_load_config_reads_sections(tmp_path: Path) -> None:
     payload = _sample_payload()
     config_path = _write_config(tmp_path, payload)
 
     cfg = load_config(config_path)
 
-    assert cfg.model_base_url == "https://api.local/v1"
-    assert cfg.api_key == "secret"
-    assert "lint" in cfg.bundle_metadata
-    metadata = cfg.bundle_metadata["lint"]
-    assert metadata.node_types == ("function",)
-    assert metadata.priority == 10
-    assert metadata.requires_context is True
-    assert cfg.workspace.base_path == Path(".remora/ws")
+    assert cfg.model.base_url == "https://api.local/v1"
+    assert cfg.model.api_key == "secret"
+    assert cfg.bundles.mapping["function"] == "lint/bundle.yaml"
+    assert cfg.discovery.paths == ("src/",)
+    assert cfg.discovery.languages == ("python",)
+    assert cfg.execution.error_policy == ErrorPolicy.CONTINUE
+    assert cfg.workspace.base_path == ".remora/ws"
 
 
 def test_serialize_config_round_trips(tmp_path: Path) -> None:
@@ -53,29 +61,20 @@ def test_serialize_config_round_trips(tmp_path: Path) -> None:
     config_path = _write_config(tmp_path, payload)
     cfg = load_config(config_path)
     serialized = serialize_config(cfg)
-    assert serialized == payload
+    assert serialized["bundles"] == payload["bundles"]
+    assert serialized["discovery"] == payload["discovery"]
+    assert serialized["model"] == payload["model"]
+    assert serialized["execution"] == payload["execution"]
+    assert serialized["workspace"] == payload["workspace"]
+    assert serialized["indexer"] == {"watch_paths": ["src/"], "store_path": ".remora/index"}
+    assert serialized["dashboard"] == {"host": "0.0.0.0", "port": 8420}
 
 
-def test_config_command_outputs_yaml(tmp_path: Path) -> None:
-    config_path = _write_config(tmp_path, _sample_payload())
-    runner = CliRunner()
-    result = runner.invoke(app, ["--config", str(config_path)])
-    assert result.exit_code == 0
-    assert "model_base_url" in result.output
-
-
-def test_config_command_supports_json(tmp_path: Path) -> None:
-    config_path = _write_config(tmp_path, _sample_payload())
-    runner = CliRunner()
-    result = runner.invoke(app, ["--config", str(config_path), "--format", "json"])
-    assert result.exit_code == 0
-    assert "{\n" in result.output
-
-
-def test_missing_config_file_errors(tmp_path: Path) -> None:
+def test_missing_config_file_returns_defaults(tmp_path: Path) -> None:
     missing = tmp_path / "remora.yaml"
-    with pytest.raises(ConfigError):
-        load_config(missing)
+    cfg = load_config(missing)
+    assert isinstance(cfg, RemoraConfig)
+    assert cfg.model.base_url == "http://localhost:8000/v1"
 
 
 def test_env_override_modifies_field(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,4 +82,4 @@ def test_env_override_modifies_field(tmp_path: Path, monkeypatch: pytest.MonkeyP
     config_path = _write_config(tmp_path, payload)
     monkeypatch.setenv("REMORA_MODEL_BASE_URL", "https://override/v2")
     cfg = load_config(config_path)
-    assert cfg.model_base_url == "https://override/v2"
+    assert cfg.model.base_url == "https://override/v2"

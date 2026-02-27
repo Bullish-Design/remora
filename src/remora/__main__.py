@@ -1,5 +1,5 @@
 """Module entrypoint for `python -m remora`."""
 
-from remora.cli import app
+from remora.cli import main
 
-app()
+main()

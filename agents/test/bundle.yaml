@@ -1,19 +1,23 @@
 name: test_agent
 model: qwen
-grammar: ebnf
-limits: permissive
 
-system_prompt: |
-  You are a test generation agent. Read the provided Python code,
-  analyze function signatures, check for existing tests, and generate
-  appropriate pytest tests.
+initial_context:
+  system_prompt: |
+    You are a test generation agent. Read the provided Python code,
+    analyze function signatures, check for existing tests, and generate
+    appropriate pytest tests.
 
-tools:
-  - tools/analyze_signature.pym
-  - tools/read_existing_tests.pym
-  - tools/write_test_file.pym
-  - tools/run_tests.pym
-  - tools/submit_result.pym
+grammar:
+  strategy: ebnf
+  allow_parallel_calls: false
+  send_tools_to_api: false
 
+agents_dir: tools
 termination: submit_result
 max_turns: 10
+
+node_types:
+  - function
+  - class
+priority: 10
+requires_context: true

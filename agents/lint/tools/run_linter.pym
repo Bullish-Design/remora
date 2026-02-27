@@ -1,60 +1,83 @@
-from grail import Input, external
+from __future__ import annotations
+
+from grail import Input
 from typing import Any
 
 source_code: str = Input("source_code")
 file_path: str = Input("file_path")
 check_only: bool = Input("check_only", default=True)
-
-
-@external
-async def run_ruff_check(path: str, fix: bool) -> dict[str, Any]:
-    """Run ruff linter check on a file."""
-    ...
+issues_input: list[dict[str, Any]] | None = Input("issues_input", default=None)
+lint_report_json: str = Input("lint_report_json", default="")
+stderr: str = Input("stderr", default="")
+exit_code: int = Input("exit_code", default=0)
 
 
 try:
     if not source_code:
         raise ValueError("Source code is required.")
 
-    args = ["check", "--output-format", "json", "--select", "E,W,F"]
-    if not check_only:
-        args.append("--fix")
-    args.append(file_path)
+    issues_data: Any
+    if issues_input is not None:
+        issues_data = issues_input
+    elif lint_report_json.strip():
+        raise ValueError("lint_report_json is not supported; pass issues_input")
+    else:
+        issues_data = []
 
-    issues_raw = await run_ruff_check(path=file_path, fix=not check_only)
+    lint_error = ""
+    if isinstance(issues_data, dict) and "error" in issues_data:
+        lint_error = (
+            issues_data.get("stderr", "").strip()
+            or str(issues_data.get("error"))
+            or f"ruff exit code {issues_data.get('exit_code')}"
+        )
+    if not lint_error and exit_code not in {0, 1}:
+        lint_error = f"ruff exit code {exit_code}"
 
-    if isinstance(issues_raw, dict) and "error" in issues_raw:
-        error_message = issues_raw.get("stderr", "").strip() or f"ruff exit code {issues_raw.get('exit_code')}"
+    if lint_error:
         result = {
             "result": None,
-            "summary": f"Error: {error_message}",
-            "knowledge_delta": {},
+            "summary": f"Error: {lint_error}",
+            "knowledge_delta": {
+                "lint_target": file_path,
+                "lint_check_only": check_only,
+            },
             "outcome": "error",
-            "error": error_message,
+            "error": lint_error,
         }
     else:
-        issues = []
-        if issues_raw:
-            for issue_data in issues_raw:
-                code_val = issue_data.get("code")
-                if isinstance(code_val, dict):
-                    code_str = str(code_val.get("value", ""))
-                else:
-                    code_str = str(code_val or "")
-                
-                fix_data = issue_data.get("fix")
-                fixable = fix_data is not None
-                if isinstance(fix_data, dict) and fix_data.get("applicability") == "unfixable":
-                    fixable = False
-                    
-                issues.append({
+        if isinstance(issues_data, dict):
+            issues_raw = issues_data.get("issues") or []
+        elif isinstance(issues_data, list):
+            issues_raw = issues_data
+        else:
+            issues_raw = []
+
+        issues: list[dict[str, Any]] = []
+        for issue_data in issues_raw:
+            if not isinstance(issue_data, dict):
+                continue
+            code_val = issue_data.get("code")
+            if isinstance(code_val, dict):
+                code_str = str(code_val.get("value", ""))
+            else:
+                code_str = str(code_val or "")
+
+            fix_data = issue_data.get("fix")
+            fixable = fix_data is not None
+            if isinstance(fix_data, dict) and fix_data.get("applicability") == "unfixable":
+                fixable = False
+
+            issues.append(
+                {
                     "code": code_str,
                     "line": issue_data.get("location", {}).get("row", 0),
                     "col": issue_data.get("location", {}).get("column", 0),
                     "message": str(issue_data.get("message", "")),
-                    "fixable": fixable
-                })
-                
+                    "fixable": fixable,
+                }
+            )
+
         fixable_count = sum(1 for issue in issues if issue.get("fixable"))
         total = len(issues)
         raw_result = {"issues": issues, "total": total, "fixable_count": fixable_count}
@@ -73,6 +96,8 @@ try:
             "knowledge_delta": {
                 "lint_errors_remaining": total,
                 "lint_errors_fixable": fixable_count,
+                "lint_target": file_path,
+                "lint_check_only": check_only,
             },
             "outcome": outcome,
         }

@@ -1,17 +1,22 @@
 name: lint_agent
 model: qwen
-grammar: ebnf
-limits: default
 
-system_prompt: |
-  You are a linting agent. Analyze the provided Python code for issues
-  using the ruff linter, apply fixes when possible, and report results.
+initial_context:
+  system_prompt: |
+    You are a linting agent. Analyze the provided Python code for issues
+    using the ruff linter, apply fixes when possible, and report results.
 
-tools:
-  - tools/read_file.pym
-  - tools/run_linter.pym
-  - tools/apply_fix.pym
-  - tools/submit_result.pym
+grammar:
+  strategy: ebnf
+  allow_parallel_calls: false
+  send_tools_to_api: false
 
+agents_dir: tools
 termination: submit_result
 max_turns: 8
+
+node_types:
+  - function
+  - class
+priority: 10
+requires_context: true

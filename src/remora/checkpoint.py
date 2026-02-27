@@ -1,7 +1,7 @@
-"""Checkpoint management via Cairn snapshots.
+"""Checkpoint management for graph execution state.
 
-Provides save/restore of graph execution state for resumption
-after interruption or failure.
+Workspace snapshots are not supported by the current Cairn API.
+This manager persists execution metadata only.
 """
 
 from __future__ import annotations
@@ -13,8 +13,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from cairn import Workspace as CairnWorkspace
-
 from remora.errors import CheckpointError
 from remora.executor import AgentState, ExecutorState, ResultSummary
 from remora.graph import AgentNode
@@ -24,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class CheckpointManager:
-    """Save and restore graph execution state via Cairn snapshots."""
+    """Save and restore graph execution state metadata."""
 
     def __init__(self, base_path: Path | str):
         self._base_path = Path(base_path)
@@ -54,10 +52,8 @@ class CheckpointManager:
             with open(metadata_path, "w") as f:
                 json.dump(metadata, f, indent=2)
 
-            for agent_id, workspace in workspaces.items():
-                snapshot_name = f"{checkpoint_id}/{agent_id}"
-                await workspace.snapshot(snapshot_name)
-                logger.debug("Saved workspace snapshot: %s", snapshot_name)
+            if workspaces:
+                logger.info("Workspace snapshots are not supported; skipping %d workspaces", len(workspaces))
 
             logger.info("Saved checkpoint: %s", checkpoint_id)
             return checkpoint_id
@@ -85,13 +81,7 @@ class CheckpointManager:
             states = {k: AgentState(v) for k, v in metadata.get("states", {}).items()}
 
             workspaces: dict[str, AgentWorkspace] = {}
-            for agent_id in nodes.keys():
-                snapshot_name = f"{checkpoint_id}/{agent_id}"
-                try:
-                    cairn_ws = await CairnWorkspace.from_snapshot(snapshot_name)
-                    workspaces[agent_id] = AgentWorkspace(cairn_ws, agent_id)
-                except Exception as exc:
-                    logger.warning("Could not restore workspace for %s: %s", agent_id, exc)
+            logger.info("Workspace snapshots are not supported; restoring metadata only")
 
             state = ExecutorState(
                 graph_id=metadata["graph_id"],

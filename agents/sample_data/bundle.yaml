@@ -1,17 +1,23 @@
 name: sample_data_agent
 model: qwen
-grammar: ebnf
-limits: default
 
-system_prompt: |
-  You are a fixture generation agent. Read the provided Python code,
-  analyze function signatures, and generate appropriate fixture data
-  for use in tests.
+initial_context:
+  system_prompt: |
+    You are a fixture generation agent. Read the provided Python code,
+    analyze function signatures, and generate appropriate fixture data
+    for use in tests.
 
-tools:
-  - tools/analyze_signature.pym
-  - tools/write_fixture_file.pym
-  - tools/submit_result.pym
+grammar:
+  strategy: ebnf
+  allow_parallel_calls: false
+  send_tools_to_api: false
 
+agents_dir: tools
 termination: submit_result
 max_turns: 6
+
+node_types:
+  - function
+  - class
+priority: 10
+requires_context: true

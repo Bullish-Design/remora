@@ -18,6 +18,7 @@ from structured_agents.events import (
     ToolResultEvent,
     ModelRequestEvent,
     ModelResponseEvent,
+    TurnCompleteEvent,
 )
 
 if TYPE_CHECKING:
@@ -183,6 +184,7 @@ RemoraEvent = (
     | ToolResultEvent
     | ModelRequestEvent
     | ModelResponseEvent
+    | TurnCompleteEvent
 )
 
 __all__ = [
@@ -205,6 +207,7 @@ __all__ = [
     "ToolResultEvent",
     "ModelRequestEvent",
     "ModelResponseEvent",
+    "TurnCompleteEvent",
     # Union type
     "RemoraEvent",
 ]

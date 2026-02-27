@@ -1,81 +1,75 @@
-from grail import Input, external
+from __future__ import annotations
+
 from typing import Any
+
+from grail import Input
 
 source_code: str = Input("source_code")
 file_path: str = Input("file_path")
 issue_code: str = Input("issue_code")
 line_number: int = Input("line_number")
+fixed_content: str | None = Input("fixed_content", default=None)
+exit_code: int = Input("exit_code", default=0)
+stderr: str = Input("stderr", default="")
 
 
-@external
-async def apply_ruff_fix(path: str, issue_code: str) -> dict[str, Any]:
-    """Apply ruff fix for a specific issue code."""
-    ...
+def _build_partial_result(message: str) -> dict[str, Any]:
+    return {
+        "result": {"success": False, "message": message},
+        "summary": message,
+        "knowledge_delta": {
+            "fix_applied": False,
+            "last_fix_issue_code": issue_code,
+            "last_fix_line": line_number,
+        },
+        "outcome": "partial",
+    }
 
 
 try:
     if not source_code:
         raise ValueError("Source code is required.")
     if not issue_code or line_number <= 0:
-        error_message = "issue_code and line_number are required."
+        raise ValueError("issue_code and line_number are required.")
+
+    candidate_content = fixed_content if fixed_content is not None else source_code
+    if exit_code not in {0, 1}:
+        error_message = stderr.strip() or f"ruff exit code {exit_code}"
         result = {
             "result": {"success": False, "message": error_message},
             "summary": f"Error: {error_message}",
-            "knowledge_delta": {},
+            "knowledge_delta": {
+                "fix_applied": False,
+                "last_fix_issue_code": issue_code,
+                "last_fix_line": line_number,
+            },
             "outcome": "error",
             "error": error_message,
         }
     else:
-        fix_result = await apply_ruff_fix(path=file_path, issue_code=issue_code)
-        exit_code = int(fix_result.get("exit_code", 0) or 0)
-        stderr = str(fix_result.get("stderr", ""))
-        new_content = fix_result.get("content", source_code)
-
-        if exit_code not in {0, 1}:
-            error_message = stderr.strip() or f"ruff exit code {exit_code}"
+        content_changed = candidate_content != source_code
+        if content_changed:
+            message = f"Applied fix for {issue_code} at line {line_number}"
             result = {
-                "result": {"success": False, "message": error_message},
-                "summary": f"Error: {error_message}",
-                "knowledge_delta": {},
-                "outcome": "error",
-                "error": error_message,
+                "result": {
+                    "success": True,
+                    "message": message,
+                    "fixed_code": candidate_content,
+                },
+                "summary": message,
+                "knowledge_delta": {
+                    "fix_applied": True,
+                    "last_fix_issue_code": issue_code,
+                    "last_fix_line": line_number,
+                },
+                "outcome": "success",
+                "written_file": file_path,
+                "content": candidate_content,
             }
         else:
-            success = new_content != source_code
-            if success:
-                message = f"Applied fix for {issue_code} at line {line_number}"
-                summary = message
-                outcome = "success"
-                result = {
-                    "result": {
-                        "success": True, 
-                        "message": message,
-                        "fixed_code": new_content,
-                    },
-                    "summary": summary,
-                    "knowledge_delta": {
-                        "fix_applied": success,
-                        "last_fix_issue_code": issue_code,
-                        "last_fix_line": line_number,
-                    },
-                    "outcome": outcome,
-                    "written_file": file_path,
-                    "content": new_content,
-                }
-            else:
-                message = "No fixable issue at that location"
-                summary = f"No fixable issue for {issue_code} at line {line_number}"
-                outcome = "partial"
-                result = {
-                    "result": {"success": False, "message": message},
-                    "summary": summary,
-                    "knowledge_delta": {
-                        "fix_applied": success,
-                        "last_fix_issue_code": issue_code,
-                        "last_fix_line": line_number,
-                    },
-                    "outcome": outcome,
-                }
+            result = _build_partial_result(
+                f"No fixable issue for {issue_code} at line {line_number}"
+            )
 except Exception as exc:
     result = {
         "result": {"success": False, "message": str(exc)},

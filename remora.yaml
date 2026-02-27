@@ -1,28 +1,28 @@
-model_base_url: "http://remora-server:8000/v1"
-api_key: "EMPTY"
+bundles:
+  path: agents
+  mapping:
+    function: lint/bundle.yaml
+    class: docstring/bundle.yaml
+    method: docstring/bundle.yaml
+    file: lint/bundle.yaml
 
-bundle_metadata:
-  lint:
-    path: agents/lint/bundle.yaml
-    node_types: [function, class]
-    priority: 10
-    requires_context: true
-  docstring:
-    path: agents/docstring/bundle.yaml
-    node_types: [function, class]
-    priority: 20
-    requires_context: true
-  test:
-    path: agents/test/bundle.yaml
-    node_types: [function]
-    priority: 30
-    requires_context: true
-  sample_data:
-    path: agents/sample_data/bundle.yaml
-    node_types: [function]
-    priority: 40
-    requires_context: false
+discovery:
+  paths: ["src/"]
+  languages: ["python"]
+  max_workers: 4
+
+model:
+  base_url: "http://remora-server:8000/v1"
+  api_key: "EMPTY"
+  default_model: "Qwen/Qwen3-4B"
+
+execution:
+  max_concurrency: 4
+  error_policy: skip_downstream
+  timeout: 300
+  max_turns: 8
+  truncation_limit: 1024
 
 workspace:
-  base_path: .remora/workspaces
-  cleanup_after: 1h
+  base_path: ".remora/workspaces"
+  cleanup_after: "1h"

@@ -1,19 +1,13 @@
-from grail import Input, external
+from grail import Input
 from typing import Any
 
 test_file: str = Input("test_file")
 target_file: str = Input("target_file")
-
-
-@external
-async def run_pytest(path: str) -> dict[str, Any]:
-    """Run pytest on a test file and return results."""
-    ...
-
-
-def _parse_number(text: str) -> int:
-    digits = [ch for ch in text if ch.isdigit()]
-    return int("".join(digits)) if digits else 0
+xml_report: str = Input("xml_report", default="")
+stdout: str = Input("stdout", default="")
+stderr: str = Input("stderr", default="")
+exit_code: int = Input("exit_code", default=0)
+structured_report: dict[str, Any] | None = Input("structured_report", default=None)
 
 
 def _read_attr(tag: str, key: str) -> int:
@@ -112,17 +106,24 @@ try:
     if not test_file:
         raise ValueError("Test file path is required.")
 
-    test_result = await run_pytest(path=test_file)
-    stdout = test_result.get("stdout", "")
-    stderr = test_result.get("stderr", "")
-    exit_code = test_result.get("exit_code", 0)
-    xml_report = test_result.get("xml_report", "")
+    if not structured_report and not xml_report.strip():
+        raise ValueError("Test report data is required.")
 
-    if not xml_report:
-        raise RuntimeError(stderr.strip() or stdout.strip() or "Pytest report not generated.")
-
-    totals = _parse_totals(xml_report)
-    failures = _parse_failures(xml_report)
+    if structured_report:
+        totals = {
+            "tests": int(structured_report.get("tests", 0)),
+            "failures": int(structured_report.get("failures", 0)),
+            "errors": int(structured_report.get("errors", 0)),
+            "skipped": int(structured_report.get("skipped", 0)),
+        }
+        failures = [
+            dict(item)
+            for item in structured_report.get("failures", [])
+            if isinstance(item, dict)
+        ]
+    else:
+        totals = _parse_totals(xml_report)
+        failures = _parse_failures(xml_report)
 
     passed = totals["tests"] - totals["failures"] - totals["errors"] - totals["skipped"]
     passed_count = max(passed, 0)
@@ -161,6 +162,8 @@ try:
             "tests_passed": raw_result["passed"],
             "tests_failed": raw_result["failed"],
             "tests_errors": raw_result["errors"],
+            "test_file": test_file,
+            "target_file": target_file,
         },
         "outcome": outcome,
     }

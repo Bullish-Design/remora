@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Iterator
 
 import tree_sitter
-from tree_sitter import Language, Parser
+from tree_sitter import Language, Parser, QueryCursor
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,9 @@ def _get_parser(language: str) -> Parser | None:
         return None
 
 
+NAME_CAPTURE_SUFFIXES = (".name", ".lang")
+
+
 def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
     """Parse a single file and extract nodes using tree-sitter queries."""
     parser = _get_parser(language)
@@ -146,13 +149,13 @@ def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
 
     # Extract matches
     nodes = []
-    captures = query.captures(tree.root_node)
+    captures = _collect_captures(query, tree.root_node)
 
     for node, capture_name in captures:
-        if capture_name.endswith(".name"):
+        if capture_name.endswith(NAME_CAPTURE_SUFFIXES):
             continue  # Skip name-only captures
 
-        node_type = capture_name.split(".")[-1]
+        node_type = capture_name.split(".", 1)[0]
         name = _extract_name(node, captures)
 
         cst_node = CSTNode(
@@ -176,11 +179,29 @@ def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
     return nodes
 
 
+def _collect_captures(query: tree_sitter.Query, root: tree_sitter.Node) -> list[tuple[tree_sitter.Node, str]]:
+    """Collect captures with compatibility across tree-sitter versions."""
+    try:
+        captures = query.captures(root)
+    except AttributeError:
+        cursor = QueryCursor(query)
+        captures = cursor.captures(root)
+
+    if isinstance(captures, dict):
+        flat: list[tuple[tree_sitter.Node, str]] = []
+        for name, nodes in captures.items():
+            for node in nodes:
+                flat.append((node, name))
+        return flat
+
+    return list(captures)
+
+
 def _extract_name(node: tree_sitter.Node, captures: list) -> str:
     """Extract the name for a captured node."""
     # Look for corresponding .name capture
     for n, name in captures:
-        if name.endswith(".name") and n.parent == node:
+        if name.endswith(NAME_CAPTURE_SUFFIXES) and n.parent == node:
             return n.text.decode() if n.text else "unknown"
 
     # Try common child names

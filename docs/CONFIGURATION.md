@@ -1,202 +1,110 @@
 # Configuration Schema
 
-This document describes the `remora.yaml` schema, defaults, and how CLI overrides apply.
+This document describes the `remora.yaml` schema for Remora v0.4.3 and how to configure core components.
 
 ## File Resolution
 
 - Default filename: `remora.yaml` in the current working directory.
-- Use `remora analyze --config path/to/remora.yaml` to load a specific file.
+- CLI commands accept `--config` where supported.
 
 ## Example
 
 ```yaml
-agents_dir: agents
-hub_mode: disabled
-
-server:
-  base_url: http://remora-server:8000/v1
-  api_key: EMPTY
-  timeout: 120
-  default_adapter: google/functiongemma-270m-it
-  retry:
-    max_attempts: 3
-    initial_delay: 1.0
-    max_delay: 30.0
-    backoff_factor: 2.0
+bundles:
+  path: agents
+  mapping:
+    function: lint/bundle.yaml
+    class: docstring/bundle.yaml
+    method: docstring/bundle.yaml
+    file: lint/bundle.yaml
 
 discovery:
-  language: python
-  query_pack: remora_core
-  query_dir: null
+  paths: ["src/"]
+  languages: ["python"]
+  max_workers: 4
 
-operations:
-  lint:
-    enabled: true
-    auto_accept: false
-    subagent: lint
-    priority: normal
-  test:
-    enabled: true
-    auto_accept: false
-    subagent: test
-    priority: high
-  docstring:
-    enabled: true
-    auto_accept: false
-    subagent: docstring
-    priority: normal
-    style: google
-  sample_data:
-    enabled: false
-    auto_accept: false
-    subagent: sample_data
-    priority: low
+model:
+  base_url: "http://remora-server:8000/v1"
+  api_key: "EMPTY"
+  default_model: "Qwen/Qwen3-4B"
 
-runner:
-  max_turns: 20
-  max_tokens: 4096
-  temperature: 0.1
-  tool_choice: auto
-  max_history_messages: 50
-
-cairn:
-  home: null
-  max_concurrent_agents: 16
+execution:
+  max_concurrency: 4
+  error_policy: skip_downstream
   timeout: 300
-  limits_preset: default
-  limits_override: {}
-  pool_workers: 4
-  max_queue_size: 100
-  workspace_cache_size: 100
-  enable_snapshots: false
-  max_snapshots: 50
-  max_resumes_per_script: 5
+  max_turns: 8
+  truncation_limit: 1024
 
-event_stream:
-  enabled: false
-  output: null
-  control_file: null
-  include_payloads: true
-  max_payload_chars: 4000
+indexer:
+  watch_paths: ["src/"]
+  store_path: ".remora/index"
 
-llm_log:
-  enabled: false
-  output: null
-  include_full_prompts: false
-  max_content_lines: 100
+dashboard:
+  host: "0.0.0.0"
+  port: 8420
 
-watch:
-  extensions: [".py"]
-  ignore_patterns:
-    - __pycache__
-    - .git
-    - .jj
-    - .venv
-    - node_modules
-    - .remora_cache
-    - .agentfs
-  debounce_ms: 500
+workspace:
+  base_path: ".remora/workspaces"
+  cleanup_after: "1h"
 ```
 
 ## Top-Level Keys
 
-### `agents_dir`
+### `bundles`
+Mapping from node type to bundle path (single bundle per node type).
 
-Path to the `agents/` directory containing bundle definitions. Relative paths are resolved against the config file directory.
-
-### `hub_mode`
-
-Hub daemon execution context setting.
-
-- `hub_mode`: Can be `in-process`, `daemon`, or `disabled` (default). Determines how the state synchronization Hub connects. 
-
-### `server`
-
-Settings for the OpenAI-compatible inference server.
-
-- `base_url`: Server base URL.
-- `api_key`: API token (use `EMPTY` for local servers).
-- `timeout`: Request timeout in seconds.
-- `default_adapter`: Default model/adapter identifier.
-- `retry`: Retry policy for transient failures (used by downstream tooling).
+- `path`: base directory for bundles (default: `agents/`).
+- `mapping`: map node type string (e.g., `function`, `class`, `file`) to a bundle path relative to `path`.
 
 ### `discovery`
+Tree-sitter discovery settings.
 
-Tree-sitter discovery settings. Note: Language support is now configured via the `LANGUAGES` dict in `config.py`.
+- `paths`: list of paths (files or directories) to scan.
+- `languages`: list of languages (by name, e.g., `python`). If omitted, uses extension mapping.
+- `max_workers`: thread pool size for parsing.
 
-- `query_pack`: Query pack directory name (default: `remora_core`).
-- `query_dir`: Optional custom query directory; `null` uses built-in queries.
+### `model`
+Default model server configuration.
 
-### `operations`
+- `base_url`: OpenAI-compatible API base URL.
+- `api_key`: API token (use `EMPTY` for local servers).
+- `default_model`: model identifier passed to structured-agents.
 
-Mapping of operation name → operation config. Additional keys are allowed and forwarded to the bundle context.
+### `execution`
+Graph execution behavior.
 
-Common fields:
-- `enabled`: Enable/disable the operation.
-- `auto_accept`: Auto-merge successful workspaces.
-- `subagent`: Directory containing `bundle.yaml` (relative to `agents_dir`).
-- `model_id`: Optional adapter override.
-- `priority`: `low`, `normal`, or `high`.
+- `max_concurrency`: maximum concurrent agents.
+- `error_policy`: `stop_graph`, `skip_downstream`, or `continue`.
+- `timeout`: per-agent timeout in seconds.
+- `max_turns`: max turns for structured-agents kernel.
+- `truncation_limit`: output truncation for summaries.
 
-### `runner`
+### `indexer`
+Indexer daemon configuration.
 
-Model runner settings.
+- `watch_paths`: list of paths to monitor for changes.
+- `store_path`: path to the indexer storage.
 
-- `max_turns`: Maximum turns before aborting.
-- `max_tokens`: Completion token cap.
-- `temperature`: Sampling temperature.
-- `tool_choice`: `auto`, `required`, or `none` (passed to structured-agents).
-- `max_history_messages`: Maximum conversation history retained by the kernel.
+### `dashboard`
+Dashboard server configuration.
 
-### `cairn`
+- `host`: bind host.
+- `port`: bind port.
 
-Grail/Cairn execution settings.
+### `workspace`
+Workspace settings.
 
-- `home`: Cache directory (defaults to `~/.cache/remora`).
-- `max_concurrent_agents`: Concurrency limit.
-- `timeout`: Tool execution timeout (seconds).
-- `limits_preset`: `strict`, `default`, or `permissive`.
-- `limits_override`: Dict merged into preset limits.
-- `pool_workers`: Process pool size for tool execution.
-- `max_queue_size`: Task queue capacity.
-- `workspace_cache_size`: Workspace LRU cache size.
-- `enable_snapshots`: Enable pause/resume snapshots.
-- `max_snapshots`: Maximum active snapshots.
-- `max_resumes_per_script`: Resume attempts per snapshot.
+- `base_path`: directory for workspace storage.
+- `cleanup_after`: duration string used by cleanup routines.
 
-### `event_stream`
+## Environment Overrides
 
-Structured event streaming (JSONL).
+Environment variables override config values on load:
 
-- `enabled`: Enable event stream output.
-- `output`: JSONL output path (defaults to `~/.cache/remora/events.jsonl`).
-- `control_file`: Optional control file used by `remora-tui`.
-- `include_payloads`: Include full payloads when true.
-- `max_payload_chars`: Truncation limit per payload.
-
-### `llm_log`
-
-Human-readable conversation logs.
-
-- `enabled`: Enable transcript logs.
-- `output`: File or directory path (defaults to cache dir).
-- `include_full_prompts`: Include full prompt text.
-- `max_content_lines`: Output line limit per message.
-
-### `watch`
-
-Settings for `remora watch`.
-
-- `extensions`: File extensions to monitor.
-- `ignore_patterns`: Path components to skip.
-- `debounce_ms`: Debounce window in milliseconds.
-
-## CLI Overrides
-
-CLI flags override configuration values at runtime. Example:
-
-```
-remora analyze --max-turns 10 --query-pack remora_core
-```
-
-**Note:** The discovery module now automatically discovers all configured languages (Python, TOML, Markdown) based on the `LANGUAGES` config. The `--discovery-language` flag has been removed.
+- `REMORA_MODEL_BASE_URL`
+- `REMORA_MODEL_API_KEY`
+- `REMORA_MODEL_DEFAULT`
+- `REMORA_EXECUTION_MAX_CONCURRENCY`
+- `REMORA_EXECUTION_TIMEOUT`
+- `REMORA_DASHBOARD_PORT`
+- `REMORA_WORKSPACE_BASE_PATH`

@@ -6,7 +6,7 @@ from structured_agents.events import ToolResultEvent
 
 from remora.context import ContextBuilder
 from remora.events import AgentCompleteEvent
-from remora.workspace import ResultSummary
+from remora.executor import ResultSummary
 
 
 def _dummy_node(node_id: str) -> SimpleNamespace:
@@ -39,7 +39,7 @@ async def test_agent_complete_event_accumulates_knowledge() -> None:
     event = AgentCompleteEvent(
         graph_id="graph-1",
         agent_id="agent-1",
-        result={"summary": "Refactored foo"},
+        result_summary="Refactored foo",
     )
 
     await builder.handle(event)
@@ -53,14 +53,8 @@ def test_ingest_summary_populates_long_track() -> None:
     summary = ResultSummary(
         agent_id="agent-2",
         success=True,
-        turn_count=3,
-        termination_reason="no_tool_calls",
-        final_message="Done",
-        payload={"status": "success"},
-        writes=[],
-        deleted_files=[],
-        errors=[],
-        tool_results=[],
+        output="Done",
+        error=None,
     )
 
     builder.ingest_summary(summary)

@@ -232,11 +232,20 @@ def _build_config(data: dict[str, Any]) -> RemoraConfig:
 def serialize_config(config: RemoraConfig) -> dict[str, Any]:
     """Serialize the configuration to a dictionary."""
 
+    def normalize(value: Any) -> Any:
+        if isinstance(value, tuple):
+            return [normalize(item) for item in value]
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        if isinstance(value, dict):
+            return {key: normalize(item) for key, item in value.items()}
+        return value
+
     def section_to_dict(section: Any) -> dict[str, Any]:
         data = asdict(section)
         if isinstance(section, ExecutionConfig):
             data["error_policy"] = section.error_policy.value
-        return data
+        return normalize(data)
 
     return {
         "discovery": section_to_dict(config.discovery),

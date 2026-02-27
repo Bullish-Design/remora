@@ -1,16 +1,23 @@
 name: harness_agent
 model: qwen
-grammar: ebnf
-limits: strict
 
-system_prompt: |
-  You are a tool invocation testing harness. Given a request payload,
-  call the specified tool with the payload and return a summary of
-  the result. This is used for testing agent tool calls.
+initial_context:
+  system_prompt: |
+    You are a tool invocation testing harness. Given a request payload,
+    call the specified tool with the payload and return a summary of
+    the result. This is used for testing agent tool calls.
 
-tools:
-  - tools/simple_tool.pym
-  - tools/submit_result.pym
+grammar:
+  strategy: ebnf
+  allow_parallel_calls: false
+  send_tools_to_api: false
 
+agents_dir: tools
 termination: submit_result
 max_turns: 3
+
+node_types:
+  - function
+  - class
+priority: 10
+requires_context: true

@@ -47,6 +47,7 @@ from remora.events import (
     RemoraEvent,
     ToolCallEvent,
     ToolResultEvent,
+    TurnCompleteEvent,
 )
 from remora.event_bus import EventBus, EventHandler, get_event_bus, reset_event_bus
 from remora.graph import AgentNode, build_graph, get_execution_batches
@@ -54,6 +55,7 @@ from remora.context import ContextBuilder, RecentAction
 from remora.executor import ExecutorState, GraphExecutor
 from remora.workspace import AgentWorkspace, CairnDataProvider, CairnResultHandler, WorkspaceManager
 from remora.checkpoint import CheckpointManager
+from remora.cairn_bridge import CairnWorkspaceService
 from remora.dashboard.app import DashboardApp, create_app
 
 
@@ -98,6 +100,7 @@ __all__ = [
     "ToolResultEvent",
     "ModelRequestEvent",
     "ModelResponseEvent",
+    "TurnCompleteEvent",
     "RemoraEvent",
     "EventBus",
     "EventHandler",
@@ -111,11 +114,11 @@ __all__ = [
     "ExecutionConfig",
     "ExecutorState",
     "GraphExecutor",
-    "execute_agent",
     "AgentWorkspace",
     "WorkspaceManager",
     "CairnDataProvider",
     "CairnResultHandler",
+    "CairnWorkspaceService",
     "CheckpointManager",
     "DashboardApp",
     "create_app",

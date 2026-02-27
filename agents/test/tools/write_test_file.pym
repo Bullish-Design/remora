@@ -1,7 +1,7 @@
 from grail import Input
 
 content: str = Input("content")
-path: str = Input("path")
+path_value: str = Input("path")
 
 
 try:

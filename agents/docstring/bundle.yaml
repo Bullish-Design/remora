@@ -1,18 +1,23 @@
 name: docstring_agent
 model: qwen
-grammar: ebnf
-limits: default
 
-system_prompt: |
-  You are a docstring generation agent. Read the provided Python code,
-  analyze existing docstrings and type hints, then write or update
-  appropriate docstrings in the requested style.
+initial_context:
+  system_prompt: |
+    You are a docstring generation agent. Read the provided Python code,
+    analyze existing docstrings and type hints, then write or update
+    appropriate docstrings in the requested style.
 
-tools:
-  - tools/read_current_docstring.pym
-  - tools/read_type_hints.pym
-  - tools/write_docstring.pym
-  - tools/submit_result.pym
+grammar:
+  strategy: ebnf
+  allow_parallel_calls: false
+  send_tools_to_api: false
 
+agents_dir: tools
 termination: submit_result
 max_turns: 6
+
+node_types:
+  - function
+  - class
+priority: 10
+requires_context: true

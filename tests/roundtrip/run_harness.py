@@ -26,7 +26,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from remora.discovery import NodeType, TreeSitterDiscoverer
+from remora.discovery import NodeType, discover
 
 HARNESS_DIR = Path(__file__).resolve().parent
 INPUT_DIR = HARNESS_DIR / "input"
@@ -75,15 +75,7 @@ def main() -> None:
         print(f"-- {input_file.name} ", end="")
 
         try:
-            discoverer = TreeSitterDiscoverer(
-                root_dirs=[input_file],
-                language="python",
-                query_pack="remora_core",
-            )
-            nodes = discoverer.discover()
-
-            if filter_types:
-                nodes = [n for n in nodes if n.node_type.value in filter_types]
+            nodes = discover([input_file], languages=["python"], node_types=list(filter_types) if filter_types else None)
 
             if not nodes:
                 out_path = OUTPUT_DIR / f"{stem}_out"
@@ -123,7 +115,7 @@ def main() -> None:
 def _format_node(node) -> str:
     """Format a CSTNode for output."""
     header = (
-        f"node_type: {node.node_type.value}\n"
+        f"node_type: {node.node_type}\n"
         f"name: {node.name}\n"
         f"full_name: {node.full_name}\n"
         f"node_id: {node.node_id}\n"

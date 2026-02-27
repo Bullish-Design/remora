@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from remora.discovery import discover
+
 
 def _create_test_files(directory: Path, count: int, lines_per_file: int) -> None:
     """Create test Python files for benchmarking."""
@@ -50,43 +52,16 @@ class TestDiscoveryPerformance:
 
     def test_discover_small_codebase(self, benchmark, small_codebase: Path) -> None:
         """Benchmark discovery on small codebase."""
-        from remora.discovery import TreeSitterDiscoverer
-
-        discoverer = TreeSitterDiscoverer(
-            root_dirs=[small_codebase],
-            languages={".py": "tree_sitter_python"},
-            query_pack="remora_core",
-        )
-
-        result = benchmark(discoverer.discover)
-
+        result = benchmark(lambda: discover([small_codebase], languages=["python"]))
         assert len(result) > 0
 
     def test_discover_medium_codebase(self, benchmark, medium_codebase: Path) -> None:
         """Benchmark discovery on medium codebase."""
-        from remora.discovery import TreeSitterDiscoverer
-
-        discoverer = TreeSitterDiscoverer(
-            root_dirs=[medium_codebase],
-            languages={".py": "tree_sitter_python"},
-            query_pack="remora_core",
-        )
-
-        result = benchmark(discoverer.discover)
-
+        result = benchmark(lambda: discover([medium_codebase], languages=["python"]))
         assert len(result) > 0
 
     @pytest.mark.slow
     def test_discover_large_codebase(self, benchmark, large_codebase: Path) -> None:
         """Benchmark discovery on large codebase."""
-        from remora.discovery import TreeSitterDiscoverer
-
-        discoverer = TreeSitterDiscoverer(
-            root_dirs=[large_codebase],
-            languages={".py": "tree_sitter_python"},
-            query_pack="remora_core",
-        )
-
-        result = benchmark(discoverer.discover)
-
+        result = benchmark(lambda: discover([large_codebase], languages=["python"]))
         assert len(result) > 0

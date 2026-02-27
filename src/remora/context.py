@@ -57,7 +57,7 @@ class ContextBuilder:
     async def handle(self, event: RemoraEvent) -> None:
         """EventBus subscriber - updates context from events."""
         match event:
-            case ToolResultEvent(name=name, output=output, is_error=is_error):
+            case ToolResultEvent(tool_name=name, output_preview=output, is_error=is_error):
                 self._recent.append(
                     RecentAction(
                         tool=name,
@@ -120,6 +120,33 @@ class ContextBuilder:
             lines.append(f"[{status}] {action.tool}: {action.summary}")
 
         return "\n".join(lines)
+
+    def get_recent_actions(self) -> list[RecentAction]:
+        """Return a snapshot of recent actions for testing or inspection."""
+        return list(self._recent)
+
+    def get_knowledge(self) -> dict[str, str]:
+        """Return a snapshot of accumulated knowledge."""
+        return dict(self._knowledge)
+
+    def ingest_summary(self, summary: Any) -> None:
+        """Ingest an external summary record into the long track."""
+        agent_id = getattr(summary, "agent_id", None)
+        if not agent_id:
+            return
+
+        success = getattr(summary, "success", None)
+        output = getattr(summary, "output", "")
+        error = getattr(summary, "error", None)
+
+        if success is True:
+            text = f"success: {str(output)[:200]}"
+        elif success is False:
+            text = f"error: {str(error)[:200]}" if error else "error: unknown"
+        else:
+            text = str(output)[:200]
+
+        self._knowledge[str(agent_id)] = text
 
     def clear(self) -> None:
         """Clear all context. Used for testing or new graph runs."""

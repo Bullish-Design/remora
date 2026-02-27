@@ -1,8 +1,7 @@
 """Cairn workspace integration.
 
 Provides thin wrappers around Cairn for agent workspace management.
-Replaces WorkspaceKV, GraphWorkspace, and WorkspaceManager with
-direct Cairn usage.
+Remora does not import fsdantic directly; workspace access flows through Cairn.
 """
 
 from __future__ import annotations
@@ -11,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from cairn import Workspace as CairnWorkspace
+from cairn.runtime import workspace_manager as cairn_workspace_manager
 
 from remora.config import WorkspaceConfig
 from remora.discovery import CSTNode
@@ -26,42 +25,56 @@ class AgentWorkspace:
     Wraps a Cairn workspace with agent-specific convenience methods.
     """
 
-    def __init__(self, workspace: CairnWorkspace, agent_id: str):
+    def __init__(self, workspace: Any, agent_id: str, stable_workspace: Any | None = None):
         self._workspace = workspace
         self._agent_id = agent_id
+        self._stable_workspace = stable_workspace
 
     @property
-    def cairn(self) -> CairnWorkspace:
+    def cairn(self) -> Any:
         """Access underlying Cairn workspace."""
         return self._workspace
 
     async def read(self, path: str) -> str:
         """Read a file from the workspace."""
-        return await self._workspace.read(path)
+        try:
+            return await self._workspace.files.read(path, mode="text")
+        except Exception:
+            if self._stable_workspace is None:
+                raise
+            return await self._stable_workspace.files.read(path, mode="text")
 
-    async def write(self, path: str, content: str) -> None:
+    async def write(self, path: str, content: str | bytes) -> None:
         """Write a file to the workspace (CoW isolated)."""
-        await self._workspace.write(path, content)
+        await self._workspace.files.write(path, content)
 
     async def exists(self, path: str) -> bool:
         """Check if a file exists in the workspace."""
-        return await self._workspace.exists(path)
+        if await self._workspace.files.exists(path):
+            return True
+        if self._stable_workspace is None:
+            return False
+        return await self._stable_workspace.files.exists(path)
+
+    async def list_dir(self, path: str = ".") -> list[str]:
+        """List directory entries in the workspace."""
+        return await self._workspace.files.list_dir(path, output="name")
 
     async def accept(self) -> None:
         """Accept all changes in this workspace."""
-        await self._workspace.accept()
+        raise WorkspaceError("Accept/reject is not supported by the Cairn workspace API")
 
     async def reject(self) -> None:
         """Reject all changes and reset to base state."""
-        await self._workspace.reject()
+        raise WorkspaceError("Accept/reject is not supported by the Cairn workspace API")
 
     async def snapshot(self, name: str) -> str:
         """Create a named snapshot of current state."""
-        return await self._workspace.snapshot(name)
+        raise WorkspaceError("Snapshots are not supported by the Cairn workspace API")
 
     async def restore(self, snapshot_id: str) -> None:
         """Restore from a named snapshot."""
-        await self._workspace.restore(snapshot_id)
+        raise WorkspaceError("Snapshots are not supported by the Cairn workspace API")
 
 
 class WorkspaceManager:
@@ -75,17 +88,19 @@ class WorkspaceManager:
         self._graph_id = graph_id
         self._base_path = Path(config.base_path) / graph_id
         self._workspaces: dict[str, AgentWorkspace] = {}
+        self._manager = cairn_workspace_manager.WorkspaceManager()
 
     async def get_workspace(self, agent_id: str) -> AgentWorkspace:
         """Get or create a workspace for an agent."""
         if agent_id in self._workspaces:
             return self._workspaces[agent_id]
 
-        workspace_path = self._base_path / agent_id
-        workspace_path.mkdir(parents=True, exist_ok=True)
+        workspace_path = self._base_path / f"{agent_id}.db"
+        workspace_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            cairn_ws = await CairnWorkspace.create(workspace_path)
+            cairn_ws = await cairn_workspace_manager._open_workspace(workspace_path, readonly=False)
+            self._manager.track_workspace(cairn_ws)
         except Exception as e:
             raise WorkspaceError(f"Failed to create workspace for {agent_id}: {e}")
 
@@ -95,11 +110,10 @@ class WorkspaceManager:
 
     async def cleanup(self) -> None:
         """Clean up all workspaces."""
-        for workspace in self._workspaces.values():
-            try:
-                await workspace.cairn.close()
-            except Exception as e:
-                logger.warning("Workspace cleanup error: %s", e)
+        try:
+            await self._manager.close_all()
+        except Exception as e:
+            logger.warning("Workspace cleanup error: %s", e)
         self._workspaces.clear()
 
 

@@ -8,10 +8,10 @@ from remora import cli
 def test_main_invokes_cli(monkeypatch) -> None:
     called: list[bool] = []
 
-    def fake_app() -> None:
+    def fake_main() -> None:
         called.append(True)
 
-    monkeypatch.setattr(cli, "app", fake_app)
+    monkeypatch.setattr(cli, "main", fake_main)
 
     runpy.run_module("remora", run_name="__main__")
 

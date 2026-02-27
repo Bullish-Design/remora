@@ -1,106 +1,39 @@
 # Remora configuration example
 # Copy to remora.yaml and adjust as needed.
 
+bundles:
+  path: agents
+  mapping:
+    function: lint/bundle.yaml
+    class: docstring/bundle.yaml
+    method: docstring/bundle.yaml
+    file: lint/bundle.yaml
+
 discovery:
-  language: python
-  query_pack: remora_core
-  # query_dir: null  # Use built-in queries (default). Set to override.
+  paths: ["src/"]
+  languages: ["python"]
+  max_workers: 4
 
-agents_dir: agents
-
-# vLLM server on your Tailscale network
-server:
+model:
   base_url: "http://remora-server:8000/v1"
   api_key: "EMPTY"
-  timeout: 120
-  default_adapter: "Qwen/Qwen3-4B-Instruct-2507-FP8"
-  retry:
-    max_attempts: 3
-    initial_delay: 1.0
-    max_delay: 30.0
-    backoff_factor: 2.0
+  default_model: "Qwen/Qwen3-4B"
 
-operations:
-  lint:
-    enabled: true
-    priority: "normal"
-    auto_accept: false
-    subagent: lint
-    # model_id here is the LoRA adapter name on the server
-    # omit to use server.default_adapter
-    # model_id: "lint"
-
-  test:
-    enabled: true
-    priority: "high"
-    auto_accept: false
-    subagent: test
-
-  docstring:
-    enabled: true
-    priority: "normal"
-    auto_accept: false
-    subagent: docstring
-    style: google
-
-  sample_data:
-    enabled: false
-    priority: "low"
-    auto_accept: false
-    subagent: sample_data
-
-runner:
-  max_turns: 20
-  max_tokens: 4096
-  temperature: 0.1
-  tool_choice: "auto"  # "required" | "auto" | "none"
-  max_history_messages: 50
-
-cairn:
-  home: null
-  max_concurrent_agents: 16
+execution:
+  max_concurrency: 4
+  error_policy: skip_downstream
   timeout: 300
-  pool_workers: 4
-  limits_preset: "default"  # strict | default | permissive
-  max_queue_size: 100
-  workspace_cache_size: 100
-  # limits_override:
-  #   max_memory_mb: 512
+  max_turns: 8
+  truncation_limit: 1024
 
-event_stream:
-  enabled: false
-  output: null
-  control_file: null
-  include_payloads: true
-  max_payload_chars: 4000
+indexer:
+  watch_paths: ["src/"]
+  store_path: ".remora/index"
 
-llm_log:
-  enabled: false
-  output: null
-  include_full_prompts: false
-  max_content_lines: 100
+dashboard:
+  host: "0.0.0.0"
+  port: 8420
 
-hub:
-  mode: disabled  # "in-process" | "daemon" | "disabled"
-  # db_path: .remora/hub.db  # default
-  index_on_startup: true
-  watch_for_changes: true
-  stale_threshold_seconds: 5.0
-  max_adhoc_files: 5
-  enable_cross_file_analysis: false
-  # cross_file_analysis_depth: 2
-  # batch_size: 50
-  # index_delay_ms: 100
-  log_level: INFO
-
-watch:
-  extensions: [".py"]
-  ignore_patterns:
-    - "__pycache__"
-    - ".git"
-    - ".jj"
-    - ".venv"
-    - "node_modules"
-    - ".remora_cache"
-    - ".agentfs"
-  debounce_ms: 500
+workspace:
+  base_path: ".remora/workspaces"
+  cleanup_after: "1h"

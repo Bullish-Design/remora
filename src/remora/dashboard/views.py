@@ -1,11 +1,32 @@
 """Dashboard views - Datastar-powered web UI."""
 
+from __future__ import annotations
+
+import asyncio
 import html
 import json
+import logging
+import uuid
+from pathlib import Path
+from typing import Any
 
 from datastar_py import attribute_generator as data
+from datastar_py import ServerSentEventGenerator as SSE
+from datastar_py.starlette import DatastarResponse, datastar_response
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
+from starlette.routing import Route
+
+from remora.config import RemoraConfig
+from remora.context import ContextBuilder
+from remora.dashboard.state import DashboardState
+from remora.discovery import discover
+from remora.executor import GraphExecutor
+from remora.event_bus import EventBus
+from remora.events import HumanInputResponseEvent
+from remora.graph import build_graph
+
+logger = logging.getLogger(__name__)
 
 
 def render_tag(tag, content="", **attrs):
@@ -20,12 +41,12 @@ def page(title="Remora Dashboard", *body_content):
     """Base HTML shell with Datastar loaded."""
     body_attrs = data.init("@get('/subscribe')")
     return f"""<!DOCTYPE html>
-<html lang="en">
+<html lang=\"en\">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset=\"UTF-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
     <title>{title}</title>
-    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.7/bundles/datastar.js"></script>
+    <script type=\"module\" src=\"https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.7/bundles/datastar.js\"></script>
     <style>
         body {{ font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
         .header {{ background: #333; color: white; padding: 20px; margin: -20px -20px 20px -20px; display: flex; justify-content: space-between; }}
@@ -108,7 +129,10 @@ def blocked_card_view(blocked: dict) -> str:
     if options and len(options) > 0:
         options_html = "".join(render_tag("option", content=opt, value=opt) for opt in options)
         input_html = render_tag(
-            "select", id=f"answer-{key}", content=options_html, **{"data-bind": f"responseDraft.{key}"}
+            "select",
+            id=f"answer-{key}",
+            content=options_html,
+            **{"data-bind": f"responseDraft.{key}"},
         )
     else:
         input_html = render_tag(
@@ -130,13 +154,18 @@ def blocked_card_view(blocked: dict) -> str:
                 const draft = $responseDraft?.{key};
                 if (draft?.trim()) {{
                     @post('/input', {{request_id: '{request_id}', response: draft}});
-                    $responseDraft.{{key}} = '';
+                    $responseDraft.{key} = '';
                 }}
             """,
         },
     )
 
-    form = render_tag("div", id=f"form-{key}", class_="response-form", content=input_html + button)
+    form = render_tag(
+        "div",
+        id=f"form-{key}",
+        class_="response-form",
+        content=input_html + button,
+    )
 
     return render_tag(
         "div",
@@ -296,7 +325,10 @@ def progress_bar_view(total: int, completed: int) -> str:
                 "div",
                 class_="progress-bar",
                 content=render_tag(
-                    "div", id="progress-fill", class_="progress-fill", **{"style": f"width: {percent}%"}
+                    "div",
+                    id="progress-fill",
+                    class_="progress-fill",
+                    **{"style": f"width: {percent}%"},
                 ),
             )
             + render_tag("div", content=f"{completed}/{total} agents completed", class_="progress-text")
@@ -328,15 +360,21 @@ def dashboard_view(view_data: dict) -> str:
     graph_launcher_card = graph_launcher_card_view()
 
     blocked_card = render_tag(
-        "div", class_="card", content=render_tag("div", content="Blocked Agents") + blocked_list_view(blocked)
+        "div",
+        class_="card",
+        content=render_tag("div", content="Blocked Agents") + blocked_list_view(blocked),
     )
 
     status_card = render_tag(
-        "div", class_="card", content=render_tag("div", content="Agent Status") + agent_status_view(agent_states)
+        "div",
+        class_="card",
+        content=render_tag("div", content="Agent Status") + agent_status_view(agent_states),
     )
 
     results_card = render_tag(
-        "div", class_="card", content=render_tag("div", content="Results") + results_view(results)
+        "div",
+        class_="card",
+        content=render_tag("div", content="Results") + results_view(results),
     )
 
     progress_card = render_tag(
@@ -357,9 +395,146 @@ def dashboard_view(view_data: dict) -> str:
     return page(header + main)
 
 
-async def index(request: Request) -> HTMLResponse:
-    """Main dashboard page."""
-    state = request.app.state.dashboard_state
-    view_data = state.get_view_data()
-    html = dashboard_view(view_data)
-    return HTMLResponse(html)
+def create_routes(
+    event_bus: EventBus,
+    config: RemoraConfig,
+    dashboard_state: DashboardState,
+    context_builder: ContextBuilder,
+    running_tasks: dict[str, asyncio.Task],
+) -> list[Route]:
+    """Create Starlette routes for the dashboard."""
+
+    async def subscribe(request: Request) -> DatastarResponse:
+        """SSE endpoint streaming view patches."""
+
+        @datastar_response
+        async def event_stream():
+            view_data = dashboard_state.get_view_data()
+            yield SSE.patch_elements(dashboard_view(view_data))
+
+            async with event_bus.stream() as events:
+                async for event in events:
+                    dashboard_state.record(event)
+                    view_data = dashboard_state.get_view_data()
+                    yield SSE.patch_elements(dashboard_view(view_data))
+
+        return await event_stream()
+
+    async def events(request: Request) -> StreamingResponse:
+        """Raw SSE endpoint streaming JSON events."""
+
+        async def event_generator():
+            try:
+                async with event_bus.stream() as events:
+                    async for event in events:
+                        dashboard_state.record(event)
+                        event_type = type(event).__name__
+                        data = {
+                            "event_type": event_type,
+                            "graph_id": getattr(event, "graph_id", ""),
+                            "agent_id": getattr(event, "agent_id", ""),
+                            "timestamp": getattr(event, "timestamp", 0),
+                        }
+                        yield f"event: {event_type}\ndata: {data}\n\n"
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error in events stream")
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+    async def index(request: Request) -> HTMLResponse:
+        """Render the dashboard page."""
+        view_data = dashboard_state.get_view_data()
+        return HTMLResponse(dashboard_view(view_data))
+
+    async def run_agent(request: Request) -> JSONResponse:
+        """Trigger graph execution."""
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        target_path = payload.get("target_path", "")
+        bundle = payload.get("bundle", "")
+
+        if not target_path:
+            return JSONResponse({"error": "target_path is required"}, status_code=400)
+
+        try:
+            graph_id = await _trigger_graph(target_path, bundle)
+        except Exception as exc:
+            logger.exception("Failed to start graph")
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+        return JSONResponse({"status": "started", "graph_id": graph_id})
+
+    async def submit_input(request: Request) -> JSONResponse:
+        """Submit human input response."""
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+        request_id = payload.get("request_id", "")
+        response = payload.get("response", "")
+
+        if not request_id or not response:
+            return JSONResponse(
+                {"error": "request_id and response are required"},
+                status_code=400,
+            )
+
+        event = HumanInputResponseEvent(request_id=request_id, response=response)
+        await event_bus.emit(event)
+        return JSONResponse({"status": "submitted"})
+
+    def _build_bundle_mapping() -> dict[str, Path]:
+        bundle_root = Path(config.bundles.path)
+        mapping: dict[str, Path] = {}
+        for name, bundle in config.bundles.mapping.items():
+            mapping[name] = bundle_root / bundle
+        return mapping
+
+    async def _trigger_graph(target_path: str, bundle_name: str) -> str:
+        graph_id = uuid.uuid4().hex[:8]
+        bundle_mapping = _build_bundle_mapping()
+
+        if not bundle_mapping:
+            raise ValueError("No bundle mapping configured")
+
+        nodes = discover([Path(target_path)])
+        agent_nodes = build_graph(nodes, bundle_mapping)
+
+        if bundle_name and bundle_name in bundle_mapping:
+            target_bundle = bundle_mapping[bundle_name]
+            agent_nodes = [node for node in agent_nodes if node.bundle_path == target_bundle]
+
+        task = asyncio.create_task(_execute_graph(graph_id, agent_nodes))
+        running_tasks[graph_id] = task
+
+        def _cleanup(_task: asyncio.Task) -> None:
+            running_tasks.pop(graph_id, None)
+
+        task.add_done_callback(_cleanup)
+        return graph_id
+
+    async def _execute_graph(graph_id: str, agent_nodes: list[Any]) -> None:
+        """Run the graph using GraphExecutor."""
+        try:
+            executor = GraphExecutor(
+                config=config,
+                event_bus=event_bus,
+                context_builder=context_builder,
+            )
+            await executor.run(agent_nodes, graph_id)
+        except Exception:
+            logger.exception("Graph execution failed: %s", graph_id)
+
+    return [
+        Route("/", index),
+        Route("/subscribe", subscribe),
+        Route("/events", events),
+        Route("/run", run_agent, methods=["POST"]),
+        Route("/input", submit_input, methods=["POST"]),
+    ]

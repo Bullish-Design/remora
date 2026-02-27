@@ -106,5 +106,9 @@ def status(
             typer.echo(f"  ... and {len(files) - 10} more")
 
 
-if __name__ == "__main__":
+def main() -> None:
     app()
+
+
+if __name__ == "__main__":
+    main()
