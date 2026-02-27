@@ -1,0 +1,22 @@
+{
+  "externals": [
+    {
+      "name": "submit_result",
+      "async": true,
+      "parameters": [
+        {
+          "name": "summary",
+          "type": "str",
+          "default": null
+        },
+        {
+          "name": "changed_files",
+          "type": "list[str]",
+          "default": null
+        }
+      ],
+      "return_type": "bool",
+      "docstring": null
+    }
+  ]
+}

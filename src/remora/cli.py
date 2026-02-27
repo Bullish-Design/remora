@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
+from typing import Iterable
 
 import click
 
@@ -30,6 +32,7 @@ def run(paths: tuple[str, ...], config_path: str | None) -> None:
     cfg = load_config(config_path)
 
     discovery_paths = list(paths) or list(cfg.discovery.paths)
+    project_root = _resolve_project_root(discovery_paths)
     nodes = discover(
         discovery_paths,
         languages=list(cfg.discovery.languages) if cfg.discovery.languages else None,
@@ -48,7 +51,7 @@ def run(paths: tuple[str, ...], config_path: str | None) -> None:
     graph = build_graph(nodes, bundle_mapping)
 
     event_bus = EventBus()
-    executor = GraphExecutor(cfg, event_bus)
+    executor = GraphExecutor(cfg, event_bus, project_root=project_root)
 
     async def run_async() -> dict[str, ResultSummary]:
         return await executor.run(graph, "cli-run")
@@ -70,6 +73,18 @@ def dashboard(host: str, port: int) -> None:
         uvicorn.run(app, host=host, port=port)
 
     asyncio.run(serve())
+
+
+def _resolve_project_root(paths: Iterable[str]) -> Path:
+    resolved: list[Path] = []
+    for path in paths:
+        path_obj = Path(path).resolve()
+        resolved.append(path_obj.parent if path_obj.is_file() else path_obj)
+    if not resolved:
+        return Path.cwd()
+    if len(resolved) == 1:
+        return resolved[0]
+    return Path(os.path.commonpath([str(path) for path in resolved]))
 
 
 @main.command()

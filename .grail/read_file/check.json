@@ -1,0 +1,21 @@
+{
+  "file": "agents/lint/tools/read_file.pym",
+  "valid": true,
+  "errors": [],
+  "warnings": [
+    {
+      "line": 5,
+      "column": 0,
+      "code": "W003",
+      "message": "Input 'check_only' is declared but never referenced"
+    }
+  ],
+  "info": {
+    "externals_count": 0,
+    "inputs_count": 3,
+    "lines_of_code": 38,
+    "monty_features_used": [
+      "f_string"
+    ]
+  }
+}

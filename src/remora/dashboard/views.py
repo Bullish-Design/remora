@@ -313,9 +313,10 @@ def results_view(results: list[dict]) -> str:
     return render_tag("div", id="results", class_="results", content=items)
 
 
-def progress_bar_view(total: int, completed: int) -> str:
+def progress_bar_view(total: int, completed: int, failed: int = 0) -> str:
     """Progress bar."""
     percent = int((completed / total) * 100) if total > 0 else 0
+    suffix = f" ({failed} failed)" if failed else ""
 
     return render_tag(
         "div",
@@ -331,7 +332,7 @@ def progress_bar_view(total: int, completed: int) -> str:
                     **{"style": f"width: {percent}%"},
                 ),
             )
-            + render_tag("div", content=f"{completed}/{total} agents completed", class_="progress-text")
+            + render_tag("div", content=f"{completed}/{total} agents completed{suffix}", class_="progress-text")
         ),
     )
 
@@ -341,7 +342,7 @@ def dashboard_view(view_data: dict) -> str:
     events = view_data.get("events", [])
     blocked = view_data.get("blocked", [])
     agent_states = view_data.get("agent_states", {})
-    progress = view_data.get("progress", {"total": 0, "completed": 0})
+    progress = view_data.get("progress", {"total": 0, "completed": 0, "failed": 0})
     results = view_data.get("results", [])
 
     header = render_tag(
@@ -381,7 +382,7 @@ def dashboard_view(view_data: dict) -> str:
         "div",
         class_="card",
         content=render_tag("div", content="Graph Execution")
-        + progress_bar_view(progress["total"], progress["completed"]),
+        + progress_bar_view(progress["total"], progress["completed"], progress.get("failed", 0)),
     )
 
     main_panel = render_tag(
@@ -501,14 +502,16 @@ def create_routes(
         if not bundle_mapping:
             raise ValueError("No bundle mapping configured")
 
-        nodes = discover([Path(target_path)])
+        target_path_obj = Path(target_path).resolve()
+        project_root = target_path_obj if target_path_obj.is_dir() else target_path_obj.parent
+        nodes = discover([target_path_obj])
         agent_nodes = build_graph(nodes, bundle_mapping)
 
         if bundle_name and bundle_name in bundle_mapping:
             target_bundle = bundle_mapping[bundle_name]
             agent_nodes = [node for node in agent_nodes if node.bundle_path == target_bundle]
 
-        task = asyncio.create_task(_execute_graph(graph_id, agent_nodes))
+        task = asyncio.create_task(_execute_graph(graph_id, agent_nodes, project_root))
         running_tasks[graph_id] = task
 
         def _cleanup(_task: asyncio.Task) -> None:
@@ -517,13 +520,14 @@ def create_routes(
         task.add_done_callback(_cleanup)
         return graph_id
 
-    async def _execute_graph(graph_id: str, agent_nodes: list[Any]) -> None:
+    async def _execute_graph(graph_id: str, agent_nodes: list[Any], project_root: Path) -> None:
         """Run the graph using GraphExecutor."""
         try:
             executor = GraphExecutor(
                 config=config,
                 event_bus=event_bus,
                 context_builder=context_builder,
+                project_root=project_root,
             )
             await executor.run(agent_nodes, graph_id)
         except Exception:

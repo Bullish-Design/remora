@@ -56,7 +56,9 @@ from remora.executor import ExecutorState, GraphExecutor
 from remora.workspace import AgentWorkspace, CairnDataProvider, CairnResultHandler, WorkspaceManager
 from remora.checkpoint import CheckpointManager
 from remora.cairn_bridge import CairnWorkspaceService
+from remora.cairn_externals import CairnExternals
 from remora.dashboard.app import DashboardApp, create_app
+from remora.utils import PathResolver
 
 
 __all__ = [
@@ -119,6 +121,8 @@ __all__ = [
     "CairnDataProvider",
     "CairnResultHandler",
     "CairnWorkspaceService",
+    "CairnExternals",
+    "PathResolver",
     "CheckpointManager",
     "DashboardApp",
     "create_app",

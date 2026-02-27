@@ -1,0 +1,46 @@
+{
+  "inputs": [
+    {
+      "name": "test_file",
+      "type": "str",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "target_file",
+      "type": "str",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "xml_report",
+      "type": "str",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "stdout",
+      "type": "str",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "stderr",
+      "type": "str",
+      "required": false,
+      "default": ""
+    },
+    {
+      "name": "exit_code",
+      "type": "int",
+      "required": false,
+      "default": 0
+    },
+    {
+      "name": "structured_report",
+      "type": "dict[str, Any] | None",
+      "required": true,
+      "default": null
+    }
+  ]
+}

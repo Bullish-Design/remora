@@ -58,13 +58,19 @@ def build_graph(
     priority_mapping = priority_mapping or {}
 
     agent_nodes: dict[str, AgentNode] = {}
+    file_node_ids_by_path: dict[str, str] = {}
+
+    if "file" in bundle_mapping:
+        for cst_node in nodes:
+            if cst_node.node_type == "file":
+                file_node_ids_by_path[cst_node.file_path] = cst_node.node_id
 
     for cst_node in nodes:
         bundle_path = bundle_mapping.get(cst_node.node_type)
         if bundle_path is None:
             continue
 
-        upstream = _compute_upstream(cst_node, nodes, agent_nodes)
+        upstream = _compute_upstream(cst_node, file_node_ids_by_path)
 
         agent_node = AgentNode(
             id=cst_node.node_id,
@@ -98,17 +104,15 @@ def build_graph(
 
 def _compute_upstream(
     cst_node: CSTNode,
-    all_nodes: list[CSTNode],
-    existing_agents: dict[str, AgentNode],
+    file_node_ids_by_path: dict[str, str],
 ) -> set[str]:
     """Compute upstream dependencies for a node."""
     upstream: set[str] = set()
 
     if cst_node.node_type in ("function", "class", "method"):
-        for other in all_nodes:
-            if other.node_type == "file" and other.file_path == cst_node.file_path:
-                if other.node_id in existing_agents:
-                    upstream.add(other.node_id)
+        file_node_id = file_node_ids_by_path.get(cst_node.file_path)
+        if file_node_id:
+            upstream.add(file_node_id)
 
     return upstream
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from grail import Input
+from grail import Input, external
 
 source_code: str = Input("source_code")
 file_path: str = Input("file_path")
@@ -11,6 +11,11 @@ line_number: int = Input("line_number")
 fixed_content: str | None = Input("fixed_content", default=None)
 exit_code: int = Input("exit_code", default=0)
 stderr: str = Input("stderr", default="")
+
+
+@external
+async def write_file(path: str, content: str) -> bool:
+    ...
 
 
 def _build_partial_result(message: str) -> dict[str, Any]:
@@ -49,6 +54,7 @@ try:
     else:
         content_changed = candidate_content != source_code
         if content_changed:
+            await write_file(file_path, candidate_content)
             message = f"Applied fix for {issue_code} at line {line_number}"
             result = {
                 "result": {

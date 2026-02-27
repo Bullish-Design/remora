@@ -1,0 +1,15 @@
+{
+  "file": "agents/sample_data/tools/write_fixture_file.pym",
+  "valid": true,
+  "errors": [],
+  "warnings": [],
+  "info": {
+    "externals_count": 1,
+    "inputs_count": 3,
+    "lines_of_code": 129,
+    "monty_features_used": [
+      "f_string",
+      "for_loop"
+    ]
+  }
+}

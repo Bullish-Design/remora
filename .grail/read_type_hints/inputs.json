@@ -1,0 +1,16 @@
+{
+  "inputs": [
+    {
+      "name": "source_code",
+      "type": "str",
+      "required": true,
+      "default": null
+    },
+    {
+      "name": "file_path",
+      "type": "str",
+      "required": true,
+      "default": null
+    }
+  ]
+}

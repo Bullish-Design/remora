@@ -1,0 +1,22 @@
+{
+  "file": "agents/lint/tools/run_linter.pym",
+  "valid": true,
+  "errors": [],
+  "warnings": [
+    {
+      "line": 11,
+      "column": 0,
+      "code": "W003",
+      "message": "Input 'stderr' is declared but never referenced"
+    }
+  ],
+  "info": {
+    "externals_count": 0,
+    "inputs_count": 7,
+    "lines_of_code": 113,
+    "monty_features_used": [
+      "f_string",
+      "for_loop"
+    ]
+  }
+}

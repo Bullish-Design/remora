@@ -65,9 +65,12 @@ class Scanner:
         lines = content.splitlines()
 
         for node in nodes:
+            normalized_type = _normalize_node_type(node.node_type)
+            if normalized_type is None:
+                continue
             node_data = {
                 "name": node.name,
-                "type": node.node_type,
+                "type": normalized_type,
                 "file_path": str(path),
                 "file_hash": file_hash,
                 "source_hash": hashlib.sha256(node.text.encode()).hexdigest(),
@@ -76,9 +79,9 @@ class Scanner:
                 "line_count": node.end_line - node.start_line + 1,
             }
 
-            if node.node_type == "function":
+            if normalized_type == "function":
                 node_data.update(self._extract_function_details(node, lines))
-            elif node.node_type == "class":
+            elif normalized_type == "class":
                 node_data.update(self._extract_class_details(node, lines))
 
             result.append(node_data)
@@ -288,6 +291,16 @@ async def scan_file_simple(
     logger.debug("Indexed %s: %d nodes", file_path, len(nodes))
 
     return len(nodes)
+
+
+def _normalize_node_type(node_type: str) -> str | None:
+    if node_type in {"function", "method"}:
+        return "function"
+    if node_type == "class":
+        return "class"
+    if node_type == "file":
+        return "module"
+    return None
 
 
 def _extract_function_ast(

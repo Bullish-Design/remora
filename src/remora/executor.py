@@ -10,6 +10,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from structured_agents.agent import get_response_parser, load_manifest
@@ -40,6 +41,7 @@ from remora.graph import AgentNode, get_execution_batches
 from remora.cairn_bridge import CairnWorkspaceService
 from remora.tools.grail import build_virtual_fs, discover_grail_tools
 from remora.workspace import CairnDataProvider
+from remora.utils import PathResolver
 
 if TYPE_CHECKING:
     from structured_agents.types import RunResult
@@ -121,11 +123,13 @@ class GraphExecutor:
         config: RemoraConfig,
         event_bus: EventBus,
         context_builder: ContextBuilder | None = None,
+        project_root: Path | str | None = None,
     ):
         self.config = config
         self.event_bus = event_bus
         self.context_builder = context_builder or ContextBuilder()
         self._observer = _EventBusObserver(event_bus)
+        self._path_resolver = PathResolver(Path(project_root or Path.cwd()))
 
         # Subscribe context builder to events
         event_bus.subscribe_all(self.context_builder.handle)
@@ -153,7 +157,11 @@ class GraphExecutor:
             )
         )
 
-        workspace_service = CairnWorkspaceService(self.config.workspace, graph_id)
+        workspace_service = CairnWorkspaceService(
+            self.config.workspace,
+            graph_id,
+            project_root=self._path_resolver.project_root,
+        )
         await workspace_service.initialize(sync=True)
         semaphore = asyncio.Semaphore(self.config.execution.max_concurrency)
 
@@ -219,11 +227,12 @@ class GraphExecutor:
                 workspace = await workspace_service.get_agent_workspace(node.id)
                 externals = workspace_service.get_externals(node.id, workspace)
 
-                data_provider = CairnDataProvider(workspace)
+                data_provider = CairnDataProvider(workspace, self._path_resolver)
                 files = await data_provider.load_files(node.target)
 
-                prompt = self._build_prompt(node, files)
                 manifest = load_manifest(node.bundle_path)
+                requires_context = getattr(manifest, "requires_context", True)
+                prompt = self._build_prompt(node, files, requires_context=requires_context)
 
                 async def files_provider() -> dict[str, str | bytes]:
                     current_files = await data_provider.load_files(node.target)
@@ -315,39 +324,52 @@ class GraphExecutor:
                 Message(role="user", content=prompt),
             ]
             tool_schemas = [tool.schema for tool in tools]
+            max_turns = getattr(manifest, "max_turns", None) or self.config.execution.max_turns
             if self.config.execution.timeout > 0:
                 return await asyncio.wait_for(
                     kernel.run(
                         messages,
                         tool_schemas,
-                        max_turns=self.config.execution.max_turns,
+                        max_turns=max_turns,
                     ),
                     timeout=self.config.execution.timeout,
                 )
             return await kernel.run(
                 messages,
                 tool_schemas,
-                max_turns=self.config.execution.max_turns,
+                max_turns=max_turns,
             )
         finally:
             await kernel.close()
 
-    def _build_prompt(self, node: AgentNode, files: dict[str, str]) -> str:
+    def _build_prompt(
+        self,
+        node: AgentNode,
+        files: dict[str, str],
+        *,
+        requires_context: bool,
+    ) -> str:
         sections: list[str] = []
 
         sections.append(f"# Target: {node.name}")
         sections.append(f"File: {node.target.file_path}")
         sections.append(f"Lines: {node.target.start_line}-{node.target.end_line}")
 
-        if node.target.file_path in files:
+        workspace_path = self._path_resolver.to_workspace_path(node.target.file_path)
+        code = files.get(workspace_path)
+        if code is None and node.target.file_path in files:
+            code = files[node.target.file_path]
+
+        if code is not None:
             sections.append("\n## Code")
             sections.append("```")
-            sections.append(node.target.text)
+            sections.append(code)
             sections.append("```")
 
-        context = self.context_builder.build_context_for(node.target)
-        if context:
-            sections.append(context)
+        if requires_context:
+            context = self.context_builder.build_context_for(node.target)
+            if context:
+                sections.append(context)
 
         return "\n".join(sections)
 

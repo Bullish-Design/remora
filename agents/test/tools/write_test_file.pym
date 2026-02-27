@@ -1,22 +1,27 @@
-from grail import Input
+from grail import Input, external
 
 content: str = Input("content")
-path_value: str = Input("path")
+path: str = Input("path")
+
+@external
+async def write_file(path: str, content: str) -> bool:
+    ...
 
 
 try:
-    if not path_value:
+    if not path:
         raise ValueError("Test file path is required.")
     if not content:
         raise ValueError("Test content is required.")
     
-    raw_result = {"success": True, "path": path_value}
+    await write_file(path, content)
+    raw_result = {"success": True, "path": path}
     result = {
         "result": raw_result,
-        "summary": f"Wrote test file {path_value}",
-        "knowledge_delta": {"test_file_written": path_value},
+        "summary": f"Wrote test file {path}",
+        "knowledge_delta": {"test_file_written": path},
         "outcome": "success",
-        "written_file": path_value,
+        "written_file": path,
         "content": content,
     }
 except Exception as exc:

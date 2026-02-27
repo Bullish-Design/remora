@@ -15,6 +15,7 @@ from cairn.runtime import workspace_manager as cairn_workspace_manager
 from remora.config import WorkspaceConfig
 from remora.discovery import CSTNode
 from remora.errors import WorkspaceError
+from remora.utils import PathResolver
 
 logger = logging.getLogger(__name__)
 
@@ -123,23 +124,32 @@ class CairnDataProvider:
     Implements the DataProvider pattern for structured-agents v0.3.
     """
 
-    def __init__(self, workspace: AgentWorkspace):
+    def __init__(self, workspace: AgentWorkspace, resolver: PathResolver):
         self._workspace = workspace
+        self._resolver = resolver
 
     async def load_files(self, node: CSTNode, related: list[str] | None = None) -> dict[str, str]:
         """Load target file and related files for Grail execution."""
         files: dict[str, str] = {}
+        target_path = self._resolver.to_workspace_path(node.file_path)
 
         try:
-            files[node.file_path] = await self._workspace.read(node.file_path)
+            content = await self._workspace.read(target_path)
+            files[target_path] = content
+            if node.file_path != target_path:
+                files[node.file_path] = content
         except Exception as e:
             logger.warning("Could not load target file %s: %s", node.file_path, e)
 
         if related:
             for path in related:
                 try:
-                    if await self._workspace.exists(path):
-                        files[path] = await self._workspace.read(path)
+                    workspace_path = self._resolver.to_workspace_path(path)
+                    if await self._workspace.exists(workspace_path):
+                        content = await self._workspace.read(workspace_path)
+                        files[workspace_path] = content
+                        if path != workspace_path:
+                            files[path] = content
                 except Exception as e:
                     logger.debug("Could not load related file %s: %s", path, e)
 
@@ -154,6 +164,9 @@ class CairnResultHandler:
 
     async def handle(self, result: dict[str, Any]) -> None:
         """Write result data back to workspace."""
+        if "written_file" in result and "content" in result:
+            await self._workspace.write(result["written_file"], result["content"])
+
         if "written_files" in result:
             for path, content in result["written_files"].items():
                 await self._workspace.write(path, content)

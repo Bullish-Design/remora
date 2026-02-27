@@ -2,67 +2,34 @@
 
 ## 1. Command-Line Interface
 
-### 1.1 `remora analyze`
+### 1.1 `remora run`
 
-Analyze Python code and generate results.
+Execute an agent graph on the specified paths.
 
 ```bash
-remora analyze [PATHS...] [OPTIONS]
+remora run [PATHS...] [--config PATH]
 ```
 
 **Arguments:**
-- `PATHS`: Files or directories to analyze (default: current directory).
+- `PATHS`: Files or directories to analyze (default: `discovery.paths`).
 
 **Options:**
-- `--operations, -o`: Comma-separated list of operations (`lint,test,docstring` by default).
-- `--config, -c`: Path to configuration file.
-- `--format, -f`: `table`, `json`, or `interactive`.
-- `--auto-accept`: Auto-merge successful results.
-- `--query-pack`, `--agents-dir`: Discovery overrides.
-- `--max-turns`, `--max-tokens`, `--temperature`, `--tool-choice`: Runner overrides.
-- `--cairn-home`, `--max-concurrent-agents`, `--cairn-timeout`: Cairn overrides.
-- `--event-stream`, `--event-stream-file`: Event stream overrides.
+- `--config`: Path to configuration file.
 
-Exit codes:
-- `0`: All operations succeeded.
-- `1`: Partial failure.
-- `2`: All operations failed or no results.
+### 1.2 `remora dashboard`
 
-### 1.2 `remora watch`
-
-Watch paths and re-run analysis on changes.
+Start the dashboard server.
 
 ```bash
-remora watch [PATHS...] [OPTIONS]
+remora dashboard [--host HOST] [--port PORT]
 ```
 
-Additional option:
-- `--debounce`: Debounce delay in milliseconds.
+### 1.3 `remora index`
 
-### 1.3 `remora list-agents`
-
-List bundle definitions and model availability.
+Start the indexer daemon.
 
 ```bash
-remora list-agents [--format table|json]
-```
-
-### 1.4 `remora config`
-
-Print the merged configuration.
-
-```bash
-remora config [--format yaml|json]
-```
-
-### 1.5 `remora-hub`
-
-Manage the Hub daemon:
-
-```bash
-remora-hub start [--project-root PATH] [--db-path PATH]
-remora-hub status [--project-root PATH]
-remora-hub stop [--project-root PATH]
+remora index [PATHS...]
 ```
 
 ## 2. Bundle Format

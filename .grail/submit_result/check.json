@@ -1,0 +1,14 @@
+{
+  "file": "agents/test/tools/submit_result.pym",
+  "valid": true,
+  "errors": [],
+  "warnings": [],
+  "info": {
+    "externals_count": 1,
+    "inputs_count": 5,
+    "lines_of_code": 41,
+    "monty_features_used": [
+      "list_comprehension"
+    ]
+  }
+}

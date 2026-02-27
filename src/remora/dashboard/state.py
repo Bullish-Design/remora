@@ -19,6 +19,7 @@ class DashboardState:
     results: list[dict[str, Any]] = field(default_factory=list)
     total_agents: int = 0
     completed_agents: int = 0
+    failed_agents: int = 0
 
     def record(self, event: RemoraEvent) -> None:
         """Process event and update state."""
@@ -42,6 +43,7 @@ class DashboardState:
         if isinstance(event, GraphStartEvent):
             self.total_agents = event.node_count
             self.completed_agents = 0
+            self.failed_agents = 0
 
         elif isinstance(event, AgentStartEvent):
             self.agent_states[event.agent_id] = {
@@ -72,6 +74,9 @@ class DashboardState:
                 self.agent_states[event.agent_id]["state"] = state_map[type(event)]
                 if isinstance(event, AgentCompleteEvent):
                     self.completed_agents += 1
+                elif isinstance(event, AgentErrorEvent):
+                    self.completed_agents += 1
+                    self.failed_agents += 1
 
         if isinstance(event, AgentCompleteEvent):
             self.results.insert(
@@ -91,6 +96,10 @@ class DashboardState:
             "events": list(self.events),
             "blocked": list(self.blocked.values()),
             "agent_states": self.agent_states,
-            "progress": {"total": self.total_agents, "completed": self.completed_agents},
+            "progress": {
+                "total": self.total_agents,
+                "completed": self.completed_agents,
+                "failed": self.failed_agents,
+            },
             "results": self.results[:10],
         }

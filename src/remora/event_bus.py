@@ -54,10 +54,12 @@ class EventBus:
     def subscribe(self, event_type: type[Any], handler: EventHandler) -> None:
         if event_type not in self._handlers:
             self._handlers[event_type] = []
-        self._handlers[event_type].append(handler)
+        if handler not in self._handlers[event_type]:
+            self._handlers[event_type].append(handler)
 
     def subscribe_all(self, handler: EventHandler) -> None:
-        self._all_handlers.append(handler)
+        if handler not in self._all_handlers:
+            self._all_handlers.append(handler)
 
     def unsubscribe(self, handler: EventHandler) -> None:
         for handlers in self._handlers.values():
@@ -93,7 +95,8 @@ class EventBus:
         predicate: Callable[[StructuredEvent | RemoraEvent], bool],
         timeout: float = 60.0,
     ) -> StructuredEvent | RemoraEvent:
-        future: asyncio.Future[StructuredEvent | RemoraEvent] = asyncio.get_event_loop().create_future()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[StructuredEvent | RemoraEvent] = loop.create_future()
 
         def handler(event: StructuredEvent | RemoraEvent) -> None:
             try:

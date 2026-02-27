@@ -1,9 +1,13 @@
-from grail import Input
+from grail import Input, external
 
 source_code: str = Input("source_code")
 file_path: str = Input("file_path")
 docstring: str = Input("docstring")
 style: str = Input("style", default="google")
+
+@external
+async def write_file(path: str, content: str) -> bool:
+    ...
 
 
 def _find_function_name(source: str) -> str | None:
@@ -93,6 +97,8 @@ try:
     updated_content = "\n".join(lines)
     if trailing_newline:
         updated_content += "\n"
+
+    await write_file(file_path, updated_content)
 
     raw_result = {
         "success": True,

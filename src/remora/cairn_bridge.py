@@ -11,12 +11,13 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from cairn.runtime.external_functions import create_external_functions
 from cairn.runtime import workspace_manager as cairn_workspace_manager
 
 from remora.config import WorkspaceConfig
+from remora.cairn_externals import CairnExternals
 from remora.errors import WorkspaceError
 from remora.workspace import AgentWorkspace
+from remora.utils import PathResolver
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class CairnWorkspaceService:
         self._config = config
         self._graph_id = graph_id
         self._project_root = Path(project_root or Path.cwd()).resolve()
+        self._resolver = PathResolver(self._project_root)
         self._base_path = Path(config.base_path) / graph_id
         self._manager = cairn_workspace_manager.WorkspaceManager()
         self._stable_workspace: Any | None = None
@@ -55,6 +57,10 @@ class CairnWorkspaceService:
     @property
     def project_root(self) -> Path:
         return self._project_root
+
+    @property
+    def resolver(self) -> PathResolver:
+        return self._resolver
 
     async def initialize(self, *, sync: bool = True) -> None:
         """Initialize stable workspace and optionally sync project files."""
@@ -105,11 +111,13 @@ class CairnWorkspaceService:
         if self._stable_workspace is None:
             raise WorkspaceError("CairnWorkspaceService is not initialized")
 
-        return create_external_functions(
-            agent_id,
-            agent_workspace.cairn,
-            self._stable_workspace,
+        externals = CairnExternals(
+            agent_id=agent_id,
+            agent_fs=agent_workspace.cairn,
+            stable_fs=self._stable_workspace,
+            resolver=self._resolver,
         )
+        return externals.as_externals()
 
     async def close(self) -> None:
         """Close all tracked workspaces."""
@@ -128,10 +136,9 @@ class CairnWorkspaceService:
             if _should_ignore(path, self._project_root):
                 continue
 
-            try:
-                rel_path = path.relative_to(self._project_root).as_posix()
-            except ValueError:
+            if not self._resolver.is_within_project(path):
                 continue
+            rel_path = self._resolver.to_workspace_path(path)
 
             try:
                 payload = path.read_bytes()

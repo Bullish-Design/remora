@@ -70,9 +70,10 @@ class RemoraGrailTool:
         call_id = context.id if context else "unknown"
         try:
             files = await self._files_provider()
+            externals = {name: fn for name, fn in self._externals.items() if name in self._script.externals}
             result = await self._script.run(
                 inputs=arguments,
-                externals=self._externals,
+                externals=externals,
                 files=files,
                 limits=self._limits,
             )
