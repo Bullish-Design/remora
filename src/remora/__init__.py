@@ -6,7 +6,6 @@ from remora.core.checkpoint import CheckpointManager
 from remora.core.config import (
     BundleConfig,
     ConfigError,
-    DashboardConfig,
     DiscoveryConfig,
     ErrorPolicy,
     ExecutionConfig,
@@ -34,7 +33,7 @@ from remora.core.errors import (
     RemoraError,
     WorkspaceError,
 )
-from remora.core.event_bus import EventBus, EventHandler, get_event_bus, reset_event_bus
+from remora.core.event_bus import EventBus, EventHandler
 from remora.core.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
@@ -82,7 +81,6 @@ __all__ = [
     "CheckpointSavedEvent",
     "ConfigError",
     "ContextBuilder",
-    "DashboardConfig",
     "DiscoveryConfig",
     "DiscoveryError",
     "ErrorPolicy",
@@ -125,9 +123,7 @@ __all__ = [
     "compute_node_id",
     "discover",
     "discover_grail_tools",
-    "get_event_bus",
     "get_execution_batches",
     "load_config",
-    "reset_event_bus",
     "serialize_config",
 ]

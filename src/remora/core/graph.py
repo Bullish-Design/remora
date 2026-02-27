@@ -6,7 +6,7 @@ AgentNode is immutable - execution state is tracked separately.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -129,7 +129,10 @@ def _compute_downstream_map(agent_nodes: dict[str, AgentNode]) -> dict[str, set[
 
 
 def _topological_sort(nodes: list[AgentNode]) -> list[AgentNode]:
-    """Kahn's algorithm with O(V+E) complexity."""
+    """Kahn's algorithm with O(V+E) complexity.
+
+    Uses deque for O(1) popleft operations while keeping priority ordering.
+    """
     node_by_id = {n.id: n for n in nodes}
 
     adjacency: dict[str, list[str]] = defaultdict(list)
@@ -141,23 +144,28 @@ def _topological_sort(nodes: list[AgentNode]) -> list[AgentNode]:
                 adjacency[upstream_id].append(node.id)
                 in_degree[node.id] += 1
 
-    queue = sorted(
-        [n for n in nodes if in_degree[n.id] == 0],
-        key=lambda n: -n.priority,
+    queue: deque[AgentNode] = deque(
+        sorted(
+            [n for n in nodes if in_degree[n.id] == 0],
+            key=lambda n: -n.priority,
+        )
     )
 
     result: list[AgentNode] = []
 
     while queue:
-        node = queue.pop(0)
+        node = queue.popleft()
         result.append(node)
 
+        newly_ready: list[AgentNode] = []
         for downstream_id in adjacency[node.id]:
             in_degree[downstream_id] -= 1
             if in_degree[downstream_id] == 0:
-                queue.append(node_by_id[downstream_id])
+                newly_ready.append(node_by_id[downstream_id])
 
-        queue.sort(key=lambda n: -n.priority)
+        if newly_ready:
+            newly_ready.sort(key=lambda n: -n.priority)
+            queue.extend(newly_ready)
 
     if len(result) != len(nodes):
         cycle_nodes = [n.id for n in nodes if in_degree[n.id] > 0]

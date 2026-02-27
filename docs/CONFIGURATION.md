@@ -39,10 +39,6 @@ indexer:
   watch_paths: ["src/"]
   store_path: ".remora/index"
 
-dashboard:
-  host: "0.0.0.0"
-  port: 8420
-
 workspace:
   base_path: ".remora/workspaces"
   cleanup_after: "1h"
@@ -85,12 +81,6 @@ Indexer daemon configuration.
 - `watch_paths`: list of paths to monitor for changes.
 - `store_path`: path to the indexer storage.
 
-### `dashboard`
-Dashboard server configuration.
-
-- `host`: bind host.
-- `port`: bind port.
-
 ### `workspace`
 Workspace settings.
 
@@ -106,5 +96,4 @@ Environment variables override config values on load:
 - `REMORA_MODEL_DEFAULT`
 - `REMORA_EXECUTION_MAX_CONCURRENCY`
 - `REMORA_EXECUTION_TIMEOUT`
-- `REMORA_DASHBOARD_PORT`
 - `REMORA_WORKSPACE_BASE_PATH`

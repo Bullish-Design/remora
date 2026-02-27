@@ -56,8 +56,8 @@ def render_shell(body: str = "", *, title: str = "Remora", init_path: str = "/su
 </html>"""
 
 
-def render_patch(state: dict[str, Any]) -> str:
-    return SSE.patch_elements(render_dashboard(state))
+def render_patch(state: dict[str, Any], *, bundle_default: str = "") -> str:
+    return SSE.patch_elements(render_dashboard(state, bundle_default=bundle_default))
 
 
 def render_signals(signals: dict[str, Any]) -> str:

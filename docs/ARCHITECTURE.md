@@ -53,7 +53,7 @@ Remora V2 is built around three nouns: **events**, **agents**, and **workspaces*
 ### Public API (`src/remora/__init__.py`)
 
 - `build_graph()`, `AgentNode`, `GraphExecutor`
-- `EventBus`, `RemoraEvent`, `get_event_bus()`
+- `EventBus`, `RemoraEvent` (explicit injection recommended)
 - `ContextBuilder`, `ResultSummary`
 - `WorkspaceConfig`, `AgentWorkspace`, `CairnDataProvider`, `CairnResultHandler`
 
@@ -63,7 +63,7 @@ Remora V2 is built around three nouns: **events**, **agents**, and **workspaces*
 2. `build_graph()` selects bundles using metadata supplied via `remora.yaml`.
 3. `GraphExecutor` provisions `CairnWorkspace`, builds context, sets `STRUCTURED_AGENTS_*` env vars, and runs each agent via `Agent.from_bundle()`.
 4. Tool results are persisted through `CairnResultHandler`, producing `ResultSummary` objects that feed `ContextBuilder` and the service layer.
-5. Frontends consume `EventBus.stream()` for SSE updates and post human responses via `/input`.
+5. Frontends consume `/subscribe` (Datastar patches) or `/events` (raw SSE) and post human responses via `/input`.
 6. `CheckpointManager` snapshots the SQLite files + metadata so workflows can resume or version control entire graphs.
 
 ## Testing Strategy

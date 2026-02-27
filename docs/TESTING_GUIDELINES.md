@@ -4,7 +4,7 @@ Remora V2 ships with phase-aligned unit suites and a focused integration signal.
 2. Confirm the **graph builder + executor** choose bundles deterministically and emit lifecycle events.
 3. Verify the **workspace helpers** (per-agent Cairn workspaces, shared snapshots, cleanup).
 4. Exercise the **context builder** (short/long tracks, knowledge ingestion, prompt sections).
-5. Ensure dashboards and CLI consumers can replay the same **EventBus** stream.
+5. Ensure service endpoints and CLI consumers can replay the same **EventBus** stream.
 
 ## Unit Testing
 
@@ -18,7 +18,7 @@ Run the full unit suite with `pytest tests/unit/ -v`. Each test should focus on 
 
 ## Integration Testing
 
-Integration tests should stitch discovery → metadata-driven graph → execution → dashboard events, asserting that the EventBus produces the expected lifecycle. The future integration suite will exercise `GraphExecutor`, the dashboard SSE endpoints, and `ResultSummary` propagation.
+Integration tests should stitch discovery → metadata-driven graph → execution → service events, asserting that the EventBus produces the expected lifecycle. The future integration suite will exercise `GraphExecutor`, the service SSE endpoints, and `ResultSummary` propagation.
 
 Run the integration suite with `pytest tests/integration/ -v`. These tests expect a real vLLM server (see `tests/config/vllm_server.yaml` for defaults) and will skip when the server is unavailable.
 Integration tests also depend on AgentFS (Cairn workspace backing). When AgentFS is unavailable, vLLM-backed integration tests will skip.
@@ -42,4 +42,4 @@ Coverage report for Cairn integration: `pytest tests/integration/cairn/ -v -m ca
 
 ## Monitoring & Dashboards
 
-Since every UI consumer subscribes to `EventBus.stream()`, regression tests should assert on emitted events (e.g., `agent_completed`, `tool_result`). Keeping assertions at the public event level makes the suite resilient as internal plumbing evolves.
+Since every UI consumer ultimately relies on the EventBus stream (via `/subscribe` or `/events`), regression tests should assert on emitted events (e.g., `agent_completed`, `tool_result`). Keeping assertions at the public event level makes the suite resilient as internal plumbing evolves.

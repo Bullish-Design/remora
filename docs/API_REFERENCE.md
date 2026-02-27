@@ -41,7 +41,7 @@ Framework-agnostic runtime modules:
 - `remora.core.discovery`: `discover()`, `CSTNode`, `TreeSitterDiscoverer`
 - `remora.core.graph`: `AgentNode`, `build_graph()`, `get_execution_batches()`
 - `remora.core.executor`: `GraphExecutor`, `ExecutorState`, `AgentState`
-- `remora.core.event_bus`: `EventBus`, `get_event_bus()`
+- `remora.core.event_bus`: `EventBus` (explicit injection recommended; `get_event_bus()` remains for legacy usage)
 - `remora.core.events`: Remora + structured-agent event classes
 - `remora.core.workspace`: Cairn workspace helpers
 - `remora.core.checkpoint`: `CheckpointManager`
@@ -49,6 +49,7 @@ Framework-agnostic runtime modules:
 ### Service Layer
 
 - `remora.service.RemoraService`: framework-agnostic API surface for `/`, `/subscribe`, `/events`, `/run`, `/input`, `/plan`, `/config`, `/snapshot`
+- `remora.service.RemoraService.create_default()`: convenience constructor that creates a service with a fresh EventBus and loaded config
 - `remora.adapters.starlette.create_app`: Starlette adapter for the service
 
 ### UI Helpers

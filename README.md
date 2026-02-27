@@ -14,7 +14,7 @@ from pathlib import Path
 
 from remora.core.config import load_config
 from remora.core.discovery import discover
-from remora.core.event_bus import get_event_bus
+from remora.core.event_bus import EventBus
 from remora.core.graph import build_graph
 from remora.core.executor import GraphExecutor
 
@@ -31,7 +31,8 @@ def main() -> None:
         for node_type, bundle in config.bundles.mapping.items()
     }
     graph = build_graph(nodes, bundle_mapping)
-    executor = GraphExecutor(config=config, event_bus=get_event_bus())
+    event_bus = EventBus()
+    executor = GraphExecutor(config=config, event_bus=event_bus)
     results = asyncio.run(executor.run(graph, "quickstart"))
     print(f"Completed {len(results)} agents")
 
@@ -86,10 +87,10 @@ grammar:
 ## Public API Highlights
 
 - `GraphExecutor`, `ExecutionConfig`, `ErrorPolicy`: run declarative graphs with bounded concurrency, structured-agents observers, and configurable error handling.
-- `EventBus`, `RemoraEvent`, `get_event_bus()`: central nervous system for logging, dashboards, and integrations.
+- `EventBus`, `RemoraEvent`: central nervous system for logging, dashboards, and integrations (explicit injection recommended).
 - `ContextBuilder`, `RecentAction`: two-track memory for prompt sections, knowledge aggregation, and human-in-the-loop responses.
 - `WorkspaceConfig`, `AgentWorkspace`, `WorkspaceManager`: supply isolated workspaces and file data for each agent run.
-- `remora.service.RemoraService`, `remora.adapters.starlette.create_app()`: framework-agnostic service surface plus a Starlette adapter that exposes `/`, `/subscribe`, `/events`, `/run`, `/input`, `/plan`, `/config`, and `/snapshot`.
+- `remora.service.RemoraService`, `remora.service.RemoraService.create_default()`, `remora.adapters.starlette.create_app()`: service surface plus Starlette adapter that exposes `/`, `/subscribe`, `/events`, `/run`, `/input`, `/plan`, `/config`, and `/snapshot`.
 - `discover()`, `TreeSitterDiscoverer`, `CSTNode`: AST discovery remains tree-sitter based but now feeds structured graphs directly.
 
 ## Event-Driven UI

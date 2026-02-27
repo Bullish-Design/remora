@@ -1,5 +1,7 @@
 # Remora v0.4.1 Refactor Implementation Design
 
+Note: The current refactor replaced `src/remora/dashboard/` with `src/remora/service/` and `src/remora/ui/`. Treat dashboard references below as historical.
+
 ## Objective
 Deliberately follow the v0.4.1 Refactoring Guide by implementing the twelve phases in sequence, validating each phase with the corresponding tests, and keeping the core architecture aligned with the v0.4.0 plan.
 

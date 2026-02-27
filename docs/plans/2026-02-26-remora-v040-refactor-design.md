@@ -1,5 +1,7 @@
 # Remora v0.4.0 Refactor Design
 
+Note: The current refactor replaced `src/remora/dashboard/` with `src/remora/service/` and `src/remora/ui/`. Treat dashboard references below as historical.
+
 ## Goal
 Establish a clean, minimal core for Remora that aligns with structured-agents 0.3.4 and Grail 3.0.0, with Cairn as the workspace layer, a single EventBus for observability, and isolated services for indexing and dashboards.
 

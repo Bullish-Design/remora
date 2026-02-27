@@ -67,7 +67,6 @@ def test_serialize_config_round_trips(tmp_path: Path) -> None:
     assert serialized["execution"] == payload["execution"]
     assert serialized["workspace"] == payload["workspace"]
     assert serialized["indexer"] == {"watch_paths": ["src/"], "store_path": ".remora/index"}
-    assert serialized["dashboard"] == {"host": "0.0.0.0", "port": 8420}
 
 
 def test_missing_config_file_returns_defaults(tmp_path: Path) -> None:

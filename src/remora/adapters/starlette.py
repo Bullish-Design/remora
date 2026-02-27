@@ -6,6 +6,7 @@ from typing import Any
 
 from starlette.applications import Starlette
 from starlette.requests import Request
+from datastar_py.starlette import DatastarResponse
 from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.routing import Route
 
@@ -14,13 +15,13 @@ from remora.service.api import RemoraService
 
 
 def create_app(service: RemoraService | None = None) -> Starlette:
-    service = service or RemoraService()
+    service = service or RemoraService.create_default()
 
     async def index(_request: Request) -> HTMLResponse:
         return HTMLResponse(service.index_html())
 
-    async def subscribe(_request: Request) -> StreamingResponse:
-        return _sse_response(service.subscribe_stream())
+    async def subscribe(_request: Request) -> DatastarResponse:
+        return DatastarResponse(service.subscribe_stream())
 
     async def events(_request: Request) -> StreamingResponse:
         return _sse_response(service.events_stream())

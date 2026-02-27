@@ -1,5 +1,7 @@
 # Remora v0.4.1 Implementation Plan
 
+Note: The current refactor replaced `src/remora/dashboard/` with `src/remora/service/` and `src/remora/ui/`. Treat dashboard references below as historical.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Implement every phase from `V041_REVIEW_REFACTORING_GUIDE.md` so Remora matches the v0.4.0 architecture with the v0.4.1 cleanup.

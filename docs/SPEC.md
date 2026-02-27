@@ -18,7 +18,7 @@ remora run [PATHS...] [--config PATH]
 
 ### 1.2 `remora serve`
 
-Start the dashboard server.
+Start the service server.
 
 ```bash
 remora serve [--host HOST] [--port PORT]

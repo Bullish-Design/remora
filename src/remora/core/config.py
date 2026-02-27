@@ -71,14 +71,6 @@ class IndexerConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class DashboardConfig:
-    """Dashboard server configuration."""
-
-    host: str = "0.0.0.0"
-    port: int = 8420
-
-
-@dataclass(frozen=True, slots=True)
 class WorkspaceConfig:
     """Cairn workspace configuration."""
 
@@ -112,7 +104,6 @@ class RemoraConfig:
     bundles: BundleConfig = field(default_factory=BundleConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     indexer: IndexerConfig = field(default_factory=IndexerConfig)
-    dashboard: DashboardConfig = field(default_factory=DashboardConfig)
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
 
@@ -181,7 +172,6 @@ def _apply_env_overrides(data: dict[str, Any]) -> dict[str, Any]:
     - REMORA_MODEL_DEFAULT -> model.default_model
     - REMORA_EXECUTION_MAX_CONCURRENCY -> execution.max_concurrency
     - REMORA_EXECUTION_TIMEOUT -> execution.timeout
-    - REMORA_DASHBOARD_PORT -> dashboard.port
     - REMORA_WORKSPACE_BASE_PATH -> workspace.base_path
     """
     env_mappings = {
@@ -190,7 +180,6 @@ def _apply_env_overrides(data: dict[str, Any]) -> dict[str, Any]:
         "REMORA_MODEL_DEFAULT": ("model", "default_model"),
         "REMORA_EXECUTION_MAX_CONCURRENCY": ("execution", "max_concurrency"),
         "REMORA_EXECUTION_TIMEOUT": ("execution", "timeout"),
-        "REMORA_DASHBOARD_PORT": ("dashboard", "port"),
         "REMORA_WORKSPACE_BASE_PATH": ("workspace", "base_path"),
     }
 
@@ -223,7 +212,6 @@ def _build_config(data: dict[str, Any]) -> RemoraConfig:
         bundles=get_section("bundles", BundleConfig),
         execution=get_section("execution", ExecutionConfig),
         indexer=get_section("indexer", IndexerConfig),
-        dashboard=get_section("dashboard", DashboardConfig),
         workspace=get_section("workspace", WorkspaceConfig),
         model=get_section("model", ModelConfig),
     )
@@ -252,7 +240,6 @@ def serialize_config(config: RemoraConfig) -> dict[str, Any]:
         "bundles": section_to_dict(config.bundles),
         "execution": section_to_dict(config.execution),
         "indexer": section_to_dict(config.indexer),
-        "dashboard": section_to_dict(config.dashboard),
         "workspace": section_to_dict(config.workspace),
         "model": section_to_dict(config.model),
     }
@@ -266,7 +253,6 @@ __all__ = [
     "BundleConfig",
     "ExecutionConfig",
     "IndexerConfig",
-    "DashboardConfig",
     "WorkspaceConfig",
     "ModelConfig",
     "load_config",

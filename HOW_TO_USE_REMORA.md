@@ -30,7 +30,7 @@ Mental model:
 
 ### 1.1 Compatibility and installation
 
-Remora targets Python 3.13+ (`requires-python = ">=3.13"`). Stario requires Python 3.14+. If you want a Stario dashboard, you can run it in a separate service while the Remora backend stays on 3.13 if needed.
+Remora targets Python 3.13+ (`requires-python = ">=3.13"`). Stario requires Python 3.14+. If you want a Stario frontend, run it in a separate service while the Remora backend stays on 3.13 if needed.
 
 Remora install options (from `docs/INSTALLATION.md`):
 
@@ -38,7 +38,7 @@ Remora install options (from `docs/INSTALLATION.md`):
 - `pip install "remora[backend]"`: adds structured agents, vLLM, xgrammar, openai.
 - `pip install "remora[full]"`: convenience meta extra.
 
-If you want to run agents locally, you need the backend extra. If you only consume events (dashboard), the core runtime is enough.
+If you want to run agents locally, you need the backend extra. If you only consume events via the service endpoints, the core runtime is enough.
 
 ---
 
@@ -54,7 +54,7 @@ If you want to run agents locally, you need the backend extra. If you only consu
 
 Discovery specifics:
 
-- Language detection is by file extension (see `LANGUAGE_EXTENSIONS` in `src/remora/discovery.py`).
+- Language detection is by file extension (see `LANGUAGE_EXTENSIONS` in `src/remora/core/discovery.py`).
 - If tree sitter is missing for a language, Remora falls back to a file level node.
 - If query packs are missing for a language, Remora still creates a file node.
 - Node ids are deterministic SHA256 hashes of file path + name + line range.
@@ -90,13 +90,13 @@ The `EventBus` is the backbone of Remora.
 - Emits Remora events (graph start, agent complete, human input requests).
 - Supports `stream()` for SSE / WebSocket consumers.
 
-Key event types (from `src/remora/events.py`):
+Key event types (from `src/remora/core/events.py`):
 - Graph: `GraphStartEvent`, `GraphCompleteEvent`, `GraphErrorEvent`
 - Agent: `AgentStartEvent`, `AgentCompleteEvent`, `AgentErrorEvent`, `AgentSkippedEvent`
 - Human: `HumanInputRequestEvent`, `HumanInputResponseEvent`
 - Kernel: `ModelRequestEvent`, `ToolResultEvent`, etc (re-exported from structured agents)
 
-If you want a UI, analytics, or logs, you subscribe to the EventBus.
+If you want a UI, analytics, or logs, you can subscribe to the EventBus in-process or use `/events` and `/subscribe` from the Remora service.
 
 EventBus streaming notes:
 
@@ -132,7 +132,7 @@ Cairn integration layers:
 
 Important limitation:
 - Workspace snapshots are not supported by the current Cairn API.
-- Checkpoints store metadata only (see `src/remora/checkpoint.py`).
+- Checkpoints store metadata only (see `src/remora/core/checkpoint.py`).
 
 ### 2.6 Tools and Grail integration
 
@@ -198,18 +198,19 @@ The indexer is an optional background daemon (`remora-index`) that watches files
 - Uses watchfiles and fsdantic to track node state.
 - When available, the ContextBuilder can pull related code into prompts.
 
-### 2.11 Dashboard (current Starlette + Datastar implementation)
+### 2.11 Service UI (Starlette + Datastar reference)
 
-Remora ships a reference dashboard in `src/remora/dashboard/`.
+Remora ships a Datastar reference UI through the service layer.
 
-- `DashboardApp` is a Starlette app.
-- `/subscribe` streams Datastar patch events with `datastar_py.starlette`.
+- UI rendering lives in `src/remora/ui/` (`UiStateProjector`, `render_dashboard`).
+- Service endpoints live in `src/remora/service/` and are exposed via `remora.adapters.starlette.create_app`.
+- `/subscribe` streams Datastar patch events (DatastarResponse).
 - `/events` streams raw JSON SSE events.
 - `/run` starts a graph execution.
 - `/input` posts human responses.
 
-This is a working reference for a Datastar UI. The rest of this guide shows
-how to do this in Stario for full alignment with the Datastar way.
+This is the in-repo reference for Datastar. External frontends (Stario or other)
+consume `/subscribe` and `/events` from a separate service.
 
 ---
 
@@ -284,10 +285,6 @@ execution:
   max_turns: 8
   truncation_limit: 1024
 
-dashboard:
-  host: "0.0.0.0"
-  port: 8420
-
 workspace:
   base_path: ".remora/workspaces"
   cleanup_after: "1h"
@@ -300,7 +297,6 @@ Environment overrides:
 - `REMORA_MODEL_DEFAULT`
 - `REMORA_EXECUTION_MAX_CONCURRENCY`
 - `REMORA_EXECUTION_TIMEOUT`
-- `REMORA_DASHBOARD_PORT`
 - `REMORA_WORKSPACE_BASE_PATH`
 
 ---
@@ -336,7 +332,7 @@ from pathlib import Path
 
 from remora.core.config import load_config
 from remora.core.discovery import discover
-from remora.core.event_bus import get_event_bus
+from remora.core.event_bus import EventBus
 from remora.core.graph import build_graph
 from remora.core.executor import GraphExecutor
 
@@ -349,7 +345,8 @@ async def main() -> None:
         for node_type, bundle in config.bundles.mapping.items()
     }
     graph = build_graph(nodes, bundle_mapping)
-    executor = GraphExecutor(config=config, event_bus=get_event_bus())
+    event_bus = EventBus()
+    executor = GraphExecutor(config=config, event_bus=event_bus)
     results = await executor.run(graph, "example-run")
     print(f"Completed {len(results)} agents")
 
@@ -541,30 +538,25 @@ Datastar UI in a few steps.
 
 ### 8.1 Recommended architecture
 
-- Remora runs the graph and emits events.
-- A Stario app subscribes to the EventBus.
-- Stario streams Datastar patches to the browser.
+- Remora runs the graph and exposes `/subscribe` and `/events`.
+- A Stario frontend connects to the Remora service over HTTP (or proxies the stream).
 - Datastar updates the UI via signals and DOM patches.
+- Human input flows back to Remora via `/input`.
 
 ### 8.2 Minimal Stario dashboard skeleton
 
-This is a toy example that mirrors the Starlette dashboard.
+This is a small proxy that forwards Remora's Datastar stream and endpoints.
+For a complete example, see `examples/stario_reference/app.py`.
 
 ```python
 import asyncio
-from stario import Context, Writer, Stario, RichTracer, data, at
+import os
+
+import httpx
+from stario import Context, RichTracer, Stario, Writer, at, data
 from stario.html import Body, Div, Head, Html, Script, Title
 
-from remora.core.event_bus import get_event_bus
-from remora.core.events import HumanInputResponseEvent
-from remora.ui.projector import UiStateProjector
-
-state = UiStateProjector()
-event_bus = get_event_bus()
-
-# Keep state in sync with Remora events
-# (This can also be done per connection instead of global.)
-event_bus.subscribe_all(state.record)
+REMORA_URL = os.environ.get("REMORA_URL", "http://localhost:8420")
 
 
 def page(*children):
@@ -572,10 +564,12 @@ def page(*children):
         {"lang": "en"},
         Head(
             Title("Remora Dashboard"),
-            Script({
-                "type": "module",
-                "src": "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.7/bundles/datastar.js",
-            }),
+            Script(
+                {
+                    "type": "module",
+                    "src": "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.7/bundles/datastar.js",
+                }
+            ),
         ),
         Body(
             data.init(at.get("/subscribe")),
@@ -584,34 +578,29 @@ def page(*children):
     )
 
 
-def dashboard_view(view_data):
-    return Div(
-        {"id": "dashboard"},
-        Div(f"Events: {len(view_data['events'])}"),
-        Div(f"Completed: {view_data['progress']['completed']}"),
-    )
+async def index(_c: Context, w: Writer) -> None:
+    w.html(page(Div({"id": "remora-root"}, "Connecting...")))
 
 
-async def index(c: Context, w: Writer) -> None:
-    w.html(page(dashboard_view(state.snapshot())))
+async def subscribe(_c: Context, w: Writer) -> None:
+    async with httpx.AsyncClient(timeout=None) as client:
+        async with client.stream("GET", f"{REMORA_URL}/subscribe") as response:
+            async for chunk in response.aiter_text():
+                w.raw(chunk)
 
 
-async def subscribe(c: Context, w: Writer) -> None:
-    w.patch(dashboard_view(state.snapshot()))
-    async with event_bus.stream() as events:
-        async for _event in w.alive(events):
-            w.patch(dashboard_view(state.snapshot()))
+async def run(c: Context, w: Writer) -> None:
+    payload = await c.req.json()
+    async with httpx.AsyncClient() as client:
+        response = await client.post(f"{REMORA_URL}/run", json=payload)
+    w.json(response.json())
 
 
 async def submit_input(c: Context, w: Writer) -> None:
     payload = await c.req.json()
-    await event_bus.emit(
-        HumanInputResponseEvent(
-            request_id=payload.get("request_id", ""),
-            response=payload.get("response", ""),
-        )
-    )
-    w.json({"ok": True})
+    async with httpx.AsyncClient() as client:
+        response = await client.post(f"{REMORA_URL}/input", json=payload)
+    w.json(response.json())
 
 
 async def main() -> None:
@@ -619,8 +608,10 @@ async def main() -> None:
         app = Stario(tracer)
         app.get("/", index)
         app.get("/subscribe", subscribe)
+        app.post("/run", run)
         app.post("/input", submit_input)
-        await app.serve()
+        await app.serve(port=9000)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -629,10 +620,10 @@ if __name__ == "__main__":
 Why this works:
 
 - The UI connects once using `data.init(@get('/subscribe'))`.
-- Remora events update the shared state.
-- Each event triggers a patch of the dashboard container.
+- Stario proxies Remora's Datastar patch stream to the browser.
+- `/run` and `/input` forward JSON payloads to Remora.
 
-This is the Stario version of the existing Starlette Datastar dashboard.
+This keeps Remora on Python 3.13 while Stario runs separately on 3.14+.
 
 ---
 
@@ -783,7 +774,7 @@ agents/
   docstring/
   test/
 app/
-  dashboard.py
+  frontend.py
 ```
 
 Execution flow:
@@ -791,7 +782,7 @@ Execution flow:
 1. `remora run src/` or a Stario /run endpoint triggers graph execution.
 2. Each agent writes to its workspace.
 3. `submit_result` summarizes changes.
-4. UI shows progress from the EventBus.
+4. UI shows progress from the EventBus (via `/events` or `/subscribe`).
 
 ### 10.2 Live code review assistant
 
@@ -890,4 +881,5 @@ Architecture:
 - `docs/HOW_TO_USE_GRAIL.md`
 - `docs/HOW_TO_USE_STRUCTURED_AGENTS.md`
 - `server/README.md`
-- `src/remora/dashboard/` (Datastar reference UI)
+- `src/remora/ui/` and `src/remora/service/` (Datastar reference UI + service layer)
+- `examples/stario_reference/` (external Stario proxy template)

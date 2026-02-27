@@ -130,11 +130,11 @@ def blocked_list_view(blocked: list[dict[str, Any]]) -> str:
     return render_tag("div", id="blocked-agents", class_="blocked-agents", content=cards)
 
 
-def graph_launcher_card_view(recent_targets: list[str] | None = None) -> str:
+def graph_launcher_card_view(recent_targets: list[str] | None = None, *, bundle_default: str = "") -> str:
     defaults = {
         "graphLauncher": {
             "target_path": "",
-            "bundle": "lint",
+            "bundle": bundle_default or "",
         }
     }
     signals_attr = html.escape(json.dumps(defaults), quote=True)
@@ -305,7 +305,7 @@ def progress_bar_view(total: int, completed: int, failed: int = 0) -> str:
     )
 
 
-def render_dashboard(state: dict[str, Any]) -> str:
+def render_dashboard(state: dict[str, Any], *, bundle_default: str = "") -> str:
     events = state.get("events", [])
     blocked = state.get("blocked", [])
     agent_states = state.get("agent_states", {})
@@ -326,7 +326,7 @@ def render_dashboard(state: dict[str, Any]) -> str:
         content=render_tag("div", id="events-header", content="Events Stream") + events_list_view(events),
     )
 
-    graph_launcher_card = graph_launcher_card_view(recent_targets)
+    graph_launcher_card = graph_launcher_card_view(recent_targets, bundle_default=bundle_default)
 
     blocked_card = render_tag(
         "div",
