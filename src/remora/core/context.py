@@ -20,6 +20,7 @@ from remora.core.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
 )
+from remora.utils import summarize
 
 if TYPE_CHECKING:
     from remora.core.discovery import CSTNode
@@ -55,14 +56,17 @@ class ContextBuilder:
         self._recent = deque(maxlen=self.window_size)
 
     async def handle(self, event: RemoraEvent) -> None:
-        """EventBus subscriber - updates context from events."""
+        """EventBus subscriber - updates context from events.
+
+        Async to match EventBus handler expectations and allow future async work.
+        """
         match event:
             case ToolResultEvent(tool_name=name, output_preview=output, is_error=is_error):
                 self._recent.append(
                     RecentAction(
                         tool=name,
                         outcome="error" if is_error else "success",
-                        summary=_summarize(str(output), max_len=200),
+                        summary=summarize(str(output), max_len=200),
                     )
                 )
 
@@ -152,13 +156,6 @@ class ContextBuilder:
         """Clear all context. Used for testing or new graph runs."""
         self._recent.clear()
         self._knowledge.clear()
-
-
-def _summarize(text: str, max_len: int = 200) -> str:
-    """Truncate text for context summary."""
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 3] + "..."
 
 
 __all__ = [

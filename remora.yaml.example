@@ -33,3 +33,11 @@ indexer:
 workspace:
   base_path: ".remora/workspaces"
   cleanup_after: "1h"
+  ignore_patterns:
+    - ".git"
+    - ".venv"
+    - "node_modules"
+    - "__pycache__"
+    - ".mypy_cache"
+    - ".pytest_cache"
+  ignore_dotfiles: true

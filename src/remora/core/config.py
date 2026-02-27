@@ -17,6 +17,7 @@ from typing import Any
 import yaml
 
 from remora.core.errors import ConfigError
+from remora.utils import PathLike, normalize_path
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +71,29 @@ class IndexerConfig:
     store_path: str = ".remora/index"
 
 
+DEFAULT_IGNORE_PATTERNS: tuple[str, ...] = (
+    ".agentfs",
+    ".git",
+    ".jj",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".remora",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "venv",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class WorkspaceConfig:
     """Cairn workspace configuration."""
 
     base_path: str = ".remora/workspaces"
     cleanup_after: str = "1h"
+    ignore_patterns: tuple[str, ...] = DEFAULT_IGNORE_PATTERNS
+    ignore_dotfiles: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,7 +131,7 @@ class RemoraConfig:
 # ============================================================================
 
 
-def load_config(path: Path | str | None = None) -> RemoraConfig:
+def load_config(path: PathLike | None = None) -> RemoraConfig:
     """Load configuration from YAML file.
 
     Args:
@@ -129,7 +147,7 @@ def load_config(path: Path | str | None = None) -> RemoraConfig:
     if path is None:
         path = _find_config_file()
 
-    config_path = Path(path)
+    config_path = normalize_path(path)
 
     if not config_path.exists():
         logger.info("No config file found, using defaults")

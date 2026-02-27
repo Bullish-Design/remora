@@ -5,7 +5,7 @@ from remora.core.events import (
     HumanInputRequestEvent,
     HumanInputResponseEvent,
 )
-from remora.ui.projector import UiStateProjector, normalize_event
+from remora.ui.projector import EventKind, UiStateProjector, normalize_event
 
 
 def test_projector_tracks_progress_and_blocked() -> None:
@@ -46,6 +46,6 @@ def test_projector_records_results() -> None:
 
 def test_normalize_event_envelope() -> None:
     envelope = normalize_event(GraphStartEvent(graph_id="graph-1", node_count=1))
-    assert envelope["kind"] == "graph"
+    assert envelope["kind"] == EventKind.GRAPH
     assert envelope["type"] == "GraphStartEvent"
     assert envelope["graph_id"] == "graph-1"

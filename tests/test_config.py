@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from remora.core.config import ErrorPolicy, RemoraConfig, load_config, serialize_config
+from remora.core.config import DEFAULT_IGNORE_PATTERNS, ErrorPolicy, RemoraConfig, load_config, serialize_config
 
 
 def _write_config(tmp_path: Path, data: dict) -> Path:
@@ -65,7 +65,11 @@ def test_serialize_config_round_trips(tmp_path: Path) -> None:
     assert serialized["discovery"] == payload["discovery"]
     assert serialized["model"] == payload["model"]
     assert serialized["execution"] == payload["execution"]
-    assert serialized["workspace"] == payload["workspace"]
+    assert serialized["workspace"] == {
+        **payload["workspace"],
+        "ignore_patterns": list(DEFAULT_IGNORE_PATTERNS),
+        "ignore_dotfiles": True,
+    }
     assert serialized["indexer"] == {"watch_paths": ["src/"], "store_path": ".remora/index"}
 
 

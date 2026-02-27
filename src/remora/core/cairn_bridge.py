@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -18,23 +19,17 @@ from remora.core.config import WorkspaceConfig
 from remora.core.cairn_externals import CairnExternals
 from remora.core.errors import WorkspaceError
 from remora.core.workspace import AgentWorkspace
-from remora.utils import PathResolver
+from remora.utils import PathLike, PathResolver, normalize_path
 
 logger = logging.getLogger(__name__)
 
-_IGNORE_DIRS = {
-    ".agentfs",
-    ".git",
-    ".jj",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".remora",
-    ".tox",
-    ".venv",
-    "__pycache__",
-    "node_modules",
-    "venv",
-}
+
+class SyncMode(str, Enum):
+    """Workspace synchronization modes."""
+
+    FULL = "full"
+    LAZY = "lazy"
+    NONE = "none"
 
 
 class CairnWorkspaceService:
@@ -44,17 +39,21 @@ class CairnWorkspaceService:
         self,
         config: WorkspaceConfig,
         graph_id: str,
-        project_root: Path | str | None = None,
+        project_root: PathLike | None = None,
     ) -> None:
         self._config = config
         self._graph_id = graph_id
-        self._project_root = Path(project_root or Path.cwd()).resolve()
+        self._project_root = normalize_path(project_root or Path.cwd()).resolve()
         self._resolver = PathResolver(self._project_root)
-        self._base_path = Path(config.base_path) / graph_id
+        self._base_path = normalize_path(config.base_path) / graph_id
         self._manager = cairn_workspace_manager.WorkspaceManager()
         self._stable_workspace: Any | None = None
         self._agent_workspaces: dict[str, AgentWorkspace] = {}
         self._stable_lock = asyncio.Lock()
+        self._sync_mode: SyncMode = SyncMode.FULL
+        self._synced_files: set[str] = set()
+        self._ignore_patterns: set[str] = set(config.ignore_patterns or ())
+        self._ignore_dotfiles: bool = config.ignore_dotfiles
 
     @property
     def project_root(self) -> Path:
@@ -64,11 +63,12 @@ class CairnWorkspaceService:
     def resolver(self) -> PathResolver:
         return self._resolver
 
-    async def initialize(self, *, sync: bool = True) -> None:
-        """Initialize stable workspace and optionally sync project files."""
+    async def initialize(self, *, sync_mode: SyncMode = SyncMode.FULL) -> None:
+        """Initialize stable workspace with configurable sync mode."""
         if self._stable_workspace is not None:
             return
 
+        self._sync_mode = sync_mode
         self._base_path.mkdir(parents=True, exist_ok=True)
         stable_path = self._base_path / "stable.db"
 
@@ -81,7 +81,7 @@ class CairnWorkspaceService:
         except Exception as exc:
             raise WorkspaceError(f"Failed to create stable workspace: {exc}") from exc
 
-        if sync:
+        if sync_mode == SyncMode.FULL:
             await self._sync_project_to_workspace()
 
     async def get_agent_workspace(self, agent_id: str) -> AgentWorkspace:
@@ -108,6 +108,7 @@ class CairnWorkspaceService:
             workspace,
             agent_id,
             stable_workspace=self._stable_workspace,
+            ensure_file_synced=self.ensure_file_synced,
             lock=asyncio.Lock(),
             stable_lock=self._stable_lock,
         )
@@ -141,7 +142,7 @@ class CairnWorkspaceService:
         for path in self._project_root.rglob("*"):
             if path.is_dir():
                 continue
-            if _should_ignore(path, self._project_root):
+            if self._should_ignore(path):
                 continue
 
             if not self._resolver.is_within_project(path):
@@ -156,22 +157,47 @@ class CairnWorkspaceService:
 
             try:
                 await self._stable_workspace.files.write(rel_path, payload, mode="binary")
+                self._synced_files.add(rel_path)
             except Exception as exc:
                 logger.debug("Failed to write %s to stable workspace: %s", rel_path, exc)
 
-
-def _should_ignore(path: Path, root: Path) -> bool:
-    try:
-        rel_parts = path.relative_to(root).parts
-    except ValueError:
-        return True
-
-    for part in rel_parts:
-        if part in _IGNORE_DIRS:
+    async def ensure_file_synced(self, rel_path: str) -> bool:
+        """Ensure a specific file is synced to workspace."""
+        if self._sync_mode == SyncMode.NONE:
+            return False
+        if rel_path in self._synced_files:
             return True
-        if part.startswith("."):
+        if self._stable_workspace is None:
+            return False
+
+        workspace_path = self._resolver.to_workspace_path(rel_path)
+        full_path = self._resolver.to_project_path(workspace_path)
+        if not full_path.exists():
+            return False
+        if self._should_ignore(full_path):
+            return False
+
+        try:
+            payload = full_path.read_bytes()
+            await self._stable_workspace.files.write(workspace_path, payload, mode="binary")
+            self._synced_files.add(workspace_path)
             return True
-    return False
+        except Exception as exc:
+            logger.debug("Failed to sync %s: %s", workspace_path, exc)
+            return False
+
+    def _should_ignore(self, path: Path) -> bool:
+        try:
+            rel_parts = path.relative_to(self._project_root).parts
+        except ValueError:
+            return True
+
+        for part in rel_parts:
+            if part in self._ignore_patterns:
+                return True
+            if self._ignore_dotfiles and part.startswith("."):
+                return True
+        return False
 
 
-__all__ = ["CairnWorkspaceService"]
+__all__ = ["CairnWorkspaceService", "SyncMode"]

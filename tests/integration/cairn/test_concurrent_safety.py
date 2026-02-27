@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
 
 pytestmark = [
     pytest.mark.integration,
@@ -116,7 +116,7 @@ class TestConcurrentSafety:
                 graph_id=f"rapid-cycle-{i}",
                 project_root=project_root,
             )
-            await service.initialize(sync=True)
+            await service.initialize(sync_mode=SyncMode.FULL)
 
             ws = await service.get_agent_workspace("agent-1")
             await ws.write("test.txt", f"Cycle {i}")
@@ -128,7 +128,7 @@ class TestConcurrentSafety:
             graph_id=f"rapid-cycle-{cycles - 1}",
             project_root=project_root,
         )
-        await service.initialize(sync=False)
+        await service.initialize(sync_mode=SyncMode.NONE)
         ws = await service.get_agent_workspace("agent-1")
         content = await ws.read("test.txt")
         assert content == f"Cycle {cycles - 1}"

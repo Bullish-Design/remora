@@ -959,9 +959,9 @@ async def handle(self, event: RemoraEvent) -> None:
 
 ---
 
-#### Alternative: Make Synchronous (if chosen)
+#### Alternative: Make Synchronous (DO NOT DO THIS)
 
-If you decide to make it synchronous:
+If you decide to make it synchronous (Which we wont):
 
 **Before:**
 ```python
@@ -1271,7 +1271,7 @@ else:
     output = getattr(result, "output", None)
 ```
 
-Or use a helper function:
+Or use a helper function (Go with this option):
 
 ```python
 def extract_output(result: Any) -> str | None:

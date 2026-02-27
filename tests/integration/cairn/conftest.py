@@ -7,7 +7,7 @@ from typing import Any, AsyncIterator
 
 import pytest
 
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
 from remora.core.config import WorkspaceConfig
 from remora.utils import PathResolver
 from tests.integration.helpers import agentfs_available_sync
@@ -60,7 +60,7 @@ async def workspace_service(
         graph_id="test-graph",
         project_root=project_root,
     )
-    await service.initialize(sync=True)
+    await service.initialize(sync_mode=SyncMode.FULL)
     try:
         yield service
     finally:

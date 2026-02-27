@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import asdict, dataclass, field, is_dataclass
+from enum import Enum
 from typing import Any
 
 from structured_agents.events import Event as StructuredEvent
@@ -32,6 +33,20 @@ from remora.core.events import (
 )
 
 MAX_EVENTS = 200
+
+
+class EventKind(str, Enum):
+    """Categories of events for UI display."""
+
+    GRAPH = "graph"
+    AGENT = "agent"
+    HUMAN = "human"
+    CHECKPOINT = "checkpoint"
+    TOOL = "tool"
+    MODEL = "model"
+    KERNEL = "kernel"
+    TURN = "turn"
+    EVENT = "event"
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -63,24 +78,24 @@ def normalize_event(event: StructuredEvent | RemoraEvent) -> dict[str, Any]:
     }
 
 
-def _event_kind(event: StructuredEvent | RemoraEvent) -> str:
+def _event_kind(event: StructuredEvent | RemoraEvent) -> EventKind:
     if isinstance(event, (GraphStartEvent, GraphCompleteEvent, GraphErrorEvent)):
-        return "graph"
+        return EventKind.GRAPH
     if isinstance(event, (AgentStartEvent, AgentCompleteEvent, AgentErrorEvent, AgentSkippedEvent)):
-        return "agent"
+        return EventKind.AGENT
     if isinstance(event, (HumanInputRequestEvent, HumanInputResponseEvent)):
-        return "human"
+        return EventKind.HUMAN
     if isinstance(event, (CheckpointSavedEvent, CheckpointRestoredEvent)):
-        return "checkpoint"
+        return EventKind.CHECKPOINT
     if isinstance(event, (ToolCallEvent, ToolResultEvent)):
-        return "tool"
+        return EventKind.TOOL
     if isinstance(event, (ModelRequestEvent, ModelResponseEvent)):
-        return "model"
+        return EventKind.MODEL
     if isinstance(event, (KernelStartEvent, KernelEndEvent)):
-        return "kernel"
+        return EventKind.KERNEL
     if isinstance(event, TurnCompleteEvent):
-        return "turn"
-    return "event"
+        return EventKind.TURN
+    return EventKind.EVENT
 
 
 def _event_payload(event: StructuredEvent | RemoraEvent) -> dict[str, Any]:
@@ -202,4 +217,4 @@ class UiStateProjector:
         self.recent_targets.clear()
 
 
-__all__ = ["UiStateProjector", "normalize_event"]
+__all__ = ["EventKind", "UiStateProjector", "normalize_event"]

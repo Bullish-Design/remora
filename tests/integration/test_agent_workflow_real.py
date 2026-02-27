@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from structured_agents.events import ToolCallEvent, ToolResultEvent
 
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
 from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
 from remora.core.discovery import CSTNode, discover
 from remora.core.event_bus import EventBus
@@ -298,7 +298,7 @@ async def _read_workspace_output(
 ) -> WorkspaceOutput:
     service = CairnWorkspaceService(WorkspaceConfig(base_path=str(workspace_root)), graph_id, project_root=project_root)
     try:
-        await service.initialize(sync=False)
+        await service.initialize(sync_mode=SyncMode.NONE)
         workspace = await service.get_agent_workspace(agent_id)
         resolver = PathResolver(project_root)
         workspace_path = resolver.to_workspace_path(output_path)

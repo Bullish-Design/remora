@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
 from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
 from remora.core.discovery import discover
 from remora.core.event_bus import EventBus
@@ -216,7 +216,7 @@ result
 
     resolver = PathResolver(project_root)
     service = CairnWorkspaceService(config.workspace, "long-graph", project_root=project_root)
-    await service.initialize(sync=False)
+    await service.initialize(sync_mode=SyncMode.NONE)
 
     _log("Workspace validation", 1)
     validation_start = time.perf_counter()

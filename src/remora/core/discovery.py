@@ -18,6 +18,8 @@ from typing import Iterator
 import tree_sitter
 from tree_sitter import Language, Parser, QueryCursor, Query
 
+from remora.utils import PathLike, normalize_path
+
 logger = logging.getLogger(__name__)
 
 # Language extension mapping
@@ -243,7 +245,7 @@ def _create_file_node(file_path: Path, content: str | None = None) -> CSTNode:
 
 
 def discover(
-    paths: list[Path] | list[str],
+    paths: list[PathLike],
     languages: list[str] | None = None,
     node_types: list[str] | None = None,
     max_workers: int = 4,
@@ -262,7 +264,7 @@ def discover(
     Returns:
         List of CSTNode objects sorted by file path and line number
     """
-    path_list = [Path(p) if isinstance(p, str) else p for p in paths]
+    path_list = [normalize_path(p) for p in paths]
 
     files: list[tuple[Path, str]] = []
     for path in path_list:
@@ -327,13 +329,13 @@ class TreeSitterDiscoverer:
 
     def __init__(
         self,
-        root_dirs: list[Path | str],
+        root_dirs: list[PathLike],
         language: str | None = None,
         query_pack: str = "remora_core",
         node_types: list[NodeType | str] | None = None,
         max_workers: int = 4,
     ) -> None:
-        self._paths = [Path(p) if isinstance(p, str) else p for p in root_dirs]
+        self._paths = [normalize_path(p) for p in root_dirs]
         self._language = language
         self._query_pack = query_pack
         self._node_types = [nt.value if isinstance(nt, NodeType) else nt for nt in node_types] if node_types else None

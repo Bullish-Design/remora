@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from structured_agents.events import ModelResponseEvent, ToolCallEvent, ToolResultEvent
 
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
 from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
 from remora.core.context import ContextBuilder
 from remora.core.discovery import discover
@@ -172,7 +172,7 @@ result
 
     agent_id = next(iter(results.keys()))
     workspace_service = CairnWorkspaceService(config.workspace, "tool-call", project_root=project_root)
-    await workspace_service.initialize(sync=False)
+    await workspace_service.initialize(sync_mode=SyncMode.NONE)
     workspace = await workspace_service.get_agent_workspace(agent_id)
     resolver = PathResolver(project_root)
     workspace_path = resolver.to_workspace_path(output_path)

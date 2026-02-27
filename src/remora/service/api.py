@@ -22,6 +22,7 @@ from remora.service.handlers import (
     handle_ui_snapshot,
 )
 from remora.ui.projector import UiStateProjector, normalize_event
+from remora.utils import PathLike, normalize_path
 from remora.ui.view import render_dashboard
 
 
@@ -33,8 +34,8 @@ class RemoraService:
         cls,
         *,
         config: RemoraConfig | None = None,
-        config_path: Path | str | None = None,
-        project_root: Path | str | None = None,
+        config_path: PathLike | None = None,
+        project_root: PathLike | None = None,
     ) -> "RemoraService":
         resolved_config = config or load_config(config_path)
         return cls(
@@ -48,7 +49,7 @@ class RemoraService:
         *,
         event_bus: EventBus,
         config: RemoraConfig | None = None,
-        project_root: Path | str | None = None,
+        project_root: PathLike | None = None,
         projector: UiStateProjector | None = None,
         executor_factory: ExecutorFactory | None = None,
     ) -> None:
@@ -56,7 +57,7 @@ class RemoraService:
             raise ValueError("event_bus is required; use RemoraService.create_default() for defaults")
         self._event_bus = event_bus
         self._config = config or load_config()
-        self._project_root = Path(project_root or Path.cwd()).resolve()
+        self._project_root = normalize_path(project_root or Path.cwd()).resolve()
         self._projector = projector or UiStateProjector()
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._bundle_default = _resolve_bundle_default(self._config)

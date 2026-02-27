@@ -10,7 +10,7 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
 from remora.core.config import load_config
 from remora.core.context import ContextBuilder
 from remora.core.discovery import discover
@@ -90,7 +90,7 @@ async def _inspect_workspace(
 ) -> None:
     config = load_config(config_path)
     service = CairnWorkspaceService(config.workspace, graph_id, project_root=PROJECT_ROOT)
-    await service.initialize(sync=False)
+    await service.initialize(sync_mode=SyncMode.NONE)
 
     try:
         workspace = await service.get_agent_workspace(agent_id)

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from structured_agents.events import ModelResponseEvent
 
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
 from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
 from remora.core.discovery import discover
 from remora.core.event_bus import EventBus
@@ -72,7 +72,7 @@ async def test_grail_tool_cairn_write_smoke(tmp_path: Path) -> None:
 
     workspace_config = WorkspaceConfig(base_path=str(tmp_path / "workspaces"))
     service = CairnWorkspaceService(workspace_config, "grail-smoke", project_root=project_root)
-    await service.initialize(sync=True)
+    await service.initialize(sync_mode=SyncMode.FULL)
     workspace = await service.get_agent_workspace("agent-1")
     externals = service.get_externals("agent-1", workspace)
 

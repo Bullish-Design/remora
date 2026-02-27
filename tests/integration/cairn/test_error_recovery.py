@@ -2,7 +2,7 @@
 
 import pytest
 
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
 
 pytestmark = [pytest.mark.integration, pytest.mark.cairn]
 
@@ -48,7 +48,7 @@ class TestErrorRecovery:
             graph_id="error-close",
             project_root=project_root,
         )
-        await service.initialize(sync=True)
+        await service.initialize(sync_mode=SyncMode.FULL)
 
         ws = await service.get_agent_workspace("agent-1")
 
@@ -71,7 +71,7 @@ class TestErrorRecovery:
             graph_id="double-close",
             project_root=project_root,
         )
-        await service.initialize(sync=True)
+        await service.initialize(sync_mode=SyncMode.FULL)
 
         await service.close()
         await service.close()

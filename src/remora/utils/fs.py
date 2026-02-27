@@ -3,15 +3,18 @@ import contextlib
 import shutil
 from pathlib import Path
 
+from remora.utils.types import PathLike, normalize_path
+
 
 @contextlib.asynccontextmanager
-async def managed_workspace(path: Path, *, cleanup: bool = True):
+async def managed_workspace(path: PathLike, *, cleanup: bool = True):
     """Context manager to ensure workspace directories are created and deterministically cleaned up.
 
     Args:
         path: The path to the workspace directory.
         cleanup: Whether to remove the workspace on exit.
     """
+    path = normalize_path(path)
     path.mkdir(parents=True, exist_ok=True)
     try:
         yield path

@@ -1,6 +1,6 @@
 """Core Remora runtime (framework-agnostic)."""
 
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
 from remora.core.cairn_externals import CairnExternals
 from remora.core.checkpoint import CheckpointManager
 from remora.core.config import (
@@ -123,5 +123,6 @@ __all__ = [
     "discover_grail_tools",
     "get_execution_batches",
     "load_config",
+    "SyncMode",
     "serialize_config",
 ]

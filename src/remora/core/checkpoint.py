@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from remora.core.errors import CheckpointError
+from remora.utils import PathLike, normalize_path
 from remora.core.executor import AgentState, ExecutorState, ResultSummary
 from remora.core.graph import AgentNode
 from remora.core.workspace import AgentWorkspace
@@ -24,8 +25,8 @@ logger = logging.getLogger(__name__)
 class CheckpointManager:
     """Save and restore graph execution state metadata."""
 
-    def __init__(self, base_path: Path | str):
-        self._base_path = Path(base_path)
+    def __init__(self, base_path: PathLike):
+        self._base_path = normalize_path(base_path)
         self._base_path.mkdir(parents=True, exist_ok=True)
 
     async def save(

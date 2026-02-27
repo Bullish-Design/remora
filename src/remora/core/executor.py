@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import yaml
 from structured_agents.agent import get_response_parser, load_manifest
@@ -40,15 +40,37 @@ from remora.core.events import (
 )
 from remora.core.event_bus import EventBus
 from remora.core.graph import AgentNode, get_execution_batches
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
 from remora.core.tools.grail import build_virtual_fs, discover_grail_tools
 from remora.core.workspace import CairnDataProvider
-from remora.utils import PathResolver
+from remora.utils import PathLike, PathResolver, normalize_path, truncate
 
 if TYPE_CHECKING:
     from structured_agents.types import RunResult
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class AgentResultProtocol(Protocol):
+    """Protocol for agent execution results."""
+
+    output: str | None
+    final_message: Any
+
+
+def extract_output(result: Any) -> str | None:
+    """Extract output from an agent result, handling multiple shapes."""
+    if isinstance(result, AgentResultProtocol):
+        if result.output is not None:
+            return result.output
+        final_message = getattr(result, "final_message", None)
+        return getattr(final_message, "content", None) if final_message else None
+    if hasattr(result, "output"):
+        return getattr(result, "output", None)
+    if isinstance(result, dict):
+        return result.get("output")
+    return None
 
 
 class AgentState(Enum):
@@ -125,13 +147,13 @@ class GraphExecutor:
         config: RemoraConfig,
         event_bus: EventBus,
         context_builder: ContextBuilder | None = None,
-        project_root: Path | str | None = None,
+        project_root: PathLike | None = None,
     ):
         self.config = config
         self.event_bus = event_bus
         self.context_builder = context_builder or ContextBuilder()
         self._observer = _EventBusObserver(event_bus)
-        self._path_resolver = PathResolver(Path(project_root or Path.cwd()))
+        self._path_resolver = PathResolver(normalize_path(project_root or Path.cwd()))
 
         # Subscribe context builder to events
         event_bus.subscribe_all(self.context_builder.handle)
@@ -189,7 +211,7 @@ class GraphExecutor:
             state.graph_id,
             project_root=self._path_resolver.project_root,
         )
-        await workspace_service.initialize(sync=True)
+        await workspace_service.initialize(sync_mode=SyncMode.FULL)
         semaphore = asyncio.Semaphore(self.config.execution.max_concurrency)
 
         try:
@@ -294,11 +316,7 @@ class GraphExecutor:
 
                 model_name = self._resolve_model_name(node.bundle_path, manifest)
                 result = await self._run_agent(manifest, prompt, tools, model_name=model_name)
-                agent_result = cast(Any, result)
-                output = getattr(agent_result, "output", None)
-                if output is None:
-                    final_message = getattr(agent_result, "final_message", None)
-                    output = getattr(final_message, "content", "") if final_message else ""
+                output = extract_output(result) or ""
 
                 submission_summary = await self._load_submission_summary(workspace, node.id)
                 if submission_summary:
@@ -307,7 +325,7 @@ class GraphExecutor:
                 summary = ResultSummary(
                     agent_id=node.id,
                     success=True,
-                    output=_truncate(str(output), self.config.execution.truncation_limit),
+                    output=truncate(str(output), max_len=self.config.execution.truncation_limit),
                 )
 
                 await self.event_bus.emit(
@@ -533,12 +551,6 @@ class GraphExecutor:
                     queue.extend(node_by_id[current].downstream)
 
         return downstream
-
-
-def _truncate(text: str, limit: int = 1024) -> str:
-    if len(text) <= limit:
-        return text
-    return text[: limit - 3] + "..."
 
 
 __all__ = [

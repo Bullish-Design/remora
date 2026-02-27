@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
 
 pytestmark = [pytest.mark.integration, pytest.mark.cairn, pytest.mark.cairn_lifecycle]
 
@@ -26,7 +26,7 @@ class TestWorkspaceLifecycle:
         )
 
         try:
-            await service.initialize(sync=True)
+            await service.initialize(sync_mode=SyncMode.FULL)
 
             workspace_dir = Path(workspace_config.base_path) / "lifecycle-test"
             assert workspace_dir.exists()
@@ -60,7 +60,7 @@ class TestWorkspaceLifecycle:
             graph_id="close-test",
             project_root=project_root,
         )
-        await service.initialize(sync=True)
+        await service.initialize(sync_mode=SyncMode.FULL)
 
         await service.get_agent_workspace("agent-1")
         await service.get_agent_workspace("agent-2")
@@ -82,7 +82,7 @@ class TestWorkspaceLifecycle:
             graph_id="reopen-test",
             project_root=project_root,
         )
-        await service1.initialize(sync=True)
+        await service1.initialize(sync_mode=SyncMode.FULL)
 
         ws1 = await service1.get_agent_workspace("agent-1")
         await ws1.write("test_file.txt", "Persistent content")
@@ -94,7 +94,7 @@ class TestWorkspaceLifecycle:
             graph_id="reopen-test",
             project_root=project_root,
         )
-        await service2.initialize(sync=False)
+        await service2.initialize(sync_mode=SyncMode.NONE)
 
         ws2 = await service2.get_agent_workspace("agent-1")
         content = await ws2.read("test_file.txt")
@@ -122,8 +122,8 @@ class TestWorkspaceLifecycle:
         )
 
         try:
-            await service1.initialize(sync=True)
-            await service2.initialize(sync=True)
+            await service1.initialize(sync_mode=SyncMode.FULL)
+            await service2.initialize(sync_mode=SyncMode.FULL)
 
             ws1 = await service1.get_agent_workspace("agent-1")
             ws2 = await service2.get_agent_workspace("agent-1")

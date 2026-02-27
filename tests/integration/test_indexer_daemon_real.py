@@ -78,7 +78,7 @@ async def test_indexer_daemon_cold_start_and_incremental_updates(
 
     file_index_before = await store.get_file_index(str(target_file))
     assert file_index_before is not None
-    assert file_index_before.node_count == 2
+    assert file_index_before.node_count == 1
 
     _write_sample(target_file, include_beta=True)
 

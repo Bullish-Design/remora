@@ -9,14 +9,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from cairn.runtime import workspace_manager as cairn_workspace_manager
 
 from remora.core.config import WorkspaceConfig
 from remora.core.discovery import CSTNode
 from remora.core.errors import WorkspaceError
-from remora.utils import PathResolver
+from remora.utils import PathLike, PathResolver, normalize_path
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +33,14 @@ class AgentWorkspace:
         agent_id: str,
         stable_workspace: Any | None = None,
         *,
+        ensure_file_synced: Callable[[str], Awaitable[bool]] | None = None,
         lock: asyncio.Lock | None = None,
         stable_lock: asyncio.Lock | None = None,
     ):
         self._workspace = workspace
         self._agent_id = agent_id
         self._stable_workspace = stable_workspace
+        self._ensure_file_synced = ensure_file_synced
         self._lock = lock or asyncio.Lock()
         if stable_workspace is not None:
             self._stable_lock = stable_lock or self._lock
@@ -50,40 +52,54 @@ class AgentWorkspace:
         """Access underlying Cairn workspace."""
         return self._workspace
 
-    async def read(self, path: str) -> str:
+    async def read(self, path: PathLike) -> str:
         """Read a file from the workspace."""
+        path_str = normalize_path(path).as_posix()
         try:
             async with self._lock:
-                return await self._workspace.files.read(path, mode="text")
+                return await self._workspace.files.read(path_str, mode="text")
         except Exception as exc:
             if not _is_missing_file_error(exc) or self._stable_workspace is None:
                 raise
         async with self._stable_lock:
-            return await self._stable_workspace.files.read(path, mode="text")
+            try:
+                return await self._stable_workspace.files.read(path_str, mode="text")
+            except Exception as exc:
+                if not _is_missing_file_error(exc):
+                    raise
 
-    async def write(self, path: str, content: str | bytes) -> None:
+        if self._ensure_file_synced is not None:
+            await self._ensure_file_synced(path_str)
+            async with self._stable_lock:
+                return await self._stable_workspace.files.read(path_str, mode="text")
+        raise FileNotFoundError(path_str)
+
+    async def write(self, path: PathLike, content: str | bytes) -> None:
         """Write a file to the workspace (CoW isolated)."""
+        path_str = normalize_path(path).as_posix()
         async with self._lock:
-            await self._workspace.files.write(path, content)
+            await self._workspace.files.write(path_str, content)
 
-    async def exists(self, path: str) -> bool:
+    async def exists(self, path: PathLike) -> bool:
         """Check if a file exists in the workspace."""
+        path_str = normalize_path(path).as_posix()
         async with self._lock:
-            if await self._workspace.files.exists(path):
+            if await self._workspace.files.exists(path_str):
                 return True
         if self._stable_workspace is None:
             return False
         async with self._stable_lock:
-            return await self._stable_workspace.files.exists(path)
+            return await self._stable_workspace.files.exists(path_str)
 
-    async def list_dir(self, path: str = ".") -> list[str]:
+    async def list_dir(self, path: PathLike = ".") -> list[str]:
         """List directory entries in the workspace."""
+        path_str = normalize_path(path).as_posix()
         async with self._lock:
-            entries = set(await self._workspace.files.list_dir(path, output="name"))
+            entries = set(await self._workspace.files.list_dir(path_str, output="name"))
         if self._stable_workspace is not None:
             try:
                 async with self._stable_lock:
-                    stable_entries = await self._stable_workspace.files.list_dir(path, output="name")
+                    stable_entries = await self._stable_workspace.files.list_dir(path_str, output="name")
             except Exception:
                 stable_entries = []
             entries.update(stable_entries)
