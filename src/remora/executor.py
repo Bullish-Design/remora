@@ -13,6 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import yaml
 from structured_agents.agent import get_response_parser, load_manifest
 from structured_agents.client import build_client
 from structured_agents.events import Event as StructuredEvent
@@ -32,6 +33,7 @@ from remora.events import (
     AgentErrorEvent,
     AgentSkippedEvent,
     AgentStartEvent,
+    CheckpointRestoredEvent,
     GraphCompleteEvent,
     GraphErrorEvent,
     GraphStartEvent,
@@ -146,20 +148,45 @@ class GraphExecutor:
             pending=set(n.id for n in graph),
         )
 
-        # Initialize states for detected nodes
-        for node_id in state.nodes:
-            state.states[node_id] = AgentState.PENDING
+        return await self._run_with_state(graph, state, emit_graph_start=True)
 
-        await self.event_bus.emit(
-            GraphStartEvent(
-                graph_id=graph_id,
-                node_count=len(graph),
+    async def resume(
+        self,
+        state: ExecutorState,
+        *,
+        checkpoint_id: str | None = None,
+    ) -> dict[str, ResultSummary]:
+        """Resume execution from a restored checkpoint state."""
+        graph = list(state.nodes.values())
+        if checkpoint_id:
+            await self.event_bus.emit(
+                CheckpointRestoredEvent(
+                    graph_id=state.graph_id,
+                    checkpoint_id=checkpoint_id,
+                )
             )
-        )
+        return await self._run_with_state(graph, state, emit_graph_start=False)
+
+    async def _run_with_state(
+        self,
+        graph: list[AgentNode],
+        state: ExecutorState,
+        *,
+        emit_graph_start: bool,
+    ) -> dict[str, ResultSummary]:
+        self._normalize_state(state)
+
+        if emit_graph_start:
+            await self.event_bus.emit(
+                GraphStartEvent(
+                    graph_id=state.graph_id,
+                    node_count=len(graph),
+                )
+            )
 
         workspace_service = CairnWorkspaceService(
             self.config.workspace,
-            graph_id,
+            state.graph_id,
             project_root=self._path_resolver.project_root,
         )
         await workspace_service.initialize(sync=True)
@@ -169,7 +196,11 @@ class GraphExecutor:
             batches = get_execution_batches(graph)
 
             for batch in batches:
-                runnable = [n for n in batch if n.id not in state.skipped and n.id not in state.failed]
+                runnable = [
+                    n
+                    for n in batch
+                    if n.id in state.pending and n.id not in state.skipped and n.id not in state.failed
+                ]
 
                 if not runnable:
                     continue
@@ -204,6 +235,23 @@ class GraphExecutor:
             await workspace_service.close()
 
         return state.completed
+
+    def _normalize_state(self, state: ExecutorState) -> None:
+        node_ids = set(state.nodes)
+        if not state.pending:
+            state.pending = node_ids - set(state.completed) - set(state.failed) - set(state.skipped)
+
+        for node_id in node_ids:
+            if node_id in state.completed:
+                state.states[node_id] = AgentState.COMPLETED
+            elif node_id in state.failed:
+                state.states[node_id] = AgentState.FAILED
+            elif node_id in state.skipped:
+                state.states[node_id] = AgentState.SKIPPED
+            elif node_id in state.pending:
+                state.states.setdefault(node_id, AgentState.PENDING)
+            else:
+                state.states.setdefault(node_id, AgentState.PENDING)
 
     async def _execute_agent(
         self,
@@ -244,7 +292,8 @@ class GraphExecutor:
                     files_provider=files_provider,
                 )
 
-                result = await self._run_agent(manifest, prompt, tools)
+                model_name = self._resolve_model_name(node.bundle_path, manifest)
+                result = await self._run_agent(manifest, prompt, tools, model_name=model_name)
                 agent_result = cast(Any, result)
                 output = getattr(agent_result, "output", None)
                 if output is None:
@@ -291,7 +340,14 @@ class GraphExecutor:
 
                 return summary
 
-    async def _run_agent(self, manifest: Any, prompt: str, tools: list[Any]) -> "RunResult":
+    async def _run_agent(
+        self,
+        manifest: Any,
+        prompt: str,
+        tools: list[Any],
+        *,
+        model_name: str,
+    ) -> "RunResult":
         parser = get_response_parser(manifest.model)
         pipeline = ConstraintPipeline(manifest.grammar_config) if manifest.grammar_config else None
 
@@ -301,7 +357,8 @@ class GraphExecutor:
             constraint_pipeline=pipeline,
         )
 
-        model_name = self.config.model.default_model or manifest.model
+        if not model_name:
+            model_name = self.config.model.default_model or getattr(manifest, "model", "")
         client = build_client(
             {
                 "base_url": self.config.model.base_url,
@@ -343,6 +400,29 @@ class GraphExecutor:
             )
         finally:
             await kernel.close()
+
+    def _resolve_model_name(self, bundle_path: Path, manifest: Any) -> str:
+        path = bundle_path
+        if path.is_dir():
+            path = path / "bundle.yaml"
+
+        override: str | None = None
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            model_data = data.get("model")
+            if isinstance(model_data, dict):
+                override = (
+                    model_data.get("id")
+                    or model_data.get("name")
+                    or model_data.get("model")
+                )
+        except Exception:
+            override = None
+
+        if override:
+            return str(override)
+
+        return self.config.model.default_model or getattr(manifest, "model", "")
 
     def _build_prompt(
         self,

@@ -15,7 +15,8 @@ from datastar_py import ServerSentEventGenerator as SSE
 from datastar_py.starlette import DatastarResponse, datastar_response
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
-from starlette.routing import Route
+from starlette.routing import Route, WebSocketRoute
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from remora.config import RemoraConfig
 from remora.context import ContextBuilder
@@ -442,6 +443,24 @@ def create_routes(
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+    async def events_ws(websocket: WebSocket) -> None:
+        """WebSocket endpoint streaming JSON events."""
+        await websocket.accept()
+        try:
+            async with event_bus.stream() as events:
+                async for event in events:
+                    payload = {
+                        "event_type": type(event).__name__,
+                        "graph_id": getattr(event, "graph_id", ""),
+                        "agent_id": getattr(event, "agent_id", ""),
+                        "timestamp": getattr(event, "timestamp", 0),
+                    }
+                    await websocket.send_json(payload)
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logger.exception("Error in websocket stream")
+
     async def index(request: Request) -> HTMLResponse:
         """Render the dashboard page."""
         view_data = dashboard_state.get_view_data()
@@ -537,6 +556,7 @@ def create_routes(
         Route("/", index),
         Route("/subscribe", subscribe),
         Route("/events", events),
+        WebSocketRoute("/ws", events_ws),
         Route("/run", run_agent, methods=["POST"]),
         Route("/input", submit_input, methods=["POST"]),
     ]
