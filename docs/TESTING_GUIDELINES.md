@@ -28,6 +28,18 @@ The concurrent agent workflow test (`tests/integration/test_agent_workflow_real.
 - `REMORA_WORKFLOW_CONCURRENCY` (default 8)
 - `REMORA_WORKFLOW_MIN_SUCCESS` (default 0.8)
 
+## Cairn Integration Testing
+
+The Cairn-focused suite lives in `tests/integration/cairn/` and validates copy-on-write isolation, read/write semantics, KV submissions, lifecycle behavior, and concurrency safety. These tests require AgentFS (fsdantic) to be available and will skip if it is not.
+
+Run the Cairn suite with `pytest tests/integration/cairn/ -v -m cairn`.
+Run isolation-only checks with `pytest tests/integration/cairn/ -v -m cairn_isolation`.
+Skip slow stress tests with `pytest tests/integration/cairn/ -v -m \"cairn and not cairn_slow\"`.
+
+Use `REMORA_CAIRN_STRESS_AGENTS` to scale the stress concurrency test (default 200).
+
+Coverage report for Cairn integration: `pytest tests/integration/cairn/ -v -m cairn --cov=remora.cairn_bridge --cov=remora.workspace --cov-report=term-missing`.
+
 ## Monitoring & Dashboards
 
 Since every UI consumer subscribes to `EventBus.stream()`, regression tests should assert on emitted events (e.g., `agent_completed`, `tool_result`). Keeping assertions at the public event level makes the suite resilient as internal plumbing evolves.

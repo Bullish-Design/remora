@@ -1,0 +1,35 @@
+name: Cairn Integration Tests
+
+on:
+  push:
+    paths:
+      - 'src/remora/cairn_*.py'
+      - 'src/remora/workspace.py'
+      - 'tests/integration/cairn/**'
+  pull_request:
+    paths:
+      - 'src/remora/cairn_*.py'
+      - 'src/remora/workspace.py'
+      - 'tests/integration/cairn/**'
+
+jobs:
+  cairn-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv sync --all-extras
+
+      - name: Run Cairn tests
+        run: |
+          uv run pytest tests/integration/cairn/ -v -m cairn --timeout=300

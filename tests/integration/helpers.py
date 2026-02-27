@@ -172,3 +172,98 @@ def _indent_block(text: str, spaces: int) -> str:
 
 def write_config(path: Path, data: dict[str, Any]) -> None:
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+async def assert_file_exists_in_workspace(
+    workspace: Any,
+    path: str,
+    *,
+    expected_content: str | None = None,
+) -> None:
+    """Assert a file exists in workspace with optional content check."""
+    exists = await workspace.files.exists(path)
+    assert exists, f"File {path} should exist in workspace"
+
+    if expected_content is not None:
+        content = await workspace.files.read(path, mode="text")
+        assert content == expected_content, (
+            f"File {path} content mismatch: "
+            f"expected {expected_content!r}, got {content!r}"
+        )
+
+
+async def assert_file_not_exists_in_workspace(
+    workspace: Any,
+    path: str,
+) -> None:
+    """Assert a file does NOT exist in workspace."""
+    exists = await workspace.files.exists(path)
+    assert not exists, f"File {path} should NOT exist in workspace"
+
+
+async def get_workspace_file_list(
+    workspace: Any,
+    path: str = "/",
+    *,
+    recursive: bool = False,
+) -> set[str]:
+    """Get set of all files in workspace."""
+    files: set[str] = set()
+
+    try:
+        entries = await workspace.files.list_dir(path, output="name")
+    except Exception:
+        return files
+
+    for entry in entries:
+        full_path = f"{path.rstrip('/')}/{entry}"
+        files.add(full_path)
+
+        if recursive:
+            sub_files = await get_workspace_file_list(
+                workspace, full_path, recursive=True
+            )
+            files.update(sub_files)
+
+    return files
+
+
+class WorkspaceStateSnapshot:
+    """Capture workspace state for comparison."""
+
+    def __init__(self, files: dict[str, str]):
+        self.files = files
+
+    @classmethod
+    async def capture(
+        cls, workspace: Any, paths: list[str]
+    ) -> "WorkspaceStateSnapshot":
+        """Capture current state of specified paths."""
+        files: dict[str, str] = {}
+        for path in paths:
+            try:
+                content = await workspace.files.read(path, mode="text")
+                files[path] = content
+            except Exception:
+                pass
+        return cls(files)
+
+    def diff(
+        self, other: "WorkspaceStateSnapshot"
+    ) -> dict[str, tuple[str | None, str | None]]:
+        """Compare two snapshots, return differences."""
+        all_paths = set(self.files.keys()) | set(other.files.keys())
+        diffs: dict[str, tuple[str | None, str | None]] = {}
+
+        for path in all_paths:
+            old = self.files.get(path)
+            new = other.files.get(path)
+            if old != new:
+                diffs[path] = (old, new)
+
+        return diffs
+
+    def assert_unchanged(self, other: "WorkspaceStateSnapshot") -> None:
+        """Assert no changes between snapshots."""
+        diffs = self.diff(other)
+        assert not diffs, f"Workspace changed unexpectedly: {diffs}"

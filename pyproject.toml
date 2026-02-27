@@ -20,7 +20,7 @@ dependencies = [
   "uvicorn>=0.23",
   "structured-agents>=0.3.4",
   "grail>=3.0.0",
-  "cairn>=1.0.0",
+  "cairn",
   "fsdantic>=0.2.0",
   "pydantic>=2.0",
   "starlette>=0.30",
@@ -116,6 +116,11 @@ markers = [
   "acceptance: end-to-end MVP acceptance tests (requires vLLM server)",
   "acceptance_mock: end-to-end tests with mock server",
   "slow: long-running tests",
+  "cairn: Cairn workspace integration tests",
+  "cairn_isolation: Tests for copy-on-write isolation",
+  "cairn_concurrent: Concurrency safety tests",
+  "cairn_lifecycle: Workspace lifecycle tests",
+  "cairn_slow: Long-running Cairn tests",
 ]
 filterwarnings = [
   "ignore:.*builtin type SwigPyPacked has no __module__ attribute.*:DeprecationWarning",

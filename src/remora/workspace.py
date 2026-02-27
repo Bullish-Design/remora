@@ -59,7 +59,14 @@ class AgentWorkspace:
 
     async def list_dir(self, path: str = ".") -> list[str]:
         """List directory entries in the workspace."""
-        return await self._workspace.files.list_dir(path, output="name")
+        entries = set(await self._workspace.files.list_dir(path, output="name"))
+        if self._stable_workspace is not None:
+            try:
+                stable_entries = await self._stable_workspace.files.list_dir(path, output="name")
+            except Exception:
+                stable_entries = []
+            entries.update(stable_entries)
+        return sorted(entries)
 
     async def accept(self) -> None:
         """Accept all changes in this workspace."""
