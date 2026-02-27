@@ -89,6 +89,14 @@ def _get_free_port() -> int:
         return sock.getsockname()[1]
 
 
+def _uvicorn_available() -> bool:
+    try:
+        import uvicorn  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
 def test_cli_run_invalid_config_fails(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     project_root.mkdir()
@@ -163,6 +171,9 @@ def test_cli_run_missing_bundle_mapping_fails(tmp_path: Path) -> None:
 
 
 def test_dashboard_cli_run_serves_http(tmp_path: Path) -> None:
+    if not _uvicorn_available():
+        pytest.skip("uvicorn is not available")
+
     repo_root = Path(__file__).resolve().parents[2]
     port = _get_free_port()
 
@@ -171,7 +182,6 @@ def test_dashboard_cli_run_serves_http(tmp_path: Path) -> None:
             sys.executable,
             "-m",
             "remora.dashboard.cli",
-            "run",
             "--host",
             "127.0.0.1",
             "--port",
@@ -179,14 +189,21 @@ def test_dashboard_cli_run_serves_http(tmp_path: Path) -> None:
         ],
         cwd=repo_root,
         env=_cli_env(repo_root),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
 
     try:
         deadline = time.time() + 10
         last_error = None
         while time.time() < deadline:
+            if process.poll() is not None:
+                stdout, stderr = process.communicate(timeout=2)
+                raise AssertionError(
+                    "Dashboard exited early "
+                    f"(code={process.returncode}) stdout={stdout!r} stderr={stderr!r}"
+                )
             try:
                 with urlopen(f"http://127.0.0.1:{port}/", timeout=1) as response:
                     assert response.status == 200
@@ -196,8 +213,9 @@ def test_dashboard_cli_run_serves_http(tmp_path: Path) -> None:
                 time.sleep(0.2)
         raise AssertionError(f"Dashboard did not start: {last_error}")
     finally:
-        process.send_signal(signal.SIGINT)
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.terminate()
+        if process.poll() is None:
+            process.send_signal(signal.SIGINT)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.terminate()

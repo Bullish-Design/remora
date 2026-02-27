@@ -426,6 +426,7 @@ def create_routes(
 
         async def event_generator():
             try:
+                yield ": open\n\n"
                 async with event_bus.stream() as events:
                     async for event in events:
                         event_type = type(event).__name__

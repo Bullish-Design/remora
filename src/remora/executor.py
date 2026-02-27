@@ -216,7 +216,7 @@ class GraphExecutor:
 
             await self.event_bus.emit(
                 GraphCompleteEvent(
-                    graph_id=graph_id,
+                    graph_id=state.graph_id,
                     completed_count=len(state.completed),
                     failed_count=len(state.failed),
                 )
@@ -225,7 +225,7 @@ class GraphExecutor:
         except Exception as e:
             await self.event_bus.emit(
                 GraphErrorEvent(
-                    graph_id=graph_id,
+                    graph_id=state.graph_id,
                     error=str(e),
                 )
             )

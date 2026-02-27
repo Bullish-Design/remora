@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import queue
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -35,83 +37,139 @@ def _build_config(tmp_path: Path) -> RemoraConfig:
     )
 
 
-def _emit_event(event_bus: EventBus, event: object) -> None:
+def _log(message: str) -> None:
+    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    thread_name = threading.current_thread().name
+    print(f"[{timestamp}][{thread_name}] {message}", flush=True)
+
+
+def _emit_event_sync(event_bus: EventBus, event: object) -> None:
+    _log(f"emit event={type(event).__name__}")
     asyncio.run(event_bus.emit(event))
 
 
-def _read_first_event_line(response, done: threading.Event, lines: queue.Queue[str]) -> None:
-    for raw in response.iter_lines():
-        if not raw:
-            continue
-        line = raw.decode() if isinstance(raw, bytes) else raw
-        lines.put(line)
-        if line.startswith("event:"):
-            done.set()
-            break
+async def _stream_until(
+    app,
+    path: str,
+    *,
+    match_text: str | None = None,
+    emit_after_first_chunk: callable | None = None,
+    on_first_chunk: callable | None = None,
+    timeout: float = 5.0,
+) -> tuple[int, str]:
+    response_started = asyncio.Event()
+    first_chunk = asyncio.Event()
+    done = asyncio.Event()
+    status_code: int | None = None
+    body_parts: list[bytes] = []
 
+    async def send(message: dict) -> None:
+        nonlocal status_code
+        if message["type"] == "http.response.start":
+            status_code = int(message["status"])
+            response_started.set()
+        elif message["type"] == "http.response.body":
+            body = message.get("body", b"")
+            if body:
+                body_parts.append(body)
+                if not first_chunk.is_set():
+                    first_chunk.set()
+                    if on_first_chunk:
+                        await on_first_chunk()
+                if match_text:
+                    joined = b"".join(body_parts)
+                    if match_text.encode() in joined:
+                        done.set()
+                else:
+                    done.set()
 
-def _read_until_contains(response, text: str, done: threading.Event, buffer: queue.Queue[str]) -> None:
-    collected: list[str] = []
-    for raw in response.iter_lines():
-        if not raw:
-            continue
-        line = raw.decode() if isinstance(raw, bytes) else raw
-        collected.append(line)
-        if text in line:
-            buffer.put(line)
-            done.set()
-            break
-        if len(collected) > 200:
-            break
+    async def receive() -> dict:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "http_version": "1.1",
+        "method": "GET",
+        "headers": [],
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("testclient", 123),
+    }
+
+    task = asyncio.create_task(app(scope, receive, send))
+    emitter_task: asyncio.Task | None = None
+    if emit_after_first_chunk is not None:
+        async def _emit() -> None:
+            await asyncio.wait_for(first_chunk.wait(), timeout=timeout)
+            await emit_after_first_chunk()
+
+        emitter_task = asyncio.create_task(_emit())
+
+    try:
+        await asyncio.wait_for(response_started.wait(), timeout=timeout)
+        await asyncio.wait_for(done.wait(), timeout=timeout)
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        if emitter_task:
+            with contextlib.suppress(asyncio.CancelledError):
+                await emitter_task
+
+    if status_code is None:
+        raise AssertionError("Response never started")
+
+    body_text = b"".join(body_parts).decode("utf-8", errors="replace")
+    return status_code, body_text
 
 
 def test_dashboard_events_stream_emits_event(tmp_path: Path) -> None:
+    _log("test_dashboard_events_stream_emits_event start")
     event_bus = EventBus()
+    _log("creating app")
     app = asyncio.run(create_app(event_bus=event_bus, config=_build_config(tmp_path)))
 
-    with TestClient(app) as client:
-        with client.stream("GET", "/events") as response:
-            assert response.status_code == 200
-            done = threading.Event()
-            lines: queue.Queue[str] = queue.Queue()
-            thread = threading.Thread(
-                target=_read_first_event_line,
-                args=(response, done, lines),
-                daemon=True,
-            )
-            thread.start()
+    async def _run() -> tuple[int, str]:
+        async def _emit() -> None:
+            _log("emitting GraphStartEvent for /events")
+            await event_bus.emit(GraphStartEvent(graph_id="dash-events", node_count=1))
 
-            _emit_event(event_bus, GraphStartEvent(graph_id="dash-events", node_count=1))
+        return await _stream_until(
+            app,
+            "/events",
+            match_text="event: GraphStartEvent",
+            emit_after_first_chunk=_emit,
+        )
 
-            assert done.wait(timeout=5)
-            thread.join(timeout=1)
-
-            event_line = lines.get(timeout=1)
-            assert "GraphStartEvent" in event_line
+    status, body = asyncio.run(_run())
+    assert status == 200
+    assert "GraphStartEvent" in body
 
 
 def test_dashboard_subscribe_stream_returns_html(tmp_path: Path) -> None:
+    _log("test_dashboard_subscribe_stream_returns_html start")
     event_bus = EventBus()
+    _log("creating app")
     app = asyncio.run(create_app(event_bus=event_bus, config=_build_config(tmp_path)))
 
-    with TestClient(app) as client:
-        with client.stream("GET", "/subscribe") as response:
-            assert response.status_code == 200
-            done = threading.Event()
-            buffer: queue.Queue[str] = queue.Queue()
-            thread = threading.Thread(
-                target=_read_until_contains,
-                args=(response, "Remora Dashboard", done, buffer),
-                daemon=True,
-            )
-            thread.start()
+    async def _run() -> tuple[int, str]:
+        return await _stream_until(
+            app,
+            "/subscribe",
+            match_text="Remora Dashboard",
+        )
 
-            assert done.wait(timeout=5)
-            thread.join(timeout=1)
-            assert "Remora Dashboard" in buffer.get(timeout=1)
+    status, body = asyncio.run(_run())
+    assert status == 200
+    assert "Remora Dashboard" in body
 
 
 def test_dashboard_input_emits_event(tmp_path: Path) -> None:
+    _log("test_dashboard_input_emits_event start")
     event_bus = EventBus()
     events: queue.Queue[object] = queue.Queue()
 
@@ -119,9 +177,12 @@ def test_dashboard_input_emits_event(tmp_path: Path) -> None:
         events.put(event)
 
     event_bus.subscribe_all(_record)
+    _log("creating app")
     app = asyncio.run(create_app(event_bus=event_bus, config=_build_config(tmp_path)))
 
+    _log("starting TestClient")
     with TestClient(app) as client:
+        _log("posting /input request")
         response = client.post(
             "/input",
             json={"request_id": "req-123", "response": "yes"},
@@ -137,52 +198,71 @@ def test_dashboard_input_emits_event(tmp_path: Path) -> None:
 
 
 def test_dashboard_events_stream_multiple_clients(tmp_path: Path) -> None:
+    _log("test_dashboard_events_stream_multiple_clients start")
     event_bus = EventBus()
+    _log("creating app")
     app = asyncio.run(create_app(event_bus=event_bus, config=_build_config(tmp_path)))
 
-    client_a = TestClient(app)
-    client_b = TestClient(app)
+    async def _run() -> tuple[tuple[int, str], tuple[int, str]]:
+        ready = asyncio.Event()
+        ready_count = 0
+        lock = asyncio.Lock()
 
-    with client_a, client_b:
-        with client_a.stream("GET", "/events") as response_a, client_b.stream("GET", "/events") as response_b:
-            done_a = threading.Event()
-            done_b = threading.Event()
-            lines_a: queue.Queue[str] = queue.Queue()
-            lines_b: queue.Queue[str] = queue.Queue()
+        async def _mark_ready() -> None:
+            nonlocal ready_count
+            async with lock:
+                ready_count += 1
+                if ready_count >= 2:
+                    ready.set()
 
-            thread_a = threading.Thread(
-                target=_read_first_event_line,
-                args=(response_a, done_a, lines_a),
-                daemon=True,
+        async def _emit() -> None:
+            await ready.wait()
+            _log("emitting GraphStartEvent for multi-client /events")
+            await event_bus.emit(GraphStartEvent(graph_id="dash-multi", node_count=1))
+
+        emit_task = asyncio.create_task(_emit())
+        task_a = asyncio.create_task(
+            _stream_until(
+                app,
+                "/events",
+                match_text="event: GraphStartEvent",
+                emit_after_first_chunk=None,
+                on_first_chunk=_mark_ready,
             )
-            thread_b = threading.Thread(
-                target=_read_first_event_line,
-                args=(response_b, done_b, lines_b),
-                daemon=True,
+        )
+        task_b = asyncio.create_task(
+            _stream_until(
+                app,
+                "/events",
+                match_text="event: GraphStartEvent",
+                emit_after_first_chunk=None,
+                on_first_chunk=_mark_ready,
             )
-            thread_a.start()
-            thread_b.start()
+        )
 
-            _emit_event(event_bus, GraphStartEvent(graph_id="dash-multi", node_count=1))
+        results = await asyncio.gather(task_a, task_b)
+        await emit_task
+        return results[0], results[1]
 
-            assert done_a.wait(timeout=5)
-            assert done_b.wait(timeout=5)
-
-            thread_a.join(timeout=1)
-            thread_b.join(timeout=1)
-
-            assert "GraphStartEvent" in lines_a.get(timeout=1)
-            assert "GraphStartEvent" in lines_b.get(timeout=1)
+    (status_a, body_a), (status_b, body_b) = asyncio.run(_run())
+    assert status_a == 200
+    assert status_b == 200
+    assert "GraphStartEvent" in body_a
+    assert "GraphStartEvent" in body_b
 
 
 def test_dashboard_websocket_stream_emits_event(tmp_path: Path) -> None:
+    _log("test_dashboard_websocket_stream_emits_event start")
     event_bus = EventBus()
+    _log("creating app")
     app = asyncio.run(create_app(event_bus=event_bus, config=_build_config(tmp_path)))
 
+    _log("starting TestClient")
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as websocket:
+            _log("emitting GraphStartEvent for /ws")
             thread = threading.Thread(
-                target=_emit_event,
+                target=_emit_event_sync,
                 args=(event_bus, GraphStartEvent(graph_id="dash-ws", node_count=1)),
                 daemon=True,
             )
