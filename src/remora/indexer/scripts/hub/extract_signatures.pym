@@ -1,0 +1,13 @@
+from grail import Input, external
+
+
+@external
+async def extract_signatures(file_path: str) -> dict:
+    ...
+
+
+file_path: str = Input("file_path")
+
+result = await extract_signatures(file_path)
+
+result

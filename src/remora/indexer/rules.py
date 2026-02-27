@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from remora.indexer.store import NodeStateStore
+
+SCRIPT_ROOT = Path(__file__).parent / "scripts"
 
 
 @dataclass
@@ -18,6 +21,7 @@ class ActionContext:
     store: "NodeStateStore"
     grail_executor: Any = None
     project_root: Path = field(default_factory=Path)
+    script_root: Path = field(default_factory=lambda: SCRIPT_ROOT)
 
     async def run_grail_script(
         self,
@@ -25,21 +29,26 @@ class ActionContext:
         inputs: dict[str, Any],
     ) -> dict[str, Any]:
         """Run a Grail script and return results."""
+        script_file = self.script_root / script_path
+        externals = {
+            "read_file": self._read_file,
+            "extract_signatures": self._extract_signatures,
+        }
+
         if self.grail_executor is not None:
             return await self.grail_executor.run(
-                script_path=script_path,
+                script_path=str(script_file),
                 inputs=inputs,
-                externals={"read_file": self._read_file},
+                externals=externals,
             )
 
         import grail
 
-        grail_dir = self.project_root / ".grail"
-        script_file = grail_dir / script_path
+        grail_dir = self.project_root / ".grail" / "indexer"
         script = grail.load(str(script_file), grail_dir=str(grail_dir))
         result = await script.run(
             inputs=inputs,
-            externals={"read_file": self._read_file},
+            externals=externals,
         )
         return result
 
@@ -49,6 +58,26 @@ class ActionContext:
         if not file_path.is_absolute():
             file_path = self.project_root / file_path
         return file_path.read_text(encoding="utf-8")
+
+    async def _extract_signatures(self, file_path: str) -> dict[str, Any]:
+        """External function for Grail scripts to parse signatures."""
+        from remora.indexer.scanner import Scanner
+
+        path = Path(file_path)
+        if not path.is_absolute():
+            path = self.project_root / path
+
+        if not path.exists():
+            return {"file_hash": "", "nodes": []}
+
+        content = path.read_text(encoding="utf-8")
+        file_hash = hashlib.sha256(content.encode()).hexdigest()
+
+        scanner = Scanner()
+        nodes = await scanner.scan_file(path)
+        for node in nodes:
+            node.setdefault("file_hash", file_hash)
+        return {"file_hash": file_hash, "nodes": nodes}
 
 
 @dataclass

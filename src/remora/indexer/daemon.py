@@ -78,6 +78,7 @@ class IndexerDaemon:
 
         self.workspace: Workspace | None = None
         self.rules = RulesEngine()
+        self.project_root = Path.cwd()
 
         self._shutdown_event = asyncio.Event()
         self._started_at: datetime | None = None
@@ -92,8 +93,7 @@ class IndexerDaemon:
 
         self._change_queue = asyncio.Queue(maxsize=1000)
 
-        project_root = Path.cwd()
-        store_path = project_root / self.config.store_path
+        store_path = self.project_root / self.config.store_path
         store_path.parent.mkdir(parents=True, exist_ok=True)
 
         if self.store is None:
@@ -104,18 +104,24 @@ class IndexerDaemon:
 
         self._started_at = datetime.now(timezone.utc)
 
-        await self._cold_start_index()
+        try:
+            await self._cold_start_index()
 
-        if self._shutdown_event.is_set():
-            return
+            if self._shutdown_event.is_set():
+                return
 
-        await self._start_change_workers()
+            await self._start_change_workers()
 
-        watch_paths = [project_root / p for p in self.config.watch_paths]
+            watch_paths = [self.project_root / p for p in self.config.watch_paths]
 
-        logger.info("Indexer daemon ready, watching: %s", watch_paths)
+            logger.info("Indexer daemon ready, watching: %s", watch_paths)
 
-        await self._watch_files(watch_paths)
+            await self._watch_files(watch_paths)
+        finally:
+            self._shutdown_event.set()
+            await self._stop_change_workers()
+            await self._close_workspace()
+            logger.info("Indexer daemon stopped")
 
     async def _watch_files(self, watch_paths: list[Path]) -> None:
         """Watch filesystem for changes."""
@@ -165,6 +171,15 @@ class IndexerDaemon:
 
         logger.debug("Change worker %d stopped", worker_id)
 
+    async def _stop_change_workers(self) -> None:
+        """Stop all change workers."""
+        if not self._change_workers:
+            return
+        for task in self._change_workers:
+            task.cancel()
+        await asyncio.gather(*self._change_workers, return_exceptions=True)
+        self._change_workers.clear()
+
     async def _handle_file_change(self, change_type: str, path: Path) -> None:
         """Process a file change."""
         store = self.store
@@ -183,7 +198,7 @@ class IndexerDaemon:
         context = ActionContext(
             store=store,
             grail_executor=self.executor,
-            project_root=path.parent,
+            project_root=self.project_root,
         )
 
         for action in actions:
@@ -247,12 +262,10 @@ class IndexerDaemon:
         if store is None:
             return
 
-        project_root = Path.cwd()
-
         logger.info("Cold start: scanning for changed files...")
 
         files = []
-        for py_file in project_root.rglob("*.py"):
+        for py_file in self.project_root.rglob("*.py"):
             if self._shutdown_event.is_set():
                 break
 
@@ -262,6 +275,8 @@ class IndexerDaemon:
 
         files_to_index = []
         for f in files:
+            if self._shutdown_event.is_set():
+                break
             file_hash = self._hash_file(f)
             existing = await store.get_file_index(str(f))
             if not existing or existing.file_hash != file_hash:
@@ -269,7 +284,7 @@ class IndexerDaemon:
 
         logger.info("Found %d files to index (out of %d total)", len(files_to_index), len(files))
 
-        if files_to_index:
+        if files_to_index and not self._shutdown_event.is_set():
             indexed, errors = await self._index_files_parallel(files_to_index)
         else:
             indexed, errors = 0, 0
@@ -292,34 +307,52 @@ class IndexerDaemon:
 
         semaphore = asyncio.Semaphore(self.max_workers)
 
-        async def process_file_with_limit(path: Path) -> tuple[Path, int, float]:
+        async def process_file_with_limit(path: Path) -> tuple[Path, int, float, Exception | None]:
             async with semaphore:
                 start = time.monotonic()
                 try:
                     count = await scan_file_simple(path, store)
                 except Exception as e:
                     logger.exception("Error indexing %s", path)
-                    raise
+                    return (path, 0, 0.0, e)
                 duration = time.monotonic() - start
-                return (path, count, duration)
+                return (path, count, duration, None)
 
         indexed = 0
         errors = 0
 
-        tasks = [process_file_with_limit(f) for f in files]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        progress = self._progress_bar(len(files)) if files else None
+        tasks = [asyncio.create_task(process_file_with_limit(f)) for f in files]
 
-        for i, result in enumerate(results):
-            path = files[i]
-            if isinstance(result, Exception):
-                logger.exception("Error indexing %s", path)
-                errors += 1
-            else:
-                _, count, duration = result
-                indexed += 1
-                logger.debug("Indexed %s: %d nodes in %.2fs", path, count, duration)
+        try:
+            for task in asyncio.as_completed(tasks):
+                if self._shutdown_event.is_set():
+                    for pending in tasks:
+                        if not pending.done():
+                            pending.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    break
+                path, count, duration, error = await task
+                if error is not None:
+                    errors += 1
+                else:
+                    indexed += 1
+                    logger.debug("Indexed %s: %d nodes in %.2fs", path, count, duration)
+                if progress:
+                    progress.update(1)
+        finally:
+            if progress:
+                progress.close()
 
         return indexed, errors
+
+    @staticmethod
+    def _progress_bar(total: int) -> Any | None:
+        try:
+            from tqdm import tqdm
+        except Exception:
+            return None
+        return tqdm(total=total, desc="Indexing", unit="file")
 
     def _should_process(self, path: Path) -> bool:
         """Check if a file should be processed."""
@@ -357,10 +390,10 @@ class IndexerDaemon:
         logger.info("Indexer daemon shutting down")
         self._shutdown_event.set()
 
+    async def _close_workspace(self) -> None:
+        """Close the workspace if open."""
         if self.workspace:
             await self.workspace.close()
-
-        logger.info("Indexer daemon stopped")
 
     @staticmethod
     def _hash_file(path: Path) -> str:

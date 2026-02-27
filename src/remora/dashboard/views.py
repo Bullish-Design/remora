@@ -414,7 +414,6 @@ def create_routes(
 
             async with event_bus.stream() as events:
                 async for event in events:
-                    dashboard_state.record(event)
                     view_data = dashboard_state.get_view_data()
                     yield SSE.patch_elements(dashboard_view(view_data))
 
@@ -427,7 +426,6 @@ def create_routes(
             try:
                 async with event_bus.stream() as events:
                     async for event in events:
-                        dashboard_state.record(event)
                         event_type = type(event).__name__
                         data = {
                             "event_type": event_type,
@@ -435,7 +433,7 @@ def create_routes(
                             "agent_id": getattr(event, "agent_id", ""),
                             "timestamp": getattr(event, "timestamp", 0),
                         }
-                        yield f"event: {event_type}\ndata: {data}\n\n"
+                        yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
             except asyncio.CancelledError:
                 pass
             except Exception:

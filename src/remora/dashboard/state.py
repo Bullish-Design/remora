@@ -26,6 +26,7 @@ class DashboardState:
             AgentStartEvent,
             AgentCompleteEvent,
             AgentErrorEvent,
+            GraphStartEvent,
             HumanInputRequestEvent,
             HumanInputResponseEvent,
         )
@@ -38,12 +39,17 @@ class DashboardState:
         }
         self.events.append(event_dict)
 
-        if isinstance(event, AgentStartEvent):
+        if isinstance(event, GraphStartEvent):
+            self.total_agents = event.node_count
+            self.completed_agents = 0
+
+        elif isinstance(event, AgentStartEvent):
             self.agent_states[event.agent_id] = {
                 "state": "started",
                 "name": event.agent_id,
             }
-            self.total_agents += 1
+            if self.total_agents == 0:
+                self.total_agents += 1
 
         elif isinstance(event, HumanInputRequestEvent):
             key = event.request_id
@@ -72,7 +78,7 @@ class DashboardState:
                 0,
                 {
                     "agent_id": event.agent_id,
-                    "content": str(getattr(event, "result", "")),
+                    "content": str(getattr(event, "result_summary", "")),
                     "timestamp": getattr(event, "timestamp", 0),
                 },
             )
