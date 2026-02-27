@@ -14,7 +14,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
-from remora.events import (
+from remora.core.events import (
     RemoraEvent,
     ToolResultEvent,
     AgentCompleteEvent,
@@ -22,7 +22,7 @@ from remora.events import (
 )
 
 if TYPE_CHECKING:
-    from remora.discovery import CSTNode
+    from remora.core.discovery import CSTNode
 
 logger = logging.getLogger(__name__)
 

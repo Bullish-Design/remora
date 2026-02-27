@@ -13,9 +13,9 @@ from typing import Any
 
 from cairn.runtime import workspace_manager as cairn_workspace_manager
 
-from remora.config import WorkspaceConfig
-from remora.discovery import CSTNode
-from remora.errors import WorkspaceError
+from remora.core.config import WorkspaceConfig
+from remora.core.discovery import CSTNode
+from remora.core.errors import WorkspaceError
 from remora.utils import PathResolver
 
 logger = logging.getLogger(__name__)

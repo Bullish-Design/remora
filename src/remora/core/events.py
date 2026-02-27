@@ -22,7 +22,7 @@ from structured_agents.events import (
 )
 
 if TYPE_CHECKING:
-    from remora.discovery import CSTNode
+    from remora.core.discovery import CSTNode
     from structured_agents.types import RunResult
 
 

@@ -10,8 +10,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from remora.discovery import CSTNode
-from remora.errors import GraphError
+from remora.core.discovery import CSTNode
+from remora.core.errors import GraphError
 
 
 @dataclass(frozen=True, slots=True)

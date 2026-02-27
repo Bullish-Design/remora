@@ -16,7 +16,7 @@ from typing import Any
 
 import yaml
 
-from remora.errors import ConfigError
+from remora.core.errors import ConfigError
 
 logger = logging.getLogger(__name__)
 

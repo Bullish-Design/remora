@@ -15,7 +15,7 @@ from typing import Any
 
 from structured_agents.events import Event as StructuredEvent
 
-from remora.events import RemoraEvent
+from remora.core.events import RemoraEvent
 
 logger = logging.getLogger(__name__)
 

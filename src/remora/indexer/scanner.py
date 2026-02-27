@@ -54,7 +54,7 @@ class Scanner:
     ) -> list[dict[str, Any]]:
         """Scan using tree-sitter (the robust way)."""
         try:
-            from remora.discovery import discover
+            from remora.core.discovery import discover
 
             nodes = discover([path])
         except Exception as e:

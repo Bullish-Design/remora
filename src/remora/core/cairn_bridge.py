@@ -14,10 +14,10 @@ from typing import Any
 
 from cairn.runtime import workspace_manager as cairn_workspace_manager
 
-from remora.config import WorkspaceConfig
-from remora.cairn_externals import CairnExternals
-from remora.errors import WorkspaceError
-from remora.workspace import AgentWorkspace
+from remora.core.config import WorkspaceConfig
+from remora.core.cairn_externals import CairnExternals
+from remora.core.errors import WorkspaceError
+from remora.core.workspace import AgentWorkspace
 from remora.utils import PathResolver
 
 logger = logging.getLogger(__name__)

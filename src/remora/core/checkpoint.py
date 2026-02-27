@@ -13,10 +13,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from remora.errors import CheckpointError
-from remora.executor import AgentState, ExecutorState, ResultSummary
-from remora.graph import AgentNode
-from remora.workspace import AgentWorkspace
+from remora.core.errors import CheckpointError
+from remora.core.executor import AgentState, ExecutorState, ResultSummary
+from remora.core.graph import AgentNode
+from remora.core.workspace import AgentWorkspace
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ class CheckpointManager:
         }
 
     def _deserialize_node(self, data: dict[str, Any]) -> AgentNode:
-        from remora.discovery import CSTNode
+        from remora.core.discovery import CSTNode
 
         target_data = data["target"]
         target = CSTNode(

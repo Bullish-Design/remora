@@ -25,10 +25,10 @@ from structured_agents.types import Message
 
 from cairn.orchestrator.lifecycle import SUBMISSION_KEY, SubmissionRecord
 
-from remora.config import ErrorPolicy, RemoraConfig
-from remora.context import ContextBuilder
-from remora.errors import ExecutionError
-from remora.events import (
+from remora.core.config import ErrorPolicy, RemoraConfig
+from remora.core.context import ContextBuilder
+from remora.core.errors import ExecutionError
+from remora.core.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
     AgentSkippedEvent,
@@ -38,11 +38,11 @@ from remora.events import (
     GraphErrorEvent,
     GraphStartEvent,
 )
-from remora.event_bus import EventBus
-from remora.graph import AgentNode, get_execution_batches
-from remora.cairn_bridge import CairnWorkspaceService
-from remora.tools.grail import build_virtual_fs, discover_grail_tools
-from remora.workspace import CairnDataProvider
+from remora.core.event_bus import EventBus
+from remora.core.graph import AgentNode, get_execution_batches
+from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.tools.grail import build_virtual_fs, discover_grail_tools
+from remora.core.workspace import CairnDataProvider
 from remora.utils import PathResolver
 
 if TYPE_CHECKING:
