@@ -87,11 +87,15 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/remora", "scripts", "demo"]
-include = ["src/remora/indexer/scripts/**/*.pym"]
+include = [
+    "src/remora/indexer/scripts/**/*.pym",
+    "src/remora/fixtures/**",
+]
 
 [tool.hatch.build.targets.sdist]
 include = [
     "src/remora",
+    "src/remora/fixtures/**",
     "demo",
     "agents",
     "training",
@@ -108,7 +112,7 @@ python-downloads = "automatic"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-q --cov=remora --cov-report=term-missing -m \"not integration\""
+addopts = "-q --cov=remora --cov-report=term-missing"
 testpaths = ["tests"]
 markers = [
   "integration: requires vLLM FunctionGemma server",

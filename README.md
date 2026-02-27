@@ -57,6 +57,23 @@ Remora ships with a lightweight core plus backend-focused extras so you can mix 
 
 See `docs/INSTALLATION.md` for more detail and the recommended deployment patterns for dashboards versus backend tooling.
 
+## Tool Calling Modes
+
+Remora supports two tool-calling modes, controlled per bundle with `grammar.send_tools_to_api`.
+
+- `send_tools_to_api: true` (default): tool schemas are sent to vLLM and the model calls tools via the native OpenAI-style tool API. This yields the most reliable tool selection and argument formatting.
+- `send_tools_to_api: false`: tool schemas are not sent to vLLM. The model must emit XML tool calls (Qwen XML parser) in the response content, which Remora parses and executes. Use this for legacy XML tool-call formats or when you need to test model misbehavior (unknown tools, malformed args).
+- When `send_tools_to_api` is `false`, Remora does not attach structured-output constraints because constraints are only applied when tool schemas are sent to the kernel.
+
+Example bundle snippet:
+
+```yaml
+grammar:
+  strategy: ebnf
+  allow_parallel_calls: false
+  send_tools_to_api: true
+```
+
 
 ## Public API Highlights
 

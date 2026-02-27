@@ -1,0 +1,10 @@
+{
+  "inputs": [
+    {
+      "name": "count",
+      "type": "int",
+      "required": true,
+      "default": null
+    }
+  ]
+}

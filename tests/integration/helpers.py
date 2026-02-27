@@ -134,6 +134,7 @@ def write_tool_bundle(
     system_prompt: str = "You are a tool-calling test agent.",
     max_turns: int = 3,
     include_grammar: bool = True,
+    send_tools_to_api: bool = True,
 ) -> Path:
     tools_dir = bundle_dir / "tools"
     tools_dir.mkdir(parents=True, exist_ok=True)
@@ -155,7 +156,7 @@ def write_tool_bundle(
                 "grammar:",
                 "  strategy: ebnf",
                 "  allow_parallel_calls: false",
-                "  send_tools_to_api: false",
+                f"  send_tools_to_api: {'true' if send_tools_to_api else 'false'}",
             ]
         )
     lines.extend(["agents_dir: tools", f"max_turns: {max_turns}"])

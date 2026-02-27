@@ -26,7 +26,7 @@ Remora (v0.4.3) is a **local agent orchestration framework** for running structu
 
 | Capability | Description | Test Priority |
 |------------|-------------|---------------|
-| **Code Discovery** | Tree-sitter based parsing of Python, JS, TS, Go, Rust, Markdown, TOML, YAML, JSON | HIGH |
+| **Code Discovery** | Tree-sitter based parsing of Python, Markdown, TOML | HIGH |
 | **Graph Building** | Convert discovered nodes to executable agent dependency graph | HIGH |
 | **Graph Execution** | Execute agents in topological order with bounded concurrency | CRITICAL |
 | **vLLM Integration** | Multi-turn agent execution with tool calling via structured-agents | CRITICAL |
@@ -244,7 +244,7 @@ assert skipped_agents == {node.id for node in function_nodes}
 
 #### 4.1.1 Multi-Language Discovery (NOT TESTED)
 
-**Remora supports:** Python, JavaScript, TypeScript, Go, Rust, Markdown, TOML, YAML, JSON
+**Remora supports:** Python, Markdown, TOML
 
 **Tests only use:** Python
 
@@ -255,11 +255,8 @@ nodes = discover([target_file], languages=["python"])
 ```
 
 **Missing coverage:**
-- JavaScript/TypeScript function and class discovery
-- Go function and struct discovery
-- Rust function and impl discovery
 - Markdown section discovery
-- TOML/YAML table discovery
+- TOML table discovery
 - Cross-language project discovery
 
 **Impact:** HIGH - Multi-language is a core advertised capability with zero integration coverage.
@@ -495,10 +492,8 @@ This is pragmatic but masks systematic issues.
 1. **Multi-Language Discovery Tests**
    ```python
    @pytest.mark.parametrize("language,content,expected_type", [
-       ("javascript", "function hello() { return 'hi'; }", "function"),
-       ("typescript", "interface User { name: string; }", "interface"),
-       ("go", "func main() {}", "function"),
-       ("rust", "fn main() {}", "function"),
+       ("markdown", "# Hello\n\nSection content", "section"),
+       ("toml", "[table]\nkey = 'value'", "table"),
    ])
    async def test_multi_language_discovery(language, content, expected_type):
        # ...
@@ -602,7 +597,7 @@ This is pragmatic but masks systematic issues.
 
 | Component | Priority | Estimated Tests | Estimated Lines |
 |-----------|----------|-----------------|-----------------|
-| Multi-language Discovery | CRITICAL | 8-10 | 200-300 |
+| Multi-language Discovery (Python, Markdown, TOML) | CRITICAL | 6-8 | 150-200 |
 | Complex Graph Execution | CRITICAL | 5-7 | 250-350 |
 | Model Failure Handling | CRITICAL | 6-8 | 200-300 |
 | Error Policy Coverage | HIGH | 3 | 150-200 |

@@ -324,6 +324,8 @@ class GraphExecutor:
                 Message(role="user", content=prompt),
             ]
             tool_schemas = [tool.schema for tool in tools]
+            if manifest.grammar_config and not manifest.grammar_config.send_tools_to_api:
+                tool_schemas = []
             max_turns = getattr(manifest, "max_turns", None) or self.config.execution.max_turns
             if self.config.execution.timeout > 0:
                 return await asyncio.wait_for(

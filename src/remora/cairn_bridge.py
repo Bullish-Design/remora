@@ -7,6 +7,7 @@ through Cairn.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,7 @@ class CairnWorkspaceService:
         self._manager = cairn_workspace_manager.WorkspaceManager()
         self._stable_workspace: Any | None = None
         self._agent_workspaces: dict[str, AgentWorkspace] = {}
+        self._stable_lock = asyncio.Lock()
 
     @property
     def project_root(self) -> Path:
@@ -102,7 +104,13 @@ class CairnWorkspaceService:
         except Exception as exc:
             raise WorkspaceError(f"Failed to create workspace for {agent_id}: {exc}") from exc
 
-        agent_workspace = AgentWorkspace(workspace, agent_id, stable_workspace=self._stable_workspace)
+        agent_workspace = AgentWorkspace(
+            workspace,
+            agent_id,
+            stable_workspace=self._stable_workspace,
+            lock=asyncio.Lock(),
+            stable_lock=self._stable_lock,
+        )
         self._agent_workspaces[agent_id] = agent_workspace
         return agent_workspace
 

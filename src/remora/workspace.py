@@ -6,6 +6,7 @@ Remora does not import fsdantic directly; workspace access flows through Cairn.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -26,10 +27,23 @@ class AgentWorkspace:
     Wraps a Cairn workspace with agent-specific convenience methods.
     """
 
-    def __init__(self, workspace: Any, agent_id: str, stable_workspace: Any | None = None):
+    def __init__(
+        self,
+        workspace: Any,
+        agent_id: str,
+        stable_workspace: Any | None = None,
+        *,
+        lock: asyncio.Lock | None = None,
+        stable_lock: asyncio.Lock | None = None,
+    ):
         self._workspace = workspace
         self._agent_id = agent_id
         self._stable_workspace = stable_workspace
+        self._lock = lock or asyncio.Lock()
+        if stable_workspace is not None:
+            self._stable_lock = stable_lock or self._lock
+        else:
+            self._stable_lock = None
 
     @property
     def cairn(self) -> Any:
@@ -39,30 +53,37 @@ class AgentWorkspace:
     async def read(self, path: str) -> str:
         """Read a file from the workspace."""
         try:
-            return await self._workspace.files.read(path, mode="text")
-        except Exception:
-            if self._stable_workspace is None:
+            async with self._lock:
+                return await self._workspace.files.read(path, mode="text")
+        except Exception as exc:
+            if not _is_missing_file_error(exc) or self._stable_workspace is None:
                 raise
+        async with self._stable_lock:
             return await self._stable_workspace.files.read(path, mode="text")
 
     async def write(self, path: str, content: str | bytes) -> None:
         """Write a file to the workspace (CoW isolated)."""
-        await self._workspace.files.write(path, content)
+        async with self._lock:
+            await self._workspace.files.write(path, content)
 
     async def exists(self, path: str) -> bool:
         """Check if a file exists in the workspace."""
-        if await self._workspace.files.exists(path):
-            return True
+        async with self._lock:
+            if await self._workspace.files.exists(path):
+                return True
         if self._stable_workspace is None:
             return False
-        return await self._stable_workspace.files.exists(path)
+        async with self._stable_lock:
+            return await self._stable_workspace.files.exists(path)
 
     async def list_dir(self, path: str = ".") -> list[str]:
         """List directory entries in the workspace."""
-        entries = set(await self._workspace.files.list_dir(path, output="name"))
+        async with self._lock:
+            entries = set(await self._workspace.files.list_dir(path, output="name"))
         if self._stable_workspace is not None:
             try:
-                stable_entries = await self._stable_workspace.files.list_dir(path, output="name")
+                async with self._stable_lock:
+                    stable_entries = await self._stable_workspace.files.list_dir(path, output="name")
             except Exception:
                 stable_entries = []
             entries.update(stable_entries)
@@ -112,7 +133,7 @@ class WorkspaceManager:
         except Exception as e:
             raise WorkspaceError(f"Failed to create workspace for {agent_id}: {e}")
 
-        agent_ws = AgentWorkspace(cairn_ws, agent_id)
+        agent_ws = AgentWorkspace(cairn_ws, agent_id, lock=asyncio.Lock())
         self._workspaces[agent_id] = agent_ws
         return agent_ws
 
@@ -189,3 +210,16 @@ __all__ = [
     "CairnDataProvider",
     "CairnResultHandler",
 ]
+
+
+def _is_missing_file_error(exc: Exception) -> bool:
+    if isinstance(exc, FileNotFoundError):
+        return True
+    code = getattr(exc, "code", None)
+    if code in {"FS_NOT_FOUND", "ENOENT"}:
+        return True
+    context = getattr(exc, "context", None)
+    if isinstance(context, dict) and context.get("agentfs_code") == "ENOENT":
+        return True
+    errno_value = getattr(exc, "errno", None)
+    return errno_value == 2
