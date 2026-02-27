@@ -1,0 +1,13 @@
+{
+  "baseline": [
+    {"sku": "BX-100", "date": "2024-05-01", "expected_units": 130},
+    {"sku": "BX-100", "date": "2024-05-02", "expected_units": 145},
+    {"sku": "BX-100", "date": "2024-05-03", "expected_units": 138},
+    {"sku": "BX-200", "date": "2024-05-01", "expected_units": 90},
+    {"sku": "BX-200", "date": "2024-05-02", "expected_units": 98},
+    {"sku": "PL-050", "date": "2024-05-01", "expected_units": 55},
+    {"sku": "PL-050", "date": "2024-05-02", "expected_units": 60},
+    {"sku": "KT-010", "date": "2024-05-01", "expected_units": 70},
+    {"sku": "KT-010", "date": "2024-05-02", "expected_units": 78}
+  ]
+}

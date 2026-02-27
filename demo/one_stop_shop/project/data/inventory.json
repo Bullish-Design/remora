@@ -1,0 +1,112 @@
+{
+  "skus": [
+    {
+      "sku": "BX-100",
+      "description": "Standard shipping box",
+      "category": "packaging",
+      "unit_cost": 2.4,
+      "list_price": 5.0,
+      "unit_weight": 0.8,
+      "min_order_qty": 200
+    },
+    {
+      "sku": "BX-200",
+      "description": "Reinforced shipping box",
+      "category": "packaging",
+      "unit_cost": 3.9,
+      "list_price": 7.5,
+      "unit_weight": 1.1,
+      "min_order_qty": 150
+    },
+    {
+      "sku": "PL-050",
+      "description": "Pallet wrap roll",
+      "category": "supplies",
+      "unit_cost": 8.2,
+      "list_price": 15.0,
+      "unit_weight": 3.4,
+      "min_order_qty": 60
+    },
+    {
+      "sku": "KT-010",
+      "description": "Starter kit bundle",
+      "category": "kits",
+      "unit_cost": 12.0,
+      "list_price": 26.0,
+      "unit_weight": 2.2,
+      "min_order_qty": 80
+    }
+  ],
+  "warehouses": [
+    {
+      "warehouse_id": "SEA-1",
+      "name": "Seattle DC",
+      "region": "NW",
+      "capacity_units": 25000
+    },
+    {
+      "warehouse_id": "DAL-1",
+      "name": "Dallas Hub",
+      "region": "SW",
+      "capacity_units": 30000
+    }
+  ],
+  "positions": [
+    {
+      "sku": "BX-100",
+      "warehouse_id": "SEA-1",
+      "on_hand": 920,
+      "inbound": 400,
+      "reserved": 250
+    },
+    {
+      "sku": "BX-100",
+      "warehouse_id": "DAL-1",
+      "on_hand": 600,
+      "inbound": 200,
+      "reserved": 180
+    },
+    {
+      "sku": "BX-200",
+      "warehouse_id": "SEA-1",
+      "on_hand": 420,
+      "inbound": 150,
+      "reserved": 120
+    },
+    {
+      "sku": "BX-200",
+      "warehouse_id": "DAL-1",
+      "on_hand": 310,
+      "inbound": 90,
+      "reserved": 140
+    },
+    {
+      "sku": "PL-050",
+      "warehouse_id": "SEA-1",
+      "on_hand": 140,
+      "inbound": 40,
+      "reserved": 35
+    },
+    {
+      "sku": "PL-050",
+      "warehouse_id": "DAL-1",
+      "on_hand": 90,
+      "inbound": 30,
+      "reserved": 25
+    },
+    {
+      "sku": "KT-010",
+      "warehouse_id": "SEA-1",
+      "on_hand": 220,
+      "inbound": 60,
+      "reserved": 95
+    },
+    {
+      "sku": "KT-010",
+      "warehouse_id": "DAL-1",
+      "on_hand": 130,
+      "inbound": 40,
+      "reserved": 70
+    }
+  ]
+}

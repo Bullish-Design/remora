@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Iterator
 
 import tree_sitter
-from tree_sitter import Language, Parser, QueryCursor
+from tree_sitter import Language, Parser, QueryCursor, Query
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
     try:
         lang_module = __import__(f"tree_sitter_{language}")
         lang = Language(lang_module.language())
-        query = lang.query(query_text)
+        query = Query(lang, query_text)
     except Exception as e:
         logger.warning("Query error for %s: %s", language, e)
         return [_create_file_node(file_path, content)]

@@ -1,0 +1,20 @@
+{
+  "suppliers": [
+    {
+      "supplier_id": "SUP-ALPHA",
+      "name": "Alpha Packaging",
+      "lead_time_days": 14,
+      "min_order_qty": 200,
+      "reliability_score": 0.93,
+      "sku_scope": ["BX-100", "BX-200", "PL-050"]
+    },
+    {
+      "supplier_id": "SUP-BETA",
+      "name": "Beta Kits",
+      "lead_time_days": 21,
+      "min_order_qty": 100,
+      "reliability_score": 0.88,
+      "sku_scope": ["KT-010"]
+    }
+  ]
+}

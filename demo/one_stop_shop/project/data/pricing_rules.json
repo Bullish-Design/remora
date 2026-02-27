@@ -1,0 +1,25 @@
+{
+  "rules": [
+    {
+      "category": "packaging",
+      "min_margin": 0.12,
+      "max_discount": 0.15,
+      "floor_price": 2.8,
+      "elasticity": 0.9
+    },
+    {
+      "category": "supplies",
+      "min_margin": 0.18,
+      "max_discount": 0.12,
+      "floor_price": 9.5,
+      "elasticity": 0.8
+    },
+    {
+      "sku": "KT-010",
+      "min_margin": 0.22,
+      "max_discount": 0.1,
+      "floor_price": 19.0,
+      "elasticity": 1.1
+    }
+  ]
+}
