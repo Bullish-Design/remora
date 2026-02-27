@@ -11,16 +11,14 @@ pip install remora
 - Provides the core event bus, workspace helpers, CLI framework, and analyzer/orchestrator plumbing that every consumer needs.
 - No `structured-agents`, `vllm`, or `openai`; backend-only workflows are disabled but the CLI still works for discovery, watch, and analysis commands.
 
-## Frontend slice (Python 3.14)
+## Dashboard slice (Python 3.13+)
 
 ```bash
-pip install "remora[frontend]"
+pip install remora
 ```
 
-- Installs `stario`, `uvicorn`, and `httpx` so downstream dashboard libraries (Stario or similar) can register SSE routes, stream events, and post responses.
-- `remora.frontend` now exports `EventBus`, `WorkspaceInboxCoordinator`, the shared dashboard state/aggregator, and `register_routes(app: Stario, event_bus: EventBus)` so your Stario app can hook into the global event stream without ever pulling in `structured-agents`.
-- This extra targets Python 3.14 because `stario` currently requires it; pip will fail on 3.13 with a clear error from `stario` itself.
-- Refer to [STARIO_INTEGRATION_REVIEW.md](../STARIO_INTEGRATION_REVIEW.md) for the signal patterns, `/events` SSE feed, and the `/agent/{agent_id}/respond` handler that interacts with `WorkspaceInboxCoordinator`.
+- Installs the core runtime plus `uvicorn` so you can run `demo/dashboard/app.py`, mount `DashboardApp`, or expose the SSE `/events` feed in your own ASGI host.
+- No additional event helpers are needed; `DashboardApp` exposes `/subscribe`, `/events`, `/run`, and `/input` along with the shared `EventBus` so every UI consumer reuses the same stream.
 
 ## Backend slice (Python 3.13+)
 

@@ -1,87 +1,89 @@
-"""Tests for ContextManager."""
+import asyncio
+from types import SimpleNamespace
 
 import pytest
+from structured_agents.events import ToolResultEvent
 
-from remora.context import ContextManager
+from remora.context import ContextBuilder
+from remora.events import AgentCompleteEvent
+from remora.workspace import ResultSummary
 
 
-class TestContextManager:
-    @pytest.fixture
-    def initial_context(self):
-        return {
-            "agent_id": "test-001",
-            "goal": "Fix lint errors in foo.py",
-            "operation": "lint",
-            "node_id": "foo.py:bar",
-            "node_summary": "A utility function",
-        }
+def _dummy_node(node_id: str) -> SimpleNamespace:
+    return SimpleNamespace(node_id=node_id)
 
-    def test_init_creates_packet(self, initial_context):
-        """ContextManager initializes a DecisionPacket."""
-        ctx = ContextManager(initial_context)
 
-        assert ctx.packet.agent_id == "test-001"
-        assert ctx.packet.goal == "Fix lint errors in foo.py"
-        assert ctx.packet.operation == "lint"
-        assert ctx.packet.turn == 0
+@pytest.mark.asyncio
+async def test_tool_result_event_tracks_recent_actions() -> None:
+    builder = ContextBuilder()
+    event = ToolResultEvent(
+        turn=1,
+        tool_name="lint",
+        call_id="call-1",
+        is_error=False,
+        duration_ms=0,
+        output_preview="Found 2 issues",
+    )
 
-    def test_apply_tool_result_with_summary(self, initial_context):
-        """Tool-provided summaries are used."""
-        ctx = ContextManager(initial_context)
+    await builder.handle(event)
 
-        ctx.apply_event(
-            {
-                "type": "tool_result",
-                "tool_name": "run_linter",
-                "data": {
-                    "summary": "Found 3 lint errors",
-                    "knowledge_delta": {"lint_errors": 3},
-                },
-            }
-        )
+    recent = builder.get_recent_actions()
+    assert len(recent) == 1
+    assert recent[0].tool == "lint"
+    assert recent[0].outcome == "success"
 
-        assert len(ctx.packet.recent_actions) == 1
-        assert ctx.packet.recent_actions[0].summary == "Found 3 lint errors"
-        assert ctx.packet.knowledge["lint_errors"].value == 3
 
-    def test_apply_tool_result_error(self, initial_context):
-        """Errors are tracked correctly."""
-        ctx = ContextManager(initial_context)
+@pytest.mark.asyncio
+async def test_agent_complete_event_accumulates_knowledge() -> None:
+    builder = ContextBuilder()
+    event = AgentCompleteEvent(
+        graph_id="graph-1",
+        agent_id="agent-1",
+        result={"summary": "Refactored foo"},
+    )
 
-        ctx.apply_event(
-            {
-                "type": "tool_result",
-                "tool_name": "run_linter",
-                "data": {
-                    "error": "File not found",
-                },
-            }
-        )
+    await builder.handle(event)
 
-        assert ctx.packet.recent_actions[0].outcome == "error"
-        assert ctx.packet.last_error == "File not found"
-        assert ctx.packet.error_count == 1
+    knowledge = builder.get_knowledge()
+    assert knowledge["agent-1"] == "Refactored foo"
 
-    def test_get_prompt_context(self, initial_context):
-        """Prompt context is properly formatted."""
-        ctx = ContextManager(initial_context)
-        ctx.packet.turn = 2
-        ctx.packet.add_action("run_linter", "Found 3 errors", "success")
-        ctx.packet.update_knowledge("errors", 3)
 
-        prompt_ctx = ctx.get_prompt_context()
+def test_ingest_summary_populates_long_track() -> None:
+    builder = ContextBuilder()
+    summary = ResultSummary(
+        agent_id="agent-2",
+        success=True,
+        turn_count=3,
+        termination_reason="no_tool_calls",
+        final_message="Done",
+        payload={"status": "success"},
+        writes=[],
+        deleted_files=[],
+        errors=[],
+        tool_results=[],
+    )
 
-        assert prompt_ctx["goal"] == "Fix lint errors in foo.py"
-        assert prompt_ctx["turn"] == 2
-        assert len(prompt_ctx["recent_actions"]) == 1
-        assert prompt_ctx["knowledge"]["errors"] == 3
+    builder.ingest_summary(summary)
 
-    def test_increment_turn(self, initial_context):
-        """Turn counter increments correctly."""
-        ctx = ContextManager(initial_context)
+    knowledge = builder.get_knowledge()
+    assert "agent-2" in knowledge
+    assert knowledge["agent-2"].startswith("success")
 
-        assert ctx.packet.turn == 0
-        ctx.increment_turn()
-        assert ctx.packet.turn == 1
-        ctx.increment_turn()
-        assert ctx.packet.turn == 2
+
+@pytest.mark.asyncio
+async def test_build_context_for_includes_recent_actions() -> None:
+    builder = ContextBuilder()
+    event = ToolResultEvent(
+        turn=1,
+        tool_name="formatter",
+        call_id="call-2",
+        is_error=False,
+        duration_ms=0,
+        output_preview="Formatted code",
+    )
+
+    await builder.handle(event)
+    context = builder.build_context_for(_dummy_node("node-1"))
+
+    assert "## Recent Actions" in context
+    assert "formatter" in context

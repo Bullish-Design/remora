@@ -12,6 +12,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
+from remora.config import load_config
+from remora.context import ContextBuilder
 from remora.dashboard.state import DashboardState
 from remora.dashboard import views
 from remora.event_bus import get_event_bus
@@ -28,6 +30,8 @@ class DashboardApp:
         self._event_bus = get_event_bus()
         self._dashboard_state = DashboardState()
         self._running_tasks: dict[str, asyncio.Task] = {}
+        self._context_builder = ContextBuilder()
+        self._remora_config = load_config()
 
     @property
     def app(self) -> Starlette:
@@ -51,7 +55,8 @@ class DashboardApp:
             view_data = self._dashboard_state.get_view_data()
             yield SSE.patch_elements(views.dashboard_view(view_data))
 
-            async for _ in self._event_bus.stream():
+            async for event in self._event_bus.stream():
+                self._dashboard_state.record(event)
                 view_data = self._dashboard_state.get_view_data()
                 yield SSE.patch_elements(views.dashboard_view(view_data))
 
@@ -63,6 +68,7 @@ class DashboardApp:
         async def event_generator():
             try:
                 async for event in self._event_bus.stream():
+                    self._dashboard_state.record(event)
                     event_type = type(event).__name__
                     data = {
                         "event_type": event_type,
@@ -106,7 +112,6 @@ class DashboardApp:
 
     async def _trigger_graph(self, target_path: str, bundle: str) -> str:
         """Trigger graph execution via the executor."""
-        from remora.executor import GraphExecutor
         from remora.graph import build_graph
         from remora.discovery import discover
         from pathlib import Path
@@ -115,11 +120,16 @@ class DashboardApp:
 
         try:
             nodes = discover([Path(target_path)])
-            agent_nodes = build_graph(nodes, {bundle: Path(f"agents/{bundle}")})
+            metadata = self._remora_config.bundle_metadata
+            agent_nodes = build_graph(nodes, metadata, config=self._remora_config)
+
+            if bundle and bundle in metadata:
+                bundle_path = metadata[bundle].path
+                agent_nodes = [node for node in agent_nodes if node.bundle_path == bundle_path]
 
             task = asyncio.create_task(self._execute_graph(graph_id, agent_nodes))
             self._running_tasks[graph_id] = task
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to build graph")
             raise
 
@@ -135,9 +145,14 @@ class DashboardApp:
                 max_concurrency=4,
                 timeout=300.0,
             )
-            executor = GraphExecutor(config=config, event_bus=get_event_bus())
-            await executor.run(agent_nodes)
-        except Exception as e:
+            executor = GraphExecutor(
+                config=config,
+                event_bus=get_event_bus(),
+                remora_config=self._remora_config,
+                context_builder=self._context_builder,
+            )
+            await executor.run(agent_nodes, self._remora_config.workspace)
+        except Exception:
             logger.exception("Graph execution failed")
 
     async def submit_input(self, request: Request) -> JSONResponse:

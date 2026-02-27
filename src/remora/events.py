@@ -12,82 +12,18 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Union
 
+from structured_agents.events import (
+    KernelEndEvent,
+    KernelStartEvent,
+    ModelRequestEvent,
+    ModelResponseEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+    TurnCompleteEvent,
+)
+
 if TYPE_CHECKING:
     from remora.discovery import CSTNode
-
-
-# =============================================================================
-# Structured-Agents Kernel Events (stubs for compatibility)
-# =============================================================================
-
-
-@dataclass(frozen=True)
-class KernelStartEvent:
-    """Kernel started event from structured-agents."""
-
-    graph_id: str = ""
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass(frozen=True)
-class KernelEndEvent:
-    """Kernel ended event from structured-agents."""
-
-    graph_id: str = ""
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass(frozen=True)
-class ToolCallEvent:
-    """Tool was called event from structured-agents."""
-
-    name: str = ""
-    call_id: str = ""
-    arguments: dict = field(default_factory=dict)
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass(frozen=True)
-class ToolResultEvent:
-    """Tool result event from structured-agents."""
-
-    name: str = ""
-    call_id: str = ""
-    output: Any = None
-    is_error: bool = False
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass(frozen=True)
-class ModelRequestEvent:
-    """Model request event from structured-agents."""
-
-    prompt: str = ""
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass(frozen=True)
-class ModelResponseEvent:
-    """Model response event from structured-agents."""
-
-    response: str = ""
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass(frozen=True)
-class RestartEvent:
-    """Kernel restart event from structured-agents."""
-
-    reason: str = ""
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass(frozen=True)
-class TurnComplete:
-    """Turn complete event from structured-agents."""
-
-    turn_count: int = 0
-    timestamp: float = field(default_factory=time.time)
 
 
 # =============================================================================
@@ -212,8 +148,7 @@ RemoraEvent = Union[
     ToolResultEvent,
     ModelRequestEvent,
     ModelResponseEvent,
-    RestartEvent,
-    TurnComplete,
+    TurnCompleteEvent,
 ]
 
 
@@ -232,7 +167,6 @@ __all__ = [
     "ToolResultEvent",
     "ModelRequestEvent",
     "ModelResponseEvent",
-    "RestartEvent",
-    "TurnComplete",
+    "TurnCompleteEvent",
     "RemoraEvent",
 ]

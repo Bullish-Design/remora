@@ -71,7 +71,6 @@ grail = { git = "https://github.com/Bullish-Design/grail.git", rev = "main" }
 [project.scripts]
 
 remora = "remora.cli:app"
-remora-hub = "remora.hub.cli:main"
 remora-index = "remora.indexer.cli:app"
 remora-tui = "scripts.remora_tui:app"
 remora-demo = "scripts.remora_demo:app"

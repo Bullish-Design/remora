@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from remora.discovery import CSTNode
-    from remora.config import RemoraConfig
+    from remora.config import BundleMetadata, RemoraConfig
 
 
 @dataclass(frozen=True)
@@ -40,19 +40,18 @@ class AgentNode:
 
 def build_graph(
     nodes: list["CSTNode"],
-    bundles: dict[str, Path],
+    bundle_metadata: dict[str, "BundleMetadata"],
     config: "RemoraConfig | None" = None,
 ) -> list[AgentNode]:
-    """Map discovered code nodes to agent nodes with dependency edges.
+    """Map discovered code nodes to agent nodes using bundle metadata.
 
-    This is a pure function - given the same inputs, it always returns
-    the same output. No side effects, no state.
+    The function remains pure: given the same nodes and metadata, it returns
+    the same graph with deterministic bundle selection by priority.
 
     Args:
         nodes: List of CSTNodes from discovery
-        bundles: Mapping from node_type to bundle path
-               e.g., {"function": Path("agents/lint"), "class": Path("agents/docstring")}
-        config: Remora configuration (optional, for future extension)
+        bundle_metadata: Mapping from bundle name to metadata describing node types
+        config: Optional Remora configuration (reserved for future uses)
 
     Returns:
         List of AgentNodes with dependency edges computed
@@ -60,10 +59,13 @@ def build_graph(
     agent_nodes: list[AgentNode] = []
 
     for node in nodes:
-        bundle_path = bundles.get(node.node_type)
-        if bundle_path is None:
+        candidates = [metadata for metadata in bundle_metadata.values() if node.node_type in metadata.node_types]
+        if not candidates:
             continue
 
+        # Choose the highest priority bundle, break ties by bundle name for determinism
+        selected = min(candidates, key=lambda metadata: (-metadata.priority, metadata.bundle_name))
+        bundle_path = selected.path
         if not bundle_path.exists():
             continue
 

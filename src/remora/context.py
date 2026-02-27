@@ -22,6 +22,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from remora.workspace import ResultSummary
+
 if TYPE_CHECKING:
     from remora.discovery import CSTNode
     from remora.events import AgentCompleteEvent, RemoraEvent, ToolResultEvent
@@ -101,11 +103,13 @@ class ContextBuilder:
         event_type = type(event).__name__
 
         if event_type == "ToolResultEvent":
+            tool_label = getattr(event, "tool_name", None) or getattr(event, "name", "unknown")
+            summary_input = getattr(event, "output", None) or getattr(event, "output_preview", None)
             self._recent.append(
                 RecentAction(
-                    tool=getattr(event, "name", "unknown") or "unknown",
+                    tool=tool_label,
                     outcome="error" if getattr(event, "is_error", False) else "success",
-                    summary=_summarize_output(getattr(event, "output", None)),
+                    summary=_summarize_output(summary_input),
                 )
             )
 
@@ -148,6 +152,12 @@ class ContextBuilder:
         sections.append(self.build_prompt_section())
 
         return "\n".join(sections)
+
+    def ingest_summary(self, summary: ResultSummary) -> None:
+        """Ingest a run summary to enrich the Long Track knowledge."""
+        if not summary.agent_id:
+            return
+        self._knowledge[summary.agent_id] = summary.brief()
 
     def get_recent_actions(self) -> list[RecentAction]:
         """Get all recent actions (Short Track)."""

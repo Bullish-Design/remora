@@ -1,87 +1,28 @@
-# Remora configuration example
-# Copy to remora.yaml and adjust as needed.
+model_base_url: "http://remora-server:8000/v1"
+api_key: "EMPTY"
 
-discovery:
-  language: python
-  query_pack: remora_core
-
-agents_dir: agents
-
-# Bundle metadata for agent graph configuration
-bundles:
-  metadata:
-    lint:
-      node_types: [function, class]
-      priority: 10
-      requires_context: true
-    docstring:
-      node_types: [function, class]
-      priority: 20
-      requires_context: true
-    test:
-      node_types: [function]
-      priority: 30
-      requires_context: true
-    sample_data:
-      node_types: [function]
-      priority: 40
-      requires_context: false
-    harness:
-      node_types: []
-      priority: 100
-      requires_context: false
-
-# vLLM server on your Tailscale network
-server:
-  base_url: "http://remora-server:8000/v1"
-  api_key: "EMPTY"
-  timeout: 120
-  default_adapter: "Qwen/Qwen3-4B-Instruct-2507-FP8"
-
-operations:
+bundle_metadata:
   lint:
-    enabled: true
-    auto_accept: false
-    subagent: lint
-    # model_id here is the LoRA adapter name on the server
-    # omit to use server.default_adapter
-    # model_id: "lint"
-
-  test:
-    enabled: true
-    auto_accept: false
-    subagent: test
-
+    path: agents/lint/bundle.yaml
+    node_types: [function, class]
+    priority: 10
+    requires_context: true
   docstring:
-    enabled: true
-    auto_accept: false
-    subagent: docstring
-    style: google
-
+    path: agents/docstring/bundle.yaml
+    node_types: [function, class]
+    priority: 20
+    requires_context: true
+  test:
+    path: agents/test/bundle.yaml
+    node_types: [function]
+    priority: 30
+    requires_context: true
   sample_data:
-    enabled: false
-    auto_accept: false
-    subagent: sample_data
+    path: agents/sample_data/bundle.yaml
+    node_types: [function]
+    priority: 40
+    requires_context: false
 
-runner:
-  max_turns: 20
-  max_tokens: 4096
-  temperature: 0.1
-  tool_choice: "auto"  # "required" | "auto" | "none"
-  max_history_messages: 50
-
-cairn:
-  command: cairn
-  home: null
-  max_concurrent_agents: 16
-  timeout: 300
-
-event_stream:
-  enabled: true
-  include_payloads: true
-  max_payload_chars: 40000
-
-llm_log:
-  enabled: true
-  output: .remora_cache/llm_conversations.log
-  include_full_prompts: false
+workspace:
+  base_path: .remora/workspaces
+  cleanup_after: 1h

@@ -1,85 +1,76 @@
-# Remora V2 Architecture
-
-Remora V2 is built around three nouns: **events**, **agents**, and **workspaces**. Every state change, user interaction, tool call, and dashboard update flows through the same `EventBus`. Agent logic is expressed declaratively via `AgentGraph`, and every run executes inside a `GraphWorkspace` backed by Cairn + Fsdantic file/KV stores. The dashboard and any other UI simply listen to that event stream.
-
-## System Overview
+Remora V2 is built around three nouns: **events**, **agents**, and **workspaces**. Every state change, tool call, and UI update flows through the same `EventBus`. Agents are defined through declarative graph builders, execution happens in deterministic batches, and dashboards simply replay the event stream.
 
 ```
-            ┌────────────┐         ┌────────────┐
-            │   User     │◀────▶│    UI /    │
-            │ Interface  │      │  Dashboard │
-            └────────────┘      └────────────┘
-                   │                  ▲
-                   ▼                  │
-                ┌────────────────────Event Bus────────────────────┐
-                │  Publishes agent events, tool calls, checkpoints │
-                └────────────────────┬────────────────────────────┘
-                                     │
-         ┌──────────────┬────────────┴─────────────┬──────────────┐
-         │ AgentGraph   │ GraphWorkspace / KV Store │ Coordinator  │
-         │ (nodes + DSL)│ (per-agent files + KV)    │ (optional)   │
-         └──────────────┴────────────┬─────────────┴──────────────┘
-                                     │
-                          AgentKernel + Tool Execution
+                 ┌────────────┐         ┌────────────┐
+                 │   User     │◀────▶│ Dashboard  │
+                 │ Interface  │      │  / CLI     │
+                 └────────────┘      └────────────┘
+                        │                  ▲
+                        ▼                  │
+                  ┌────────────────────Event Bus────────────────────┐
+                  │  Publishes kernel events, tool results, and logs │
+                  └─────────────┬──────────────┬────────────▲────────┘
+                                │              │            │
+                        ┌───────▼───────┐ ┌────▼────┐ ┌─────▼─────┐
+                        │ Graph Builder │ │ Context │ │ Dashboard │
+                        │ (remora.graph)│ │ Builder │ │ App / SSE │
+                        └───────────────┘ └─────────┘ └────────────┘
 ```
 
 ## Core Components
 
 ### Event Bus (`remora.event_bus.EventBus`)
 
-- Pydantic-first events (`Event`, `EventCategory`, convenience constructors)
-- Backpressure queue plus `asyncio.gather` for concurrent subscribers
-- `stream()` exposes SSE/WebSocket-ready iterators used by the dashboard, CLI, and mobile remotes.
-- Every agent lifecycle change (`agent_started`, `agent_blocked`, `agent_completed`, `workspace_checkpointed`, etc.) is emitted here.
+- Centralized observer that implements the structured-agents `Observer` protocol.
+- Type-based subscriptions and `stream()` support SSE/WebSocket consumers.
+- Every tool call, human input request, and agent completion emits through the bus.
 
-### Agent Graph (`remora.agent_graph`)
+### Graph Builder & Executor (`remora.graph`, `remora.executor.GraphExecutor`)
 
-- `AgentNode` unifies identity, bundle, target, inbox, kernel, KV state, and result tracking.
-- `AgentGraph` exposes `.agent()`, `.after().run()`, `.run_parallel()`, `.discover()`, and `.on_blocked()` for building declarative workflows.
-- `GraphExecutor` handles concurrency, emits each agent event, and integrates blocked/resumed handling via injected handlers.
+- `build_graph()` maps `CSTNode` objects to bundles via metadata, respecting priorities and dependencies.
+- `GraphExecutor` runs those nodes, provisions per-agent Cairn workspaces, injects the EventBus as the structured-agents observer, and emits `AgentStart/Complete/Error` events.
+- Execution is governed by `ExecutionConfig`, `ErrorPolicy`, and the shared `ContextBuilder` for prompt context and knowledge.
 
-### Workspaces & State (`remora.workspace`, `remora.agent_state`, `remora.checkpoint`)
+### Context & Knowledge (`remora.context.ContextBuilder`)
 
-- `GraphWorkspace` creates agent directories, shared space, and a snapshot of the original source under `remora_workspaces/`.
-- `AgentKVStore` (Phase 5) stores conversation history, tool results, metadata, and snapshots entirely inside the KV store.
-- `CheckpointManager` materializes files + KV entries, exports them to disk, and restores new workspaces for checkpoint playback or versioning.
+- Subscribes to `ToolResultEvent` and `AgentCompleteEvent` to maintain rolling recent actions and persistent knowledge summaries.
+- Supplies prompt sections (`build_context_for`) that `execute_agent()` uses when calling `Agent.run()`.
+- `ingest_summary()` captures every `ResultSummary` so downstream UIs know what changed.
 
-### Interactive Layer (`remora.interactive`)
+### Workspaces (`remora.workspace`, `remora.checkpoint`)
 
-- `WorkspaceInboxCoordinator` polls Cairn KV for `outbox:question:*`, emits `agent:blocked`, and writes answers to `inbox:response:*`.
-- `ask_user()` writes a question, polls the KV inbox, and resumes once the coordinator responds.
-- `get_user_messages()` flushes async user messages sent via KV and integrates them into agent turns.
+- `WorkspaceConfig` describes base path + cleanup cadence for `CairnWorkspace` instances.
+- `CairnDataProvider` feeds file contents (source + related files) into prompts and results.
+- `CairnResultHandler` persists tool outputs + file writes and returns `ResultSummary` objects.
+- `CheckpointManager` snapshots both SQLite state and metadata for versioned replay.
 
-### UI & Dashboard (`demo/dashboard`)
+### Dashboard App (`remora.dashboard.app`)
 
-- FastAPI app streams events via `/events` (SSE) and `/ws/events` (WebSocket).
-- User responses are posted to `/agent/{agent_id}/respond` and reflected back through `EventBus` (`Event.agent_resumed`).
-- `/projector` and `/mobile` endpoints render simplified views for presentation or touch interactions.
-- Static assets live under `demo/dashboard/static/` and talk to `/static/dashboard.js`.
+- Starlette application exposing `/subscribe`, `/events`, `/run`, and `/input`.
+- Streams SSE patches and raw JSON events; posting to `/input` emits `HumanInputResponseEvent` on the EventBus.
+- Intended entry point for any ASGI dashboard or projector.
 
 ### Public API (`src/remora/__init__.py`)
 
-Exports are intentionally minimal:
-
-- `AgentGraph`, `GraphConfig`
-- `EventBus`, `Event`, `get_event_bus`
-- `discover`, `CSTNode`, `TreeSitterDiscoverer`
-- `GraphWorkspace`, `WorkspaceManager`
-
-This keeps the dependency surface clean while allowing consumers to compose graphs, subscribe to events, and orchestrate UI/CLI workflows.
+- `build_graph()`, `AgentNode`, `BundleMetadata`, `GraphExecutor`
+- `EventBus`, `Event`, `get_event_bus()`
+- `ContextBuilder`, `ResultSummary`
+- `WorkspaceConfig`, `CairnWorkspace`, `CairnDataProvider`, `CairnResultHandler`
+- `DashboardApp`, `create_app()`
 
 ## Data Flow
 
 1. `discover()` parses the target paths via Tree-sitter and yields `CSTNode` objects.
-2. `AgentGraph` adds agents, wires dependencies, and optionally sets `.on_blocked()`.
-3. `GraphExecutor` runs each agent:
-   - publishes `agent_started`
-   - executes structured-agents kernel (bundles + tools)
-   - writes conversation + tool results via `AgentKVStore`
-   - publishes `agent_completed` / `agent_failed`
-4. The dashboard or CLI consumes `EventBus.stream()` to display progress and resolve questions.
-5. Workspaces can be checkpointed via `CheckpointManager`, materializing both files and KV entries for versioning.
+2. `build_graph()` selects bundles using metadata supplied via `remora.yaml`.
+3. `GraphExecutor` provisions `CairnWorkspace`, builds context, sets `STRUCTURED_AGENTS_*` env vars, and runs each agent via `Agent.from_bundle()`.
+4. Tool results are persisted through `CairnResultHandler`, producing `ResultSummary` objects that feed `ContextBuilder` and `DashboardApp`.
+5. The dashboard or CLI consumes `EventBus.stream()` for SSE/WS updates and posts human responses via `/input`.
+6. `CheckpointManager` snapshots the SQLite files + metadata so workflows can resume or version control entire graphs.
 
 ## Testing Strategy
 
-Each phase ships with dedicated unit tests (`tests/unit/test_event_bus.py`, `test_agent_graph.py`, etc.) and an integration suite under `tests/integration/` that uses the new graph API plus interactive handlers. The event bus tests guarantee wildcard matching, SSE clients, and telemetry; agent_graph tests cover dependency wiring and agent inbox interactions; workspace tests verify directories, snapshots, and cleanup.
+- `tests/unit/test_event_bus.py`: validates pub/sub, filtering, streaming, `wait_for()`, and human-in-the-loop patterns.
+- `tests/test_context_manager.py`: exercises `ContextBuilder` short/long tracks and summary ingestion.
+- `tests/unit/test_workspace.py`: verifies Cairn workspace creation, snapshots, and shared areas.
+
+Run the suite with `pytest tests/unit/ -v` (see `docs/TESTING_GUIDELINES.md` for extra expectations).

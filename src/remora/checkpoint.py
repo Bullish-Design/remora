@@ -32,6 +32,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from remora.workspace import CairnWorkspace, restore_workspace, snapshot_workspace
+
 if TYPE_CHECKING:
     from remora.executor import ExecutorState
 
@@ -208,9 +210,11 @@ class CheckpointManager:
         checkpoint_dir = self._store_path / checkpoint_id
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+        agent_snapshots: dict[str, str] = {}
         for agent_id, workspace in executor_state.workspaces.items():
             agent_dir = checkpoint_dir / agent_id
-            await workspace.snapshot(str(agent_dir))
+            snapshot_path = await snapshot_workspace(workspace, agent_dir)
+            agent_snapshots[agent_id] = str(snapshot_path)
 
         metadata = {
             "checkpoint_id": checkpoint_id,
@@ -220,6 +224,7 @@ class CheckpointManager:
             "results": {aid: _serialize_result(res) for aid, res in executor_state.completed.items()},
             "pending": list(executor_state.pending),
             "agent_workspaces": list(executor_state.workspaces.keys()),
+            "agent_snapshots": agent_snapshots,
         }
 
         store = await self._get_store()
@@ -250,13 +255,8 @@ class CheckpointManager:
         checkpoint_dir = self._store_path / checkpoint_id
         workspaces = {}
 
-        for agent_id in metadata["agent_workspaces"]:
-            agent_dir = checkpoint_dir / agent_id
-            if agent_dir.exists():
-                from cairn import CairnWorkspace
-
-                workspace = await CairnWorkspace.from_snapshot(str(agent_dir))
-                workspaces[agent_id] = workspace
+        for agent_id, snapshot_path in metadata.get("agent_snapshots", {}).items():
+            workspaces[agent_id] = await restore_workspace(snapshot_path)
 
         results = {aid: _deserialize_result(res) for aid, res in metadata.get("results", {}).items()}
 

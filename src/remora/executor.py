@@ -1,17 +1,36 @@
-"""Graph Executor - Runs agents in dependency order using structured-agents."""
-
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any
 
-if TYPE_CHECKING:
-    from remora.graph import AgentNode
+from structured_agents.agent import Agent
+from structured_agents.exceptions import KernelError
+from structured_agents.types import RunResult
+
+from remora.context import ContextBuilder
+from remora.config import RemoraConfig
+from remora.events import (
+    AgentCompleteEvent,
+    AgentErrorEvent,
+    AgentStartEvent,
+    GraphCompleteEvent,
+    GraphStartEvent,
+    ToolResultEvent,
+)
+from remora.graph import AgentNode, get_execution_batches
+from remora.workspace import (
+    CairnDataProvider,
+    CairnResultHandler,
+    CairnWorkspace,
+    ResultSummary,
+    create_workspace,
+)
 
 
 class ErrorPolicy(StrEnum):
@@ -22,48 +41,32 @@ class ErrorPolicy(StrEnum):
     CONTINUE = "continue"
 
 
-class RunResult(Protocol):
-    """Protocol for agent execution results."""
-
-    @property
-    def final_message(self) -> Any: ...
-
-    @property
-    def turn_count(self) -> int: ...
-
-    @property
-    def termination_reason(self) -> str: ...
-
-
 @dataclass
 class ExecutorState:
     """Tracks execution state across a graph run."""
 
     graph_id: str
-    nodes: dict[str, "AgentNode"]
-    completed: dict[str, Any] = field(default_factory=dict)
+    nodes: dict[str, AgentNode]
+    completed: dict[str, ResultSummary] = field(default_factory=dict)
     pending: set[str] = field(default_factory=set)
-    workspaces: dict[str, Any] = field(default_factory=dict)
+    workspaces: dict[str, CairnWorkspace] = field(default_factory=dict)
     started_at: float = field(default_factory=time.time)
 
     def get_agent_state(self, agent_id: str) -> str:
-        """Get current state of an agent."""
         if agent_id in self.completed:
-            result = self.completed[agent_id]
-            if result is None or isinstance(result, dict) and result.get("error"):
+            summary = self.completed[agent_id]
+            if not summary.success:
                 return "failed"
             return "completed"
         if agent_id in self.pending:
             return "running"
         return "pending"
 
-    def mark_completed(self, agent_id: str, result: Any) -> None:
-        """Mark an agent as completed."""
-        self.completed[agent_id] = result
+    def mark_completed(self, agent_id: str, summary: ResultSummary) -> None:
+        self.completed[agent_id] = summary
         self.pending.discard(agent_id)
 
     def mark_started(self, agent_id: str) -> None:
-        """Mark an agent as started."""
         self.pending.add(agent_id)
 
 
@@ -74,73 +77,134 @@ class ExecutionConfig:
     max_concurrency: int = 4
     timeout: float = 300.0
     error_policy: ErrorPolicy = ErrorPolicy.STOP_GRAPH
+    max_turns: int = 10
 
     def __post_init__(self) -> None:
         if self.max_concurrency < 1:
             raise ValueError("max_concurrency must be >= 1")
         if self.timeout <= 0:
             raise ValueError("timeout must be positive")
+        if self.max_turns < 1:
+            raise ValueError("max_turns must be >= 1")
 
 
 async def execute_agent(
-    node: "AgentNode",
-    workspace: Any,
+    node: AgentNode,
+    workspace: CairnWorkspace,
+    context_builder: ContextBuilder,
+    result_handler: CairnResultHandler,
     observer: Any,
-) -> Any:
-    """Execute a single agent using structured-agents."""
-    from remora.workspace import CairnDataProvider
-
+    remora_config: RemoraConfig,
+    max_turns: int,
+) -> ResultSummary:
+    """Execute an agent via structured-agents and persist outputs."""
     data_provider = CairnDataProvider(workspace)
+    prompt = await _build_agent_prompt(node, context_builder, data_provider)
 
-    prompt = _build_agent_prompt(node)
+    _set_structured_agents_env(remora_config)
 
-    return {"status": "not_implemented", "node": node.name}
+    agent = await Agent.from_bundle(node.bundle_path, observer=observer)
+    try:
+        run_result = await agent.run(prompt, max_turns=max_turns)
+    finally:
+        await agent.close()
+
+    payload = _parse_payload(run_result.final_message.content)
+    summary = await result_handler.handle(node.id, run_result, payload, workspace)
+    return summary
 
 
-def _build_agent_prompt(node: "AgentNode") -> str:
-    """Build the prompt for an agent from its target node."""
-    prompt_parts = []
+async def _build_agent_prompt(
+    node: AgentNode,
+    context_builder: ContextBuilder,
+    data_provider: CairnDataProvider,
+) -> str:
+    parts: list[str] = []
 
-    prompt_parts.append(f"# Target: {node.name}")
-    prompt_parts.append(f"# Type: {node.node_type}")
+    context = context_builder.build_context_for(node)
+    if context.strip():
+        parts.append("## Context")
+        parts.append(context)
+
+    parts.append("## Target Node")
+    parts.append(f"- id: {node.id}")
+    parts.append(f"- name: {node.name}")
+    parts.append(f"- type: {node.target.node_type}")
     if node.target.file_path:
-        prompt_parts.append(f"# File: {node.target.file_path}")
-    prompt_parts.append("")
-    prompt_parts.append(node.target.text)
+        parts.append(f"- file: {node.target.file_path}")
 
-    return "\n".join(prompt_parts)
+    parts.append("\n## Source")
+    if node.target.text:
+        parts.append(_truncate(node.target.text))
+
+    files = await data_provider.load_files(node.target)
+    if files:
+        parts.append("\n## Workspace Files")
+        for path in sorted(files):
+            content = files[path]
+            text = content.decode("utf-8", errors="ignore") if isinstance(content, (bytes, bytearray)) else str(content)
+            parts.append(f"### {path}\n{_truncate(text)}")
+
+    return "\n".join(parts)
+
+
+def _truncate(text: str, limit: int = 1024) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def _parse_payload(content: str | None) -> dict[str, Any]:
+    if not content:
+        return {}
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        return {
+            "message": content,
+        }
+
+
+def _set_structured_agents_env(config: RemoraConfig) -> None:
+    os.environ["STRUCTURED_AGENTS_BASE_URL"] = config.model_base_url
+    os.environ["STRUCTURED_AGENTS_API_KEY"] = config.api_key
 
 
 class GraphExecutor:
     """Runs agents in dependency order with bounded concurrency."""
 
-    def __init__(self, config: ExecutionConfig, event_bus: Any):
-        """Initialize the executor."""
+    def __init__(
+        self,
+        config: ExecutionConfig,
+        event_bus: Any,
+        remora_config: RemoraConfig,
+        context_builder: ContextBuilder | None = None,
+        result_handler: CairnResultHandler | None = None,
+    ) -> None:
         self.config = config
         self.event_bus = event_bus
+        self.remora_config = remora_config
+        self.context_builder = context_builder or ContextBuilder()
+        self.result_handler = result_handler or CairnResultHandler()
+        self._subscribe_context_builder()
+
+    def _subscribe_context_builder(self) -> None:
+        self.event_bus.subscribe(ToolResultEvent, self.context_builder.handle)
+        self.event_bus.subscribe(AgentCompleteEvent, self.context_builder.handle)
 
     async def run(
         self,
-        graph: list["AgentNode"],
+        graph: list[AgentNode],
         workspace_config: Any,
     ) -> dict[str, Any]:
-        """Execute all agents in topological order."""
-        from remora.events import (
-            GraphStartEvent,
-            GraphCompleteEvent,
-            AgentStartEvent,
-            AgentCompleteEvent,
-            AgentErrorEvent,
-        )
-        from remora.graph import get_execution_batches
-        from remora.workspace import create_workspace
-
         graph_id = uuid.uuid4().hex
-        results: dict[str, Any] = {}
+        results: dict[str, dict[str, Any]] = {}
         state = ExecutorState(
             graph_id=graph_id,
             nodes={node.id: node for node in graph},
         )
+
+        self.context_builder.clear()
 
         await self.event_bus.emit(
             GraphStartEvent(
@@ -150,11 +214,13 @@ class GraphExecutor:
         )
 
         batches = get_execution_batches(graph)
+        stop_execution = False
 
         for batch in batches:
             for node in batch:
-                ws = await create_workspace(node.id, workspace_config)
-                state.workspaces[node.id] = ws
+                ws_handle = await create_workspace(node.id, workspace_config)
+                state.workspaces[node.id] = ws_handle
+                state.mark_started(node.id)
 
             if self.config.max_concurrency > 1:
                 batch_results = await self._run_batch_parallel(batch, state)
@@ -170,12 +236,15 @@ class GraphExecutor:
                             error=str(result),
                         )
                     )
-
                     if self.config.error_policy == ErrorPolicy.STOP_GRAPH:
+                        stop_execution = True
                         break
-                else:
-                    results[node.id] = result
+                elif isinstance(result, ResultSummary):
+                    results[node.id] = result.to_dict()
                     state.mark_completed(node.id, result)
+
+            if stop_execution:
+                break
 
         await self.event_bus.emit(
             GraphCompleteEvent(
@@ -184,17 +253,19 @@ class GraphExecutor:
             )
         )
 
+        for workspace_handle in state.workspaces.values():
+            await workspace_handle.close()
+
         return results
 
     async def _run_batch_parallel(
         self,
-        batch: list["AgentNode"],
+        batch: list[AgentNode],
         state: ExecutorState,
     ) -> list[Any]:
-        """Run a batch of nodes in parallel."""
         semaphore = asyncio.Semaphore(self.config.max_concurrency)
 
-        async def run_with_semaphore(node: "AgentNode") -> Any:
+        async def run_with_semaphore(node: AgentNode) -> Any:
             async with semaphore:
                 return await self._run_node(node, state)
 
@@ -203,10 +274,9 @@ class GraphExecutor:
 
     async def _run_batch_sequential(
         self,
-        batch: list["AgentNode"],
+        batch: list[AgentNode],
         state: ExecutorState,
     ) -> list[Any]:
-        """Run a batch of nodes sequentially."""
         results = []
         for node in batch:
             try:
@@ -218,48 +288,66 @@ class GraphExecutor:
 
     async def _run_node(
         self,
-        node: "AgentNode",
+        node: AgentNode,
         state: ExecutorState,
     ) -> Any:
-        """Run a single node."""
-        from remora.events import AgentStartEvent, AgentCompleteEvent, AgentErrorEvent
-
-        workspace = state.workspaces[node.id]
+        workspace_handle = state.workspaces[node.id]
         graph_id = state.graph_id
 
         await self.event_bus.emit(
             AgentStartEvent(
                 graph_id=graph_id,
                 agent_id=node.id,
-                node={},
+                node={
+                    "name": node.name,
+                    "target": str(node.target.file_path),
+                },
             )
         )
 
         try:
-            result = await execute_agent(node, workspace, self.event_bus)
+            summary = await execute_agent(
+                node,
+                workspace_handle,
+                self.context_builder,
+                self.result_handler,
+                self.event_bus,
+                self.remora_config,
+                self.config.max_turns,
+            )
 
             await self.event_bus.emit(
                 AgentCompleteEvent(
                     graph_id=graph_id,
                     agent_id=node.id,
-                    result=result,
+                    result=summary.to_dict(),
                 )
             )
+            self.context_builder.ingest_summary(summary)
 
-            return result
+            return summary
 
-        except Exception as e:
+        except KernelError as exc:
             await self.event_bus.emit(
                 AgentErrorEvent(
                     graph_id=graph_id,
                     agent_id=node.id,
-                    error=str(e),
+                    error=str(exc),
                 )
             )
-
             if self.config.error_policy == ErrorPolicy.STOP_GRAPH:
                 raise
-
+            return None
+        except Exception as exc:
+            await self.event_bus.emit(
+                AgentErrorEvent(
+                    graph_id=graph_id,
+                    agent_id=node.id,
+                    error=str(exc),
+                )
+            )
+            if self.config.error_policy == ErrorPolicy.STOP_GRAPH:
+                raise
             return None
 
 
