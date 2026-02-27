@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+import time
+import uuid
 
 from remora.core.events import RemoraEvent
 from remora.core.event_bus import EventBus
@@ -12,28 +14,49 @@ from remora.core.workspace import CairnWorkspaceService
 @dataclass
 class Message:
     """A message in the conversation."""
+    id: str
     role: str  # "user" or "assistant"
     content: str
     timestamp: float
     tool_calls: list[dict] = field(default_factory=list)
 
+    @classmethod
+    def user(cls, content: str) -> "Message":
+        return cls(
+            id=str(uuid.uuid4()),
+            role="user",
+            content=content,
+            timestamp=time.time(),
+        )
 
-@dataclass
-class AgentResponse:
-    """Response from the agent."""
-    content: str
-    tool_calls: list[dict]
-    turn_count: int
+    @classmethod
+    def assistant(cls, content: str, tool_calls: list[dict] | None = None) -> "Message":
+        return cls(
+            id=str(uuid.uuid4()),
+            role="assistant",
+            content=content,
+            timestamp=time.time(),
+            tool_calls=tool_calls or [],
+        )
 
 
 @dataclass
 class ChatConfig:
     """Configuration for a chat session."""
+    workspace_path: str
     system_prompt: str
+    tool_presets: list[str] = field(default_factory=lambda: ["file_ops"])
     model_name: str = "Qwen/Qwen3-4B"
     model_base_url: str = "http://localhost:8000/v1"
     model_api_key: str = "EMPTY"
     max_turns: int = 10
+
+
+@dataclass
+class AgentResponse:
+    """Response from the agent."""
+    message: Message
+    turn_count: int
 
 
 class ChatSession:
@@ -41,49 +64,37 @@ class ChatSession:
     Simplified single-agent chat interface.
 
     Wraps Remora's AgentKernel to provide a conversation-oriented API
-    with automatic history management.
-
-    Example:
-        session = await ChatSession.create(
-            workspace_path=Path("/my/project"),
-            config=ChatConfig(system_prompt="You are a helpful assistant."),
-            tools=["file_ops"],
-        )
-
-        response = await session.send("What files are in this directory?")
-        print(response.content)
+    with automatic history management and event streaming.
     """
 
     def __init__(
         self,
-        workspace_path: Path,
+        session_id: str,
         config: ChatConfig,
-        tools: list[str],
-        event_bus: EventBus | None = None,
+        event_bus: EventBus,
     ):
-        self.workspace_path = workspace_path
+        self.session_id = session_id
         self.config = config
-        self.tool_names = tools
-        self.event_bus = event_bus or EventBus()
+        self.event_bus = event_bus
 
         self._history: list[Message] = []
-        self._workspace: Any = None  # CairnWorkspaceService
-        self._tools: list[Any] = []  # Tool instances
+        self._workspace: Any = None
+        self._tools: list[Any] = []
         self._initialized = False
 
     @classmethod
     async def create(
         cls,
-        workspace_path: Path,
         config: ChatConfig,
-        tools: list[str],
         event_bus: EventBus | None = None,
     ) -> "ChatSession":
         """Factory method to create and initialize a chat session."""
+        session_id = str(uuid.uuid4())
+        event_bus = event_bus or EventBus()
+
         session = cls(
-            workspace_path=workspace_path,
+            session_id=session_id,
             config=config,
-            tools=tools,
             event_bus=event_bus,
         )
         await session._initialize()
@@ -91,46 +102,35 @@ class ChatSession:
 
     async def _initialize(self) -> None:
         """Initialize workspace and tools."""
-        # Create workspace service
+        from remora.core.tool_registry import ToolRegistry
+
+        # Create workspace
+        workspace_path = Path(self.config.workspace_path).expanduser().resolve()
         self._workspace = await CairnWorkspaceService.create(
-            base_path=self.workspace_path,
+            base_path=workspace_path,
         )
 
         # Get tools from registry
-        from remora.core.tool_registry import ToolRegistry
         self._tools = ToolRegistry.get_tools(
             workspace=self._workspace,
-            presets=self.tool_names,
+            presets=self.config.tool_presets,
         )
 
         self._initialized = True
 
-    async def send(self, message: str) -> AgentResponse:
-        """
-        Send a message to the agent and get a response.
-
-        Args:
-            message: The user's message
-
-        Returns:
-            AgentResponse with content, tool calls, and turn count
-        """
+    async def send(self, content: str) -> AgentResponse:
+        """Send a message and get a response."""
         if not self._initialized:
-            raise RuntimeError("ChatSession not initialized. Use create() factory.")
+            raise RuntimeError("Session not initialized")
 
-        import time
+        # Add user message
+        user_msg = Message.user(content)
+        self._history.append(user_msg)
 
-        # Add user message to history
-        self._history.append(Message(
-            role="user",
-            content=message,
-            timestamp=time.time(),
-        ))
+        # Build messages for kernel
+        messages = [{"role": m.role, "content": m.content} for m in self._history]
 
-        # Build conversation context for kernel
-        messages = self._build_messages()
-
-        # Run the agent kernel
+        # Run agent
         from structured_agents import AgentKernel, ModelAdapter
 
         kernel = AgentKernel(
@@ -150,32 +150,21 @@ class ChatSession:
         )
 
         # Extract response
-        response_content = result.final_message.content or ""
         tool_calls = [
             {"name": tc.name, "arguments": tc.arguments}
             for tc in result.tool_calls
         ]
 
-        # Add assistant message to history
-        self._history.append(Message(
-            role="assistant",
-            content=response_content,
-            timestamp=time.time(),
+        assistant_msg = Message.assistant(
+            content=result.final_message.content or "",
             tool_calls=tool_calls,
-        ))
+        )
+        self._history.append(assistant_msg)
 
         return AgentResponse(
-            content=response_content,
-            tool_calls=tool_calls,
+            message=assistant_msg,
             turn_count=result.turn_count,
         )
-
-    def _build_messages(self) -> list[dict]:
-        """Build message list for kernel from history."""
-        return [
-            {"role": msg.role, "content": msg.content}
-            for msg in self._history
-        ]
 
     @property
     def history(self) -> list[Message]:
