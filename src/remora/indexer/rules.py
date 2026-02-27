@@ -28,14 +28,33 @@ class ActionContext:
         script_path: str,
         inputs: dict[str, Any],
     ) -> dict[str, Any]:
-        """Run a Grail script and return results."""
+        """Run a Grail script and return results.
+
+        Filters externals to those declared by the script to keep Grail's
+        strict validation satisfied.
+        """
         script_file = self.script_root / script_path
-        externals = {
+        raw_externals = {
             "read_file": self._read_file,
             "extract_signatures": self._extract_signatures,
         }
 
+        def _filter_externals(script: Any) -> dict[str, Any]:
+            allowed = set(getattr(script, "externals", {}).keys())
+            if not allowed:
+                return raw_externals
+            return {name: handler for name, handler in raw_externals.items() if name in allowed}
+
         if self.grail_executor is not None:
+            externals = raw_externals
+            try:
+                import grail
+
+                grail_dir = self.project_root / ".grail" / "indexer"
+                script = grail.load(str(script_file), grail_dir=str(grail_dir))
+                externals = _filter_externals(script)
+            except Exception:
+                externals = raw_externals
             return await self.grail_executor.run(
                 script_path=str(script_file),
                 inputs=inputs,
@@ -46,6 +65,7 @@ class ActionContext:
 
         grail_dir = self.project_root / ".grail" / "indexer"
         script = grail.load(str(script_file), grail_dir=str(grail_dir))
+        externals = _filter_externals(script)
         result = await script.run(
             inputs=inputs,
             externals=externals,

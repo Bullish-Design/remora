@@ -1,0 +1,17 @@
+{
+  "externals": [
+    {
+      "name": "extract_signatures",
+      "async": true,
+      "parameters": [
+        {
+          "name": "file_path",
+          "type": "str",
+          "default": null
+        }
+      ],
+      "return_type": "dict",
+      "docstring": null
+    }
+  ]
+}

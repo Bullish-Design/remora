@@ -26,16 +26,28 @@ from remora.executor import GraphExecutor
 from remora.event_bus import EventBus
 from remora.events import HumanInputResponseEvent
 from remora.graph import build_graph
+from remora.utils import PathResolver
 
 logger = logging.getLogger(__name__)
 
 
 def render_tag(tag, content="", **attrs):
     """Simple HTML tag renderer."""
-    attr_str = " ".join(f'{k}="{v}"' for k, v in attrs.items() if v)
+    normalized_attrs: list[str] = []
+    for key, value in attrs.items():
+        if value is None or value == "":
+            continue
+        if key.endswith("_") and key[:-1] in ("class", "for"):
+            key = key[:-1]
+        normalized_attrs.append(f'{key}="{value}"')
+    attr_str = " ".join(normalized_attrs)
     if content:
         return f"<{tag} {attr_str}>{content}</{tag}>" if attr_str else f"<{tag}>{content}</{tag}>"
     return f"<{tag} {attr_str}/>" if attr_str else f"<{tag}/>"
+
+
+def _escape_js_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
 
 
 def page(title="Remora Dashboard", *body_content):
@@ -71,8 +83,59 @@ def page(title="Remora Dashboard", *body_content):
         .progress-bar {{ height: 20px; background: #e0e0e0; border-radius: 10px; overflow: hidden; }}
         .progress-fill {{ height: 100%; background: #28a745; transition: width 0.3s; }}
         .main {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }}
+        .graph-launcher-form {{ display: grid; gap: 8px; }}
+        .graph-launcher-form input {{ padding: 8px; border: 1px solid #ddd; border-radius: 4px; }}
+        .recent-targets {{ margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }}
+        .recent-label {{ font-size: 12px; color: #666; width: 100%; }}
+        .recent-target {{ padding: 4px 8px; border-radius: 999px; border: 1px solid #ddd; background: #f8f8f8; cursor: pointer; font-size: 12px; }}
         @media (max-width: 768px) {{ .main {{ grid-template-columns: 1fr; }} }}
     </style>
+    <script>
+        (() => {{
+            const listId = "target-options";
+            const inputId = "target-path";
+            const maxItems = 80;
+
+            const escapeHtml = (value) =>
+                value.replaceAll("&", "&amp;")
+                    .replaceAll("<", "&lt;")
+                    .replaceAll(">", "&gt;")
+                    .replaceAll('"', "&quot;")
+                    .replaceAll("'", "&#39;");
+
+            const updateList = async (prefix) => {{
+                const list = document.getElementById(listId);
+                if (!list) {{
+                    return;
+                }}
+                try {{
+                    const response = await fetch(`/api/targets?prefix=${{encodeURIComponent(prefix || "")}}`);
+                    if (!response.ok) {{
+                        return;
+                    }}
+                    const payload = await response.json();
+                    const items = Array.isArray(payload.items) ? payload.items.slice(0, maxItems) : [];
+                    list.innerHTML = items.map((item) => `<option value="${{escapeHtml(item)}}"></option>`).join("");
+                }} catch (_err) {{
+                    list.innerHTML = "";
+                }}
+            }};
+
+            window.remoraTargetLookup = updateList;
+
+            document.addEventListener("input", (event) => {{
+                if (event.target && event.target.id === inputId) {{
+                    updateList(event.target.value);
+                }}
+            }});
+
+            document.addEventListener("focusin", (event) => {{
+                if (event.target && event.target.id === inputId) {{
+                    updateList(event.target.value);
+                }}
+            }});
+        }})();
+    </script>
 </head>
 <body {body_attrs}>
     {"".join(body_content)}
@@ -193,7 +256,7 @@ def blocked_list_view(blocked: list[dict]) -> str:
     return render_tag("div", id="blocked-agents", class_="blocked-agents", content=cards)
 
 
-def graph_launcher_card_view() -> str:
+def graph_launcher_card_view(recent_targets: list[str] | None = None) -> str:
     """Card that lets users configure and start a graph."""
     defaults = {
         "graphLauncher": {
@@ -207,8 +270,12 @@ def graph_launcher_card_view() -> str:
         "input",
         placeholder="Target path (file or directory)",
         type="text",
+        id="target-path",
+        list="target-options",
+        autocomplete="off",
         **{"data-bind": "graphLauncher.target_path"},
     )
+    datalist = '<datalist id="target-options"></datalist>'
     bundle_input = render_tag(
         "input",
         placeholder="Bundle name (e.g., lint, docstring)",
@@ -233,11 +300,23 @@ def graph_launcher_card_view() -> str:
             """,
         },
     )
+    root_button = render_tag(
+        "button",
+        content="Run Root Graph",
+        type="button",
+        **{
+            "data-on": "click",
+            "data-on-click": """
+                const bundle = $graphLauncher?.bundle?.trim() || 'lint';
+                @post('/run', {target_path: '.', bundle: bundle});
+            """,
+        },
+    )
 
     form = render_tag(
         "div",
         class_="graph-launcher-form",
-        content=target_input + bundle_input + button,
+        content=target_input + datalist + bundle_input + button + root_button,
     )
 
     signals_div = render_tag(
@@ -248,10 +327,32 @@ def graph_launcher_card_view() -> str:
         },
     )
 
+    recent_targets = recent_targets or []
+    recent_buttons = "".join(
+        render_tag(
+            "button",
+            content=html.escape(target),
+            type="button",
+            class_="recent-target",
+            **{
+                "data-on": "click",
+                "data-on-click": f"$graphLauncher.target_path = '{_escape_js_string(target)}';",
+            },
+        )
+        for target in recent_targets
+    )
+    recent_panel = ""
+    if recent_buttons:
+        recent_panel = render_tag(
+            "div",
+            class_="recent-targets",
+            content=render_tag("div", content="Recent targets", class_="recent-label") + recent_buttons,
+        )
+
     return render_tag(
         "div",
         class_="card graph-launcher-card",
-        content=render_tag("div", content="Run Agent Graph") + form + signals_div,
+        content=render_tag("div", content="Run Agent Graph") + form + recent_panel + signals_div,
     )
 
 
@@ -345,6 +446,7 @@ def dashboard_view(view_data: dict) -> str:
     agent_states = view_data.get("agent_states", {})
     progress = view_data.get("progress", {"total": 0, "completed": 0, "failed": 0})
     results = view_data.get("results", [])
+    recent_targets = view_data.get("recent_targets", [])
 
     header = render_tag(
         "div",
@@ -359,7 +461,7 @@ def dashboard_view(view_data: dict) -> str:
         content=render_tag("div", id="events-header", content="Events Stream") + events_list_view(events),
     )
 
-    graph_launcher_card = graph_launcher_card_view()
+    graph_launcher_card = graph_launcher_card_view(recent_targets)
 
     blocked_card = render_tag(
         "div",
@@ -394,7 +496,7 @@ def dashboard_view(view_data: dict) -> str:
 
     main = render_tag("div", class_="main", content=events_panel + main_panel)
 
-    return page(header + main)
+    return page("Remora Dashboard", header + main)
 
 
 def create_routes(
@@ -403,8 +505,21 @@ def create_routes(
     dashboard_state: DashboardState,
     context_builder: ContextBuilder,
     running_tasks: dict[str, asyncio.Task],
+    *,
+    project_root: Path,
 ) -> list[Route]:
     """Create Starlette routes for the dashboard."""
+    path_resolver = PathResolver(project_root)
+    ignored_names = {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "__pycache__",
+        ".tox",
+        ".remora",
+        ".devenv",
+    }
 
     async def subscribe(request: Request) -> DatastarResponse:
         """SSE endpoint streaming view patches."""
@@ -467,6 +582,12 @@ def create_routes(
         view_data = dashboard_state.get_view_data()
         return HTMLResponse(dashboard_view(view_data))
 
+    async def list_targets(request: Request) -> JSONResponse:
+        """Return target path suggestions relative to project root."""
+        prefix = request.query_params.get("prefix", "").strip()
+        suggestions = _list_target_suggestions(prefix)
+        return JSONResponse({"items": suggestions})
+
     async def run_agent(request: Request) -> JSONResponse:
         """Trigger graph execution."""
         try:
@@ -482,6 +603,8 @@ def create_routes(
 
         try:
             graph_id = await _trigger_graph(target_path, bundle)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
         except Exception as exc:
             logger.exception("Failed to start graph")
             return JSONResponse({"error": str(exc)}, status_code=500)
@@ -515,6 +638,54 @@ def create_routes(
             mapping[name] = bundle_root / bundle
         return mapping
 
+    def _normalize_target(target_path: str) -> Path:
+        path_obj = Path(target_path)
+        if path_obj.is_absolute():
+            resolved = path_obj.resolve()
+        else:
+            resolved = (project_root / path_obj).resolve()
+        if not path_resolver.is_within_project(resolved):
+            raise ValueError("target_path must be within the dashboard project root")
+        if not resolved.exists():
+            raise ValueError("target_path does not exist")
+        return resolved
+
+    def _list_target_suggestions(prefix: str) -> list[str]:
+        cleaned = prefix.replace("\\", "/").lstrip("/")
+        if cleaned.endswith("/"):
+            base_dir = (project_root / cleaned).resolve()
+            fragment = ""
+        else:
+            prefix_path = Path(cleaned)
+            base_dir = (project_root / prefix_path.parent).resolve()
+            fragment = prefix_path.name
+        if not base_dir.exists() or not base_dir.is_dir():
+            return []
+        if not path_resolver.is_within_project(base_dir):
+            return []
+
+        fragment_lower = fragment.lower()
+        suggestions: list[str] = []
+        entries = sorted(
+            base_dir.iterdir(),
+            key=lambda p: (not p.is_dir(), p.name.lower()),
+        )
+        for entry in entries:
+            if entry.name in ignored_names or entry.name.startswith("."):
+                continue
+            if fragment_lower and not entry.name.lower().startswith(fragment_lower):
+                continue
+            try:
+                rel = entry.resolve().relative_to(project_root).as_posix()
+            except ValueError:
+                continue
+            if entry.is_dir():
+                rel = f"{rel}/"
+            suggestions.append(rel)
+            if len(suggestions) >= 80:
+                break
+        return suggestions
+
     async def _trigger_graph(target_path: str, bundle_name: str) -> str:
         graph_id = uuid.uuid4().hex[:8]
         bundle_mapping = _build_bundle_mapping()
@@ -522,8 +693,15 @@ def create_routes(
         if not bundle_mapping:
             raise ValueError("No bundle mapping configured")
 
-        target_path_obj = Path(target_path).resolve()
-        project_root = target_path_obj if target_path_obj.is_dir() else target_path_obj.parent
+        target_path_obj = _normalize_target(target_path)
+        try:
+            rel_target = target_path_obj.relative_to(project_root).as_posix()
+        except ValueError:
+            rel_target = target_path_obj.as_posix()
+        if target_path_obj.is_dir() and not rel_target.endswith("/"):
+            rel_target = f"{rel_target}/"
+        dashboard_state.record_target(rel_target)
+        graph_root = target_path_obj if target_path_obj.is_dir() else target_path_obj.parent
         nodes = discover([target_path_obj])
         agent_nodes = build_graph(nodes, bundle_mapping)
 
@@ -531,7 +709,7 @@ def create_routes(
             target_bundle = bundle_mapping[bundle_name]
             agent_nodes = [node for node in agent_nodes if node.bundle_path == target_bundle]
 
-        task = asyncio.create_task(_execute_graph(graph_id, agent_nodes, project_root))
+        task = asyncio.create_task(_execute_graph(graph_id, agent_nodes, graph_root))
         running_tasks[graph_id] = task
 
         def _cleanup(_task: asyncio.Task) -> None:
@@ -557,6 +735,7 @@ def create_routes(
         Route("/", index),
         Route("/subscribe", subscribe),
         Route("/events", events),
+        Route("/api/targets", list_targets),
         WebSocketRoute("/ws", events_ws),
         Route("/run", run_agent, methods=["POST"]),
         Route("/input", submit_input, methods=["POST"]),

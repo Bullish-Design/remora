@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import queue
 import threading
-import time
 from datetime import datetime
 from pathlib import Path
 
+import anyio
 import pytest
-from starlette.testclient import TestClient
+from starlette.testclient import TestClient, WebSocketTestSession
 
 from remora.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
 from remora.dashboard.app import create_app
@@ -43,9 +44,38 @@ def _log(message: str) -> None:
     print(f"[{timestamp}][{thread_name}] {message}", flush=True)
 
 
-def _emit_event_sync(event_bus: EventBus, event: object) -> None:
+def _emit_event_via_portal(
+    websocket: WebSocketTestSession,
+    event_bus: EventBus,
+    event: object,
+) -> None:
     _log(f"emit event={type(event).__name__}")
-    asyncio.run(event_bus.emit(event))
+    websocket.portal.call(event_bus.emit, event)
+
+
+def _receive_ws_json(websocket: WebSocketTestSession, timeout: float = 2.0) -> dict:
+    async def _receive() -> dict:
+        try:
+            with anyio.fail_after(timeout):
+                message = await websocket._send_rx.receive()
+        except TimeoutError as exc:
+            raise AssertionError("Timed out waiting for websocket message") from exc
+
+        message_type = message.get("type")
+        if message_type == "websocket.close":
+            raise AssertionError(f"Websocket closed early: {message!r}")
+        if message_type != "websocket.send":
+            raise AssertionError(f"Unexpected websocket message: {message!r}")
+
+        text = message.get("text")
+        if text is None:
+            data = message.get("bytes")
+            if data is None:
+                raise AssertionError(f"Websocket message missing payload: {message!r}")
+            text = data.decode("utf-8")
+        return json.loads(text)
+
+    return websocket.portal.call(_receive)
 
 
 async def _stream_until(
@@ -261,13 +291,11 @@ def test_dashboard_websocket_stream_emits_event(tmp_path: Path) -> None:
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as websocket:
             _log("emitting GraphStartEvent for /ws")
-            thread = threading.Thread(
-                target=_emit_event_sync,
-                args=(event_bus, GraphStartEvent(graph_id="dash-ws", node_count=1)),
-                daemon=True,
+            _emit_event_via_portal(
+                websocket,
+                event_bus,
+                GraphStartEvent(graph_id="dash-ws", node_count=1),
             )
-            thread.start()
-            payload = websocket.receive_json()
-            thread.join(timeout=1)
+            payload = _receive_ws_json(websocket)
 
             assert payload["event_type"] == "GraphStartEvent"

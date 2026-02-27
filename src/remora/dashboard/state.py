@@ -20,6 +20,18 @@ class DashboardState:
     total_agents: int = 0
     completed_agents: int = 0
     failed_agents: int = 0
+    recent_targets: deque[str] = field(default_factory=lambda: deque(maxlen=10))
+
+    def record_target(self, target_path: str) -> None:
+        """Track recent targets for quick re-runs."""
+        cleaned = target_path.strip()
+        if not cleaned:
+            return
+        try:
+            self.recent_targets.remove(cleaned)
+        except ValueError:
+            pass
+        self.recent_targets.appendleft(cleaned)
 
     def record(self, event: RemoraEvent) -> None:
         """Process event and update state."""
@@ -102,4 +114,5 @@ class DashboardState:
                 "failed": self.failed_agents,
             },
             "results": self.results[:10],
+            "recent_targets": list(self.recent_targets),
         }
