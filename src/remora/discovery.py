@@ -1,406 +1,338 @@
-"""Tree-sitter backed node discovery for Remora.
+"""Consolidated code discovery using tree-sitter.
 
-This module consolidates discovery functionality from the former discovery/ package.
-Provides CSTNode dataclass and discover() function for scanning source code.
+This module provides the `discover()` function which scans source files
+and returns CSTNode objects representing functions, classes, files, etc.
 """
 
 from __future__ import annotations
 
-import concurrent.futures
 import hashlib
 import importlib.resources
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
-from typing import Iterable
+from typing import Iterator
 
-from tree_sitter import Language, Parser, Query, QueryCursor, Tree
-
-from remora.errors import DiscoveryError as BaseDiscoveryError
-
+import tree_sitter
+from tree_sitter import Language, Parser
 
 logger = logging.getLogger(__name__)
 
-
-LANGUAGES: dict[str, str] = {
-    ".py": "tree_sitter_python",
-    ".pyi": "tree_sitter_python",
-    ".toml": "tree_sitter_toml",
-    ".md": "tree_sitter_markdown",
+# Language extension mapping
+LANGUAGE_EXTENSIONS: dict[str, str] = {
+    ".py": "python",
+    ".md": "markdown",
+    ".toml": "toml",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".json": "json",
+    ".js": "javascript",
+    ".ts": "typescript",
+    ".go": "go",
+    ".rs": "rust",
 }
 
 
-class DiscoveryError(BaseDiscoveryError):
-    pass
-
-
-def compute_node_id(file_path: Path, node_type: str, name: str) -> str:
-    """Compute a stable node ID.
-
-    Hash: sha256(resolved_file_path:node_type:name), truncated to 16 hex chars.
-    Stable across reformatting because it does NOT include byte offsets.
-    """
-    digest_input = f"{file_path.resolve()}:{node_type}:{name}".encode("utf-8")
-    return hashlib.sha256(digest_input).hexdigest()[:16]
+# ============================================================================
+# Data Types
+# ============================================================================
 
 
 @dataclass(frozen=True, slots=True)
 class CSTNode:
-    """A discovered code node (file, class, function, or method).
+    """A concrete syntax tree node discovered from source code.
 
-    This is a frozen dataclass with slots — instances are immutable after creation.
-    The `full_name` property returns a qualified name like 'ClassName.method_name'.
+    Immutable data object representing a discovered code element.
+    The node_id is deterministic based on file path, name, and position.
     """
 
     node_id: str
-    node_type: str
+    node_type: str  # "function", "class", "file", "section", "table"
     name: str
-    file_path: Path
-    start_byte: int
-    end_byte: int
+    full_name: str
+    file_path: str
     text: str
     start_line: int
     end_line: int
-    _full_name: str = ""
+    start_byte: int
+    end_byte: int
 
-    def __post_init__(self) -> None:
-        if not self._full_name:
-            object.__setattr__(self, "_full_name", self.name)
-
-    @property
-    def full_name(self) -> str:
-        return self._full_name
+    def __hash__(self) -> int:
+        return hash(self.node_id)
 
 
-class CompiledQuery:
-    """A compiled tree-sitter query with metadata."""
-
-    def __init__(self, query: Query, source_file: Path, query_text: str, query_name: str) -> None:
-        self.query = query
-        self.source_file = source_file
-        self.query_text = query_text
-        self._query_name = query_name
-
-    @property
-    def name(self) -> str:
-        return self._query_name
+def compute_node_id(file_path: str, name: str, start_line: int, end_line: int) -> str:
+    """Compute deterministic node ID using SHA256."""
+    content = f"{file_path}:{name}:{start_line}:{end_line}"
+    return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
-def _load_queries(query_dir: Path, language: str, query_pack: str) -> list[CompiledQuery]:
-    """Load and compile .scm query files for a language/pack combination."""
-    pack_dir = query_dir / language / query_pack
-    if not pack_dir.is_dir():
-        raise DiscoveryError(f"Query pack directory not found: {pack_dir}")
+# ============================================================================
+# Query Loading (fixes MIN-05: path resolution)
+# ============================================================================
 
-    scm_files = sorted(pack_dir.glob("*.scm"))
-    if not scm_files:
-        raise DiscoveryError(f"No .scm query files found in: {pack_dir}")
 
-    grammar_module = f"tree_sitter_{language}"
+def _get_query_dir() -> Path:
+    """Get the queries directory using importlib.resources.
+
+    This correctly resolves the path regardless of installation method.
+    """
+    return Path(importlib.resources.files("remora")) / "queries"
+
+
+def _load_queries(language: str, query_pack: str = "remora_core") -> str | None:
+    """Load tree-sitter query from .scm file."""
+    query_dir = _get_query_dir()
+
+    # Try language-specific query pack
+    query_path = query_dir / language / query_pack
+    if not query_path.exists():
+        return None
+
+    queries = []
+    for scm_file in sorted(query_path.glob("*.scm")):
+        queries.append(scm_file.read_text())
+
+    return "\n".join(queries) if queries else None
+
+
+# ============================================================================
+# Parsing
+# ============================================================================
+
+
+def _get_parser(language: str) -> Parser | None:
+    """Get a tree-sitter parser for the given language."""
     try:
-        grammar_pkg = importlib.import_module(grammar_module)
-    except ImportError as exc:
-        raise DiscoveryError(f"Failed to import grammar module: {grammar_module}") from exc
-
-    ts_language = Language(grammar_pkg.language())
-
-    compiled: list[CompiledQuery] = []
-    for scm_file in scm_files:
-        compiled.append(_compile_query(scm_file, ts_language))
-
-    logger.info(
-        "Loaded %d queries from %s/%s: %s",
-        len(compiled),
-        language,
-        query_pack,
-        [q.name for q in compiled],
-    )
-    return compiled
+        # Language libraries are named like tree_sitter_python
+        lang_module = __import__(f"tree_sitter_{language}")
+        lang = Language(lang_module.language())
+        parser = Parser(lang)
+        return parser
+    except (ImportError, AttributeError) as e:
+        logger.debug("Could not load parser for %s: %s", language, e)
+        return None
 
 
-def _compile_query(scm_file: Path, ts_language: Language) -> CompiledQuery:
-    """Compile a single .scm file into a tree-sitter Query."""
-    try:
-        query_text = scm_file.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise DiscoveryError(f"Failed to read query file: {scm_file}") from exc
+def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
+    """Parse a single file and extract nodes using tree-sitter queries."""
+    parser = _get_parser(language)
+    if parser is None:
+        # Fall back to file-level node
+        return [_create_file_node(file_path)]
 
     try:
-        query = Query(ts_language, query_text)
-    except Exception as exc:
-        raise DiscoveryError(f"Query syntax error in {scm_file.name}: {exc}") from exc
+        content = file_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning("Could not read %s: %s", file_path, e)
+        return []
 
-    return CompiledQuery(
-        query=query,
-        source_file=scm_file,
-        query_text=query_text,
-        query_name=scm_file.stem,
-    )
+    tree = parser.parse(content.encode())
 
+    # Load and apply queries
+    query_text = _load_queries(language)
+    if query_text is None:
+        return [_create_file_node(file_path, content)]
 
-class SourceParser:
-    """Parses source files into tree-sitter Trees."""
+    try:
+        lang_module = __import__(f"tree_sitter_{language}")
+        lang = Language(lang_module.language())
+        query = lang.query(query_text)
+    except Exception as e:
+        logger.warning("Query error for %s: %s", language, e)
+        return [_create_file_node(file_path, content)]
 
-    def __init__(self, grammar_module: str) -> None:
-        try:
-            grammar_pkg = importlib.import_module(grammar_module)
-        except ImportError as exc:
-            raise DiscoveryError(f"Failed to import grammar module: {grammar_module}") from exc
+    # Extract matches
+    nodes = []
+    captures = query.captures(tree.root_node)
 
-        self._language = Language(grammar_pkg.language())
-        self._parser = Parser(self._language)
-        self._grammar_module = grammar_module
+    for node, capture_name in captures:
+        if capture_name.endswith(".name"):
+            continue  # Skip name-only captures
 
-    @property
-    def language(self) -> Language:
-        return self._language
+        node_type = capture_name.split(".")[-1]
+        name = _extract_name(node, captures)
 
-    def parse_file(self, file_path: Path) -> tuple[Tree, bytes]:
-        """Parse a source file and return (tree, source_bytes)."""
-        resolved = file_path.resolve()
-        try:
-            source_bytes = resolved.read_bytes()
-        except OSError as exc:
-            raise DiscoveryError(f"Failed to read source file: {resolved}") from exc
+        cst_node = CSTNode(
+            node_id=compute_node_id(str(file_path), name, node.start_point[0] + 1, node.end_point[0] + 1),
+            node_type=node_type,
+            name=name,
+            full_name=f"{node_type}:{name}",
+            file_path=str(file_path),
+            text=content[node.start_byte : node.end_byte],
+            start_line=node.start_point[0] + 1,
+            end_line=node.end_point[0] + 1,
+            start_byte=node.start_byte,
+            end_byte=node.end_byte,
+        )
+        nodes.append(cst_node)
 
-        tree = self._parser.parse(source_bytes)
-        if tree.root_node.has_error:
-            logger.warning("Parse errors in %s (continuing with partial tree)", resolved)
-
-        return tree, source_bytes
-
-    def parse_bytes(self, source_bytes: bytes) -> Tree:
-        """Parse raw bytes and return a tree-sitter Tree."""
-        return self._parser.parse(source_bytes)
-
-
-def _extract_matches(
-    file_path: Path,
-    tree: Tree,
-    source_bytes: bytes,
-    queries: list[CompiledQuery],
-) -> list[CSTNode]:
-    """Run queries against a tree and extract CSTNodes."""
-    nodes: list[CSTNode] = []
-    seen_ids: set[str] = set()
-
-    for compiled_query in queries:
-        new_nodes = _run_single_query(file_path, tree, source_bytes, compiled_query)
-        for node in new_nodes:
-            if node.node_id not in seen_ids:
-                seen_ids.add(node.node_id)
-                nodes.append(node)
-
-    nodes.sort(key=lambda n: (str(n.file_path), n.start_byte, n.node_type, n.name))
-    return nodes
-
-
-def _run_single_query(
-    file_path: Path,
-    tree: Tree,
-    source_bytes: bytes,
-    compiled_query: CompiledQuery,
-) -> list[CSTNode]:
-    """Run a single query and extract CSTNodes from matches."""
-    cursor = QueryCursor(compiled_query.query)
-    nodes: list[CSTNode] = []
-
-    for match in cursor.matches(tree.root_node):
-        captures_by_prefix: dict[str, dict[str, list]] = {}
-
-        for capture_name, ts_nodes in match[1].items():
-            parts = capture_name.split(".")
-            if len(parts) != 2:
-                continue
-
-            prefix, suffix = parts
-            if prefix not in captures_by_prefix:
-                captures_by_prefix[prefix] = {}
-            if suffix not in captures_by_prefix[prefix]:
-                captures_by_prefix[prefix][suffix] = []
-            captures_by_prefix[prefix][suffix].extend(ts_nodes)
-
-        for prefix, captures in captures_by_prefix.items():
-            def_nodes = captures.get("def", [])
-            name_nodes = captures.get("name", [])
-
-            for i, def_node in enumerate(def_nodes):
-                node_type = prefix
-
-                if i < len(name_nodes):
-                    name_node = name_nodes[i]
-                    name = source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="replace")
-                elif node_type == "file":
-                    name = file_path.stem
-                else:
-                    name = "unknown"
-
-                text = source_bytes[def_node.start_byte : def_node.end_byte].decode("utf-8", errors="replace")
-                node_id = compute_node_id(file_path, node_type, name)
-
-                nodes.append(
-                    CSTNode(
-                        node_id=node_id,
-                        node_type=node_type,
-                        name=name,
-                        file_path=file_path,
-                        start_byte=def_node.start_byte,
-                        end_byte=def_node.end_byte,
-                        text=text,
-                        start_line=def_node.start_point.row + 1,
-                        end_line=def_node.end_point.row + 1,
-                    )
-                )
+    # Always include file-level node
+    if not any(n.node_type == "file" for n in nodes):
+        nodes.insert(0, _create_file_node(file_path, content))
 
     return nodes
 
 
-def _detect_language(file_path: Path, languages: dict[str, str] | None) -> str | None:
-    """Detect language from file extension."""
-    ext = file_path.suffix
-    grammar_module = languages.get(ext) if languages else LANGUAGES.get(ext)
-    if grammar_module:
-        return grammar_module.replace("tree_sitter_", "")
-    return None
+def _extract_name(node: tree_sitter.Node, captures: list) -> str:
+    """Extract the name for a captured node."""
+    # Look for corresponding .name capture
+    for n, name in captures:
+        if name.endswith(".name") and n.parent == node:
+            return n.text.decode() if n.text else "unknown"
+
+    # Try common child names
+    for child in node.children:
+        if child.type in ("identifier", "name", "function_name"):
+            return child.text.decode() if child.text else "unknown"
+
+    return "unknown"
 
 
-def _collect_files(root_dirs: list[Path], extensions: set[str]) -> list[Path]:
-    """Walk root_dirs and collect files matching extensions."""
-    files: list[Path] = []
-    for root in root_dirs:
-        if root.is_file() and root.suffix in extensions:
-            files.append(root)
-        elif root.is_dir():
-            for ext in extensions:
-                files.extend(sorted(root.rglob(f"*{ext}")))
-    return files
+def _create_file_node(file_path: Path, content: str | None = None) -> CSTNode:
+    """Create a file-level CSTNode."""
+    if content is None:
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            content = ""
+
+    line_count = content.count("\n") + 1 if content else 1
+
+    byte_length = len(content.encode("utf-8")) if content else 0
+    return CSTNode(
+        node_id=compute_node_id(str(file_path), file_path.name, 1, line_count),
+        node_type="file",
+        name=file_path.name,
+        full_name=file_path.name,
+        file_path=str(file_path),
+        text=content,
+        start_line=1,
+        end_line=line_count,
+        start_byte=0,
+        end_byte=byte_length,
+    )
 
 
-def _default_query_dir() -> Path:
-    """Return the built-in query directory inside the remora package."""
-    import os
-
-    return Path(os.path.dirname(__file__)).parent / "queries"
+# ============================================================================
+# Public API
+# ============================================================================
 
 
 def discover(
-    paths: list[Path],
-    languages: dict[str, str] | None = None,
+    paths: list[Path] | list[str],
+    languages: list[str] | None = None,
     node_types: list[str] | None = None,
-    query_pack: str = "remora_core",
-    query_dir: Path | None = None,
     max_workers: int = 4,
 ) -> list[CSTNode]:
     """Scan source paths with tree-sitter and return discovered nodes.
 
+    Uses thread pool for parallel file parsing. Language is auto-detected
+    from file extension. Custom .scm queries are loaded from queries/ dir.
+
     Args:
-        paths: Directories or files to scan.
-        languages: Override language extension mapping (default: remora.LANGUAGES).
-        node_types: Filter to specific node types (currently unused, for future).
-        query_pack: Query pack name (default: "remora_core").
-        query_dir: Custom query directory (default: built-in queries).
-        max_workers: Thread pool size for parallel parsing.
+        paths: Files or directories to scan
+        languages: Limit to specific languages (by extension, e.g. "python")
+        node_types: Filter to specific node types ("function", "class", etc.)
+        max_workers: Thread pool size for parallel parsing
 
     Returns:
-        Deduplicated, sorted list of CSTNode instances.
-
-    Usage:
-        nodes = discover([Path("./src")])
-        nodes = discover([Path("./src")], languages={".py": "tree_sitter_python"})
+        List of CSTNode objects sorted by file path and line number
     """
-    languages = languages or LANGUAGES
-    query_dir = query_dir or _default_query_dir()
-    root_dirs = [Path(p).resolve() for p in paths]
+    path_list = [Path(p) if isinstance(p, str) else p for p in paths]
 
-    ext_to_language: dict[str, str] = {}
-    for ext, grammar_module in languages.items():
-        language = grammar_module.replace("tree_sitter_", "")
-        ext_to_language[ext] = language
-
-    languages_with_queries: dict[str, list[str]] = {}
-    for ext, language in ext_to_language.items():
-        pack_dir = query_dir / language / query_pack
-        if pack_dir.is_dir():
-            if language not in languages_with_queries:
-                languages_with_queries[language] = []
-            languages_with_queries[language].append(ext)
+    files: list[tuple[Path, str]] = []
+    for path in path_list:
+        if path.is_file():
+            lang = _detect_language(path)
+            if lang and (languages is None or lang in languages):
+                files.append((path, lang))
+        elif path.is_dir():
+            for file_path in _walk_directory(path):
+                lang = _detect_language(file_path)
+                if lang and (languages is None or lang in languages):
+                    files.append((file_path, lang))
 
     all_nodes: list[CSTNode] = []
 
-    for language, extensions in languages_with_queries.items():
-        grammar_module = f"tree_sitter_{language}"
-        files = _collect_files(root_dirs, set(extensions))
-
-        if not files:
-            continue
-
-        try:
-            queries = _load_queries(query_dir, language, query_pack)
-        except DiscoveryError as e:
-            logger.warning("Skipping language %s: %s", language, e)
-            continue
-
-        def _parse_single(file_path: Path) -> list[CSTNode]:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_parse_file, file_path, lang) for file_path, lang in files]
+        for future in futures:
             try:
-                parser = SourceParser(grammar_module)
-                tree, source_bytes = parser.parse_file(file_path)
-                return _extract_matches(file_path, tree, source_bytes, queries)
-            except DiscoveryError:
-                logger.warning("Skipping %s due to parse error", file_path)
-                return []
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            results_generator = executor.map(_parse_single, files)
-            for nodes in results_generator:
+                nodes = future.result()
                 all_nodes.extend(nodes)
+            except Exception as e:
+                logger.warning("Parse error: %s", e)
 
-    seen_ids: set[str] = set()
-    unique_nodes: list[CSTNode] = []
-    for node in all_nodes:
-        if node.node_id not in seen_ids:
-            seen_ids.add(node.node_id)
-            unique_nodes.append(node)
+    if node_types:
+        all_nodes = [n for n in all_nodes if n.node_type in node_types]
 
-    unique_nodes.sort(key=lambda n: (str(n.file_path), n.start_byte, n.node_type, n.name))
-    return unique_nodes
+    all_nodes.sort(key=lambda n: (n.file_path, n.start_line))
+
+    return all_nodes
+
+
+def _detect_language(file_path: Path) -> str | None:
+    """Detect language from file extension."""
+    return LANGUAGE_EXTENSIONS.get(file_path.suffix.lower())
+
+
+def _walk_directory(directory: Path) -> Iterator[Path]:
+    """Recursively walk directory, skipping hidden and common ignore patterns."""
+    ignore_patterns = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox"}
+
+    for item in directory.iterdir():
+        if item.name.startswith(".") or item.name in ignore_patterns:
+            continue
+        if item.is_file():
+            yield item
+        elif item.is_dir():
+            yield from _walk_directory(item)
+
+
+class NodeType(str, Enum):
+    FILE = "file"
+    CLASS = "class"
+    FUNCTION = "function"
+    METHOD = "method"
+    SECTION = "section"
+    TABLE = "table"
 
 
 class TreeSitterDiscoverer:
-    """Backward-compatible wrapper that uses the new discover() function."""
+    """Compatibility wrapper that exposes the old API."""
 
     def __init__(
         self,
-        root_dirs: Iterable[Path],
+        root_dirs: list[Path | str],
+        language: str | None = None,
         query_pack: str = "remora_core",
-        query_dir: Path | None = None,
-        event_emitter=None,
-        languages: dict[str, str] | None = None,
+        node_types: list[NodeType | str] | None = None,
+        max_workers: int = 4,
     ) -> None:
-        self.root_dirs = [Path(p).resolve() for p in root_dirs]
-        self.query_pack = query_pack
-        self.query_dir = query_dir or _default_query_dir()
-        self.event_emitter = event_emitter
-        self._languages = languages or LANGUAGES
+        self._paths = [Path(p) if isinstance(p, str) else p for p in root_dirs]
+        self._language = language
+        self._query_pack = query_pack
+        self._node_types = [nt.value if isinstance(nt, NodeType) else nt for nt in node_types] if node_types else None
+        self._max_workers = max_workers
 
     def discover(self) -> list[CSTNode]:
+        languages: list[str] | None = [self._language] if self._language else None
         return discover(
-            paths=self.root_dirs,
-            languages=self._languages,
-            query_pack=self.query_pack,
-            query_dir=self.query_dir,
+            paths=self._paths,
+            languages=languages,
+            node_types=self._node_types,
+            max_workers=self._max_workers,
         )
-
-    def _collect_files(self, extensions: set[str]) -> list[Path]:
-        return _collect_files(self.root_dirs, extensions)
 
 
 __all__ = [
     "CSTNode",
-    "CompiledQuery",
-    "DiscoveryError",
-    "SourceParser",
-    "TreeSitterDiscoverer",
     "compute_node_id",
     "discover",
-    "LANGUAGES",
+    "LANGUAGE_EXTENSIONS",
+    "NodeType",
+    "TreeSitterDiscoverer",
 ]

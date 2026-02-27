@@ -1,205 +1,186 @@
-"""Graph topology - pure data, no execution.
+"""Agent graph topology.
 
-This module provides:
-1. AgentNode: A frozen dataclass representing a node in the execution graph
-2. build_graph(): Pure function that creates the DAG from discovered nodes
-3. get_ready_nodes(): Helper for finding nodes ready to execute
-
-The key insight: topology is data, not behavior. AgentNode has no state,
-no kernel, no workspace. It just describes "what agent, what target, what dependencies."
+This module defines the pure data structures for graph topology.
+AgentNode is immutable - execution state is tracked separately.
 """
+
+from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from remora.discovery import CSTNode
-    from remora.config import BundleMetadata, RemoraConfig
+from remora.discovery import CSTNode
+from remora.errors import GraphError
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AgentNode:
     """A node in the execution graph. Immutable topology.
 
-    This is pure data - no state, no kernel, no workspace.
-    Just "what agent, what target, what dependencies."
+    Contains only topology information - no mutable state.
+    Execution state is tracked by GraphExecutor separately.
     """
 
     id: str
     name: str
-    target: "CSTNode"
+    target: CSTNode
     bundle_path: Path
     upstream: frozenset[str] = frozenset()
     downstream: frozenset[str] = frozenset()
+    priority: int = 0
 
-    def __str__(self) -> str:
-        return f"AgentNode({self.name}, upstream={len(self.upstream)}, downstream={len(self.downstream)})"
+    def __hash__(self) -> int:
+        return hash(self.id)
 
 
 def build_graph(
-    nodes: list["CSTNode"],
-    bundle_metadata: dict[str, "BundleMetadata"],
-    config: "RemoraConfig | None" = None,
+    nodes: list[CSTNode],
+    bundle_mapping: dict[str, Path],
+    priority_mapping: dict[str, int] | None = None,
 ) -> list[AgentNode]:
-    """Map discovered code nodes to agent nodes using bundle metadata.
+    """Build agent graph from discovered nodes.
 
-    The function remains pure: given the same nodes and metadata, it returns
-    the same graph with deterministic bundle selection by priority.
+    Maps each CSTNode to an AgentNode based on node_type -> bundle_path mapping.
+    Computes dependency edges based on file relationships.
 
     Args:
-        nodes: List of CSTNodes from discovery
-        bundle_metadata: Mapping from bundle name to metadata describing node types
-        config: Optional Remora configuration (reserved for future uses)
+        nodes: Discovered CSTNodes from discovery.discover()
+        bundle_mapping: Maps node_type (e.g., "function") to bundle path
+        priority_mapping: Optional priority per node_type (higher = earlier)
 
     Returns:
-        List of AgentNodes with dependency edges computed
+        List of AgentNode sorted by priority and dependency order
+
+    Raises:
+        GraphError: If graph contains cycles
     """
-    agent_nodes: list[AgentNode] = []
+    priority_mapping = priority_mapping or {}
 
-    for node in nodes:
-        candidates = [metadata for metadata in bundle_metadata.values() if node.node_type in metadata.node_types]
-        if not candidates:
+    agent_nodes: dict[str, AgentNode] = {}
+
+    for cst_node in nodes:
+        bundle_path = bundle_mapping.get(cst_node.node_type)
+        if bundle_path is None:
             continue
 
-        # Choose the highest priority bundle, break ties by bundle name for determinism
-        selected = min(candidates, key=lambda metadata: (-metadata.priority, metadata.bundle_name))
-        bundle_path = selected.path
-        if not bundle_path.exists():
-            continue
+        upstream = _compute_upstream(cst_node, nodes, agent_nodes)
 
         agent_node = AgentNode(
-            id=node.node_id,
-            name=f"{node.node_type}:{node.name}",
-            target=node,
+            id=cst_node.node_id,
+            name=cst_node.name,
+            target=cst_node,
             bundle_path=bundle_path,
+            upstream=frozenset(upstream),
+            priority=priority_mapping.get(cst_node.node_type, 0),
         )
-        agent_nodes.append(agent_node)
+        agent_nodes[agent_node.id] = agent_node
 
-    agent_nodes = _compute_file_dependencies(agent_nodes)
+    downstream_map = _compute_downstream_map(agent_nodes)
 
-    return agent_nodes
-
-
-def _compute_file_dependencies(agent_nodes: list[AgentNode]) -> list[AgentNode]:
-    """Compute dependency edges based on file proximity."""
-    by_file: dict[Path, list[AgentNode]] = defaultdict(list)
-    for node in agent_nodes:
-        by_file[node.target.file_path].append(node)
-
-    for file_path in by_file:
-        by_file[file_path].sort(key=lambda n: n.target.start_line)
-
-    result: list[AgentNode] = []
-    node_by_id: dict[str, AgentNode] = {}
-
-    for file_path, nodes in by_file.items():
-        for i, node in enumerate(nodes):
-            if i == 0:
-                result.append(node)
-                node_by_id[node.id] = node
-            else:
-                upstream_ids = frozenset(n.id for n in nodes[:i])
-                new_node = AgentNode(
-                    id=node.id,
-                    name=node.name,
-                    target=node.target,
-                    bundle_path=node.bundle_path,
-                    upstream=upstream_ids,
-                    downstream=frozenset(),
-                )
-                result.append(new_node)
-                node_by_id[new_node.id] = new_node
-
-    final_result: list[AgentNode] = []
-    for node in result:
-        downstream_ids = frozenset(nid for nid, n in node_by_id.items() if node.id in n.upstream)
-        final_node = AgentNode(
+    final_nodes = []
+    for node in agent_nodes.values():
+        updated_node = AgentNode(
             id=node.id,
             name=node.name,
             target=node.target,
             bundle_path=node.bundle_path,
             upstream=node.upstream,
-            downstream=downstream_ids,
+            downstream=frozenset(downstream_map[node.id]),
+            priority=node.priority,
         )
-        final_result.append(final_node)
+        final_nodes.append(updated_node)
 
-    return final_result
+    sorted_nodes = _topological_sort(final_nodes)
 
-
-def get_ready_nodes(
-    graph: list[AgentNode],
-    completed: set[str],
-) -> list[AgentNode]:
-    """Get nodes that are ready to execute.
-
-    A node is ready if:
-    1. It's not already completed
-    2. All its upstream dependencies are in the completed set
-    """
-    ready: list[AgentNode] = []
-
-    for node in graph:
-        if node.id in completed:
-            continue
-        if node.upstream <= completed:
-            ready.append(node)
-
-    return ready
+    return sorted_nodes
 
 
-def topological_sort(graph: list[AgentNode]) -> list[AgentNode]:
-    """Return nodes in topological order (all dependencies before dependents)."""
-    if not graph:
-        return []
+def _compute_upstream(
+    cst_node: CSTNode,
+    all_nodes: list[CSTNode],
+    existing_agents: dict[str, AgentNode],
+) -> set[str]:
+    """Compute upstream dependencies for a node."""
+    upstream: set[str] = set()
 
-    node_by_id = {node.id: node for node in graph}
-    in_degree = {node.id: len(node.upstream) for node in graph}
+    if cst_node.node_type in ("function", "class", "method"):
+        for other in all_nodes:
+            if other.node_type == "file" and other.file_path == cst_node.file_path:
+                if other.node_id in existing_agents:
+                    upstream.add(other.node_id)
 
-    queue = [node_id for node_id, degree in in_degree.items() if degree == 0]
+    return upstream
+
+
+def _compute_downstream_map(agent_nodes: dict[str, AgentNode]) -> dict[str, set[str]]:
+    """Build downstream mapping in single O(V+E) pass."""
+    downstream_map: dict[str, set[str]] = defaultdict(set)
+
+    for node in agent_nodes.values():
+        for upstream_id in node.upstream:
+            downstream_map[upstream_id].add(node.id)
+
+    return downstream_map
+
+
+def _topological_sort(nodes: list[AgentNode]) -> list[AgentNode]:
+    """Kahn's algorithm with O(V+E) complexity."""
+    node_by_id = {n.id: n for n in nodes}
+
+    adjacency: dict[str, list[str]] = defaultdict(list)
+    in_degree: dict[str, int] = {n.id: 0 for n in nodes}
+
+    for node in nodes:
+        for upstream_id in node.upstream:
+            if upstream_id in node_by_id:
+                adjacency[upstream_id].append(node.id)
+                in_degree[node.id] += 1
+
+    queue = sorted(
+        [n for n in nodes if in_degree[n.id] == 0],
+        key=lambda n: -n.priority,
+    )
+
     result: list[AgentNode] = []
 
     while queue:
-        node_id = queue.pop(0)
-        result.append(node_by_id[node_id])
+        node = queue.pop(0)
+        result.append(node)
 
-        for other_node in graph:
-            if node_id in other_node.upstream:
-                in_degree[other_node.id] -= 1
-                if in_degree[other_node.id] == 0:
-                    queue.append(other_node.id)
+        for downstream_id in adjacency[node.id]:
+            in_degree[downstream_id] -= 1
+            if in_degree[downstream_id] == 0:
+                queue.append(node_by_id[downstream_id])
 
-    if len(result) != len(graph):
-        raise ValueError("Graph contains cycles - cannot topologically sort")
+        queue.sort(key=lambda n: -n.priority)
+
+    if len(result) != len(nodes):
+        cycle_nodes = [n.id for n in nodes if in_degree[n.id] > 0]
+        raise GraphError(f"Cycle detected involving nodes: {cycle_nodes}")
 
     return result
 
 
-def get_execution_batches(
-    graph: list[AgentNode],
-) -> list[list[AgentNode]]:
-    """Group nodes into execution batches (parallel-safe groups)."""
-    if not graph:
-        return []
-
-    node_by_id = {node.id: node for node in graph}
+def get_execution_batches(nodes: list[AgentNode]) -> list[list[AgentNode]]:
+    """Group nodes into batches that can execute in parallel."""
+    node_by_id = {n.id: n for n in nodes}
     completed: set[str] = set()
     batches: list[list[AgentNode]] = []
+    remaining = set(n.id for n in nodes)
 
-    while len(completed) < len(graph):
-        ready = get_ready_nodes(graph, completed)
-        if not ready:
-            remaining = [n for n in graph if n.id not in completed]
-            raise ValueError(
-                f"Deadlock: {len(remaining)} nodes have unmet dependencies. "
-                f"Remaining: {[n.id for n in remaining[:5]]}..."
-            )
+    while remaining:
+        batch = [node_by_id[nid] for nid in remaining if node_by_id[nid].upstream <= completed]
 
-        batches.append(ready)
+        if not batch:
+            raise GraphError("Unable to make progress - possible cycle")
 
-        for node in ready:
+        batch.sort(key=lambda n: -n.priority)
+        batches.append(batch)
+
+        for node in batch:
             completed.add(node.id)
+            remaining.discard(node.id)
 
     return batches
 
@@ -207,7 +188,5 @@ def get_execution_batches(
 __all__ = [
     "AgentNode",
     "build_graph",
-    "get_ready_nodes",
-    "topological_sort",
     "get_execution_batches",
 ]

@@ -1,227 +1,157 @@
-"""Cairn workspace helpers for Remora v0.4."""
+"""Cairn workspace integration.
+
+Provides thin wrappers around Cairn for agent workspace management.
+Replaces WorkspaceKV, GraphWorkspace, and WorkspaceManager with
+direct Cairn usage.
+"""
 
 from __future__ import annotations
 
-import shutil
-from dataclasses import dataclass, asdict
+import logging
 from pathlib import Path
 from typing import Any
 
-from fsdantic.client import Fsdantic
-from fsdantic.workspace import Workspace
-from structured_agents.types import RunResult
+from cairn import Workspace as CairnWorkspace
+
+from remora.config import WorkspaceConfig
+from remora.discovery import CSTNode
+from remora.errors import WorkspaceError
+
+logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class WorkspaceConfig:
-    """Configuration overrides for Cairn workspaces."""
+class AgentWorkspace:
+    """Workspace for a single agent execution.
 
-    base_path: Path = Path(".remora/workspaces")
-    cleanup_after: str = "1h"
+    Wraps a Cairn workspace with agent-specific convenience methods.
+    """
 
+    def __init__(self, workspace: CairnWorkspace, agent_id: str):
+        self._workspace = workspace
+        self._agent_id = agent_id
 
-class CairnWorkspace:
-    """Wrapper for an fsdantic workspace plus the backing sqlite path."""
+    @property
+    def cairn(self) -> CairnWorkspace:
+        """Access underlying Cairn workspace."""
+        return self._workspace
 
-    def __init__(self, workspace: Workspace, db_path: Path) -> None:
-        self.workspace = workspace
-        self.db_path = db_path
+    async def read(self, path: str) -> str:
+        """Read a file from the workspace."""
+        return await self._workspace.read(path)
 
-    async def close(self) -> None:
-        await self.workspace.close()
+    async def write(self, path: str, content: str) -> None:
+        """Write a file to the workspace (CoW isolated)."""
+        await self._workspace.write(path, content)
 
+    async def exists(self, path: str) -> bool:
+        """Check if a file exists in the workspace."""
+        return await self._workspace.exists(path)
 
-def _resolve_base_path(config: WorkspaceConfig) -> Path:
-    base_path = Path(config.base_path)
-    base_path.mkdir(parents=True, exist_ok=True)
-    return base_path
+    async def accept(self) -> None:
+        """Accept all changes in this workspace."""
+        await self._workspace.accept()
 
+    async def reject(self) -> None:
+        """Reject all changes and reset to base state."""
+        await self._workspace.reject()
 
-async def _open_workspace(db_path: Path) -> CairnWorkspace:
-    workspace = await Fsdantic.open(path=str(db_path))
-    return CairnWorkspace(workspace=workspace, db_path=db_path)
+    async def snapshot(self, name: str) -> str:
+        """Create a named snapshot of current state."""
+        return await self._workspace.snapshot(name)
 
-
-async def create_workspace(agent_id: str, config: WorkspaceConfig) -> CairnWorkspace:
-    """Create an isolated workspace for a single agent."""
-    base_path = _resolve_base_path(config)
-    agent_dir = base_path / agent_id
-    agent_dir.mkdir(parents=True, exist_ok=True)
-    db_path = agent_dir / "workspace.db"
-    return await _open_workspace(db_path)
-
-
-async def create_shared_workspace(graph_id: str, config: WorkspaceConfig) -> CairnWorkspace:
-    """Create a shared workspace for a graph run."""
-    base_path = _resolve_base_path(config)
-    shared_dir = base_path / "shared" / graph_id
-    shared_dir.mkdir(parents=True, exist_ok=True)
-    db_path = shared_dir / "workspace.db"
-    return await _open_workspace(db_path)
+    async def restore(self, snapshot_id: str) -> None:
+        """Restore from a named snapshot."""
+        await self._workspace.restore(snapshot_id)
 
 
-async def snapshot_workspace(workspace: CairnWorkspace, snapshot_dir: Path | str) -> Path:
-    """Snapshot the workspace sqlite directory to a safe location."""
-    snapshot_dir_path = Path(snapshot_dir)
-    await workspace.workspace.raw.get_database().commit()
-    if snapshot_dir_path.exists():
-        shutil.rmtree(snapshot_dir_path)
-    shutil.copytree(workspace.db_path.parent, snapshot_dir_path)
-    return snapshot_dir_path / workspace.db_path.name
+class WorkspaceManager:
+    """Manages Cairn workspaces for graph execution.
 
+    Creates isolated workspaces per agent with CoW semantics.
+    """
 
-async def restore_workspace(snapshot: Path | str) -> CairnWorkspace:
-    """Restore a workspace from a snapshot file."""
-    snapshot_path = Path(snapshot)
-    if not snapshot_path.exists():
-        raise FileNotFoundError(f"Snapshot not found: {snapshot_path}")
-    return await _open_workspace(snapshot_path)
+    def __init__(self, config: WorkspaceConfig, graph_id: str):
+        self._config = config
+        self._graph_id = graph_id
+        self._base_path = Path(config.base_path) / graph_id
+        self._workspaces: dict[str, AgentWorkspace] = {}
+
+    async def get_workspace(self, agent_id: str) -> AgentWorkspace:
+        """Get or create a workspace for an agent."""
+        if agent_id in self._workspaces:
+            return self._workspaces[agent_id]
+
+        workspace_path = self._base_path / agent_id
+        workspace_path.mkdir(parents=True, exist_ok=True)
+
+        try:
+            cairn_ws = await CairnWorkspace.create(workspace_path)
+        except Exception as e:
+            raise WorkspaceError(f"Failed to create workspace for {agent_id}: {e}")
+
+        agent_ws = AgentWorkspace(cairn_ws, agent_id)
+        self._workspaces[agent_id] = agent_ws
+        return agent_ws
+
+    async def cleanup(self) -> None:
+        """Clean up all workspaces."""
+        for workspace in self._workspaces.values():
+            try:
+                await workspace.cairn.close()
+            except Exception as e:
+                logger.warning("Workspace cleanup error: %s", e)
+        self._workspaces.clear()
 
 
 class CairnDataProvider:
-    """Populates Grail `files` using Cairn workspaces."""
+    """Populates Grail virtual FS from a Cairn workspace.
 
-    def __init__(self, workspace: Workspace | CairnWorkspace) -> None:
-        target = workspace.workspace if isinstance(workspace, CairnWorkspace) else workspace
-        self._files = target.files
+    Implements the DataProvider pattern for structured-agents v0.3.
+    """
 
-    async def load_files(self, node: Any) -> dict[str, str | bytes]:
-        files: dict[str, str | bytes] = {}
+    def __init__(self, workspace: AgentWorkspace):
+        self._workspace = workspace
 
-        main_path = getattr(node, "file_path", None)
-        if main_path:
-            try:
-                content = await self._files.read(str(main_path))
-                files[str(main_path)] = content
-            except Exception:
-                files[str(main_path)] = ""
+    async def load_files(self, node: CSTNode, related: list[str] | None = None) -> dict[str, str]:
+        """Load target file and related files for Grail execution."""
+        files: dict[str, str] = {}
 
-        related = getattr(node, "related_files", None) or []
-        for rel_path in related:
-            try:
-                content = await self._files.read(str(rel_path))
-                files[str(rel_path)] = content
-            except Exception:
-                files[str(rel_path)] = ""
+        try:
+            files[node.file_path] = await self._workspace.read(node.file_path)
+        except Exception as e:
+            logger.warning("Could not load target file %s: %s", node.file_path, e)
+
+        if related:
+            for path in related:
+                try:
+                    if await self._workspace.exists(path):
+                        files[path] = await self._workspace.read(path)
+                except Exception as e:
+                    logger.debug("Could not load related file %s: %s", path, e)
 
         return files
 
-    async def load_file(self, path: str) -> str | bytes:
-        try:
-            return await self._files.read(path)
-        except Exception:
-            return ""
-
-
-@dataclass(frozen=True)
-class ResultSummary:
-    """Summary of an agent run for context + dashboard consumers."""
-
-    agent_id: str
-    success: bool
-    turn_count: int
-    termination_reason: str
-    final_message: str | None
-    payload: dict[str, Any]
-    writes: list[tuple[str, str]]
-    deleted_files: list[str]
-    errors: list[str]
-    tool_results: list[dict[str, Any]]
-
-    def brief(self) -> str:
-        status = "success" if self.success else "failed"
-        message = self.final_message or "no output"
-        return f"{status} ({self.turn_count} turns): {message}"
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
 
 class CairnResultHandler:
-    """Persists Remora tool results back into the Cairn workspace."""
+    """Persists script results back to Cairn workspace."""
 
-    async def handle(
-        self,
-        agent_id: str,
-        run_result: RunResult,
-        payload: dict[str, Any],
-        workspace: Workspace | CairnWorkspace,
-    ) -> ResultSummary:
-        files = workspace.workspace if isinstance(workspace, CairnWorkspace) else workspace
-        file_manager = files.files
+    def __init__(self, workspace: AgentWorkspace):
+        self._workspace = workspace
 
-        writes = self._collect_writes(payload)
-        for path, content in writes:
-            await file_manager.write(path, content)
+    async def handle(self, result: dict[str, Any]) -> None:
+        """Write result data back to workspace."""
+        if "written_files" in result:
+            for path, content in result["written_files"].items():
+                await self._workspace.write(path, content)
 
-        deleted_files: list[str] = []
-        for path in payload.get("deleted_files", []):
-            deleted_files.append(path)
-            try:
-                await file_manager.agent_fs.fs.delete_file(path)
-            except Exception:
-                pass
-
-        errors: list[str] = []
-        if payload.get("error"):
-            errors.append(str(payload["error"]))
-
-        final_message = run_result.final_message.content
-        final_tool_result = run_result.final_tool_result
-        if final_tool_result and final_tool_result.is_error:
-            errors.append(final_tool_result.output)
-
-        tool_results: list[dict[str, Any]] = []
-        if final_tool_result is not None:
-            tool_results.append(
-                {
-                    "name": final_tool_result.name,
-                    "call_id": final_tool_result.call_id,
-                    "output": final_tool_result.output,
-                    "is_error": final_tool_result.is_error,
-                }
-            )
-
-        success = not errors and payload.get("status") != "failed"
-
-        return ResultSummary(
-            agent_id=agent_id,
-            success=success,
-            turn_count=run_result.turn_count,
-            termination_reason=run_result.termination_reason,
-            final_message=final_message,
-            payload=payload,
-            writes=writes,
-            deleted_files=deleted_files,
-            errors=errors,
-            tool_results=tool_results,
-        )
-
-    def _collect_writes(self, payload: dict[str, Any]) -> list[tuple[str, str]]:
-        writes: list[tuple[str, str]] = []
-
-        if "written_file" in payload and "content" in payload:
-            writes.append((payload["written_file"], payload["content"]))
-
-        for fix in payload.get("lint_fixes", []):
-            if "path" in fix and "content" in fix:
-                writes.append((fix["path"], fix["content"]))
-
-        for test_file in payload.get("generated_tests", []):
-            if "path" in test_file and "content" in test_file:
-                writes.append((test_file["path"], test_file["content"]))
-
-        return writes
+        if "modified_file" in result:
+            path, content = result["modified_file"]
+            await self._workspace.write(path, content)
 
 
 __all__ = [
+    "AgentWorkspace",
+    "WorkspaceManager",
     "CairnDataProvider",
     "CairnResultHandler",
-    "CairnWorkspace",
-    "WorkspaceConfig",
-    "ResultSummary",
-    "create_workspace",
-    "create_shared_workspace",
-    "snapshot_workspace",
-    "restore_workspace",
 ]

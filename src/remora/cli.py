@@ -27,7 +27,7 @@ def config(
     try:
         cfg = load_config(config_path)
     except ConfigError as exc:
-        typer.echo(f"{exc.code}: {exc}", err=True)
+        typer.echo(f"Configuration error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     payload = serialize_config(cfg)

@@ -1,210 +1,142 @@
+"""Graph executor for running agents in dependency order.
+
+Uses structured-agents Agent.from_bundle() for execution.
+Configuration passed directly - no global environment variables.
+"""
+
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-import time
-import uuid
+import logging
 from dataclasses import dataclass, field
-from enum import StrEnum
-from typing import Any
+from enum import Enum
+from typing import TYPE_CHECKING, Any, cast
 
-from structured_agents.agent import Agent
+from structured_agents import Agent
+from structured_agents.events import Event as StructuredEvent
+from structured_agents.events.observer import Observer
 from structured_agents.exceptions import KernelError
-from structured_agents.types import RunResult
 
+from remora.config import ErrorPolicy, RemoraConfig
 from remora.context import ContextBuilder
-from remora.config import RemoraConfig
+from remora.errors import ExecutionError
 from remora.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
+    AgentSkippedEvent,
     AgentStartEvent,
     GraphCompleteEvent,
+    GraphErrorEvent,
     GraphStartEvent,
-    ToolResultEvent,
 )
+from remora.event_bus import EventBus
 from remora.graph import AgentNode, get_execution_batches
-from remora.workspace import (
-    CairnDataProvider,
-    CairnResultHandler,
-    CairnWorkspace,
-    ResultSummary,
-    create_workspace,
-)
+from remora.workspace import CairnDataProvider, WorkspaceManager
+
+if TYPE_CHECKING:
+    from structured_agents.types import RunResult
+
+logger = logging.getLogger(__name__)
 
 
-class ErrorPolicy(StrEnum):
-    """Graph-level error handling policies."""
+class AgentState(Enum):
+    """Execution state of an agent."""
 
-    STOP_GRAPH = "stop_graph"
-    SKIP_DOWNSTREAM = "skip_downstream"
-    CONTINUE = "continue"
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+@dataclass
+class ResultSummary:
+    """Summary of an agent execution result."""
+
+    agent_id: str
+    success: bool
+    output: str
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize for checkpoint storage."""
+        return {
+            "agent_id": self.agent_id,
+            "success": self.success,
+            "output": self.output,
+            "error": self.error,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ResultSummary":
+        return cls(
+            agent_id=data["agent_id"],
+            success=data["success"],
+            output=data["output"],
+            error=data.get("error"),
+        )
 
 
 @dataclass
 class ExecutorState:
-    """Tracks execution state across a graph run."""
+    """State of graph execution for checkpointing."""
 
     graph_id: str
     nodes: dict[str, AgentNode]
+    states: dict[str, AgentState] = field(default_factory=dict)
     completed: dict[str, ResultSummary] = field(default_factory=dict)
     pending: set[str] = field(default_factory=set)
-    workspaces: dict[str, CairnWorkspace] = field(default_factory=dict)
-    started_at: float = field(default_factory=time.time)
-
-    def get_agent_state(self, agent_id: str) -> str:
-        if agent_id in self.completed:
-            summary = self.completed[agent_id]
-            if not summary.success:
-                return "failed"
-            return "completed"
-        if agent_id in self.pending:
-            return "running"
-        return "pending"
-
-    def mark_completed(self, agent_id: str, summary: ResultSummary) -> None:
-        self.completed[agent_id] = summary
-        self.pending.discard(agent_id)
-
-    def mark_started(self, agent_id: str) -> None:
-        self.pending.add(agent_id)
+    failed: set[str] = field(default_factory=set)
+    skipped: set[str] = field(default_factory=set)
 
 
-@dataclass
-class ExecutionConfig:
-    """Configuration for graph execution."""
+class _EventBusObserver(Observer):
+    def __init__(self, bus: EventBus) -> None:
+        self._bus = bus
 
-    max_concurrency: int = 4
-    timeout: float = 300.0
-    error_policy: ErrorPolicy = ErrorPolicy.STOP_GRAPH
-    max_turns: int = 10
-
-    def __post_init__(self) -> None:
-        if self.max_concurrency < 1:
-            raise ValueError("max_concurrency must be >= 1")
-        if self.timeout <= 0:
-            raise ValueError("timeout must be positive")
-        if self.max_turns < 1:
-            raise ValueError("max_turns must be >= 1")
-
-
-async def execute_agent(
-    node: AgentNode,
-    workspace: CairnWorkspace,
-    context_builder: ContextBuilder,
-    result_handler: CairnResultHandler,
-    observer: Any,
-    remora_config: RemoraConfig,
-    max_turns: int,
-) -> ResultSummary:
-    """Execute an agent via structured-agents and persist outputs."""
-    data_provider = CairnDataProvider(workspace)
-    prompt = await _build_agent_prompt(node, context_builder, data_provider)
-
-    _set_structured_agents_env(remora_config)
-
-    agent = await Agent.from_bundle(node.bundle_path, observer=observer)
-    try:
-        run_result = await agent.run(prompt, max_turns=max_turns)
-    finally:
-        await agent.close()
-
-    payload = _parse_payload(run_result.final_message.content)
-    summary = await result_handler.handle(node.id, run_result, payload, workspace)
-    return summary
-
-
-async def _build_agent_prompt(
-    node: AgentNode,
-    context_builder: ContextBuilder,
-    data_provider: CairnDataProvider,
-) -> str:
-    parts: list[str] = []
-
-    context = context_builder.build_context_for(node)
-    if context.strip():
-        parts.append("## Context")
-        parts.append(context)
-
-    parts.append("## Target Node")
-    parts.append(f"- id: {node.id}")
-    parts.append(f"- name: {node.name}")
-    parts.append(f"- type: {node.target.node_type}")
-    if node.target.file_path:
-        parts.append(f"- file: {node.target.file_path}")
-
-    parts.append("\n## Source")
-    if node.target.text:
-        parts.append(_truncate(node.target.text))
-
-    files = await data_provider.load_files(node.target)
-    if files:
-        parts.append("\n## Workspace Files")
-        for path in sorted(files):
-            content = files[path]
-            text = content.decode("utf-8", errors="ignore") if isinstance(content, (bytes, bytearray)) else str(content)
-            parts.append(f"### {path}\n{_truncate(text)}")
-
-    return "\n".join(parts)
-
-
-def _truncate(text: str, limit: int = 1024) -> str:
-    if len(text) <= limit:
-        return text
-    return text[: limit - 3] + "..."
-
-
-def _parse_payload(content: str | None) -> dict[str, Any]:
-    if not content:
-        return {}
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        return {
-            "message": content,
-        }
-
-
-def _set_structured_agents_env(config: RemoraConfig) -> None:
-    os.environ["STRUCTURED_AGENTS_BASE_URL"] = config.model_base_url
-    os.environ["STRUCTURED_AGENTS_API_KEY"] = config.api_key
+    async def emit(self, event: StructuredEvent) -> None:
+        await self._bus.emit(event)
 
 
 class GraphExecutor:
-    """Runs agents in dependency order with bounded concurrency."""
+    """Executes agent graph in dependency order.
+
+    Features:
+    - Bounded concurrency via semaphore
+    - Error policies (STOP_GRAPH, SKIP_DOWNSTREAM, CONTINUE)
+    - Event emission at lifecycle points
+    - Checkpoint save/restore support
+    """
 
     def __init__(
         self,
-        config: ExecutionConfig,
-        event_bus: Any,
-        remora_config: RemoraConfig,
+        config: RemoraConfig,
+        event_bus: EventBus,
         context_builder: ContextBuilder | None = None,
-        result_handler: CairnResultHandler | None = None,
-    ) -> None:
+    ):
         self.config = config
         self.event_bus = event_bus
-        self.remora_config = remora_config
         self.context_builder = context_builder or ContextBuilder()
-        self.result_handler = result_handler or CairnResultHandler()
-        self._subscribe_context_builder()
+        self._observer = _EventBusObserver(event_bus)
 
-    def _subscribe_context_builder(self) -> None:
-        self.event_bus.subscribe(ToolResultEvent, self.context_builder.handle)
-        self.event_bus.subscribe(AgentCompleteEvent, self.context_builder.handle)
+        # Subscribe context builder to events
+        event_bus.subscribe_all(self.context_builder.handle)
 
     async def run(
         self,
         graph: list[AgentNode],
-        workspace_config: Any,
-    ) -> dict[str, Any]:
-        graph_id = uuid.uuid4().hex
-        results: dict[str, dict[str, Any]] = {}
+        graph_id: str,
+    ) -> dict[str, ResultSummary]:
+        """Execute all agents in topological order."""
         state = ExecutorState(
             graph_id=graph_id,
-            nodes={node.id: node for node in graph},
+            nodes={n.id: n for n in graph},
+            pending=set(n.id for n in graph),
         )
 
-        self.context_builder.clear()
+        # Initialize states for detected nodes
+        for node_id in state.nodes:
+            state.states[node_id] = AgentState.PENDING
 
         await self.event_bus.emit(
             GraphStartEvent(
@@ -213,148 +145,225 @@ class GraphExecutor:
             )
         )
 
-        batches = get_execution_batches(graph)
-        stop_execution = False
+        workspace_mgr = WorkspaceManager(self.config.workspace, graph_id)
+        semaphore = asyncio.Semaphore(self.config.execution.max_concurrency)
 
-        for batch in batches:
-            for node in batch:
-                ws_handle = await create_workspace(node.id, workspace_config)
-                state.workspaces[node.id] = ws_handle
-                state.mark_started(node.id)
+        try:
+            batches = get_execution_batches(graph)
 
-            if self.config.max_concurrency > 1:
-                batch_results = await self._run_batch_parallel(batch, state)
-            else:
-                batch_results = await self._run_batch_sequential(batch, state)
+            for batch in batches:
+                runnable = [n for n in batch if n.id not in state.skipped and n.id not in state.failed]
 
-            for node, result in zip(batch, batch_results):
-                if isinstance(result, Exception):
-                    await self.event_bus.emit(
-                        AgentErrorEvent(
-                            graph_id=graph_id,
-                            agent_id=node.id,
-                            error=str(result),
-                        )
-                    )
-                    if self.config.error_policy == ErrorPolicy.STOP_GRAPH:
-                        stop_execution = True
-                        break
-                elif isinstance(result, ResultSummary):
-                    results[node.id] = result.to_dict()
-                    state.mark_completed(node.id, result)
+                if not runnable:
+                    continue
 
-            if stop_execution:
-                break
+                tasks = [self._execute_agent(n, state, workspace_mgr, semaphore) for n in runnable]
 
-        await self.event_bus.emit(
-            GraphCompleteEvent(
-                graph_id=graph_id,
-                results=results,
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                should_stop = await self._process_results(runnable, results, state, graph)
+
+                if should_stop:
+                    break
+
+            await self.event_bus.emit(
+                GraphCompleteEvent(
+                    graph_id=graph_id,
+                    completed_count=len(state.completed),
+                    failed_count=len(state.failed),
+                )
             )
-        )
 
-        for workspace_handle in state.workspaces.values():
-            await workspace_handle.close()
+        except Exception as e:
+            await self.event_bus.emit(
+                GraphErrorEvent(
+                    graph_id=graph_id,
+                    error=str(e),
+                )
+            )
+            raise ExecutionError(f"Graph execution failed: {e}") from e
 
-        return results
+        finally:
+            await workspace_mgr.cleanup()
 
-    async def _run_batch_parallel(
-        self,
-        batch: list[AgentNode],
-        state: ExecutorState,
-    ) -> list[Any]:
-        semaphore = asyncio.Semaphore(self.config.max_concurrency)
+        return state.completed
 
-        async def run_with_semaphore(node: AgentNode) -> Any:
-            async with semaphore:
-                return await self._run_node(node, state)
-
-        tasks = [asyncio.create_task(run_with_semaphore(node)) for node in batch]
-        return await asyncio.gather(*tasks, return_exceptions=True)
-
-    async def _run_batch_sequential(
-        self,
-        batch: list[AgentNode],
-        state: ExecutorState,
-    ) -> list[Any]:
-        results = []
-        for node in batch:
-            try:
-                result = await self._run_node(node, state)
-                results.append(result)
-            except Exception as e:
-                results.append(e)
-        return results
-
-    async def _run_node(
+    async def _execute_agent(
         self,
         node: AgentNode,
         state: ExecutorState,
-    ) -> Any:
-        workspace_handle = state.workspaces[node.id]
-        graph_id = state.graph_id
+        workspace_mgr: WorkspaceManager,
+        semaphore: asyncio.Semaphore,
+    ) -> ResultSummary:
+        async with semaphore:
+            state.states[node.id] = AgentState.RUNNING
 
-        await self.event_bus.emit(
-            AgentStartEvent(
-                graph_id=graph_id,
-                agent_id=node.id,
-                node={
-                    "name": node.name,
-                    "target": str(node.target.file_path),
-                },
+            await self.event_bus.emit(
+                AgentStartEvent(
+                    graph_id=state.graph_id,
+                    agent_id=node.id,
+                    node_name=node.name,
+                )
             )
+
+            try:
+                workspace = await workspace_mgr.get_workspace(node.id)
+
+                data_provider = CairnDataProvider(workspace)
+                files = await data_provider.load_files(node.target)
+
+                prompt = self._build_prompt(node, files)
+                result = await self._run_agent(node, prompt)
+                agent_result = cast(Any, result)
+                output = getattr(agent_result, "output", None)
+                if output is None:
+                    final_message = getattr(agent_result, "final_message", None)
+                    output = getattr(final_message, "content", "") if final_message else ""
+
+                summary = ResultSummary(
+                    agent_id=node.id,
+                    success=True,
+                    output=_truncate(str(output), self.config.execution.truncation_limit),
+                )
+
+                await self.event_bus.emit(
+                    AgentCompleteEvent(
+                        graph_id=state.graph_id,
+                        agent_id=node.id,
+                        result_summary=summary.output[:200],
+                    )
+                )
+
+                return summary
+
+            except Exception as e:
+                logger.error("Agent %s failed: %s", node.id, e)
+
+                summary = ResultSummary(
+                    agent_id=node.id,
+                    success=False,
+                    output="",
+                    error=str(e),
+                )
+
+                await self.event_bus.emit(
+                    AgentErrorEvent(
+                        graph_id=state.graph_id,
+                        agent_id=node.id,
+                        error=str(e),
+                    )
+                )
+
+                return summary
+
+    async def _run_agent(self, node: AgentNode, prompt: str) -> "RunResult":
+        agent = await Agent.from_bundle(
+            node.bundle_path,
+            observer=self._observer,
+            base_url=self.config.model.base_url,
+            api_key=self.config.model.api_key or None,
+            model=self.config.model.default_model,
         )
 
         try:
-            summary = await execute_agent(
-                node,
-                workspace_handle,
-                self.context_builder,
-                self.result_handler,
-                self.event_bus,
-                self.remora_config,
-                self.config.max_turns,
+            return await agent.run(
+                prompt,
+                max_turns=self.config.execution.max_turns,
             )
+        finally:
+            await agent.close()
 
-            await self.event_bus.emit(
-                AgentCompleteEvent(
-                    graph_id=graph_id,
-                    agent_id=node.id,
-                    result=summary.to_dict(),
-                )
-            )
-            self.context_builder.ingest_summary(summary)
+    def _build_prompt(self, node: AgentNode, files: dict[str, str]) -> str:
+        sections: list[str] = []
 
-            return summary
+        sections.append(f"# Target: {node.name}")
+        sections.append(f"File: {node.target.file_path}")
+        sections.append(f"Lines: {node.target.start_line}-{node.target.end_line}")
 
-        except KernelError as exc:
-            await self.event_bus.emit(
-                AgentErrorEvent(
-                    graph_id=graph_id,
+        if node.target.file_path in files:
+            sections.append("\n## Code")
+            sections.append("```")
+            sections.append(node.target.text)
+            sections.append("```")
+
+        context = self.context_builder.build_context_for(node.target)
+        if context:
+            sections.append(context)
+
+        return "\n".join(sections)
+
+    async def _process_results(
+        self,
+        nodes: list[AgentNode],
+        results: list[ResultSummary | BaseException],
+        state: ExecutorState,
+        graph: list[AgentNode],
+    ) -> bool:
+        should_stop = False
+
+        for node, result in zip(nodes, results):
+            if isinstance(result, BaseException):
+                result = ResultSummary(
                     agent_id=node.id,
-                    error=str(exc),
+                    success=False,
+                    output="",
+                    error=str(result),
                 )
-            )
-            if self.config.error_policy == ErrorPolicy.STOP_GRAPH:
-                raise
-            return None
-        except Exception as exc:
-            await self.event_bus.emit(
-                AgentErrorEvent(
-                    graph_id=graph_id,
-                    agent_id=node.id,
-                    error=str(exc),
-                )
-            )
-            if self.config.error_policy == ErrorPolicy.STOP_GRAPH:
-                raise
-            return None
+
+            state.pending.discard(node.id)
+
+            if result.success:
+                state.states[node.id] = AgentState.COMPLETED
+                state.completed[node.id] = result
+            else:
+                state.states[node.id] = AgentState.FAILED
+                state.failed.add(node.id)
+
+                if self.config.execution.error_policy == ErrorPolicy.STOP_GRAPH:
+                    should_stop = True
+
+                elif self.config.execution.error_policy == ErrorPolicy.SKIP_DOWNSTREAM:
+                    downstream = self._get_all_downstream(node.id, graph)
+                    for skip_id in downstream:
+                        if skip_id not in state.completed and skip_id not in state.failed:
+                            state.skipped.add(skip_id)
+                            state.states[skip_id] = AgentState.SKIPPED
+                            state.pending.discard(skip_id)
+
+                            await self.event_bus.emit(
+                                AgentSkippedEvent(
+                                    graph_id=state.graph_id,
+                                    agent_id=skip_id,
+                                    reason=f"Upstream agent {node.id} failed",
+                                )
+                            )
+
+        return should_stop
+
+    def _get_all_downstream(self, node_id: str, graph: list[AgentNode]) -> set[str]:
+        node_by_id = {n.id: n for n in graph}
+        downstream: set[str] = set()
+        queue = list(node_by_id[node_id].downstream)
+
+        while queue:
+            current = queue.pop()
+            if current not in downstream:
+                downstream.add(current)
+                if current in node_by_id:
+                    queue.extend(node_by_id[current].downstream)
+
+        return downstream
+
+
+def _truncate(text: str, limit: int = 1024) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
 
 
 __all__ = [
-    "GraphExecutor",
+    "AgentState",
+    "ResultSummary",
     "ExecutorState",
-    "ExecutionConfig",
-    "ErrorPolicy",
-    "execute_agent",
+    "GraphExecutor",
 ]

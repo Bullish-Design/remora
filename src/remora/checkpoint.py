@@ -1,307 +1,178 @@
-"""Cairn-Native Checkpointing.
+"""Checkpoint management via Cairn snapshots.
 
-This module provides checkpointing for graph execution state using Cairn's
-native snapshot/restore capabilities. Replaces the old file-backed KV store
-approach with Cairn workspace snapshots.
-
-Usage:
-    manager = CheckpointManager(Path(".remora/checkpoints"))
-
-    # Save checkpoint
-    checkpoint_id = await manager.save(
-        graph_id="graph-1",
-        executor_state=executor_state,
-    )
-
-    # Restore checkpoint
-    restored_state = await manager.restore(checkpoint_id)
-
-    # List checkpoints
-    checkpoints = await manager.list_checkpoints(graph_id="graph-1")
-
-    # Delete checkpoint
-    await manager.delete(checkpoint_id)
+Provides save/restore of graph execution state for resumption
+after interruption or failure.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import shutil
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from remora.workspace import CairnWorkspace, restore_workspace, snapshot_workspace
+from cairn import Workspace as CairnWorkspace
 
-if TYPE_CHECKING:
-    from remora.executor import ExecutorState
+from remora.errors import CheckpointError
+from remora.executor import AgentState, ExecutorState, ResultSummary
+from remora.graph import AgentNode
+from remora.workspace import AgentWorkspace
 
-
-class JsonStore:
-    """Simple JSON file-based store for checkpoint metadata.
-
-    Provides basic key-value storage using JSON files.
-    Replaces fsdantic for simplicity.
-    """
-
-    def __init__(self, store_path: Path):
-        """Initialize the store.
-
-        Args:
-            store_path: Directory for JSON files
-        """
-        self._path = store_path
-        self._path.mkdir(parents=True, exist_ok=True)
-
-    async def put(self, key: str, value: dict[str, Any]) -> None:
-        """Store a value.
-
-        Args:
-            key: The key to store
-            value: The value (must be JSON-serializable dict)
-        """
-        file_path = self._path / f"{key}.json"
-        file_path.write_text(json.dumps(value, indent=2))
-
-    async def get(self, key: str) -> dict[str, Any] | None:
-        """Retrieve a value.
-
-        Args:
-            key: The key to retrieve
-
-        Returns:
-            The stored dict, or None if not found
-        """
-        file_path = self._path / f"{key}.json"
-        if not file_path.exists():
-            return None
-        return json.loads(file_path.read_text())
-
-    async def delete(self, key: str) -> None:
-        """Delete a value.
-
-        Args:
-            key: The key to delete
-        """
-        file_path = self._path / f"{key}.json"
-        if file_path.exists():
-            file_path.unlink()
-
-    async def list(self) -> list[dict[str, Any]]:
-        """List all stored values.
-
-        Returns:
-            List of all stored dicts
-        """
-        results = []
-        for file_path in self._path.glob("*.json"):
-            try:
-                results.append(json.loads(file_path.read_text()))
-            except (json.JSONDecodeError, IOError):
-                continue
-        return results
-
-
-def _serialize_result(result: Any) -> dict[str, Any]:
-    """Serialize a RunResult to JSON-serializable dict.
-
-    Args:
-        result: The RunResult or result dict to serialize
-
-    Returns:
-        JSON-serializable dict
-    """
-    if result is None:
-        return {"type": "none"}
-
-    if isinstance(result, dict):
-        return {"type": "dict", "data": result}
-
-    if hasattr(result, "model_dump"):
-        return {"type": "model_dump", "data": result.model_dump()}
-
-    if hasattr(result, "dict"):
-        return {"type": "dict_attr", "data": result.dict()}
-
-    return {"type": "str", "data": str(result)}
-
-
-def _deserialize_result(data: dict[str, Any]) -> Any:
-    """Deserialize a dict back to a RunResult-like object.
-
-    Args:
-        data: The serialized dict
-
-    Returns:
-        The deserialized result (typically a dict)
-    """
-    if data is None:
-        return None
-
-    result_type = data.get("type", "dict")
-    result_data = data.get("data", data)
-
-    if result_type in ("none", None):
-        return None
-
-    if result_type in ("dict", "dict_attr"):
-        return result_data
-
-    if result_type == "model_dump":
-        return result_data
-
-    if result_type == "str":
-        return result_data
-
-    return result_data
+logger = logging.getLogger(__name__)
 
 
 class CheckpointManager:
-    """Save and restore graph execution state via Cairn snapshots.
+    """Save and restore graph execution state via Cairn snapshots."""
 
-    This replaces the old CheckpointManager that used file-backed KV stores.
-    Now uses Cairn's native snapshot/restore for workspaces.
-
-    Usage:
-        manager = CheckpointManager(Path(".remora/checkpoints"))
-
-        # Save
-        checkpoint_id = await manager.save(graph_id, executor_state)
-
-        # Restore
-        state = await manager.restore(checkpoint_id)
-    """
-
-    def __init__(self, store_path: Path):
-        """Initialize the CheckpointManager.
-
-        Args:
-            store_path: Directory to store checkpoints
-        """
-        self._store_path = store_path
-        self._store: JsonStore | None = None
-
-    async def _get_store(self) -> JsonStore:
-        """Lazy initialization of the metadata store.
-
-        Returns:
-            The JsonStore instance
-        """
-        if self._store is None:
-            self._store = JsonStore(self._store_path / "_metadata")
-        return self._store
+    def __init__(self, base_path: Path | str):
+        self._base_path = Path(base_path)
+        self._base_path.mkdir(parents=True, exist_ok=True)
 
     async def save(
         self,
-        graph_id: str,
-        executor_state: "ExecutorState",
+        executor_state: ExecutorState,
+        workspaces: dict[str, AgentWorkspace],
     ) -> str:
-        """Snapshot all agent workspaces + execution state.
-
-        Args:
-            graph_id: ID of the graph being checkpointed
-            executor_state: Current executor state with workspaces and results
-
-        Returns:
-            Checkpoint ID that can be used to restore
-        """
-        checkpoint_id = f"{graph_id}_{datetime.now().isoformat()}"
-        checkpoint_dir = self._store_path / checkpoint_id
+        checkpoint_id = f"{executor_state.graph_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        checkpoint_dir = self._base_path / checkpoint_id
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        agent_snapshots: dict[str, str] = {}
-        for agent_id, workspace in executor_state.workspaces.items():
-            agent_dir = checkpoint_dir / agent_id
-            snapshot_path = await snapshot_workspace(workspace, agent_dir)
-            agent_snapshots[agent_id] = str(snapshot_path)
+        try:
+            metadata = {
+                "graph_id": executor_state.graph_id,
+                "pending": list(executor_state.pending),
+                "failed": list(executor_state.failed),
+                "skipped": list(executor_state.skipped),
+                "states": {k: v.value for k, v in executor_state.states.items()},
+                "results": {aid: res.to_dict() for aid, res in executor_state.completed.items()},
+                "nodes": {nid: self._serialize_node(node) for nid, node in executor_state.nodes.items()},
+            }
 
-        metadata = {
-            "checkpoint_id": checkpoint_id,
-            "graph_id": graph_id,
-            "timestamp": datetime.now().isoformat(),
-            "completed": list(executor_state.completed.keys()),
-            "results": {aid: _serialize_result(res) for aid, res in executor_state.completed.items()},
-            "pending": list(executor_state.pending),
-            "agent_workspaces": list(executor_state.workspaces.keys()),
-            "agent_snapshots": agent_snapshots,
-        }
+            metadata_path = checkpoint_dir / "metadata.json"
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f, indent=2)
 
-        store = await self._get_store()
-        await store.put(checkpoint_id, metadata)
+            for agent_id, workspace in workspaces.items():
+                snapshot_name = f"{checkpoint_id}/{agent_id}"
+                await workspace.snapshot(snapshot_name)
+                logger.debug("Saved workspace snapshot: %s", snapshot_name)
 
-        return checkpoint_id
+            logger.info("Saved checkpoint: %s", checkpoint_id)
+            return checkpoint_id
 
-    async def restore(self, checkpoint_id: str) -> "ExecutorState":
-        """Restore workspaces and execution state from checkpoint.
+        except Exception as exc:
+            raise CheckpointError(f"Failed to save checkpoint: {exc}") from exc
 
-        Args:
-            checkpoint_id: ID of the checkpoint to restore
-
-        Returns:
-            Restored ExecutorState
-
-        Raises:
-            KeyError: If checkpoint not found
-        """
-        store = await self._get_store()
-        metadata = await store.get(checkpoint_id)
-
-        if metadata is None:
-            raise KeyError(f"Checkpoint not found: {checkpoint_id}")
-
-        from remora.executor import ExecutorState
-
-        checkpoint_dir = self._store_path / checkpoint_id
-        workspaces = {}
-
-        for agent_id, snapshot_path in metadata.get("agent_snapshots", {}).items():
-            workspaces[agent_id] = await restore_workspace(snapshot_path)
-
-        results = {aid: _deserialize_result(res) for aid, res in metadata.get("results", {}).items()}
-
-        return ExecutorState(
-            graph_id=metadata["graph_id"],
-            nodes={},
-            completed=results,
-            pending=set(metadata.get("pending", [])),
-            workspaces=workspaces,
-        )
-
-    async def list_checkpoints(
+    async def restore(
         self,
-        graph_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """List available checkpoints.
+        checkpoint_id: str,
+    ) -> tuple[ExecutorState, dict[str, AgentWorkspace]]:
+        checkpoint_dir = self._base_path / checkpoint_id
+        if not checkpoint_dir.exists():
+            raise CheckpointError(f"Checkpoint not found: {checkpoint_id}")
 
-        Args:
-            graph_id: Optional filter by graph ID
+        try:
+            metadata_path = checkpoint_dir / "metadata.json"
+            with open(metadata_path) as f:
+                metadata = json.load(f)
 
-        Returns:
-            List of checkpoint metadata dicts
-        """
-        store = await self._get_store()
-        all_checkpoints = await store.list()
+            completed = {aid: ResultSummary.from_dict(data) for aid, data in metadata.get("results", {}).items()}
 
-        if graph_id:
-            return [cp for cp in all_checkpoints if cp.get("graph_id") == graph_id]
-        return all_checkpoints
+            nodes = {nid: self._deserialize_node(data) for nid, data in metadata.get("nodes", {}).items()}
 
-    async def delete(self, checkpoint_id: str) -> None:
-        """Delete a checkpoint.
+            states = {k: AgentState(v) for k, v in metadata.get("states", {}).items()}
 
-        Args:
-            checkpoint_id: ID of checkpoint to delete
-        """
-        store = await self._get_store()
-        await store.delete(checkpoint_id)
+            workspaces: dict[str, AgentWorkspace] = {}
+            for agent_id in nodes.keys():
+                snapshot_name = f"{checkpoint_id}/{agent_id}"
+                try:
+                    cairn_ws = await CairnWorkspace.from_snapshot(snapshot_name)
+                    workspaces[agent_id] = AgentWorkspace(cairn_ws, agent_id)
+                except Exception as exc:
+                    logger.warning("Could not restore workspace for %s: %s", agent_id, exc)
 
-        checkpoint_dir = self._store_path / checkpoint_id
+            state = ExecutorState(
+                graph_id=metadata["graph_id"],
+                nodes=nodes,
+                states=states,
+                completed=completed,
+                pending=set(metadata.get("pending", [])),
+                failed=set(metadata.get("failed", [])),
+                skipped=set(metadata.get("skipped", [])),
+            )
+
+            logger.info("Restored checkpoint: %s", checkpoint_id)
+            return state, workspaces
+
+        except Exception as exc:
+            raise CheckpointError(f"Failed to restore checkpoint: {exc}") from exc
+
+    def list_checkpoints(self, graph_id: str | None = None) -> list[str]:
+        checkpoints = []
+        for item in self._base_path.iterdir():
+            if item.is_dir() and (item / "metadata.json").exists():
+                if graph_id is None or item.name.startswith(graph_id):
+                    checkpoints.append(item.name)
+        return sorted(checkpoints, reverse=True)
+
+    def delete(self, checkpoint_id: str) -> None:
+        checkpoint_dir = self._base_path / checkpoint_id
         if checkpoint_dir.exists():
             shutil.rmtree(checkpoint_dir)
+            logger.info("Deleted checkpoint: %s", checkpoint_id)
+
+    def _serialize_node(self, node: AgentNode) -> dict[str, Any]:
+        return {
+            "id": node.id,
+            "name": node.name,
+            "target": {
+                "node_id": node.target.node_id,
+                "node_type": node.target.node_type,
+                "name": node.target.name,
+                "full_name": node.target.full_name,
+                "file_path": node.target.file_path,
+                "text": node.target.text,
+                "start_line": node.target.start_line,
+                "end_line": node.target.end_line,
+                "start_byte": node.target.start_byte,
+                "end_byte": node.target.end_byte,
+            },
+            "bundle_path": str(node.bundle_path),
+            "upstream": list(node.upstream),
+            "downstream": list(node.downstream),
+            "priority": node.priority,
+        }
+
+    def _deserialize_node(self, data: dict[str, Any]) -> AgentNode:
+        from remora.discovery import CSTNode
+
+        target_data = data["target"]
+        target = CSTNode(
+            node_id=target_data["node_id"],
+            node_type=target_data["node_type"],
+            name=target_data["name"],
+            full_name=target_data.get("full_name", target_data.get("name", "unknown")),
+            file_path=target_data["file_path"],
+            text=target_data.get("text", ""),
+            start_line=target_data.get("start_line", 1),
+            end_line=target_data.get("end_line", 1),
+            start_byte=target_data.get("start_byte", 0),
+            end_byte=target_data.get("end_byte", 0),
+        )
+
+        return AgentNode(
+            id=data["id"],
+            name=data["name"],
+            target=target,
+            bundle_path=Path(data["bundle_path"]),
+            upstream=frozenset(data.get("upstream", [])),
+            downstream=frozenset(data.get("downstream", [])),
+            priority=data.get("priority", 0),
+        )
 
 
 __all__ = [
     "CheckpointManager",
-    "JsonStore",
 ]

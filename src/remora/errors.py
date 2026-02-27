@@ -1,43 +1,59 @@
-# src/remora/errors.py
+"""Remora error hierarchy.
+
+All Remora-specific errors inherit from RemoraError.
+"""
+
 from __future__ import annotations
 
-class RemoraError(Exception):
-    """Base exception for all Remora errors."""
-    code: str = "REMORA-UNKNOWN"
-    recoverable: bool = False
-    
-    def __init__(self, message: str, code: str | None = None, recoverable: bool | None = None):
-        super().__init__(message)
-        if code is not None:
-            self.code = code
-        if recoverable is not None:
-            self.recoverable = recoverable
 
-class ConfigurationError(RemoraError):
-    code = "REMORA-CONFIG"
+class RemoraError(Exception):
+    """Base class for all Remora errors."""
+
+    pass
+
+
+class ConfigError(RemoraError):
+    """Configuration loading or validation error."""
+
+    pass
+
 
 class DiscoveryError(RemoraError):
-    code = "REMORA-DISCOVERY"
+    """Error during code discovery."""
+
+    pass
+
+
+class GraphError(RemoraError):
+    """Error in graph construction or validation."""
+
+    pass
+
 
 class ExecutionError(RemoraError):
-    code = "REMORA-EXEC"
-    recoverable = True
+    """Error during agent execution."""
 
-class SubagentError(RemoraError):
-    code = "REMORA-AGENT"
+    pass
 
-class HubError(RemoraError):
-    """Base exception for all Hub-related errors."""
-    code = "REMORA-HUB"
 
-class KernelTimeoutError(ExecutionError):
-    """Raised when the LLM or tool execution times out."""
-    code = "REMORA-EXEC-TIMEOUT"
+class CheckpointError(RemoraError):
+    """Error during checkpoint save or restore."""
 
-class ToolExecutionError(ExecutionError):
-    """Raised when a specific tool fails catastrophically."""
-    code = "REMORA-EXEC-TOOL"
+    pass
 
-class ContextLengthError(ExecutionError):
-    """Raised when the prompt exceeds the model's context window."""
-    code = "REMORA-EXEC-CONTEXT"
+
+class WorkspaceError(RemoraError):
+    """Error in workspace operations."""
+
+    pass
+
+
+__all__ = [
+    "RemoraError",
+    "ConfigError",
+    "DiscoveryError",
+    "GraphError",
+    "ExecutionError",
+    "CheckpointError",
+    "WorkspaceError",
+]

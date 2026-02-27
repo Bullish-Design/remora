@@ -13,18 +13,21 @@ authors = [
 dependencies = [
   "typer>=0.12",
   "rich>=13",
-  "pydantic>=2",
   "pyyaml>=6",
   "jinja2>=3",
-  "watchfiles>=0.21",  # transitive via cairn; kept explicit for watch command
-  "tree-sitter>=0.24",
+  "watchfiles>=0.21",
+  "tree-sitter>=0.20",
   "tree-sitter-python>=0.23",
   "tree-sitter-toml",
   "tree-sitter-markdown",
-  "cairn",
-  "grail",
+  "cairn>=1.0.0",
+  "grail>=3.0.0",
   "textual",
-  "datastar-py",
+  "datastar-py>=0.1",
+  "structured-agents>=0.3.4",
+  "fsdantic>=0.2.0",
+  "pydantic>=2.0",
+  "starlette>=0.30",
 ]
 
 [project.optional-dependencies]

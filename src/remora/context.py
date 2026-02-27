@@ -1,143 +1,90 @@
-"""Context Builder - Two-Track Memory implementation.
+"""Context builder for Two-Track Memory.
 
-This module provides bounded context for agents by:
-- Short Track: Rolling window of recent actions (deque with maxlen)
-- Long Track: Full event stream via EventBus subscription
+Short Track: Rolling deque of recent actions
+Long Track: Full event subscription for knowledge accumulation
 
-Usage:
-    builder = ContextBuilder(window_size=20, store=node_store)
-
-    # Subscribe to events
-    event_bus.subscribe(ToolResultEvent, builder.handle)
-    event_bus.subscribe(AgentCompleteEvent, builder.handle)
-
-    # Build context for a node
-    context = builder.build_context_for(node)
+The ContextBuilder subscribes to the EventBus and builds bounded
+context for agent prompts.
 """
 
 from __future__ import annotations
 
-import time
+import logging
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any, TYPE_CHECKING
 
-from remora.workspace import ResultSummary
+from remora.events import (
+    RemoraEvent,
+    ToolResultEvent,
+    AgentCompleteEvent,
+    AgentErrorEvent,
+)
 
 if TYPE_CHECKING:
     from remora.discovery import CSTNode
-    from remora.events import AgentCompleteEvent, RemoraEvent, ToolResultEvent
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class RecentAction:
+    """A recent tool/agent action for Short Track memory."""
+
+    tool: str
+    outcome: str  # "success", "error", "partial"
+    summary: str
+    agent_id: str | None = None
 
 
 @dataclass
-class RecentAction:
-    """A recent action for the Short Track."""
-
-    tool: str
-    outcome: str
-    summary: str
-    timestamp: float = field(default_factory=time.time)
-
-
-def _summarize_output(output: Any, max_length: int = 100) -> str:
-    """Truncate and summarize tool output for the Short Track."""
-    if output is None:
-        return "no output"
-
-    if isinstance(output, dict):
-        keys = list(output.keys())[:3]
-        return f"dict({', '.join(keys)})"
-
-    if isinstance(output, list):
-        return f"list[{len(output)} items]"
-
-    s = str(output)
-    if len(s) > max_length:
-        return s[: max_length - 3] + "..."
-    return s
-
-
-def _extract_knowledge(result: dict[str, Any]) -> str:
-    """Extract key information from agent result for knowledge accumulation."""
-    if not result:
-        return "no result"
-
-    if "summary" in result:
-        return str(result["summary"])
-
-    if "message" in result:
-        msg = result["message"]
-        if isinstance(msg, dict) and "content" in msg:
-            content = msg["content"]
-            if len(content) > 100:
-                return content[:97] + "..."
-            return content
-
-    keys = [k for k in result.keys() if not k.startswith("_")]
-    if keys:
-        return f"fields: {', '.join(keys[:5])}"
-
-    return "completed"
-
-
 class ContextBuilder:
     """Builds bounded context from the event stream.
 
-    Implements the Two-Track Memory concept:
-    - Short Track: Rolling window of recent actions (via deque with maxlen)
-    - Long Track: Full event stream (via EventBus subscription)
+    Implements Two-Track Memory:
+    - Short Track: Rolling window of recent actions (bounded deque)
+    - Long Track: Knowledge accumulated from completed agents
     """
 
-    def __init__(
-        self,
-        window_size: int = 20,
-        store: Any = None,
-    ):
-        """Initialize the ContextBuilder."""
-        self._recent: deque[RecentAction] = deque(maxlen=window_size)
-        self._knowledge: dict[str, str] = {}
-        self._store = store
+    window_size: int = 20
+    _recent: deque[RecentAction] = field(default_factory=deque)
+    _knowledge: dict[str, str] = field(default_factory=dict)
+    _store: Any = None
+
+    def __post_init__(self):
+        self._recent = deque(maxlen=self.window_size)
 
     async def handle(self, event: RemoraEvent) -> None:
         """EventBus subscriber - updates context from events."""
-        event_type = type(event).__name__
-
-        if event_type == "ToolResultEvent":
-            tool_label = getattr(event, "tool_name", None) or getattr(event, "name", "unknown")
-            summary_input = getattr(event, "output", None) or getattr(event, "output_preview", None)
-            self._recent.append(
-                RecentAction(
-                    tool=tool_label,
-                    outcome="error" if getattr(event, "is_error", False) else "success",
-                    summary=_summarize_output(summary_input),
+        match event:
+            case ToolResultEvent(name=name, output=output, is_error=is_error):
+                self._recent.append(
+                    RecentAction(
+                        tool=name,
+                        outcome="error" if is_error else "success",
+                        summary=_summarize(str(output), max_len=200),
+                    )
                 )
-            )
 
-        elif event_type == "AgentCompleteEvent":
-            aid = getattr(event, "agent_id", None)
-            result = getattr(event, "result", None)
-            if aid and result:
-                self._knowledge[aid] = _extract_knowledge(result)
+            case AgentCompleteEvent(agent_id=aid, result_summary=summary):
+                self._knowledge[aid] = summary
 
-    def build_prompt_section(self) -> str:
-        """Render current Short Track as a prompt section."""
-        lines = ["## Recent Actions"]
+            case AgentErrorEvent(agent_id=aid, error=error):
+                self._recent.append(
+                    RecentAction(
+                        tool="agent",
+                        outcome="error",
+                        summary=f"Agent {aid} failed: {error[:100]}",
+                        agent_id=aid,
+                    )
+                )
 
-        recent_list = list(self._recent)
-        for action in recent_list[-10:]:
-            status = "✓" if action.outcome == "success" else "✗"
-            lines.append(f"- {status} {action.tool}: {action.summary}")
+            case _:
+                pass
 
-        if self._knowledge:
-            lines.append("\n## Knowledge")
-            for agent_id, knowledge in self._knowledge.items():
-                lines.append(f"- {agent_id}: {knowledge}")
-
-        return "\n".join(lines)
-
-    def build_context_for(self, node: Any) -> str:
-        """Build full context: Hub index data + Short Track."""
-        sections = []
+    def build_context_for(self, node: CSTNode) -> str:
+        """Build full context for an agent prompt."""
+        sections: list[str] = []
 
         if self._store:
             try:
@@ -146,31 +93,45 @@ class ContextBuilder:
                     sections.append("## Related Code")
                     for rel in related[:5]:
                         sections.append(f"- {rel}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to load related code for %s: %s", node.node_id, e)
 
-        sections.append(self.build_prompt_section())
+        if self._recent:
+            sections.append("\n## Recent Actions")
+            for action in self._recent:
+                status = "+" if action.outcome == "success" else "-"
+                sections.append(f"[{status}] {action.tool}: {action.summary}")
+
+        if self._knowledge:
+            sections.append("\n## Prior Analysis")
+            for agent_id, knowledge in list(self._knowledge.items())[-5:]:
+                sections.append(f"- {agent_id}: {knowledge[:200]}")
 
         return "\n".join(sections)
 
-    def ingest_summary(self, summary: ResultSummary) -> None:
-        """Ingest a run summary to enrich the Long Track knowledge."""
-        if not summary.agent_id:
-            return
-        self._knowledge[summary.agent_id] = summary.brief()
+    def build_prompt_section(self) -> str:
+        """Render just the recent actions as a prompt section."""
+        if not self._recent:
+            return ""
 
-    def get_recent_actions(self) -> list[RecentAction]:
-        """Get all recent actions (Short Track)."""
-        return list(self._recent)
+        lines = ["## Recent Activity"]
+        for action in self._recent:
+            status = "+" if action.outcome == "success" else "-"
+            lines.append(f"[{status}] {action.tool}: {action.summary}")
 
-    def get_knowledge(self) -> dict[str, str]:
-        """Get accumulated knowledge (Long Track summary)."""
-        return self._knowledge.copy()
+        return "\n".join(lines)
 
     def clear(self) -> None:
-        """Clear all context. Useful for new sessions."""
+        """Clear all context. Used for testing or new graph runs."""
         self._recent.clear()
         self._knowledge.clear()
+
+
+def _summarize(text: str, max_len: int = 200) -> str:
+    """Truncate text for context summary."""
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
 
 
 __all__ = [
