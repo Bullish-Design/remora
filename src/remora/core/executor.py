@@ -52,18 +52,24 @@ logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
-class AgentResultProtocol(Protocol):
-    """Protocol for agent execution results."""
+class ResultWithOutput(Protocol):
+    """Protocol for results that expose an output field."""
 
     output: str | None
+
+
+@runtime_checkable
+class ResultWithFinalMessage(Protocol):
+    """Protocol for results that expose a final_message field."""
+
     final_message: Any
 
 
 def extract_output(result: Any) -> str | None:
     """Extract output from an agent result, handling multiple shapes."""
-    if isinstance(result, AgentResultProtocol):
-        if result.output is not None:
-            return result.output
+    if isinstance(result, ResultWithOutput) and result.output is not None:
+        return result.output
+    if isinstance(result, ResultWithFinalMessage):
         final_message = getattr(result, "final_message", None)
         return getattr(final_message, "content", None) if final_message else None
     if hasattr(result, "output"):
