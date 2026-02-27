@@ -12,6 +12,7 @@ from typing import Any, Callable
 from remora.core.config import RemoraConfig
 from remora.core.discovery import discover
 from remora.core.event_bus import EventBus
+from remora.core.event_store import EventStore, EventSourcedBus
 from remora.core.events import HumanInputResponseEvent
 from remora.core.executor import GraphExecutor
 from remora.core.graph import AgentNode, build_graph
@@ -32,6 +33,7 @@ class ServiceDeps:
     projector: UiStateProjector
     executor_factory: ExecutorFactory
     running_tasks: dict[str, asyncio.Task]
+    event_store: EventStore | None = None
 
 
 def default_executor_factory(
@@ -165,7 +167,10 @@ def _serialize_node(node: AgentNode) -> dict[str, Any]:
 
 async def _execute_graph(graph_id: str, agent_nodes: list[AgentNode], project_root: Path, deps: ServiceDeps) -> None:
     try:
-        executor = deps.executor_factory(deps.config, deps.event_bus, project_root)
+        event_bus: EventBus = deps.event_bus
+        if deps.event_store is not None:
+            event_bus = EventSourcedBus(deps.event_bus, deps.event_store, graph_id)  # type: ignore[assignment]
+        executor = deps.executor_factory(deps.config, event_bus, project_root)
         await executor.run(agent_nodes, graph_id)
     except Exception:
         logger.exception("Graph execution failed: %s", graph_id)

@@ -12,7 +12,7 @@ from starlette.testclient import TestClient
 
 from remora.adapters.starlette import create_app
 from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
-from remora.core.event_bus import EventBus
+from remora.core.container import RemoraContainer
 from remora.core.events import GraphStartEvent, HumanInputResponseEvent
 from remora.service.api import RemoraService
 from tests.integration.helpers import load_vllm_config, write_bundle
@@ -126,9 +126,10 @@ async def _stream_until(
 
 def test_dashboard_events_stream_emits_event(tmp_path: Path) -> None:
     _log("test_dashboard_events_stream_emits_event start")
-    event_bus = EventBus()
+    container = RemoraContainer.create(config=_build_config(tmp_path), project_root=tmp_path)
+    event_bus = container.event_bus
     _log("creating app")
-    service = RemoraService(event_bus=event_bus, config=_build_config(tmp_path), project_root=tmp_path)
+    service = RemoraService(container=container)
     app = create_app(service)
 
     async def _run() -> tuple[int, str]:
@@ -150,9 +151,9 @@ def test_dashboard_events_stream_emits_event(tmp_path: Path) -> None:
 
 def test_dashboard_subscribe_stream_returns_html(tmp_path: Path) -> None:
     _log("test_dashboard_subscribe_stream_returns_html start")
-    event_bus = EventBus()
+    container = RemoraContainer.create(config=_build_config(tmp_path), project_root=tmp_path)
     _log("creating app")
-    service = RemoraService(event_bus=event_bus, config=_build_config(tmp_path), project_root=tmp_path)
+    service = RemoraService(container=container)
     app = create_app(service)
 
     async def _run() -> tuple[int, str]:
@@ -169,7 +170,8 @@ def test_dashboard_subscribe_stream_returns_html(tmp_path: Path) -> None:
 
 def test_dashboard_input_emits_event(tmp_path: Path) -> None:
     _log("test_dashboard_input_emits_event start")
-    event_bus = EventBus()
+    container = RemoraContainer.create(config=_build_config(tmp_path), project_root=tmp_path)
+    event_bus = container.event_bus
     events: queue.Queue[object] = queue.Queue()
 
     def _record(event: object) -> None:
@@ -177,7 +179,7 @@ def test_dashboard_input_emits_event(tmp_path: Path) -> None:
 
     event_bus.subscribe_all(_record)
     _log("creating app")
-    service = RemoraService(event_bus=event_bus, config=_build_config(tmp_path), project_root=tmp_path)
+    service = RemoraService(container=container)
     app = create_app(service)
 
     _log("starting TestClient")
@@ -199,9 +201,10 @@ def test_dashboard_input_emits_event(tmp_path: Path) -> None:
 
 def test_dashboard_events_stream_multiple_clients(tmp_path: Path) -> None:
     _log("test_dashboard_events_stream_multiple_clients start")
-    event_bus = EventBus()
+    container = RemoraContainer.create(config=_build_config(tmp_path), project_root=tmp_path)
+    event_bus = container.event_bus
     _log("creating app")
-    service = RemoraService(event_bus=event_bus, config=_build_config(tmp_path), project_root=tmp_path)
+    service = RemoraService(container=container)
     app = create_app(service)
 
     async def _run() -> tuple[tuple[int, str], tuple[int, str]]:

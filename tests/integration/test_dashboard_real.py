@@ -9,7 +9,7 @@ from starlette.testclient import TestClient
 
 from remora.adapters.starlette import create_app
 from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
-from remora.core.event_bus import EventBus
+from remora.core.container import RemoraContainer
 from remora.service.api import RemoraService
 from tests.integration.helpers import agentfs_available_sync, load_vllm_config, vllm_available, write_bundle
 
@@ -45,7 +45,8 @@ def test_dashboard_run_emits_events(tmp_path: Path) -> None:
         workspace=WorkspaceConfig(base_path=str(tmp_path / "workspaces")),
     )
 
-    event_bus = EventBus()
+    container = RemoraContainer.create(config=config, project_root=project_root)
+    event_bus = container.event_bus
     events: queue.Queue[object] = queue.Queue()
 
     def _record(event: object) -> None:
@@ -53,7 +54,7 @@ def test_dashboard_run_emits_events(tmp_path: Path) -> None:
 
     event_bus.subscribe_all(_record)
 
-    service = RemoraService(event_bus=event_bus, config=config, project_root=project_root)
+    service = RemoraService(container=container)
     app = create_app(service)
 
     with TestClient(app) as client:

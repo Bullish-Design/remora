@@ -1,0 +1,25 @@
+bundles:
+  path: agents
+  mapping:
+    section: article_section/bundle.yaml
+    file: article_summary/bundle.yaml
+
+discovery:
+  languages: ["markdown"]
+  max_workers: 4
+
+model:
+  base_url: "http://remora-server:8000/v1"
+  api_key: "EMPTY"
+  default_model: "Qwen/Qwen3-4B"
+
+execution:
+  max_concurrency: 4
+  error_policy: skip_downstream
+  timeout: 300
+  max_turns: 6
+  truncation_limit: 1024
+
+workspace:
+  base_path: ".remora/workspaces"
+  cleanup_after: "1h"

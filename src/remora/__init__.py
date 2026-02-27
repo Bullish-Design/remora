@@ -16,6 +16,7 @@ from remora.core.config import (
     load_config,
     serialize_config,
 )
+from remora.core.container import RemoraContainer, ScopedContainer
 from remora.core.context import ContextBuilder, RecentAction
 from remora.core.discovery import (
     CSTNode,
@@ -34,6 +35,7 @@ from remora.core.errors import (
     WorkspaceError,
 )
 from remora.core.event_bus import EventBus, EventHandler
+from remora.core.event_store import EventSourcedBus, EventStore
 from remora.core.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
@@ -57,6 +59,7 @@ from remora.core.events import (
 )
 from remora.core.executor import AgentState, ExecutorState, GraphExecutor, ResultSummary
 from remora.core.graph import AgentNode, build_graph, get_execution_batches
+from remora.core.streaming_sync import FileWatcher, StreamingSyncManager, SyncStats
 from remora.core.tools import RemoraGrailTool, build_virtual_fs, discover_grail_tools
 from remora.core.workspace import AgentWorkspace, CairnDataProvider, CairnResultHandler, WorkspaceManager
 from remora.utils import PathResolver
@@ -100,6 +103,8 @@ __all__ = [
     "TurnCompleteEvent",
     "EventBus",
     "EventHandler",
+    "EventSourcedBus",
+    "EventStore",
     "AgentNode",
     "build_graph",
     "get_execution_batches",
@@ -122,6 +127,11 @@ __all__ = [
     "CairnWorkspaceService",
     "SyncMode",
     "WorkspaceManager",
+    "RemoraContainer",
+    "ScopedContainer",
+    "FileWatcher",
+    "StreamingSyncManager",
+    "SyncStats",
     "RemoraGrailTool",
     "build_virtual_fs",
     "discover_grail_tools",

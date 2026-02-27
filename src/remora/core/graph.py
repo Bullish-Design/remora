@@ -59,18 +59,27 @@ def build_graph(
 
     agent_nodes: dict[str, AgentNode] = {}
     file_node_ids_by_path: dict[str, str] = {}
+    section_node_ids_by_path: dict[str, list[str]] = defaultdict(list)
 
     if "file" in bundle_mapping:
         for cst_node in nodes:
             if cst_node.node_type == "file":
                 file_node_ids_by_path[cst_node.file_path] = cst_node.node_id
+    if "section" in bundle_mapping:
+        for cst_node in nodes:
+            if cst_node.node_type == "section":
+                section_node_ids_by_path[cst_node.file_path].append(cst_node.node_id)
 
     for cst_node in nodes:
         bundle_path = bundle_mapping.get(cst_node.node_type)
         if bundle_path is None:
             continue
 
-        upstream = _compute_upstream(cst_node, file_node_ids_by_path)
+        upstream = _compute_upstream(
+            cst_node,
+            file_node_ids_by_path,
+            section_node_ids_by_path,
+        )
 
         agent_node = AgentNode(
             id=cst_node.node_id,
@@ -105,6 +114,7 @@ def build_graph(
 def _compute_upstream(
     cst_node: CSTNode,
     file_node_ids_by_path: dict[str, str],
+    section_node_ids_by_path: dict[str, list[str]],
 ) -> set[str]:
     """Compute upstream dependencies for a node."""
     upstream: set[str] = set()
@@ -113,6 +123,8 @@ def _compute_upstream(
         file_node_id = file_node_ids_by_path.get(cst_node.file_path)
         if file_node_id:
             upstream.add(file_node_id)
+    elif cst_node.node_type == "file":
+        upstream.update(section_node_ids_by_path.get(cst_node.file_path, []))
 
     return upstream
 

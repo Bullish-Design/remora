@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from typing import Any, AsyncIterator
 
-from remora.core.config import RemoraConfig, load_config
+from remora.core.config import RemoraConfig
+from remora.core.container import RemoraContainer
 from remora.core.event_bus import EventBus
 from remora.models import ConfigSnapshot, InputResponse, PlanRequest, PlanResponse, RunRequest, RunResponse
 from remora.service.datastar import render_patch, render_shell
@@ -22,7 +22,7 @@ from remora.service.handlers import (
     handle_ui_snapshot,
 )
 from remora.ui.projector import UiStateProjector, normalize_event
-from remora.utils import PathLike, normalize_path
+from remora.utils import PathLike
 from remora.ui.view import render_dashboard
 
 
@@ -37,27 +37,25 @@ class RemoraService:
         config_path: PathLike | None = None,
         project_root: PathLike | None = None,
     ) -> "RemoraService":
-        resolved_config = config or load_config(config_path)
-        return cls(
-            event_bus=EventBus(),
-            config=resolved_config,
+        container = RemoraContainer.create(
+            config=config,
+            config_path=config_path,
             project_root=project_root,
         )
+        return cls(container=container)
 
     def __init__(
         self,
         *,
-        event_bus: EventBus,
-        config: RemoraConfig | None = None,
-        project_root: PathLike | None = None,
+        container: RemoraContainer,
         projector: UiStateProjector | None = None,
         executor_factory: ExecutorFactory | None = None,
     ) -> None:
-        if event_bus is None:
-            raise ValueError("event_bus is required; use RemoraService.create_default() for defaults")
-        self._event_bus = event_bus
-        self._config = config or load_config()
-        self._project_root = normalize_path(project_root or Path.cwd()).resolve()
+        self._container = container
+        self._event_bus = container.event_bus
+        self._event_store = container.event_store
+        self._config = container.config
+        self._project_root = container.project_root
         self._projector = projector or UiStateProjector()
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._bundle_default = _resolve_bundle_default(self._config)
@@ -70,6 +68,7 @@ class RemoraService:
             projector=self._projector,
             executor_factory=executor_factory or default_executor_factory,
             running_tasks=self._running_tasks,
+            event_store=self._event_store,
         )
 
     def index_html(self) -> str:
@@ -95,6 +94,17 @@ class RemoraService:
                 event_name = envelope.get("type", "event")
                 yield f"event: {event_name}\ndata: {data}\n\n"
 
+    async def replay_events(
+        self,
+        graph_id: str,
+        *,
+        event_types: list[str] | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        if self._event_store is None:
+            raise ValueError("event store is not configured")
+        async for record in self._event_store.replay(graph_id, event_types=event_types):
+            yield record
+
     async def run(self, request: RunRequest) -> RunResponse:
         return await handle_run(request, self._deps)
 
@@ -109,6 +119,10 @@ class RemoraService:
 
     def ui_snapshot(self) -> dict[str, Any]:
         return handle_ui_snapshot(self._deps)
+
+    @property
+    def has_event_store(self) -> bool:
+        return self._event_store is not None
 
 
 def _resolve_bundle_default(config: RemoraConfig) -> str:

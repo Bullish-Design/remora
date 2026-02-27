@@ -16,6 +16,7 @@ from typing import Any
 from cairn.runtime import workspace_manager as cairn_workspace_manager
 
 from remora.core.config import WorkspaceConfig
+from remora.core.streaming_sync import FileWatcher, StreamingSyncManager, SyncStats
 from remora.core.cairn_externals import CairnExternals
 from remora.core.errors import WorkspaceError
 from remora.core.workspace import AgentWorkspace
@@ -51,9 +52,10 @@ class CairnWorkspaceService:
         self._agent_workspaces: dict[str, AgentWorkspace] = {}
         self._stable_lock = asyncio.Lock()
         self._sync_mode: SyncMode = SyncMode.FULL
-        self._synced_files: set[str] = set()
         self._ignore_patterns: set[str] = set(config.ignore_patterns or ())
         self._ignore_dotfiles: bool = config.ignore_dotfiles
+        self._streaming_sync: StreamingSyncManager | None = None
+        self._file_watcher: FileWatcher | None = None
 
     @property
     def project_root(self) -> Path:
@@ -63,7 +65,12 @@ class CairnWorkspaceService:
     def resolver(self) -> PathResolver:
         return self._resolver
 
-    async def initialize(self, *, sync_mode: SyncMode = SyncMode.FULL) -> None:
+    async def initialize(
+        self,
+        *,
+        sync_mode: SyncMode = SyncMode.FULL,
+        watch_changes: bool = False,
+    ) -> None:
         """Initialize stable workspace with configurable sync mode."""
         if self._stable_workspace is not None:
             return
@@ -83,6 +90,16 @@ class CairnWorkspaceService:
 
         if sync_mode == SyncMode.FULL:
             await self._sync_project_to_workspace()
+        elif sync_mode == SyncMode.LAZY:
+            self._streaming_sync = StreamingSyncManager(
+                project_root=self._project_root,
+                workspace=self._stable_workspace,
+                ignore_checker=self._should_ignore,
+            )
+
+        if watch_changes and self._streaming_sync:
+            self._file_watcher = FileWatcher(self._streaming_sync)
+            await self._file_watcher.start()
 
     async def get_agent_workspace(self, agent_id: str) -> AgentWorkspace:
         """Get or create an agent workspace."""
@@ -130,9 +147,13 @@ class CairnWorkspaceService:
 
     async def close(self) -> None:
         """Close all tracked workspaces."""
+        if self._file_watcher:
+            await self._file_watcher.stop()
+            self._file_watcher = None
         await self._manager.close_all()
         self._agent_workspaces.clear()
         self._stable_workspace = None
+        self._streaming_sync = None
 
     async def _sync_project_to_workspace(self) -> None:
         """Sync project files into the stable workspace."""
@@ -157,34 +178,22 @@ class CairnWorkspaceService:
 
             try:
                 await self._stable_workspace.files.write(rel_path, payload, mode="binary")
-                self._synced_files.add(rel_path)
             except Exception as exc:
                 logger.debug("Failed to write %s to stable workspace: %s", rel_path, exc)
 
     async def ensure_file_synced(self, rel_path: str) -> bool:
         """Ensure a specific file is synced to workspace."""
-        if self._sync_mode == SyncMode.NONE:
-            return False
-        if rel_path in self._synced_files:
+        if self._streaming_sync:
+            return await self._streaming_sync.ensure_synced(rel_path)
+        if self._sync_mode == SyncMode.FULL:
             return True
-        if self._stable_workspace is None:
-            return False
+        return False
 
-        workspace_path = self._resolver.to_workspace_path(rel_path)
-        full_path = self._resolver.to_project_path(workspace_path)
-        if not full_path.exists():
-            return False
-        if self._should_ignore(full_path):
-            return False
-
-        try:
-            payload = full_path.read_bytes()
-            await self._stable_workspace.files.write(workspace_path, payload, mode="binary")
-            self._synced_files.add(workspace_path)
-            return True
-        except Exception as exc:
-            logger.debug("Failed to sync %s: %s", workspace_path, exc)
-            return False
+    def get_sync_stats(self) -> SyncStats | None:
+        """Get streaming sync statistics."""
+        if self._streaming_sync:
+            return self._streaming_sync.get_stats()
+        return None
 
     def _should_ignore(self, path: Path) -> bool:
         try:

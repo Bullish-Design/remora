@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -37,6 +38,8 @@ from remora.core.events import (
     GraphCompleteEvent,
     GraphErrorEvent,
     GraphStartEvent,
+    HumanInputRequestEvent,
+    HumanInputResponseEvent,
 )
 from remora.core.event_bus import EventBus
 from remora.core.graph import AgentNode, get_execution_batches
@@ -302,6 +305,7 @@ class GraphExecutor:
             try:
                 workspace = await workspace_service.get_agent_workspace(node.id)
                 externals = workspace_service.get_externals(node.id, workspace)
+                externals = self._build_externals(externals, graph_id=state.graph_id, agent_id=node.id)
 
                 data_provider = CairnDataProvider(workspace, self._path_resolver)
                 files = await data_provider.load_files(node.target)
@@ -478,6 +482,40 @@ class GraphExecutor:
                 sections.append(context)
 
         return "\n".join(sections)
+
+    def _build_externals(
+        self,
+        externals: dict[str, Any],
+        *,
+        graph_id: str,
+        agent_id: str,
+    ) -> dict[str, Any]:
+        async def request_human_input(
+            question: str,
+            options: list[str] | None = None,
+            timeout_s: int = 300,
+        ) -> str:
+            request_id = uuid.uuid4().hex[:8]
+            normalized_options = tuple(options) if options else None
+            await self.event_bus.emit(
+                HumanInputRequestEvent(
+                    graph_id=graph_id,
+                    agent_id=agent_id,
+                    request_id=request_id,
+                    question=question,
+                    options=normalized_options,
+                )
+            )
+            response = await self.event_bus.wait_for(
+                HumanInputResponseEvent,
+                lambda event: event.request_id == request_id,
+                timeout=float(timeout_s),
+            )
+            return response.response
+
+        merged = dict(externals)
+        merged["request_human_input"] = request_human_input
+        return merged
 
     async def _load_submission_summary(self, workspace: Any, agent_id: str) -> str | None:
         try:

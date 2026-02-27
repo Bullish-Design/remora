@@ -1,0 +1,30 @@
+from grail import Input, external
+
+
+@external
+async def request_human_input(
+    question: str,
+    options: list[str] | None = None,
+    timeout_s: int = 300,
+) -> str:
+    ...
+
+
+question: str = Input("question")
+options: list[str] = Input("options", default=[])
+timeout_s: int = Input("timeout_s", default=300)
+
+try:
+    response = await request_human_input(str(question), options or None, int(timeout_s))
+    result = {
+        "response": str(response),
+        "outcome": "success",
+    }
+except Exception as exc:
+    result = {
+        "response": "",
+        "outcome": "error",
+        "error": str(exc),
+    }
+
+result

@@ -1,0 +1,28 @@
+name: article_summary_agent
+model: qwen
+
+initial_context:
+  system_prompt: |
+    You are the article summary agent. Combine the section summaries listed in
+    "## Prior Analysis" into a cohesive, higher-level summary of the full article.
+
+    If you need guidance on tone, scope, or focus, call the tool request_human_input
+    once with a short question before summarizing.
+
+    Then call submit_result exactly once with:
+    - summary: the combined article summary
+    - changed_files: []
+
+grammar:
+  strategy: ebnf
+  allow_parallel_calls: false
+  send_tools_to_api: false
+
+agents_dir: tools
+termination: submit_result
+max_turns: 4
+
+node_types:
+  - file
+priority: 5
+requires_context: true

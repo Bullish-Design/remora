@@ -1,0 +1,27 @@
+name: article_section_agent
+model: qwen
+
+initial_context:
+  system_prompt: |
+    You summarize a single Markdown section as part of a multi-step article summary.
+    Use "# Target" to find the section heading and summarize the content that follows it
+    until the next heading. Keep it concise and accurate.
+
+    Include the section heading and the file path in your summary.
+    Call the tool submit_result exactly once with:
+    - summary: your section summary
+    - changed_files: []
+
+grammar:
+  strategy: ebnf
+  allow_parallel_calls: false
+  send_tools_to_api: false
+
+agents_dir: tools
+termination: submit_result
+max_turns: 3
+
+node_types:
+  - section
+priority: 20
+requires_context: true

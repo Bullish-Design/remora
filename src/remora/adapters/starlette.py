@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from starlette.applications import Starlette
@@ -25,6 +26,20 @@ def create_app(service: RemoraService | None = None) -> Starlette:
 
     async def events(_request: Request) -> StreamingResponse:
         return _sse_response(service.events_stream())
+
+    async def replay(request: Request) -> StreamingResponse | JSONResponse:
+        graph_id = request.query_params.get("graph_id")
+        if not graph_id:
+            return _error("graph_id required", status_code=400)
+        if not service.has_event_store:
+            return _error("event store not configured", status_code=400)
+
+        async def generate():
+            async for event in service.replay_events(graph_id):
+                payload = json.dumps(event, default=str)
+                yield f"event: replay\ndata: {payload}\n\n"
+
+        return _sse_response(generate())
 
     async def run(request: Request) -> JSONResponse:
         try:
@@ -73,6 +88,7 @@ def create_app(service: RemoraService | None = None) -> Starlette:
         Route("/", index),
         Route("/subscribe", subscribe),
         Route("/events", events),
+        Route("/replay", replay),
         Route("/run", run, methods=["POST"]),
         Route("/input", submit_input, methods=["POST"]),
         Route("/plan", plan, methods=["POST"]),

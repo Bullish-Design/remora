@@ -1,0 +1,26 @@
+from grail import Input, external
+
+
+@external
+async def submit_result(summary: str, changed_files: list[str]) -> bool:
+    ...
+
+
+summary: str = Input("summary")
+changed_files: list[str] = Input("changed_files", default=[])
+
+try:
+    normalized_files = [str(path) for path in changed_files]
+    await submit_result(str(summary), normalized_files)
+    result = {
+        "summary": str(summary),
+        "outcome": "success",
+    }
+except Exception as exc:
+    result = {
+        "summary": f"error: {exc}",
+        "outcome": "error",
+        "error": str(exc),
+    }
+
+result

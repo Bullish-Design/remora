@@ -108,7 +108,13 @@ class ContextBuilder:
 
         if self._knowledge:
             sections.append("\n## Prior Analysis")
-            for agent_id, knowledge in list(self._knowledge.items())[-5:]:
+            node_type = getattr(node, "node_type", "")
+            file_path = getattr(node, "file_path", "")
+            if node_type == "file" and file_path.endswith(".md"):
+                items = list(self._knowledge.items())
+            else:
+                items = list(self._knowledge.items())[-5:]
+            for agent_id, knowledge in items:
                 sections.append(f"- {agent_id}: {knowledge[:200]}")
 
         return "\n".join(sections)
