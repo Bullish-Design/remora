@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import uuid
+from pathlib import Path
 
 from datastar_py import attribute_generator as data
 from starlette.applications import Starlette
@@ -373,6 +375,289 @@ def create_demo_app(*, config_path: str | None = None, project_root: str | None 
 
         return HTMLResponse(render_demo_shell(body + script, title="Tool Call Observatory"))
 
+    async def demo_playback(_request: Request) -> HTMLResponse:
+        has_event_store = service.has_event_store
+        note = (
+            "Event store enabled. Load a graph_id to replay. Resume Run triggers .remora/run_gates."
+            if has_event_store
+            else "Event store not configured. Replay requires event sourcing."
+        )
+
+        load_attrs = {"type": "button"}
+        if not has_event_store:
+            load_attrs["disabled"] = "disabled"
+
+        controls = Card(
+            title="Playback Controls",
+            content=RawHTML(
+                "".join(
+                    [
+                        Element(tag="div", content=note, class_="tile-copy").render(),
+                        Element(tag="div", content="Graph ID", class_="control-label").render(),
+                        Input(
+                            id="playback-graph-id",
+                            attrs={"placeholder": "graph id", "type": "text"},
+                        ).render(),
+                        FlexRow(
+                            gap="0.5rem",
+                            children=[
+                                RawHTML(
+                                    Button(
+                                        label="Load",
+                                        id="playback-load",
+                                        attrs=load_attrs,
+                                        class_="button primary",
+                                    ).render()
+                                ),
+                                RawHTML(
+                                    Button(
+                                        label="Resume Run",
+                                        id="playback-resume",
+                                        attrs={"type": "button"},
+                                        class_="button ghost",
+                                    ).render()
+                                ),
+                                RawHTML(
+                                    Button(
+                                        label="Clear",
+                                        id="playback-clear",
+                                        attrs={"type": "button"},
+                                        class_="button ghost",
+                                    ).render()
+                                ),
+                                RawHTML(
+                                    Button(
+                                        label="Step Back",
+                                        id="playback-prev",
+                                        attrs={"type": "button"},
+                                        class_="button ghost",
+                                    ).render()
+                                ),
+                                RawHTML(
+                                    Button(
+                                        label="Step",
+                                        id="playback-next",
+                                        attrs={"type": "button"},
+                                        class_="button accent",
+                                    ).render()
+                                ),
+                                RawHTML(
+                                    Button(
+                                        label="Play",
+                                        id="playback-play",
+                                        attrs={"type": "button"},
+                                        class_="button primary",
+                                    ).render()
+                                ),
+                                RawHTML(
+                                    Button(
+                                        label="Pause",
+                                        id="playback-pause",
+                                        attrs={"type": "button"},
+                                        class_="button ghost",
+                                    ).render()
+                                ),
+                            ],
+                        ).render(),
+                        Element(
+                            tag="div",
+                            content=RawHTML(
+                                "".join(
+                                    [
+                                        Element(tag="span", content="Loaded").render(),
+                                        Element(tag="strong", content="0", id="playback-count").render(),
+                                        Element(tag="span", content="Index").render(),
+                                        Element(tag="strong", content="0", id="playback-index").render(),
+                                    ]
+                                )
+                            ),
+                            class_="stat-line",
+                        ).render(),
+                    ]
+                )
+            ),
+        ).render()
+
+        event_panel = Card(
+            title="Event Detail",
+            content=RawHTML(
+                Element(tag="pre", content="", id="playback-detail", class_="code-block").render()
+            ),
+        ).render()
+
+        timeline_panel = Card(
+            title="Timeline",
+            content=RawHTML(
+                Element(tag="div", content="", id="playback-timeline", class_="events-list").render()
+            ),
+        ).render()
+
+        body = Container(
+            class_="page",
+            children=[
+                RawHTML(_nav()),
+                Element(tag="div", content="Playback Studio", class_="page-title").render(),
+                Grid(gap="1.25rem", children=[controls, event_panel, timeline_panel]).render(),
+            ],
+        ).render()
+
+        script = """
+        <script>
+        const loadBtn = document.getElementById('playback-load');
+        const clearBtn = document.getElementById('playback-clear');
+        const prevBtn = document.getElementById('playback-prev');
+        const nextBtn = document.getElementById('playback-next');
+        const playBtn = document.getElementById('playback-play');
+        const pauseBtn = document.getElementById('playback-pause');
+        const resumeBtn = document.getElementById('playback-resume');
+        const graphInput = document.getElementById('playback-graph-id');
+        const countEl = document.getElementById('playback-count');
+        const indexEl = document.getElementById('playback-index');
+        const detailEl = document.getElementById('playback-detail');
+        const timelineEl = document.getElementById('playback-timeline');
+
+        let events = [];
+        let cursor = -1;
+        let player = null;
+        let source = null;
+
+        function setStatus(text) {
+            detailEl.textContent = text;
+        }
+
+        function renderTimeline() {
+            const start = Math.max(0, cursor - 6);
+            const slice = events.slice(start, cursor + 1);
+            timelineEl.innerHTML = slice.map((event, idx) => {
+                const absolute = start + idx;
+                const label = event.event_type || event.type || 'event';
+                const active = absolute === cursor ? 'active' : '';
+                return `<div class="event ${active}">#${absolute} ${label}</div>`;
+            }).join('');
+        }
+
+        function renderDetail() {
+            if (cursor < 0 || cursor >= events.length) {
+                setStatus('No event selected.');
+                return;
+            }
+            detailEl.textContent = JSON.stringify(events[cursor], null, 2);
+        }
+
+        function render() {
+            countEl.textContent = events.length.toString();
+            indexEl.textContent = cursor >= 0 ? cursor.toString() : '0';
+            renderDetail();
+            renderTimeline();
+        }
+
+        function step(delta) {
+            if (!events.length) {
+                return;
+            }
+            cursor = Math.min(events.length - 1, Math.max(0, cursor + delta));
+            render();
+        }
+
+        function startPlayback() {
+            if (player) {
+                return;
+            }
+            player = setInterval(() => {
+                if (cursor >= events.length - 1) {
+                    stopPlayback();
+                    return;
+                }
+                step(1);
+            }, 600);
+        }
+
+        function stopPlayback() {
+            if (player) {
+                clearInterval(player);
+                player = null;
+            }
+        }
+
+        function resetPlayback() {
+            stopPlayback();
+            if (source) {
+                source.close();
+                source = null;
+            }
+            events = [];
+            cursor = -1;
+            render();
+            setStatus('No events loaded.');
+        }
+
+        loadBtn.addEventListener('click', () => {
+            resetPlayback();
+            const graphId = (graphInput.value || '').trim();
+            if (!graphId) {
+                setStatus('Graph ID is required.');
+                return;
+            }
+            setStatus('Loading events...');
+            source = new EventSource(`/replay?graph_id=${encodeURIComponent(graphId)}&follow=1`);
+            source.addEventListener('replay', (event) => {
+                if (!event.data) {
+                    return;
+                }
+                try {
+                    const payload = JSON.parse(event.data);
+                    events.push(payload);
+                    if (cursor < 0) {
+                        cursor = 0;
+                    }
+                    render();
+                } catch (err) {
+                    setStatus('Failed to parse replay payload.');
+                }
+            });
+            source.onerror = () => {
+                if (source) {
+                    source.close();
+                    source = null;
+                }
+                if (!events.length) {
+                    setStatus('No events found for this graph.');
+                } else {
+                    setStatus('Replay loaded. Use step controls.');
+                }
+            };
+        });
+
+        clearBtn.addEventListener('click', () => resetPlayback());
+        prevBtn.addEventListener('click', () => step(-1));
+        nextBtn.addEventListener('click', () => step(1));
+        playBtn.addEventListener('click', () => startPlayback());
+        pauseBtn.addEventListener('click', () => stopPlayback());
+        resumeBtn.addEventListener('click', async () => {
+            const graphId = (graphInput.value || '').trim();
+            if (!graphId) {
+                setStatus('Graph ID is required to resume.');
+                return;
+            }
+            setStatus('Sending resume signal...');
+            const response = await fetch('/demo/run_gate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({graph_id: graphId}),
+            });
+            if (response.ok) {
+                setStatus('Resume signal sent. Start stepping.');
+            } else {
+                setStatus('Failed to send resume signal.');
+            }
+        });
+
+        render();
+        </script>
+        """
+
+        return HTMLResponse(render_demo_shell(body + script, title="Playback Studio"))
+
     async def emit_blocked(request: Request) -> JSONResponse:
         payload = await request.json() if request.method == "POST" else {}
         question = str(payload.get("question", "Need confirmation"))
@@ -393,12 +678,25 @@ def create_demo_app(*, config_path: str | None = None, project_root: str | None 
 
         return JSONResponse({"request_id": request_id})
 
+    async def run_gate(request: Request) -> JSONResponse:
+        payload = await request.json() if request.method == "POST" else {}
+        graph_id = str(payload.get("graph_id", "")).strip()
+        if not graph_id:
+            return JSONResponse({"error": "graph_id required"}, status_code=400)
+        gate_root = _run_gate_root()
+        gate_root.mkdir(parents=True, exist_ok=True)
+        gate_path = gate_root / f"{graph_id}.start"
+        gate_path.write_text("start", encoding="utf-8")
+        return JSONResponse({"status": "ok", "path": str(gate_path)})
+
     routes = [
         Route("/demo", demo_index),
         Route("/demo/dashboard", demo_dashboard),
         Route("/demo/components", demo_components),
         Route("/demo/observatory", demo_observatory),
+        Route("/demo/playback", demo_playback),
         Route("/demo/emit/block", emit_blocked, methods=["POST"]),
+        Route("/demo/run_gate", run_gate, methods=["POST"]),
         Mount("/", app=remora_app),
     ]
 
@@ -409,12 +707,12 @@ def render_demo_shell(body: str, *, title: str, init_path: str | None = None) ->
     body_attrs = ""
     if init_path:
         body_attrs = data.init(f"@get('{init_path}')")
-    return f"""<!DOCTYPE html>
+    html = """<!DOCTYPE html>
 <html lang=\"en\">
 <head>
     <meta charset=\"UTF-8\">
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-    <title>{title}</title>
+    <title>__TITLE__</title>
     <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">
     <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>
     <link href=\"https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Sans:wght@400;600&display=swap\" rel=\"stylesheet\">
@@ -524,6 +822,9 @@ def render_demo_shell(body: str, *, title: str, init_path: str | None = None) ->
         .run-output { margin-top: 0.75rem; font-weight: 600; }
         .stat-chip { padding: 0.6rem 1rem; border-radius: 999px; background: rgba(11, 181, 168, 0.15); font-weight: 600; }
         .stat-chip strong { font-size: 1.1rem; margin-left: 0.35rem; }
+        .stat-line { display: flex; gap: 0.5rem; align-items: center; font-weight: 600; }
+        .stat-line strong { margin-right: 0.5rem; }
+        .event.active { color: var(--accent); font-weight: 600; }
         @keyframes rise {
             from { transform: translateY(8px); opacity: 0; }
             to { transform: translateY(0); opacity: 1; }
@@ -535,10 +836,15 @@ def render_demo_shell(body: str, *, title: str, init_path: str | None = None) ->
         }
     </style>
 </head>
-<body {body_attrs}>
-    {body}
+<body __BODY_ATTRS__>
+    __BODY__
 </body>
 </html>"""
+    return (
+        html.replace("__TITLE__", title)
+        .replace("__BODY_ATTRS__", body_attrs)
+        .replace("__BODY__", body)
+    )
 
 
 def _nav() -> str:
@@ -555,6 +861,7 @@ def _nav() -> str:
                             _nav_link("/demo/dashboard", "Dashboard"),
                             _nav_link("/demo/components", "Components"),
                             _nav_link("/demo/observatory", "Observatory"),
+                            _nav_link("/demo/playback", "Playback"),
                         ]
                     )
                 ),
@@ -592,6 +899,13 @@ def _bundle_default(service: RemoraService) -> str:
     if isinstance(mapping, dict) and mapping:
         return next(iter(mapping))
     return ""
+
+
+def _run_gate_root() -> Path:
+    env_path = os.environ.get("REMORA_RUN_GATE_DIR")
+    if env_path:
+        return Path(env_path)
+    return Path.cwd() / ".remora" / "run_gates"
 
 
 __all__ = ["create_demo_app"]

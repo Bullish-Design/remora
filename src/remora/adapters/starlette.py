@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -33,11 +34,22 @@ def create_app(service: RemoraService | None = None) -> Starlette:
             return _error("graph_id required", status_code=400)
         if not service.has_event_store:
             return _error("event store not configured", status_code=400)
+        follow = request.query_params.get("follow", "").lower() in {"1", "true", "yes"}
 
         async def generate():
-            async for event in service.replay_events(graph_id):
-                payload = json.dumps(event, default=str)
-                yield f"event: replay\ndata: {payload}\n\n"
+            last_id = 0
+            while True:
+                emitted = False
+                async for event in service.replay_events(graph_id, after_id=last_id):
+                    payload = json.dumps(event, default=str)
+                    last_id = int(event.get("id", last_id))
+                    emitted = True
+                    yield f"event: replay\ndata: {payload}\n\n"
+                if not follow:
+                    break
+                if not emitted:
+                    yield ": ping\n\n"
+                await asyncio.sleep(0.5)
 
         return _sse_response(generate())
 

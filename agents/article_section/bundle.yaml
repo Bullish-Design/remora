@@ -8,6 +8,7 @@ initial_context:
     until the next heading. Keep it concise and accurate.
 
     Include the section heading and the file path in your summary.
+    Format the first line like: "File=<path> Section=<heading>".
     Call the tool submit_result exactly once with:
     - summary: your section summary
     - changed_files: []

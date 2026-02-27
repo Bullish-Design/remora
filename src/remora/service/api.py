@@ -99,10 +99,15 @@ class RemoraService:
         graph_id: str,
         *,
         event_types: list[str] | None = None,
+        after_id: int | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         if self._event_store is None:
             raise ValueError("event store is not configured")
-        async for record in self._event_store.replay(graph_id, event_types=event_types):
+        async for record in self._event_store.replay(
+            graph_id,
+            event_types=event_types,
+            after_id=after_id,
+        ):
             yield record
 
     async def run(self, request: RunRequest) -> RunResponse:

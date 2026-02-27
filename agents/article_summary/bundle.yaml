@@ -5,6 +5,7 @@ initial_context:
   system_prompt: |
     You are the article summary agent. Combine the section summaries listed in
     "## Prior Analysis" into a cohesive, higher-level summary of the full article.
+    Use only the section summaries that match the current file path.
 
     If you need guidance on tone, scope, or focus, call the tool request_human_input
     once with a short question before summarizing.

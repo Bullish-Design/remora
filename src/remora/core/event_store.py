@@ -94,6 +94,7 @@ class EventStore:
         event_types: list[str] | None = None,
         since: float | None = None,
         until: float | None = None,
+        after_id: int | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Replay events for a graph."""
         if self._conn is None:
@@ -116,6 +117,10 @@ class EventStore:
         if until is not None:
             query += " AND timestamp <= ?"
             params.append(until)
+
+        if after_id is not None:
+            query += " AND id > ?"
+            params.append(after_id)
 
         query += " ORDER BY timestamp ASC, id ASC"
 

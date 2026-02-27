@@ -11,7 +11,7 @@ discovery:
 model:
   base_url: "http://remora-server:8000/v1"
   api_key: "EMPTY"
-  default_model: "Qwen/Qwen3-4B"
+  default_model: "Qwen/Qwen3-4B-Instruct-2507-FP8"
 
 execution:
   max_concurrency: 4
