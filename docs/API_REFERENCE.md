@@ -4,123 +4,61 @@ This document summarizes the public CLI commands and Python APIs available in Re
 
 ## CLI
 
-### `remora analyze`
+### `remora serve`
 
-Run analysis on files or directories.
+Start the Remora service (Starlette adapter).
 
 Key flags:
-- `--operations`: Comma-separated operations (default: `lint,test,docstring`).
-- `--format`: `table`, `json`, or `interactive`.
-- `--config`: Path to `remora.yaml`.
-- `--auto-accept`: Auto-accept successful results.
-- `--max-turns`, `--max-tokens`, `--temperature`, `--tool-choice`: Runner overrides.
-- `--query-pack`, `--agents-dir`: Discovery and agent overrides.
-- `--max-concurrent-agents`, `--cairn-timeout`, `--cairn-home`: Cairn overrides.
-- `--event-stream`, `--event-stream-file`: Event stream overrides.
 
-### `remora watch`
+- `--host`, `--port`: bind address for the service.
+- `--project-root`: override the root directory used for relative targets.
+- `--config`: path to `remora.yaml`.
 
-Watch paths for changes and re-run analysis. Uses the `watch` configuration block.
+### `remora run`
 
-Additional flag:
-- `--debounce`: Debounce delay in milliseconds.
+Run a graph execution for a target path.
 
-### `remora config`
+Key flags:
 
-Print the resolved configuration after merging defaults, file values, and CLI overrides.
-Includes the `hub_mode` execution context setting (`in-process`, `daemon`, or `disabled`).
+- `--config`: path to `remora.yaml`.
 
-### `remora list-agents`
+### `remora-index`
 
-List available bundle definitions, Grail validation status, and model adapter availability.
+Start the indexer daemon.
 
-### `remora-hub`
+Key flags:
 
-Manage the optional Hub daemon.
-
-- `remora-hub start [--project-root PATH] [--db-path PATH] [--foreground/--background]`
-- `remora-hub status [--project-root PATH]`
-- `remora-hub stop [--project-root PATH]`
+- `--watch-paths`: paths to monitor for changes.
+- `--store-path`: path to the index store.
 
 ## Python Modules
 
-### `remora.config`
+### Core Runtime (`remora.core`)
 
-Configuration models and helpers.
+Framework-agnostic runtime modules:
 
-- `RemoraConfig`
-- `DiscoveryConfig`, `ServerConfig`, `RunnerConfig`, `OperationConfig`
-- `CairnConfig`, `EventStreamConfig`, `LlmLogConfig`, `WatchConfig`
-- `load_config(config_path=None, overrides=None) -> RemoraConfig`
-- `resolve_grail_limits(config: CairnConfig) -> dict[str, Any]`
-- `serialize_config(config: RemoraConfig) -> dict[str, Any]`
+- `remora.core.config`: `RemoraConfig`, `ExecutionConfig`, `BundleConfig`, `load_config()`
+- `remora.core.discovery`: `discover()`, `CSTNode`, `TreeSitterDiscoverer`
+- `remora.core.graph`: `AgentNode`, `build_graph()`, `get_execution_batches()`
+- `remora.core.executor`: `GraphExecutor`, `ExecutorState`, `AgentState`
+- `remora.core.event_bus`: `EventBus`, `get_event_bus()`
+- `remora.core.events`: Remora + structured-agent event classes
+- `remora.core.workspace`: Cairn workspace helpers
+- `remora.core.checkpoint`: `CheckpointManager`
 
-### `remora.analyzer`
+### Service Layer
 
-Programmatic API for running analysis.
+- `remora.service.RemoraService`: framework-agnostic API surface for `/`, `/subscribe`, `/events`, `/run`, `/input`, `/plan`, `/config`, `/snapshot`
+- `remora.adapters.starlette.create_app`: Starlette adapter for the service
 
-- `RemoraAnalyzer(config, event_emitter=None)`
-  - `analyze(paths: list[Path], operations: list[str] | None = None) -> AnalysisResults`
-  - `accept(node_id: str | None = None, operation: str | None = None) -> None`
-  - `reject(node_id: str | None = None, operation: str | None = None) -> None`
-  - `retry(node_id: str, operation: str, config_override: dict | None = None) -> AgentResult`
-  - `bulk_accept(...)`, `bulk_reject(...)`
+### UI Helpers
 
-### `remora.presenter`
+- `remora.ui.projector.UiStateProjector`: event → UI state reducer
+- `remora.ui.view.render_dashboard`: HTML snapshot renderer
 
-Formatting and presenting analysis results.
+### Models
 
-- `ResultPresenter(format_type="table")`
-  - `present(results: AnalysisResults) -> None`
-
-### `remora.workspace_bridge`
-
-Bridge for Cairn workspace merging and discarding operations.
-
-- `CairnWorkspaceBridge(workspace_manager, project_root, cache_root)`
-  - `merge(workspace_id: str) -> None`
-  - `discard(workspace_id: str) -> None`
-
-### `remora.constants`
-
-Centralized configuration constants.
-
-### `remora.orchestrator`
-
-- `Coordinator(config, event_stream_enabled=None, event_stream_output=None)`
-  - `process_node(node: CSTNode, operations: list[str]) -> NodeResult`
-  - Async context manager for cleanup
-- `RemoraAgentContext` and `RemoraAgentState`
-
-### `remora.kernel_runner`
-
-- `KernelRunner(node, ctx, config, bundle_path, event_emitter, workspace_path=None, stable_path=None)`
-  - `run() -> AgentResult`
-
-### `remora.discovery`
-
-- `TreeSitterDiscoverer(root_dirs, query_pack, query_dir=None, languages=None)`
-  - `discover() -> list[CSTNode]`
-- `CSTNode` (node_type is now a string: "file", "class", "function", "method", etc.)
-
-### `remora.events`
-
-- `EventEmitter` protocol
-- `JsonlEventEmitter`, `NullEventEmitter`, `CompositeEventEmitter`
-- `EventName`, `EventStatus`
-
-### `remora.watcher`
-
-- `RemoraFileWatcher(watch_paths, on_changes, ...)`
-  - `start()` / `stop()`
-- `FileChange`
-
-### `remora.context`
-
-- `ContextManager`
-- `DecisionPacket` models
-
-### `remora.context.hub_client`
-
-- `HubClient`
-- `get_hub_client()`
+- `remora.models.RunRequest`, `RunResponse`
+- `remora.models.PlanRequest`, `PlanResponse`
+- `remora.models.InputResponse`
+- `remora.models.ConfigSnapshot`

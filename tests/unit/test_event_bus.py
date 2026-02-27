@@ -3,8 +3,8 @@ import asyncio
 import pytest
 from structured_agents.events import ModelResponseEvent, ToolCallEvent, ToolResultEvent
 
-from remora.event_bus import EventBus
-from remora.events import RemoraEvent
+from remora.core.event_bus import EventBus
+from remora.core.events import RemoraEvent
 
 
 @pytest.mark.asyncio

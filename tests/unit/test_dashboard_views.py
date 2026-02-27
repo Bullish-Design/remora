@@ -1,14 +1,11 @@
-from remora.dashboard.state import DashboardState
-from remora.dashboard.views import dashboard_view, render_tag
+from remora.ui.projector import UiStateProjector
+from remora.ui.view import render_dashboard, render_tag
 
 
 def test_dashboard_view_renders_body_content() -> None:
-    html = dashboard_view(DashboardState().get_view_data())
-    body_index = html.find("<body")
-    assert body_index != -1
-    body_start = html.find(">", body_index)
-    assert body_start != -1
-    assert "Remora Dashboard" in html[body_start:]
+    html = render_dashboard(UiStateProjector().snapshot())
+    assert '<main id="remora-root"' in html
+    assert "Remora Dashboard" in html
 
 
 def test_render_tag_normalizes_reserved_attrs() -> None:

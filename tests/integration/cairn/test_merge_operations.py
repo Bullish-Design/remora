@@ -2,7 +2,7 @@
 
 import pytest
 
-from remora.errors import WorkspaceError
+from remora.core.errors import WorkspaceError
 
 pytestmark = [pytest.mark.integration, pytest.mark.cairn]
 

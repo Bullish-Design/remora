@@ -10,14 +10,14 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
-from remora.cairn_bridge import CairnWorkspaceService
-from remora.config import load_config
-from remora.context import ContextBuilder
-from remora.discovery import discover
-from remora.event_bus import EventBus
-from remora.events import AgentCompleteEvent, AgentErrorEvent, GraphCompleteEvent, GraphStartEvent
-from remora.executor import GraphExecutor
-from remora.graph import build_graph
+from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.config import load_config
+from remora.core.context import ContextBuilder
+from remora.core.discovery import discover
+from remora.core.event_bus import EventBus
+from remora.core.events import AgentCompleteEvent, AgentErrorEvent, GraphCompleteEvent, GraphStartEvent
+from remora.core.executor import GraphExecutor
+from remora.core.graph import build_graph
 
 DEMO_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = DEMO_ROOT / "project"

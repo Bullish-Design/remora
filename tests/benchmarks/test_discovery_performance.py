@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from remora.discovery import discover
+from remora.core.discovery import discover
 
 
 def _create_test_files(directory: Path, count: int, lines_per_file: int) -> None:

@@ -75,7 +75,6 @@ grail = { git = "https://github.com/Bullish-Design/grail.git", rev = "main" }
 [project.scripts]
 remora = "remora.cli:main"
 remora-index = "remora.indexer.cli:main"
-remora-dashboard = "remora.dashboard.cli:main"
 
 #[project.urls]
 #homepage = "https://github.com/Bullish-Design/template-py"
@@ -97,6 +96,7 @@ include = [
     "src/remora",
     "src/remora/fixtures/**",
     "demo",
+    "examples",
     "agents",
     "training",
     "docs",

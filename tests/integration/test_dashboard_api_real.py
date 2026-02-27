@@ -2,20 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import queue
 import threading
 from datetime import datetime
 from pathlib import Path
 
-import anyio
 import pytest
-from starlette.testclient import TestClient, WebSocketTestSession
+from starlette.testclient import TestClient
 
-from remora.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
-from remora.dashboard.app import create_app
-from remora.event_bus import EventBus
-from remora.events import GraphStartEvent, HumanInputResponseEvent
+from remora.adapters.starlette import create_app
+from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
+from remora.core.event_bus import EventBus
+from remora.core.events import GraphStartEvent, HumanInputResponseEvent
+from remora.service.api import RemoraService
 from tests.integration.helpers import load_vllm_config, write_bundle
 
 
@@ -44,38 +43,6 @@ def _log(message: str) -> None:
     print(f"[{timestamp}][{thread_name}] {message}", flush=True)
 
 
-def _emit_event_via_portal(
-    websocket: WebSocketTestSession,
-    event_bus: EventBus,
-    event: object,
-) -> None:
-    _log(f"emit event={type(event).__name__}")
-    websocket.portal.call(event_bus.emit, event)
-
-
-def _receive_ws_json(websocket: WebSocketTestSession, timeout: float = 2.0) -> dict:
-    async def _receive() -> dict:
-        try:
-            with anyio.fail_after(timeout):
-                message = await websocket._send_rx.receive()
-        except TimeoutError as exc:
-            raise AssertionError("Timed out waiting for websocket message") from exc
-
-        message_type = message.get("type")
-        if message_type == "websocket.close":
-            raise AssertionError(f"Websocket closed early: {message!r}")
-        if message_type != "websocket.send":
-            raise AssertionError(f"Unexpected websocket message: {message!r}")
-
-        text = message.get("text")
-        if text is None:
-            data = message.get("bytes")
-            if data is None:
-                raise AssertionError(f"Websocket message missing payload: {message!r}")
-            text = data.decode("utf-8")
-        return json.loads(text)
-
-    return websocket.portal.call(_receive)
 
 
 async def _stream_until(
@@ -161,7 +128,8 @@ def test_dashboard_events_stream_emits_event(tmp_path: Path) -> None:
     _log("test_dashboard_events_stream_emits_event start")
     event_bus = EventBus()
     _log("creating app")
-    app = asyncio.run(create_app(event_bus=event_bus, config=_build_config(tmp_path)))
+    service = RemoraService(event_bus=event_bus, config=_build_config(tmp_path), project_root=tmp_path)
+    app = create_app(service)
 
     async def _run() -> tuple[int, str]:
         async def _emit() -> None:
@@ -184,7 +152,8 @@ def test_dashboard_subscribe_stream_returns_html(tmp_path: Path) -> None:
     _log("test_dashboard_subscribe_stream_returns_html start")
     event_bus = EventBus()
     _log("creating app")
-    app = asyncio.run(create_app(event_bus=event_bus, config=_build_config(tmp_path)))
+    service = RemoraService(event_bus=event_bus, config=_build_config(tmp_path), project_root=tmp_path)
+    app = create_app(service)
 
     async def _run() -> tuple[int, str]:
         return await _stream_until(
@@ -208,7 +177,8 @@ def test_dashboard_input_emits_event(tmp_path: Path) -> None:
 
     event_bus.subscribe_all(_record)
     _log("creating app")
-    app = asyncio.run(create_app(event_bus=event_bus, config=_build_config(tmp_path)))
+    service = RemoraService(event_bus=event_bus, config=_build_config(tmp_path), project_root=tmp_path)
+    app = create_app(service)
 
     _log("starting TestClient")
     with TestClient(app) as client:
@@ -231,7 +201,8 @@ def test_dashboard_events_stream_multiple_clients(tmp_path: Path) -> None:
     _log("test_dashboard_events_stream_multiple_clients start")
     event_bus = EventBus()
     _log("creating app")
-    app = asyncio.run(create_app(event_bus=event_bus, config=_build_config(tmp_path)))
+    service = RemoraService(event_bus=event_bus, config=_build_config(tmp_path), project_root=tmp_path)
+    app = create_app(service)
 
     async def _run() -> tuple[tuple[int, str], tuple[int, str]]:
         ready = asyncio.Event()
@@ -279,23 +250,3 @@ def test_dashboard_events_stream_multiple_clients(tmp_path: Path) -> None:
     assert status_b == 200
     assert "GraphStartEvent" in body_a
     assert "GraphStartEvent" in body_b
-
-
-def test_dashboard_websocket_stream_emits_event(tmp_path: Path) -> None:
-    _log("test_dashboard_websocket_stream_emits_event start")
-    event_bus = EventBus()
-    _log("creating app")
-    app = asyncio.run(create_app(event_bus=event_bus, config=_build_config(tmp_path)))
-
-    _log("starting TestClient")
-    with TestClient(app) as client:
-        with client.websocket_connect("/ws") as websocket:
-            _log("emitting GraphStartEvent for /ws")
-            _emit_event_via_portal(
-                websocket,
-                event_bus,
-                GraphStartEvent(graph_id="dash-ws", node_count=1),
-            )
-            payload = _receive_ws_json(websocket)
-
-            assert payload["event_type"] == "GraphStartEvent"

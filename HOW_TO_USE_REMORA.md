@@ -101,7 +101,7 @@ If you want a UI, analytics, or logs, you subscribe to the EventBus.
 EventBus streaming notes:
 
 - `stream()` is an async context manager that yields an async iterator.
-- It does not backfill history. If you need state, build it in your consumer (or use `DashboardState`).
+- It does not backfill history. If you need state, build it in your consumer (or use `UiStateProjector`).
 
 ### 2.4 Context builder (two track memory)
 
@@ -192,7 +192,7 @@ Use checkpoints for recovery and diagnostics, not full workspace restore.
 
 ### 2.10 Indexer and related code
 
-The indexer is an optional background daemon (`remora index`) that watches files and updates a symbol store.
+The indexer is an optional background daemon (`remora-index`) that watches files and updates a symbol store.
 
 - Config: `indexer.watch_paths`, `indexer.store_path` in `remora.yaml`.
 - Uses watchfiles and fsdantic to track node state.
@@ -320,10 +320,10 @@ What happens:
 - It executes bundles with bounded concurrency.
 - Events are emitted for every agent and tool call.
 
-### 5.2 Dashboard
+### 5.2 Service
 
 ```bash
-remora dashboard --host 0.0.0.0 --port 8420
+remora serve --host 0.0.0.0 --port 8420
 ```
 
 Use this to confirm your event stream before building a custom UI.
@@ -334,11 +334,11 @@ Use this to confirm your event stream before building a custom UI.
 import asyncio
 from pathlib import Path
 
-from remora.config import load_config
-from remora.discovery import discover
-from remora.event_bus import get_event_bus
-from remora.graph import build_graph
-from remora.executor import GraphExecutor
+from remora.core.config import load_config
+from remora.core.discovery import discover
+from remora.core.event_bus import get_event_bus
+from remora.core.graph import build_graph
+from remora.core.executor import GraphExecutor
 
 async def main() -> None:
     config = load_config()
@@ -359,7 +359,7 @@ asyncio.run(main())
 ### 5.4 Indexer daemon
 
 ```bash
-remora index src/
+remora-index src/
 ```
 
 Use this if you want related code and symbol context for prompts or dashboards.
@@ -555,11 +555,11 @@ import asyncio
 from stario import Context, Writer, Stario, RichTracer, data, at
 from stario.html import Body, Div, Head, Html, Script, Title
 
-from remora.dashboard.state import DashboardState
-from remora.event_bus import get_event_bus
-from remora.events import HumanInputResponseEvent
+from remora.core.event_bus import get_event_bus
+from remora.core.events import HumanInputResponseEvent
+from remora.ui.projector import UiStateProjector
 
-state = DashboardState()
+state = UiStateProjector()
 event_bus = get_event_bus()
 
 # Keep state in sync with Remora events
@@ -593,14 +593,14 @@ def dashboard_view(view_data):
 
 
 async def index(c: Context, w: Writer) -> None:
-    w.html(page(dashboard_view(state.get_view_data())))
+    w.html(page(dashboard_view(state.snapshot())))
 
 
 async def subscribe(c: Context, w: Writer) -> None:
-    w.patch(dashboard_view(state.get_view_data()))
+    w.patch(dashboard_view(state.snapshot()))
     async with event_bus.stream() as events:
         async for _event in w.alive(events):
-            w.patch(dashboard_view(state.get_view_data()))
+            w.patch(dashboard_view(state.snapshot()))
 
 
 async def submit_input(c: Context, w: Writer) -> None:
@@ -830,7 +830,7 @@ Goal: Keep a live index of code symbols.
 
 Architecture:
 
-- Run `remora index` to start the indexer daemon.
+- Run `remora-index` to start the indexer daemon.
 - UI subscribes to index changes and shows related code per node.
 - Use Datastar to patch a right side panel.
 
@@ -877,7 +877,7 @@ Architecture:
 
 - Unit tests: `pytest tests/unit/ -v`
 - Integration tests: `pytest tests/integration/ -v` (requires a running vLLM server)
-- Dashboard smoke: run `remora dashboard` and load `/` in the browser
+- Service smoke: run `remora serve` and load `/` in the browser
 
 ---
 

@@ -1,4 +1,4 @@
-"""Remora public API surface (core-only)."""
+"""Core Remora runtime (framework-agnostic)."""
 
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.cairn_externals import CairnExternals
@@ -60,7 +60,6 @@ from remora.core.executor import AgentState, ExecutorState, GraphExecutor, Resul
 from remora.core.graph import AgentNode, build_graph, get_execution_batches
 from remora.core.tools import RemoraGrailTool, build_virtual_fs, discover_grail_tools
 from remora.core.workspace import AgentWorkspace, CairnDataProvider, CairnResultHandler, WorkspaceManager
-from remora.utils import PathResolver
 
 __all__ = [
     "AgentCompleteEvent",
@@ -106,7 +105,6 @@ __all__ = [
     "ModelRequestEvent",
     "ModelResponseEvent",
     "NodeType",
-    "PathResolver",
     "RecentAction",
     "RemoraConfig",
     "RemoraError",

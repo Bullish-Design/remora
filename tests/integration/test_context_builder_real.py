@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from remora.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
-from remora.context import ContextBuilder
-from remora.discovery import CSTNode, discover
-from remora.event_bus import EventBus
-from remora.executor import GraphExecutor
-from remora.graph import AgentNode
+from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
+from remora.core.context import ContextBuilder
+from remora.core.discovery import CSTNode, discover
+from remora.core.event_bus import EventBus
+from remora.core.executor import GraphExecutor
+from remora.core.graph import AgentNode
 from tests.integration.helpers import (
     agentfs_available,
     load_vllm_config,

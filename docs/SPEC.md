@@ -16,20 +16,20 @@ remora run [PATHS...] [--config PATH]
 **Options:**
 - `--config`: Path to configuration file.
 
-### 1.2 `remora dashboard`
+### 1.2 `remora serve`
 
 Start the dashboard server.
 
 ```bash
-remora dashboard [--host HOST] [--port PORT]
+remora serve [--host HOST] [--port PORT]
 ```
 
-### 1.3 `remora index`
+### 1.3 `remora-index`
 
 Start the indexer daemon.
 
 ```bash
-remora index [PATHS...]
+remora-index [PATHS...]
 ```
 
 ## 2. Bundle Format

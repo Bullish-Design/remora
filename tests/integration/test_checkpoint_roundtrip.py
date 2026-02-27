@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from remora.checkpoint import CheckpointManager
-from remora.executor import AgentState, ExecutorState, ResultSummary
-from remora.graph import build_graph
-from remora.discovery import discover
+from remora.core.checkpoint import CheckpointManager
+from remora.core.executor import AgentState, ExecutorState, ResultSummary
+from remora.core.graph import build_graph
+from remora.core.discovery import discover
 
 
 pytestmark = pytest.mark.integration

@@ -4,9 +4,9 @@ from types import SimpleNamespace
 import pytest
 from structured_agents.events import ToolResultEvent
 
-from remora.context import ContextBuilder
-from remora.events import AgentCompleteEvent
-from remora.executor import ResultSummary
+from remora.core.context import ContextBuilder
+from remora.core.events import AgentCompleteEvent
+from remora.core.executor import ResultSummary
 
 
 def _dummy_node(node_id: str) -> SimpleNamespace:

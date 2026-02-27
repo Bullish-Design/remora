@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from remora.config import BundleConfig, ErrorPolicy, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
-from remora.discovery import CSTNode, discover
-from remora.event_bus import EventBus
-from remora.events import AgentErrorEvent, AgentStartEvent
-from remora.executor import AgentState, ExecutorState, GraphExecutor
-from remora.graph import AgentNode
-from remora.tools.grail import RemoraGrailTool
+from remora.core.config import BundleConfig, ErrorPolicy, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
+from remora.core.discovery import CSTNode, discover
+from remora.core.event_bus import EventBus
+from remora.core.events import AgentErrorEvent, AgentStartEvent
+from remora.core.executor import AgentState, ExecutorState, GraphExecutor
+from remora.core.graph import AgentNode
+from remora.core.tools.grail import RemoraGrailTool
 from tests.integration.helpers import agentfs_available, load_vllm_config, vllm_available, write_bundle
 
 

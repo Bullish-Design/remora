@@ -5,13 +5,13 @@ from pathlib import Path
 import pytest
 from structured_agents.events import ModelResponseEvent
 
-from remora.cairn_bridge import CairnWorkspaceService
-from remora.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
-from remora.discovery import discover
-from remora.event_bus import EventBus
-from remora.executor import GraphExecutor
-from remora.graph import build_graph
-from remora.tools.grail import RemoraGrailTool
+from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
+from remora.core.discovery import discover
+from remora.core.event_bus import EventBus
+from remora.core.executor import GraphExecutor
+from remora.core.graph import build_graph
+from remora.core.tools.grail import RemoraGrailTool
 from remora.utils import PathResolver
 from tests.integration.helpers import agentfs_available, load_vllm_config, vllm_available, write_bundle
 

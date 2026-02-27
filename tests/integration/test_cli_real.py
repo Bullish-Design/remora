@@ -170,7 +170,7 @@ def test_cli_run_missing_bundle_mapping_fails(tmp_path: Path) -> None:
     assert "No bundle mapping configured" in (result.stderr + result.stdout)
 
 
-def test_dashboard_cli_run_serves_http(tmp_path: Path) -> None:
+def test_service_cli_run_serves_http(tmp_path: Path) -> None:
     if not _uvicorn_available():
         pytest.skip("uvicorn is not available")
 
@@ -181,7 +181,8 @@ def test_dashboard_cli_run_serves_http(tmp_path: Path) -> None:
         [
             sys.executable,
             "-m",
-            "remora.dashboard.cli",
+            "remora",
+            "serve",
             "--host",
             "127.0.0.1",
             "--port",
@@ -201,7 +202,7 @@ def test_dashboard_cli_run_serves_http(tmp_path: Path) -> None:
             if process.poll() is not None:
                 stdout, stderr = process.communicate(timeout=2)
                 raise AssertionError(
-                    "Dashboard exited early "
+                    "Service exited early "
                     f"(code={process.returncode}) stdout={stdout!r} stderr={stderr!r}"
                 )
             try:
@@ -211,7 +212,7 @@ def test_dashboard_cli_run_serves_http(tmp_path: Path) -> None:
             except Exception as exc:
                 last_error = exc
                 time.sleep(0.2)
-        raise AssertionError(f"Dashboard did not start: {last_error}")
+        raise AssertionError(f"Service did not start: {last_error}")
     finally:
         if process.poll() is None:
             process.send_signal(signal.SIGINT)

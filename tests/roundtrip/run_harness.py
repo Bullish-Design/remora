@@ -26,7 +26,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from remora.discovery import NodeType, discover
+from remora.core.discovery import NodeType, discover
 
 HARNESS_DIR = Path(__file__).resolve().parent
 INPUT_DIR = HARNESS_DIR / "input"

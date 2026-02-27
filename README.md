@@ -1,6 +1,6 @@
 # Remora — Event-Driven Agent Graph Workflows
 
-Remora V2 is a simple, elegant framework for composing and running structured-agent workloads on your code. Every action flows through a **Pydantic-first event bus**, agents are described via metadata-driven graphs, work happens inside isolated Cairn workspaces, and every UI (CLI, dashboard, mobile) just consumes the same events.
+Remora V2 is a simple, elegant framework for composing and running structured-agent workloads on your code. Every action flows through a **Pydantic-first event bus**, agents are described via metadata-driven graphs, work happens inside isolated Cairn workspaces, and every UI just consumes the same events.
 
 ## Quick Start
 
@@ -12,11 +12,11 @@ Remora V2 is a simple, elegant framework for composing and running structured-ag
 import asyncio
 from pathlib import Path
 
-from remora.config import load_config
-from remora.discovery import discover
-from remora.event_bus import get_event_bus
-from remora.graph import build_graph
-from remora.executor import GraphExecutor
+from remora.core.config import load_config
+from remora.core.discovery import discover
+from remora.core.event_bus import get_event_bus
+from remora.core.graph import build_graph
+from remora.core.executor import GraphExecutor
 
 def main() -> None:
     config = load_config()
@@ -39,20 +39,28 @@ if __name__ == "__main__":
     main()
 ```
 
-4. Stream events via the dashboard demo or mount `DashboardApp`:
+4. Start the Remora service (Starlette adapter):
 
 ```bash
-remora-dashboard run
+remora serve
 ```
 
-The dashboard and any custom UI subscribe to the same SSE feed driven by `remora.event_bus.EventBus`.
+UIs subscribe to the same SSE feed driven by the event bus.
+
+## How to run the service
+
+```bash
+remora serve --host 0.0.0.0 --port 8420
+```
+
+Then open `http://localhost:8420/` or connect to `/subscribe` and `/events` from an external frontend.
 
 ## Installation Options
 
 Remora ships with a lightweight core plus backend-focused extras so you can mix dashboards and structured-agent tooling across interpreter versions.
 
-- `pip install remora` – installs the base runtime with the event bus, CLI framework, Cairn workspace helpers, and the `DashboardApp` demo that exposes SSE/HTTP endpoints for downstream dashboards.
-- `pip install "remora[backend]"` – pulls in `structured-agents`, `vllm`, `xgrammar`, and `openai` so CLI commands like `list-agents` or `scripts/validate_agents.py` can validate Grail bundles and drive vLLM kernels.
+- `pip install remora` – installs the base runtime with the event bus, CLI framework, Cairn workspace helpers, and the Remora service adapter (SSE/HTTP endpoints for downstream dashboards).
+- `pip install "remora[backend]"` – pulls in `structured-agents`, `vllm`, `xgrammar`, and `openai` so Grail bundles and vLLM kernels can execute in-process.
 - `pip install "remora[full]"` – convenience meta extra that installs both slices for environments that run dashboards and local inference in the same interpreter.
 
 See `docs/INSTALLATION.md` for more detail and the recommended deployment patterns for dashboards versus backend tooling.
@@ -81,12 +89,12 @@ grammar:
 - `EventBus`, `RemoraEvent`, `get_event_bus()`: central nervous system for logging, dashboards, and integrations.
 - `ContextBuilder`, `RecentAction`: two-track memory for prompt sections, knowledge aggregation, and human-in-the-loop responses.
 - `WorkspaceConfig`, `AgentWorkspace`, `WorkspaceManager`: supply isolated workspaces and file data for each agent run.
-- `DashboardApp`, `create_app()`: lightweight Starlette application that streams SSE updates, handles `/events`, `/run`, and `/input`, and can be mounted in any ASGI host.
+- `remora.service.RemoraService`, `remora.adapters.starlette.create_app()`: framework-agnostic service surface plus a Starlette adapter that exposes `/`, `/subscribe`, `/events`, `/run`, `/input`, `/plan`, `/config`, and `/snapshot`.
 - `discover()`, `TreeSitterDiscoverer`, `CSTNode`: AST discovery remains tree-sitter based but now feeds structured graphs directly.
 
 ## Event-Driven UI
 
-Every UI consumer subscribes to the same event stream. Use the dashboard at `/subscribe` for full HTML patches or `/events` for raw SSE JSON, and resolve blocked agents via `/input`.
+Every UI consumer subscribes to the same event stream. Use `/subscribe` for Datastar patches or `/events` for raw SSE JSON, and resolve blocked agents via `/input`.
 
 ## Workspaces & Checkpoints
 
@@ -106,5 +114,6 @@ Run the unit suite with `pytest tests/unit/ -v` (see `docs/TESTING_GUIDELINES.md
 - `BLUE_SKY_V2_REWRITE_GUIDE.md` — detailed phase-by-phase roadmap
 - `V2_IMPLEMENTATION_STATUS.md` — what is shipped so far
 - `docs/ARCHITECTURE.md` — updated architecture diagram and data flow
+- `docs/REMORA_UI_API.md` — service contract for UI/frontends
 - `docs/TESTING_GUIDELINES.md` — new Phase 1-6/7 test coverage plan
-- `demo/dashboard/` — SSE/WebSocket dashboard + projector/mobile remotes
+- `examples/stario_reference/` — external Stario reference frontend template

@@ -9,12 +9,12 @@ from pathlib import Path
 import pytest
 from structured_agents.events import ToolCallEvent, ToolResultEvent
 
-from remora.cairn_bridge import CairnWorkspaceService
-from remora.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
-from remora.discovery import CSTNode, discover
-from remora.event_bus import EventBus
-from remora.executor import GraphExecutor, ResultSummary
-from remora.graph import build_graph
+from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
+from remora.core.discovery import CSTNode, discover
+from remora.core.event_bus import EventBus
+from remora.core.executor import GraphExecutor, ResultSummary
+from remora.core.graph import build_graph
 from remora.utils import PathResolver
 from tests.integration.helpers import agentfs_available, load_vllm_config, vllm_available, write_tool_bundle
 

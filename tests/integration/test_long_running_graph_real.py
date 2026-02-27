@@ -6,13 +6,13 @@ import time
 
 import pytest
 
-from remora.cairn_bridge import CairnWorkspaceService
-from remora.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
-from remora.discovery import discover
-from remora.event_bus import EventBus
-from remora.events import AgentCompleteEvent, AgentStartEvent
-from remora.executor import GraphExecutor
-from remora.graph import build_graph
+from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
+from remora.core.discovery import discover
+from remora.core.event_bus import EventBus
+from remora.core.events import AgentCompleteEvent, AgentStartEvent
+from remora.core.executor import GraphExecutor
+from remora.core.graph import build_graph
 from remora.utils import PathResolver
 from tests.integration.helpers import agentfs_available, load_vllm_config, vllm_available, write_bundle, write_tool_bundle
 

@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from remora.checkpoint import CheckpointManager
-from remora.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
-from remora.discovery import CSTNode, discover
-from remora.event_bus import EventBus
-from remora.events import AgentStartEvent, CheckpointRestoredEvent
-from remora.executor import AgentState, ExecutorState, GraphExecutor
-from remora.graph import AgentNode
+from remora.core.checkpoint import CheckpointManager
+from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
+from remora.core.discovery import CSTNode, discover
+from remora.core.event_bus import EventBus
+from remora.core.events import AgentStartEvent, CheckpointRestoredEvent
+from remora.core.executor import AgentState, ExecutorState, GraphExecutor
+from remora.core.graph import AgentNode
 from tests.integration.helpers import agentfs_available, load_vllm_config, vllm_available, write_bundle
 
 

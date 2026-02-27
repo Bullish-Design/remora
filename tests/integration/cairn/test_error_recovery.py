@@ -2,7 +2,7 @@
 
 import pytest
 
-from remora.cairn_bridge import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService
 
 pytestmark = [pytest.mark.integration, pytest.mark.cairn]
 

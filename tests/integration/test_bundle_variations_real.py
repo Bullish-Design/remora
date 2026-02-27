@@ -3,12 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from remora.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
-from remora.discovery import discover
-from remora.event_bus import EventBus
-from remora.events import AgentErrorEvent, AgentStartEvent, KernelEndEvent, ModelRequestEvent, ToolCallEvent
-from remora.executor import GraphExecutor
-from remora.graph import build_graph
+from remora.core.config import BundleConfig, ExecutionConfig, ModelConfig, RemoraConfig, WorkspaceConfig
+from remora.core.discovery import discover
+from remora.core.event_bus import EventBus
+from remora.core.events import AgentErrorEvent, AgentStartEvent, KernelEndEvent, ModelRequestEvent, ToolCallEvent
+from remora.core.executor import GraphExecutor
+from remora.core.graph import build_graph
 from tests.integration.helpers import (
     agentfs_available,
     load_vllm_config,

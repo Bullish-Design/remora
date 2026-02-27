@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from remora.config import ErrorPolicy, RemoraConfig, load_config, serialize_config
+from remora.core.config import ErrorPolicy, RemoraConfig, load_config, serialize_config
 
 
 def _write_config(tmp_path: Path, data: dict) -> Path:

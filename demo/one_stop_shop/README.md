@@ -1,6 +1,6 @@
 # Remora One Stop Shop Demo
 
-This demo shows Remora running against a realistic Python project with real vLLM calls and real Cairn workspaces. It exercises discovery, graph execution, Grail tools, workspaces, EventBus streaming, and the dashboard/indexer entry points.
+This demo shows Remora running against a realistic Python project with real vLLM calls and real Cairn workspaces. It exercises discovery, graph execution, Grail tools, workspaces, EventBus streaming, and the service/indexer entry points.
 
 ## What is included
 
@@ -42,16 +42,16 @@ Artifacts generated:
 remora run demo/one_stop_shop/project/src --config demo/one_stop_shop/remora.yaml
 ```
 
-4. Start the dashboard server:
+4. Start the service server:
 
 ```bash
-remora-dashboard run --config demo/one_stop_shop/remora.yaml
+remora serve --config demo/one_stop_shop/remora.yaml
 ```
 
 5. Start the indexer daemon:
 
 ```bash
-remora index demo/one_stop_shop/project/src
+remora-index demo/one_stop_shop/project/src
 ```
 
 ## Run the Meridian app only
@@ -73,9 +73,9 @@ The demo script reads one agent workspace and prints a file preview so you can c
 
 ## How this maps to Remora features
 
-- Discovery: `remora.discovery.discover()` scans the Meridian codebase.
-- Graph construction: `remora.graph.build_graph()` creates a dependency-aware plan.
-- Execution: `remora.executor.GraphExecutor` runs agents with real vLLM calls.
+- Discovery: `remora.core.discovery.discover()` scans the Meridian codebase.
+- Graph construction: `remora.core.graph.build_graph()` creates a dependency-aware plan.
+- Execution: `remora.core.executor.GraphExecutor` runs agents with real vLLM calls.
 - Grail tools: loaded from `agents/` and executed against a virtual FS.
 - Workspaces: `CairnWorkspaceService` and `PathResolver` map project paths into Cairn.
 - Event streaming: `EventBus` is used to log events to JSONL and to the console.

@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from remora.discovery import CSTNode
-from remora.graph import build_graph
+from remora.core.discovery import CSTNode
+from remora.core.graph import build_graph
 
 
 def _ensure_file(path: Path) -> None:
