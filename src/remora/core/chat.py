@@ -8,12 +8,13 @@ import uuid
 
 from remora.core.events import RemoraEvent
 from remora.core.event_bus import EventBus
-from remora.core.workspace import CairnWorkspaceService
+from remora.core.cairn_bridge import CairnWorkspaceService
 
 
 @dataclass
 class Message:
     """A message in the conversation."""
+
     id: str
     role: str  # "user" or "assistant"
     content: str
@@ -43,6 +44,7 @@ class Message:
 @dataclass
 class ChatConfig:
     """Configuration for a chat session."""
+
     workspace_path: str
     system_prompt: str
     tool_presets: list[str] = field(default_factory=lambda: ["file_ops"])
@@ -55,6 +57,7 @@ class ChatConfig:
 @dataclass
 class AgentResponse:
     """Response from the agent."""
+
     message: Message
     turn_count: int
 
@@ -150,10 +153,7 @@ class ChatSession:
         )
 
         # Extract response
-        tool_calls = [
-            {"name": tc.name, "arguments": tc.arguments}
-            for tc in result.tool_calls
-        ]
+        tool_calls = [{"name": tc.name, "arguments": tc.arguments} for tc in result.tool_calls]
 
         assistant_msg = Message.assistant(
             content=result.final_message.content or "",
