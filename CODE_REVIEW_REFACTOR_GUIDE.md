@@ -1,6 +1,6 @@
 # Remora Refactoring Guide (Revised)
 
-This guide provides step-by-step instructions to complete the Remora refactor. The key change from the previous version: **use FSdantic KV for non-event state** instead of consolidating into a raw SQLite `RemoraStore`.
+This guide provides step-by-step instructions to complete the full Remora refactor. The key change from the previous version: **use FSdantic KV for non-event state** instead of consolidating into a raw SQLite `RemoraStore`.
 
 ---
 
