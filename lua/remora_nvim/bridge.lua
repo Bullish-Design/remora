@@ -126,7 +126,7 @@ end
 -- Convenience Methods
 -- ============================================================================
 
-function M.notify_buffer_opened(file_path)
+function M.notify_buffer_opened(file_path, callback)
     M.call("buffer.opened", { path = file_path }, function(result)
         if result and result.agents then
             local count = #result.agents
@@ -138,6 +138,10 @@ function M.notify_buffer_opened(file_path)
             end
         elseif result and result.error then
             vim.notify("Remora: " .. result.error, vim.log.levels.WARN)
+        end
+
+        if callback then
+            callback(result)
         end
     end)
 end

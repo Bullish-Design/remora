@@ -191,9 +191,18 @@ class AgentRunner:
             self._project_root / ".remora",
             agent_id,
         )
+        logger.info("Looking for state at %s", state_path)
         state = load_agent_state(state_path)
         if state is None:
-            logger.warning(f"No state found for agent {agent_id}")
+            logger.error("No state file found for agent %s at %s", agent_id, state_path)
+            if self._event_bus:
+                await self._event_bus.emit(
+                    AgentErrorEvent(
+                        graph_id=self._swarm_id,
+                        agent_id=agent_id,
+                        error=f"Agent state not found at {state_path}",
+                    )
+                )
             return
 
         context = ExecutionContext(

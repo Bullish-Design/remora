@@ -10,21 +10,25 @@ from pathlib import Path
 
 
 import uvicorn
+from datastar_py.sse import ServerSentEventGenerator
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from datastar_py.sse import ServerSentEventGenerator
 
 from remora.core.agent_runner import AgentRunner
+from remora.core.agent_state import AgentState, save as save_agent_state
 from remora.core.config import load_config
-from remora.core.discovery import CSTNode, parse_file
+from remora.core.discovery import CSTNode, compute_node_id, parse_file
 from remora.core.event_bus import EventBus
 from remora.core.event_store import EventStore
 from remora.core.events import RemoraEvent, AgentMessageEvent
-from remora.core.reconciler import reconcile_on_startup
+from remora.core.reconciler import get_agent_state_path, reconcile_on_startup
 from remora.core.subscriptions import SubscriptionRegistry
 from remora.core.swarm_state import AgentMetadata, SwarmState
 from remora.demo.client_manager import ClientManager, NvimClient
 from remora.utils import normalize_path
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -256,6 +260,9 @@ async def rpc_buffer_opened(params: dict) -> dict:
         logger.error("Failed to parse %s: %s", file_path, exc)
         return {"error": str(exc)}
 
+    project_root = normalize_path(config.project_path)
+    swarm_root = project_root / ".remora"
+
     registered = []
     for node in nodes:
         agent_id = compute_agent_id(node, path)
@@ -263,7 +270,7 @@ async def rpc_buffer_opened(params: dict) -> dict:
             agent_id=agent_id,
             node_type=node.node_type,
             name=node.name,
-            full_name=f"{path.stem}.{node.name}",
+            full_name=node.full_name or f"{path.stem}.{node.name}",
             file_path=str(path),
             parent_id=None,
             start_line=node.start_line,
@@ -272,6 +279,20 @@ async def rpc_buffer_opened(params: dict) -> dict:
         )
 
         await swarm_state.upsert(metadata)
+
+        state_path = get_agent_state_path(swarm_root, agent_id)
+        if not state_path.exists():
+            state = AgentState(
+                agent_id=agent_id,
+                node_type=node.node_type,
+                name=node.name,
+                full_name=node.full_name or f"{path.stem}.{node.name}",
+                file_path=str(path),
+                range=(node.start_line, node.end_line),
+            )
+            save_agent_state(state_path, state)
+            logger.info("Created agent state file %s", state_path)
+
         await subscriptions.register_defaults(agent_id, str(path))
 
         registered.append(
@@ -309,7 +330,7 @@ async def rpc_get_events(params: dict) -> dict:
 
 
 def compute_agent_id(node: CSTNode, file_path: Path) -> str:
-    return f"{node.node_type}_{file_path.stem}_{node.start_line}"
+    return compute_node_id(str(file_path), node.name, node.start_line, node.end_line)
 
 
 async def start_rpc_server():
@@ -388,10 +409,13 @@ async def stream_events(request: Request):
     """SSE endpoint for real-time events."""
 
     async def sse_generator():
-        yield ServerSentEventGenerator.merge_fragments(
-            '<div id="logs" data-prepend><li class="log-entry">Connected to Swarm EventBus...</li></div>'
-        )
+        # yield ServerSentEventGenerator.merge_fragments(
+        #'<div id="logs" data-prepend><li class="log-entry">Connected to Swarm EventBus...</li></div>'
+        # )
 
+        yield ServerSentEventGenerator.patch_elements(
+            '<div id="logs" data-prepend><li>Connected to Swarm EventBus...</li></div>'
+        )
         queue: asyncio.Queue[RemoraEvent] = asyncio.Queue()
 
         async def handler(event: RemoraEvent):
@@ -430,7 +454,7 @@ async def stream_events(request: Request):
                     </div>
                 """
 
-                yield ServerSentEventGenerator.merge_fragments(html)
+                yield ServerSentEventGenerator.patch_elements(html)
         except asyncio.CancelledError:
             event_bus.unsubscribe(handler)
 

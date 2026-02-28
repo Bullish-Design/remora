@@ -4,6 +4,7 @@ local M = {}
 
 M.current_agent_id = nil
 M.registered_buffers = {}
+M.agent_id_cache = {}
 
 function M.setup()
     vim.api.nvim_create_autocmd("CursorMoved", {
@@ -28,19 +29,21 @@ function M.on_buffer_opened(ev)
     end
 
     M.registered_buffers[file_path] = true
-    require("remora_nvim.bridge").notify_buffer_opened(file_path)
+    require("remora_nvim.bridge").notify_buffer_opened(file_path, function(result)
+        if not result or not result.agents then
+            return
+        end
+
+        local file_name = vim.fn.fnamemodify(file_path, ":t:r")
+        for _, agent in ipairs(result.agents) do
+            local cache_key = string.format("%s_%s_%d", agent.type, file_name, agent.line)
+            M.agent_id_cache[cache_key] = agent.agent_id
+        end
+    end)
 end
 
 function M.on_buffer_entered(ev)
-    local bufnr = vim.api.nvim_get_current_buf()
-    local file_path = vim.api.nvim_buf_get_name(bufnr)
-
-    if file_path == "" or M.registered_buffers[file_path] then
-        return
-    end
-
-    M.registered_buffers[file_path] = true
-    require("remora_nvim.bridge").notify_buffer_opened(file_path)
+    M.on_buffer_opened(ev)
 end
 
 function M.on_cursor_moved()
@@ -85,7 +88,6 @@ function M.on_cursor_moved()
     local file_path = vim.api.nvim_buf_get_name(bufnr)
     local file_name = vim.fn.fnamemodify(file_path, ":t:r")
 
-    local agent_id
     local node_type = "file"
     local start_line = 1
 
@@ -95,7 +97,8 @@ function M.on_cursor_moved()
         start_line = start_line + 1
     end
 
-    agent_id = string.format("%s_%s_%d", node_type, file_name, start_line)
+    local cache_key = string.format("%s_%s_%d", node_type, file_name, start_line)
+    local agent_id = M.agent_id_cache[cache_key] or cache_key
 
     if agent_id ~= M.current_agent_id then
         M.current_agent_id = agent_id

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
 import time
 from dataclasses import asdict, is_dataclass
@@ -13,6 +14,8 @@ from structured_agents.events import Event as StructuredEvent
 
 from remora.core.events import RemoraEvent
 from remora.utils import PathLike, normalize_path
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from remora.core.event_bus import EventBus
@@ -158,6 +161,13 @@ class EventStore:
 
         if self._trigger_queue is not None and self._subscriptions is not None:
             matching_agents = await self._subscriptions.get_matching_agents(event)
+            logger.info(
+                "Event %s to_agent=%s matched %d agents: %s",
+                event_type,
+                to_agent,
+                len(matching_agents),
+                matching_agents,
+            )
             for agent_id in matching_agents:
                 await self._trigger_queue.put((agent_id, event_id, event))
 
