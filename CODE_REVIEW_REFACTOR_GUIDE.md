@@ -713,3 +713,675 @@ After completing all phases, verify:
 - Phase 7 (Optimization)
 - Phase 8 (Tests)
 - Phase 9 (Documentation)
+
+---
+
+## Phase 11: Storage Consolidation
+
+This phase consolidates the fragmented storage architecture into a unified database. See CODE_REVIEW.md Appendix A for full analysis.
+
+### Step 11.1: Create Unified RemoraStore
+
+**Create**: `src/remora/core/store.py`
+
+```python
+"""Unified Remora state storage.
+
+Consolidates EventStore, SubscriptionRegistry, SwarmState, and AgentState
+into a single SQLite database with proper transactions.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import sqlite3
+import time
+from dataclasses import asdict, is_dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, AsyncIterator
+
+from remora.core.events import RemoraEvent
+from remora.core.subscriptions import SubscriptionPattern, Subscription
+from remora.core.swarm_state import AgentMetadata
+from remora.utils import PathLike, normalize_path
+
+if TYPE_CHECKING:
+    from remora.core.event_bus import EventBus
+
+
+class RemoraStore:
+    """Unified storage for all Remora state.
+
+    Combines:
+    - Events (formerly EventStore)
+    - Subscriptions (formerly SubscriptionRegistry)
+    - Agents (formerly SwarmState)
+    - Agent state (formerly JSONL files)
+    """
+
+    def __init__(
+        self,
+        db_path: PathLike,
+        event_bus: "EventBus | None" = None,
+    ):
+        self._db_path = normalize_path(db_path)
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn: sqlite3.Connection | None = None
+        self._lock = asyncio.Lock()
+        self._event_bus = event_bus
+        self._trigger_queue: asyncio.Queue[tuple[str, int, RemoraEvent]] | None = None
+
+    async def initialize(self) -> None:
+        """Initialize the database with all tables."""
+        async with self._lock:
+            if self._conn is not None:
+                return
+
+            self._conn = await asyncio.to_thread(
+                sqlite3.connect,
+                str(self._db_path),
+                check_same_thread=False,
+            )
+            self._conn.row_factory = sqlite3.Row
+
+            await asyncio.to_thread(
+                self._conn.executescript,
+                """
+                -- Events table (formerly EventStore)
+                CREATE TABLE IF NOT EXISTS events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    graph_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    timestamp REAL NOT NULL,
+                    created_at REAL NOT NULL,
+                    from_agent TEXT,
+                    to_agent TEXT,
+                    correlation_id TEXT,
+                    tags TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_events_graph_id ON events(graph_id);
+                CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+                CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_events_to_agent ON events(to_agent);
+
+                -- Subscriptions table (formerly SubscriptionRegistry)
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT NOT NULL,
+                    pattern_json TEXT NOT NULL,
+                    is_default INTEGER NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_agent_id ON subscriptions(agent_id);
+
+                -- Agents table (formerly SwarmState)
+                CREATE TABLE IF NOT EXISTS agents (
+                    agent_id TEXT PRIMARY KEY,
+                    node_type TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    full_name TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    parent_id TEXT,
+                    start_line INTEGER NOT NULL,
+                    end_line INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+
+                -- Agent state table (formerly JSONL files)
+                CREATE TABLE IF NOT EXISTS agent_state (
+                    agent_id TEXT PRIMARY KEY,
+                    chat_history TEXT,
+                    connections TEXT,
+                    custom_subscriptions TEXT,
+                    last_updated REAL NOT NULL,
+                    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+                );
+                """,
+            )
+
+            self._trigger_queue = asyncio.Queue()
+
+    # ========== Event Methods ==========
+
+    async def append_event(
+        self,
+        graph_id: str,
+        event: RemoraEvent,
+    ) -> int:
+        """Append an event to the store."""
+        if self._conn is None:
+            await self.initialize()
+
+        event_type = type(event).__name__
+        payload = self._serialize_event(event)
+        timestamp = getattr(event, "timestamp", time.time())
+        created_at = time.time()
+
+        from_agent = getattr(event, "from_agent", None)
+        to_agent = getattr(event, "to_agent", None)
+        correlation_id = getattr(event, "correlation_id", None)
+        tags = getattr(event, "tags", None)
+        tags_json = json.dumps(tags) if tags else None
+
+        async with self._lock:
+            cursor = await asyncio.to_thread(
+                self._conn.execute,
+                """
+                INSERT INTO events (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json),
+            )
+            await asyncio.to_thread(self._conn.commit)
+            event_id = cursor.lastrowid or 0
+
+        # Queue triggers for matching subscriptions
+        if self._trigger_queue is not None:
+            matching_agents = await self.get_matching_agents(event)
+            for agent_id in matching_agents:
+                await self._trigger_queue.put((agent_id, event_id, event))
+
+        # Emit to event bus for UI updates
+        if self._event_bus is not None:
+            await self._event_bus.emit(event)
+
+        return event_id
+
+    async def get_triggers(self) -> AsyncIterator[tuple[str, int, RemoraEvent]]:
+        """Iterate over event triggers for matched subscriptions."""
+        if self._trigger_queue is None:
+            raise RuntimeError("Store not initialized")
+
+        while True:
+            try:
+                trigger = await self._trigger_queue.get()
+                yield trigger
+            except asyncio.CancelledError:
+                break
+
+    # ========== Subscription Methods ==========
+
+    async def register_subscription(
+        self,
+        agent_id: str,
+        pattern: SubscriptionPattern,
+        is_default: bool = False,
+    ) -> Subscription:
+        """Register a new subscription."""
+        if self._conn is None:
+            await self.initialize()
+
+        now = time.time()
+        pattern_json = json.dumps(asdict(pattern))
+
+        async with self._lock:
+            cursor = await asyncio.to_thread(
+                self._conn.execute,
+                """
+                INSERT INTO subscriptions (agent_id, pattern_json, is_default, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (agent_id, pattern_json, 1 if is_default else 0, now, now),
+            )
+            await asyncio.to_thread(self._conn.commit)
+            sub_id = cursor.lastrowid
+
+        return Subscription(
+            id=sub_id,
+            agent_id=agent_id,
+            pattern=pattern,
+            is_default=is_default,
+            created_at=now,
+            updated_at=now,
+        )
+
+    async def get_matching_agents(self, event: RemoraEvent) -> list[str]:
+        """Get all agent IDs whose subscriptions match the event."""
+        if self._conn is None:
+            await self.initialize()
+
+        async with self._lock:
+            cursor = await asyncio.to_thread(
+                self._conn.execute,
+                "SELECT agent_id, pattern_json FROM subscriptions ORDER BY id",
+            )
+            rows = await asyncio.to_thread(cursor.fetchall)
+
+        matching_agents = []
+        seen_agents = set()
+
+        for row in rows:
+            pattern_data = json.loads(row["pattern_json"])
+            pattern = SubscriptionPattern(**pattern_data)
+
+            if pattern.matches(event):
+                agent_id = row["agent_id"]
+                if agent_id not in seen_agents:
+                    matching_agents.append(agent_id)
+                    seen_agents.add(agent_id)
+
+        return matching_agents
+
+    # ========== Agent Registry Methods ==========
+
+    async def upsert_agent(self, metadata: AgentMetadata) -> None:
+        """Insert or update an agent."""
+        if self._conn is None:
+            await self.initialize()
+
+        now = time.time()
+        async with self._lock:
+            await asyncio.to_thread(
+                self._conn.execute,
+                """
+                INSERT INTO agents (agent_id, node_type, name, full_name, file_path, parent_id, start_line, end_line, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    node_type = excluded.node_type,
+                    name = excluded.name,
+                    full_name = excluded.full_name,
+                    file_path = excluded.file_path,
+                    parent_id = excluded.parent_id,
+                    start_line = excluded.start_line,
+                    end_line = excluded.end_line,
+                    updated_at = excluded.updated_at,
+                    status = 'active'
+                """,
+                (
+                    metadata.agent_id,
+                    metadata.node_type,
+                    metadata.name,
+                    metadata.full_name,
+                    metadata.file_path,
+                    metadata.parent_id,
+                    metadata.start_line,
+                    metadata.end_line,
+                    now,
+                    now,
+                ),
+            )
+            await asyncio.to_thread(self._conn.commit)
+
+    async def list_agents(self, status: str | None = None) -> list[dict[str, Any]]:
+        """List all agents, optionally filtered by status."""
+        if self._conn is None:
+            await self.initialize()
+
+        query = "SELECT * FROM agents"
+        params = []
+        if status:
+            query += " WHERE status = ?"
+            params.append(status)
+
+        async with self._lock:
+            cursor = await asyncio.to_thread(self._conn.execute, query, params)
+            rows = await asyncio.to_thread(cursor.fetchall)
+
+        return [dict(row) for row in rows]
+
+    # ========== Agent State Methods ==========
+
+    async def save_agent_state(
+        self,
+        agent_id: str,
+        chat_history: list[dict[str, Any]],
+        connections: dict[str, str],
+        custom_subscriptions: list[SubscriptionPattern],
+    ) -> None:
+        """Save agent state to the database."""
+        if self._conn is None:
+            await self.initialize()
+
+        now = time.time()
+        chat_json = json.dumps(chat_history, default=str)
+        conn_json = json.dumps(connections)
+        subs_json = json.dumps([asdict(s) for s in custom_subscriptions])
+
+        async with self._lock:
+            await asyncio.to_thread(
+                self._conn.execute,
+                """
+                INSERT INTO agent_state (agent_id, chat_history, connections, custom_subscriptions, last_updated)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    chat_history = excluded.chat_history,
+                    connections = excluded.connections,
+                    custom_subscriptions = excluded.custom_subscriptions,
+                    last_updated = excluded.last_updated
+                """,
+                (agent_id, chat_json, conn_json, subs_json, now),
+            )
+            await asyncio.to_thread(self._conn.commit)
+
+    async def load_agent_state(self, agent_id: str) -> dict[str, Any] | None:
+        """Load agent state from the database."""
+        if self._conn is None:
+            await self.initialize()
+
+        async with self._lock:
+            cursor = await asyncio.to_thread(
+                self._conn.execute,
+                "SELECT * FROM agent_state WHERE agent_id = ?",
+                (agent_id,),
+            )
+            row = await asyncio.to_thread(cursor.fetchone)
+
+        if row is None:
+            return None
+
+        return {
+            "agent_id": row["agent_id"],
+            "chat_history": json.loads(row["chat_history"] or "[]"),
+            "connections": json.loads(row["connections"] or "{}"),
+            "custom_subscriptions": json.loads(row["custom_subscriptions"] or "[]"),
+            "last_updated": row["last_updated"],
+        }
+
+    # ========== Utilities ==========
+
+    def _serialize_event(self, event: RemoraEvent) -> str:
+        """Serialize an event to JSON."""
+        if is_dataclass(event):
+            data = asdict(event)
+        elif hasattr(event, "__dict__"):
+            data = dict(vars(event))
+        else:
+            data = {"value": str(event)}
+        return json.dumps(data, default=str)
+
+    async def close(self) -> None:
+        """Close the database connection."""
+        if self._conn:
+            async with self._lock:
+                await asyncio.to_thread(self._conn.close)
+                self._conn = None
+        self._trigger_queue = None
+
+
+__all__ = ["RemoraStore"]
+```
+
+---
+
+### Step 11.2: Update AgentRunner to Use RemoraStore
+
+**File**: `src/remora/core/agent_runner.py`
+
+**Current imports**:
+```python
+from remora.core.event_store import EventStore
+from remora.core.subscriptions import SubscriptionRegistry
+from remora.core.swarm_state import SwarmState
+```
+
+**New imports**:
+```python
+from remora.core.store import RemoraStore
+```
+
+**Current `__init__`**:
+```python
+def __init__(
+    self,
+    event_store: EventStore,
+    subscriptions: SubscriptionRegistry,
+    swarm_state: SwarmState,
+    config: Config,
+    event_bus: "EventBus",
+):
+    self._event_store = event_store
+    self._subscriptions = subscriptions
+    self._swarm_state = swarm_state
+    # ...
+```
+
+**New `__init__`**:
+```python
+def __init__(
+    self,
+    store: RemoraStore,
+    config: Config,
+    event_bus: "EventBus",
+):
+    self._store = store
+    self._config = config
+    self._event_bus = event_bus
+    # ...
+```
+
+**Update all method calls**:
+- `self._event_store.append()` → `self._store.append_event()`
+- `self._event_store.get_triggers()` → `self._store.get_triggers()`
+- `self._subscriptions.get_matching_agents()` → `self._store.get_matching_agents()`
+- `self._swarm_state.list_agents()` → `await self._store.list_agents()`
+
+---
+
+### Step 11.3: Update Reconciler to Use RemoraStore
+
+**File**: `src/remora/core/reconciler.py`
+
+**Replace**:
+```python
+async def reconcile(
+    swarm_state: SwarmState,
+    subscriptions: SubscriptionRegistry,
+    project_root: Path,
+    config: Config,
+) -> ReconcileResult:
+```
+
+**With**:
+```python
+async def reconcile(
+    store: RemoraStore,
+    project_root: Path,
+    config: Config,
+) -> ReconcileResult:
+```
+
+**Update all calls**:
+- `swarm_state.list_agents()` → `await store.list_agents()`
+- `swarm_state.upsert()` → `await store.upsert_agent()`
+- `await subscriptions.register_defaults()` → `await store.register_subscription()` (loop)
+
+---
+
+### Step 11.4: Delete Old Storage Files
+
+After migration is complete and tested:
+
+```bash
+rm src/remora/core/event_store.py
+rm src/remora/core/subscriptions.py
+rm src/remora/core/swarm_state.py
+rm src/remora/core/agent_state.py
+```
+
+**Update `src/remora/core/__init__.py`**:
+```python
+# Remove old exports
+# - EventStore, EventSourcedBus
+# - SubscriptionRegistry, SubscriptionPattern, Subscription
+# - SwarmState, AgentMetadata
+# - AgentState, load, save
+
+# Add new export
+from remora.core.store import RemoraStore
+```
+
+---
+
+### Step 11.5: Update Database Path in Config
+
+**File**: `src/remora/core/config.py`
+
+**Add/update field**:
+```python
+@dataclass(slots=True)
+class Config:
+    # ... existing fields ...
+
+    # Storage - unified database
+    db_path: str = ".remora/remora.db"
+
+    # Remove these if present:
+    # event_db_path: str
+    # subscriptions_db_path: str
+    # swarm_state_db_path: str
+```
+
+---
+
+### Step 11.6: Migration Script for Existing Data
+
+**Create**: `scripts/migrate_to_unified_db.py`
+
+```python
+#!/usr/bin/env python3
+"""Migrate old Remora databases to unified format."""
+
+import json
+import sqlite3
+from pathlib import Path
+
+def migrate(remora_dir: Path) -> None:
+    """Migrate old databases to unified remora.db."""
+
+    new_db = remora_dir / "remora.db"
+
+    # Skip if already migrated
+    if new_db.exists():
+        print(f"Unified database already exists: {new_db}")
+        return
+
+    conn = sqlite3.connect(str(new_db))
+
+    # Create schema (same as RemoraStore.initialize)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS events (...);
+        CREATE TABLE IF NOT EXISTS subscriptions (...);
+        CREATE TABLE IF NOT EXISTS agents (...);
+        CREATE TABLE IF NOT EXISTS agent_state (...);
+    """)
+
+    # Migrate events.db
+    events_db = remora_dir / "events.db"
+    if events_db.exists():
+        print(f"Migrating events from {events_db}")
+        src = sqlite3.connect(str(events_db))
+        for row in src.execute("SELECT * FROM events"):
+            conn.execute(
+                "INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                row,
+            )
+        src.close()
+        conn.commit()
+
+    # Migrate subscriptions.db
+    subs_db = remora_dir / "subscriptions.db"
+    if subs_db.exists():
+        print(f"Migrating subscriptions from {subs_db}")
+        src = sqlite3.connect(str(subs_db))
+        for row in src.execute("SELECT * FROM subscriptions"):
+            conn.execute(
+                "INSERT INTO subscriptions VALUES (?, ?, ?, ?, ?, ?)",
+                row,
+            )
+        src.close()
+        conn.commit()
+
+    # Migrate swarm_state.db
+    swarm_db = remora_dir / "swarm_state.db"
+    if swarm_db.exists():
+        print(f"Migrating agents from {swarm_db}")
+        src = sqlite3.connect(str(swarm_db))
+        for row in src.execute("SELECT * FROM agents"):
+            conn.execute(
+                "INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                row,
+            )
+        src.close()
+        conn.commit()
+
+    # Migrate JSONL state files
+    agents_dir = remora_dir / "agents"
+    if agents_dir.exists():
+        for state_file in agents_dir.rglob("state.jsonl"):
+            agent_id = state_file.parent.name
+            print(f"Migrating state for {agent_id}")
+
+            lines = state_file.read_text().strip().split("\n")
+            if lines:
+                data = json.loads(lines[-1])
+                conn.execute(
+                    """
+                    INSERT INTO agent_state (agent_id, chat_history, connections, custom_subscriptions, last_updated)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        agent_id,
+                        json.dumps(data.get("chat_history", [])),
+                        json.dumps(data.get("connections", {})),
+                        json.dumps(data.get("custom_subscriptions", [])),
+                        data.get("last_updated", 0),
+                    ),
+                )
+        conn.commit()
+
+    conn.close()
+    print(f"Migration complete: {new_db}")
+
+
+if __name__ == "__main__":
+    import sys
+    path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".remora")
+    migrate(path)
+```
+
+---
+
+### Step 11.7: Verification After Consolidation
+
+```bash
+# Verify unified database exists
+ls -la .remora/remora.db
+
+# Verify tables
+sqlite3 .remora/remora.db ".tables"
+# Expected: agent_state  agents  events  subscriptions
+
+# Verify data migrated
+sqlite3 .remora/remora.db "SELECT COUNT(*) FROM events"
+sqlite3 .remora/remora.db "SELECT COUNT(*) FROM agents"
+sqlite3 .remora/remora.db "SELECT COUNT(*) FROM subscriptions"
+
+# Run tests
+pytest tests/
+
+# Test basic operations
+remora swarm reconcile
+remora swarm start --once
+```
+
+---
+
+## Updated Summary After Consolidation
+
+| Phase | Files Changed | Lines Removed | Lines Added |
+|-------|--------------|---------------|-------------|
+| 1-10. (Previous) | ~13 files | ~1035 | ~225 |
+| 11. Storage Consolidation | 6 files | ~900 | ~350 |
+| **Total** | ~19 files | ~1935 | ~575 |
+
+**Net reduction**: ~1360 lines of code while gaining:
+- Single database for all Remora state
+- Atomic transactions across components
+- Simplified mental model (2 storage concerns: state + workspaces)
+- Better async consistency

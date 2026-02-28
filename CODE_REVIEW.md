@@ -416,3 +416,195 @@ However, **~970 LOC of legacy code remains** (executor.py, graph.py, context.py)
 5. Add missing tests for cascade prevention and pattern matching
 
 **Estimated Effort**: The refactoring guide provides step-by-step instructions for all fixes.
+
+---
+
+## Appendix A: Storage Consolidation Analysis
+
+### A.1 Current Storage Landscape
+
+Remora currently uses **6 separate storage mechanisms**, creating unnecessary mental complexity:
+
+| Storage | Type | Location | Purpose |
+|---------|------|----------|---------|
+| **EventStore** | SQLite | `.remora/events.db` | Event sourcing, trigger queue |
+| **SubscriptionRegistry** | SQLite | `.remora/subscriptions.db` | Pattern-based routing |
+| **SwarmState** | SQLite | `.remora/swarm_state.db` | Agent registry |
+| **AgentState** | JSONL files | `.remora/agents/<id>/state.jsonl` | Per-agent state, chat history |
+| **Cairn Stable** | turso/libsql | `.remora/stable.db` | CoW file storage (stable) |
+| **Cairn Agent WS** | turso/libsql | `.remora/agents/<id>/workspace.db` | CoW file storage (per-agent) |
+
+This is **3 SQLite databases + per-agent JSONL + 2+ Cairn databases** - far more complexity than necessary.
+
+### A.2 Analysis: Should EventStore Use Cairn/turso?
+
+**Short answer: No.**
+
+**Rationale:**
+
+1. **Different concerns**: Cairn/turso is designed for **file storage with CoW (copy-on-write) semantics**. It provides:
+   - Per-agent sandboxed workspaces
+   - Merge/reject semantics for agent file changes
+   - Binary file storage with parent-child relationships
+
+   EventStore needs **append-only event logs** with:
+   - Sequential reads for replay
+   - Subscription matching and trigger queue
+   - Fast time-range queries
+
+2. **Interface mismatch**: Cairn exposes a `workspace.files.write(path, content)` API designed for file operations. There's no general-purpose SQL interface exposed - we'd be fighting the abstraction.
+
+3. **Cairn internals are opaque**: Cairn manages its own database structure. Adding event sourcing tables would require modifying Cairn itself, breaking the library boundary.
+
+4. **libsql benefits don't apply**: libsql's advantages (edge replication, embedded replicas) aren't needed for local event storage.
+
+**However**, the Cairn workspaces (`stable.db` and `workspace.db` files) should remain as-is - they're doing exactly what they're designed for.
+
+### A.3 Recommended Consolidation: Unified Remora Database
+
+The **3 SQLite databases should be merged into one**:
+
+```
+.remora/
+  remora.db          # Unified database (NEW)
+  agents/
+    <id>/
+      state.jsonl    # Per-agent state (MERGE into remora.db)
+      workspace.db   # Cairn agent workspace (KEEP)
+  stable.db          # Cairn stable workspace (KEEP)
+```
+
+**Unified Schema:**
+
+```sql
+-- All in remora.db
+CREATE TABLE events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    graph_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    timestamp REAL NOT NULL,
+    created_at REAL NOT NULL,
+    from_agent TEXT,
+    to_agent TEXT,
+    correlation_id TEXT,
+    tags TEXT
+);
+
+CREATE TABLE subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL,
+    pattern_json TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+
+CREATE TABLE agents (
+    agent_id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    parent_id TEXT,
+    start_line INTEGER NOT NULL,
+    end_line INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+
+CREATE TABLE agent_state (
+    agent_id TEXT PRIMARY KEY,
+    chat_history TEXT,  -- JSON array
+    connections TEXT,   -- JSON object
+    custom_subscriptions TEXT,  -- JSON array
+    last_updated REAL NOT NULL,
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+```
+
+### A.4 Benefits of Consolidation
+
+| Benefit | Impact |
+|---------|--------|
+| **Single connection pool** | Simpler resource management, fewer file handles |
+| **Atomic transactions** | Cross-table operations can be transactional |
+| **Simpler mental model** | One "Remora state" concept vs. 4 |
+| **Unified initialization** | One `await store.initialize()` call |
+| **Simplified backup** | Copy one file instead of multiple |
+| **Foreign key integrity** | Agent state references agents table |
+
+### A.5 Additional Consolidation Opportunities
+
+#### A.5.1 Merge EventBus into EventStore
+
+Currently:
+- `EventBus` (in-memory pub/sub)
+- `EventStore` (persistence)
+- `EventSourcedBus` (wrapper combining both)
+
+**Issue**: `EventSourcedBus` causes **double emission** (see Part 4.3).
+
+**Fix**: Merge EventBus functionality directly into EventStore:
+```python
+class EventStore:
+    async def emit(self, event):
+        event_id = await self._persist(event)
+        await self._notify_subscribers(event)
+        return event_id
+```
+
+This eliminates the wrapper layer entirely.
+
+#### A.5.2 Merge AgentState into SwarmState
+
+Currently AgentState and SwarmState (with AgentMetadata) duplicate fields:
+- Both have: `agent_id`, `node_type`, `name`, `full_name`, `file_path`, `parent_id`, `start_line/range`
+
+**Merge into one entity**: The `agents` table stores everything, with `chat_history` and `custom_subscriptions` as JSON columns.
+
+#### A.5.3 Remove RemoraService Wrapper
+
+`RemoraService` in `api.py` just wraps AgentRunner. After consolidation:
+- `AgentRunner` becomes the single entry point
+- `RemoraService` is removed
+- Direct API: `runner = AgentRunner(config); await runner.start()`
+
+### A.6 Storage Architecture After Consolidation
+
+```
+.remora/
+  remora.db            # ALL Remora state (unified)
+  stable.db            # Cairn stable workspace
+  agents/
+    <id>/
+      workspace.db     # Cairn agent workspace (CoW)
+```
+
+**Components:**
+- `RemoraStore` - Single class managing unified `remora.db`
+- `CairnWorkspaceService` - Unchanged, manages CoW workspaces
+
+**Mental model:**
+- **Remora state** → `remora.db` (agents, subscriptions, events, state)
+- **File workspaces** → Cairn (stable + per-agent CoW)
+
+### A.7 Implementation Priority
+
+1. **Phase 1**: Merge EventStore + SubscriptionRegistry + SwarmState into `RemoraStore`
+2. **Phase 2**: Merge AgentState JSONL into `RemoraStore.agent_state` table
+3. **Phase 3**: Eliminate EventSourcedBus wrapper (fix double emission)
+4. **Phase 4**: Simplify RemoraService into direct AgentRunner usage
+
+**LOC Impact**: ~200 lines removed, ~100 lines added for unified store
+
+### A.8 What NOT to Consolidate
+
+| Component | Keep Separate | Reason |
+|-----------|---------------|--------|
+| **Cairn stable.db** | Yes | Different concern (file CoW), library boundary |
+| **Cairn agent workspaces** | Yes | Per-agent sandboxing with merge/reject semantics |
+| **grail.py** | Yes | Tool runtime, not state |
+
+The Cairn workspaces serve a fundamentally different purpose: **file content with CoW semantics for agent sandboxing**. This is orthogonal to event sourcing and agent registry, and should remain separate.
