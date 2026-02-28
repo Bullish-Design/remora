@@ -21,7 +21,7 @@ from structured_agents.types import Message
 
 from remora.core.agent_state import AgentState
 from remora.core.discovery import CSTNode
-from remora.core.event_store import EventSourcedBus, EventStore
+from remora.core.event_store import EventStore
 from remora.core.subscriptions import SubscriptionRegistry
 from remora.core.tools.grail import build_virtual_fs, discover_grail_tools
 from remora.core.workspace import CairnDataProvider
@@ -182,8 +182,16 @@ class SwarmExecutor:
                 "timeout": self.config.timeout_s,
             }
         )
-        event_sourced_bus = EventSourcedBus(self._event_bus, self._event_store, self._swarm_id)
-        kernel = AgentKernel(client=client, adapter=adapter, tools=tools, observer=event_sourced_bus)
+        class _EventStoreObserver:
+            def __init__(self, store: EventStore, swarm_id: str):
+                self.store = store
+                self.swarm_id = swarm_id
+            
+            async def emit(self, event: Any) -> None:
+                await self.store.append(self.swarm_id, event)
+                
+        observer = _EventStoreObserver(self._event_store, self._swarm_id)
+        kernel = AgentKernel(client=client, adapter=adapter, tools=tools, observer=observer)
         try:
             messages: list[Message] = [
                 Message(role="system", content=manifest.system_prompt),

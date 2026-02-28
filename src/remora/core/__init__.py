@@ -8,7 +8,7 @@ from remora.core.config import (
     load_config,
     serialize_config,
 )
-from remora.core.context import ContextBuilder, RecentAction
+
 from remora.core.discovery import (
     CSTNode,
     LANGUAGE_EXTENSIONS,
@@ -24,7 +24,7 @@ from remora.core.errors import (
     WorkspaceError,
 )
 from remora.core.event_bus import EventBus, EventHandler
-from remora.core.event_store import EventSourcedBus, EventStore
+from remora.core.event_store import EventStore
 from remora.core.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
@@ -54,7 +54,7 @@ from remora.core.agent_state import AgentState
 from remora.core.agent_runner import AgentRunner, ExecutionContext
 from remora.core.swarm_executor import SwarmExecutor
 from remora.core.tools import RemoraGrailTool, build_virtual_fs, discover_grail_tools
-from remora.core.workspace import AgentWorkspace, CairnDataProvider, CairnResultHandler, WorkspaceManager
+from remora.core.workspace import AgentWorkspace, CairnDataProvider
 
 __all__ = [
     "AgentCompleteEvent",
@@ -70,15 +70,11 @@ __all__ = [
     "CSTNode",
     "CairnDataProvider",
     "CairnExternals",
-    "CairnResultHandler",
-    "CairnWorkspaceService",
-    "ContextBuilder",
     "ContentChangedEvent",
     "DiscoveryConfig",
     "DiscoveryError",
     "EventBus",
     "EventHandler",
-    "EventSourcedBus",
     "EventStore",
     "ExecutionContext",
     "ExecutionError",
@@ -91,7 +87,6 @@ __all__ = [
     "ModelRequestEvent",
     "ModelResponseEvent",
     "NodeType",
-    "RecentAction",
     "RemoraError",
     "RemoraEvent",
     "RemoraGrailTool",
@@ -105,7 +100,6 @@ __all__ = [
     "TreeSitterDiscoverer",
     "TurnCompleteEvent",
     "WorkspaceError",
-    "WorkspaceManager",
     "build_virtual_fs",
     "compute_node_id",
     "discover",

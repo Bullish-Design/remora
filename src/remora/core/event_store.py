@@ -340,43 +340,4 @@ class EventStore:
         return json.dumps(data, default=str)
 
 
-class EventSourcedBus:
-    """An EventBus wrapper that persists events to an EventStore."""
-
-    def __init__(
-        self,
-        event_bus: "EventBus",
-        event_store: EventStore,
-        graph_id: str,
-    ):
-        from remora.core.event_bus import EventBus
-
-        self._bus = event_bus
-        self._store = event_store
-        self._graph_id = graph_id
-
-    async def emit(self, event: StructuredEvent | RemoraEvent) -> None:
-        """Emit and persist an event."""
-        await self._store.append(self._graph_id, event)
-        await self._bus.emit(event)
-
-    async def replay_to_bus(
-        self,
-        *,
-        event_types: list[str] | None = None,
-    ) -> int:
-        """Replay stored events through the bus."""
-        count = 0
-        async for event_record in self._store.replay(
-            self._graph_id,
-            event_types=event_types,
-        ):
-            await self._bus.emit(event_record)  # type: ignore[arg-type]
-            count += 1
-        return count
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._bus, name)
-
-
-__all__ = ["EventSourcedBus", "EventStore"]
+__all__ = ["EventStore"]

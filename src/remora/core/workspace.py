@@ -122,46 +122,6 @@ class AgentWorkspace:
         raise WorkspaceError("Snapshots are not supported by the Cairn workspace API")
 
 
-class WorkspaceManager:
-    """Manages Cairn workspaces for graph execution.
-
-    Creates isolated workspaces per agent with CoW semantics.
-    """
-
-    def __init__(self, config: Config, graph_id: str):
-        self._config = config
-        self._graph_id = graph_id
-        self._base_path = Path(config.bundle_root) / graph_id
-        self._workspaces: dict[str, AgentWorkspace] = {}
-        self._manager = cairn_workspace_manager.WorkspaceManager()
-
-    async def get_workspace(self, agent_id: str) -> AgentWorkspace:
-        """Get or create a workspace for an agent."""
-        if agent_id in self._workspaces:
-            return self._workspaces[agent_id]
-
-        workspace_path = self._base_path / f"{agent_id}.db"
-        workspace_path.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            cairn_ws = await cairn_workspace_manager._open_workspace(workspace_path, readonly=False)
-            self._manager.track_workspace(cairn_ws)
-        except Exception as e:
-            raise WorkspaceError(f"Failed to create workspace for {agent_id}: {e}")
-
-        agent_ws = AgentWorkspace(cairn_ws, agent_id, lock=asyncio.Lock())
-        self._workspaces[agent_id] = agent_ws
-        return agent_ws
-
-    async def cleanup(self) -> None:
-        """Clean up all workspaces."""
-        try:
-            await self._manager.close_all()
-        except Exception as e:
-            logger.warning("Workspace cleanup error: %s", e)
-        self._workspaces.clear()
-
-
 class CairnDataProvider:
     """Populates Grail virtual FS from a Cairn workspace.
 
@@ -200,31 +160,9 @@ class CairnDataProvider:
         return files
 
 
-class CairnResultHandler:
-    """Persists script results back to Cairn workspace."""
-
-    def __init__(self, workspace: AgentWorkspace):
-        self._workspace = workspace
-
-    async def handle(self, result: dict[str, Any]) -> None:
-        """Write result data back to workspace."""
-        if "written_file" in result and "content" in result:
-            await self._workspace.write(result["written_file"], result["content"])
-
-        if "written_files" in result:
-            for path, content in result["written_files"].items():
-                await self._workspace.write(path, content)
-
-        if "modified_file" in result:
-            path, content = result["modified_file"]
-            await self._workspace.write(path, content)
-
-
 __all__ = [
     "AgentWorkspace",
-    "WorkspaceManager",
     "CairnDataProvider",
-    "CairnResultHandler",
 ]
 
 

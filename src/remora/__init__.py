@@ -8,7 +8,7 @@ from remora.core.config import (
     load_config,
     serialize_config,
 )
-from remora.core.context import ContextBuilder, RecentAction
+
 from remora.core.discovery import (
     CSTNode,
     LANGUAGE_EXTENSIONS,
@@ -25,7 +25,7 @@ from remora.core.errors import (
     WorkspaceError,
 )
 from remora.core.event_bus import EventBus, EventHandler
-from remora.core.event_store import EventSourcedBus, EventStore
+from remora.core.event_store import EventStore
 from remora.core.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
@@ -55,7 +55,7 @@ from remora.core.reconciler import (
     reconcile_on_startup,
 )
 from remora.core.tools import RemoraGrailTool, build_virtual_fs, discover_grail_tools
-from remora.core.workspace import AgentWorkspace, CairnDataProvider, CairnResultHandler, WorkspaceManager
+from remora.core.workspace import AgentWorkspace, CairnDataProvider
 from remora.utils import PathResolver, to_project_relative
 
 __all__ = [
@@ -84,7 +84,6 @@ __all__ = [
     "TurnCompleteEvent",
     "EventBus",
     "EventHandler",
-    "EventSourcedBus",
     "EventStore",
     "AgentState",
     "AgentRunner",
@@ -96,15 +95,10 @@ __all__ = [
     "TreeSitterDiscoverer",
     "compute_node_id",
     "discover",
-    "ContextBuilder",
-    "RecentAction",
     "AgentWorkspace",
     "CairnDataProvider",
     "CairnExternals",
-    "CairnResultHandler",
-    "CairnWorkspaceService",
-    "WorkspaceManager",
-    "RemoraGrailTool",
+    "CairnExternals",
     "build_virtual_fs",
     "discover_grail_tools",
     "PathResolver",
