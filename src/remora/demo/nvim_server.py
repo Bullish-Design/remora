@@ -111,8 +111,8 @@ async def stream_events(request: Request):
 
     async def sse_generator():
         # Yield the initial connection message
-        yield ServerSentEventGenerator.merge_fragments(
-            fragments='<div id="logs" data-prepend><li>Connected to Swarm EventBus...</li></div>'
+        yield ServerSentEventGenerator.patch_elements(
+            '<div id="logs" data-prepend><li>Connected to Swarm EventBus...</li></div>'
         )
 
         # Subscribe to EventBus to receive all RemoraEvents asynchronously

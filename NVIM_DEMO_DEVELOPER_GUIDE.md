@@ -379,8 +379,8 @@ async def stream_events(request: Request):
     """Datastar SSE endpoint for real-time updates."""
     async def sse_generator():
         # Yield the initial connection message
-        yield ServerSentEventGenerator.merge_fragments(
-            fragments='<div id="logs" data-prepend><li>Connected to Swarm EventBus...</li></div>'
+        yield ServerSentEventGenerator.patch_elements(
+            '<div id="logs" data-prepend><li>Connected to Swarm EventBus...</li></div>'
         )
         
         # Subscribe to EventBus to receive all RemoraEvents asynchronously
@@ -403,8 +403,8 @@ async def stream_events(request: Request):
                 html_fragment = f'<div id="logs" data-prepend><li>[{event_type}] {agent_id}</li></div>'
                 
                 # Datastar merge_fragments tells the frontend to update specific HTML fragments
-                yield ServerSentEventGenerator.merge_fragments(
-                    fragments=html_fragment
+                yield ServerSentEventGenerator.patch_elements(
+                    html_fragment
                 )
         except asyncio.CancelledError:
              event_bus.unsubscribe_all(event_handler)
@@ -498,6 +498,7 @@ This uses Datastar's custom data attributes for reactivity and SSE processing.
    Run the setup command:
    ```vim
    :lua require('remora_nvim').setup({})
+   :source plugin/remora_nvim.lua
    :RemoraToggle
    ```
    Move your cursor around Python functions/classes and observe the right-hand panel updating via JSON-RPC.
