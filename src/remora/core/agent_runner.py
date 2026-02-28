@@ -72,6 +72,7 @@ class AgentRunner:
             event_bus=event_bus,
             event_store=event_store,
             subscriptions=subscriptions,
+            swarm_state=swarm_state,
             swarm_id=self._swarm_id,
             project_root=self._project_root,
         )

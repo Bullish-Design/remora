@@ -15,7 +15,7 @@ from remora.core.config import load_config
 from remora.core.context import ContextBuilder
 from remora.core.discovery import discover
 from remora.core.event_bus import EventBus
-from remora.core.events import AgentCompleteEvent, AgentErrorEvent, GraphCompleteEvent, GraphStartEvent
+from remora.core.events import AgentCompleteEvent, AgentErrorEvent
 from remora.core.executor import GraphExecutor
 from remora.core.graph import build_graph
 
@@ -54,17 +54,10 @@ async def _log_events(bus: EventBus, output_path: Path, stop_event: asyncio.Even
 
 
 def _print_event(event: Any) -> None:
-    if isinstance(event, GraphStartEvent):
-        print(f"Graph {event.graph_id} started with {event.node_count} nodes")
-    elif isinstance(event, AgentCompleteEvent):
+    if isinstance(event, AgentCompleteEvent):
         print(f"Agent {event.agent_id} completed")
     elif isinstance(event, AgentErrorEvent):
         print(f"Agent {event.agent_id} failed: {event.error}")
-    elif isinstance(event, GraphCompleteEvent):
-        print(
-            f"Graph {event.graph_id} completed: {event.completed_count} completed, "
-            f"{event.failed_count} failed"
-        )
 
 
 def _run_meridian_pipeline(output_path: Path) -> None:

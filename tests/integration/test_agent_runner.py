@@ -124,11 +124,11 @@ async def test_cooldown_prevents_duplicate_triggers(
 
     await event_store.append(
         "test-swarm",
-        ManualTriggerEvent(agent_id="agent_a", reason="test"),
+        ManualTriggerEvent(to_agent="agent_a", reason="test"),
     )
     await event_store.append(
         "test-swarm",
-        ManualTriggerEvent(agent_id="agent_a", reason="test"),
+        ManualTriggerEvent(to_agent="agent_a", reason="test"),
     )
 
     await asyncio.sleep(0.2)
@@ -181,7 +181,7 @@ async def test_concurrent_trigger_handling(
         for i in range(5):
             await event_store.append(
                 "test-swarm",
-                ManualTriggerEvent(agent_id=f"agent_{i}", reason="test"),
+                ManualTriggerEvent(to_agent=f"agent_{i}", reason="test"),
             )
 
     await trigger_all()

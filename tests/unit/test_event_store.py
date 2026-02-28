@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from remora.core.event_store import EventStore
-from remora.core.events import GraphStartEvent
+from remora.core.events import AgentStartEvent
 
 
 @pytest.mark.asyncio
@@ -18,14 +18,14 @@ async def test_event_store_append_and_replay(tmp_path: Path) -> None:
     store = EventStore(tmp_path / "events.db")
     await store.initialize()
 
-    event = GraphStartEvent(graph_id="graph-1", node_count=1)
+    event = AgentStartEvent(graph_id="graph-1", agent_id="agent-1", node_name="test")
     await store.append("graph-1", event)
 
     count = await store.get_event_count("graph-1")
     assert count == 1
 
     records = [record async for record in store.replay("graph-1")]
-    assert records[0]["event_type"] == "GraphStartEvent"
+    assert records[0]["event_type"] == "AgentStartEvent"
     assert records[0]["payload"]["graph_id"] == "graph-1"
 
     graphs = await store.get_graph_ids()

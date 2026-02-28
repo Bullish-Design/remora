@@ -125,7 +125,7 @@ class ContentChangedEvent:
 class ManualTriggerEvent:
     """Manual trigger to start an agent."""
 
-    agent_id: str
+    to_agent: str
     reason: str
     timestamp: float = field(default_factory=time.time)
 

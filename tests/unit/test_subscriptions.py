@@ -82,6 +82,23 @@ async def test_unregister_all(temp_db: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_unregister_by_id(temp_db: Path) -> None:
+    registry = SubscriptionRegistry(temp_db)
+    await registry.initialize()
+
+    pattern = SubscriptionPattern(to_agent="agent-x")
+    sub = await registry.register("agent-x", pattern)
+
+    removed = await registry.unregister(sub.id)
+    assert removed
+
+    subs = await registry.get_subscriptions("agent-x")
+    assert len(subs) == 0
+
+    await registry.close()
+
+
+@pytest.mark.asyncio
 async def test_pattern_matching_event_types() -> None:
     pattern = SubscriptionPattern(event_types=["AgentMessageEvent", "ContentChangedEvent"])
 
@@ -91,7 +108,7 @@ async def test_pattern_matching_event_types() -> None:
     file_event = ContentChangedEvent(path="test.py")
     assert pattern.matches(file_event)
 
-    start_event = type("GraphStartEvent", (), {"graph_id": "x", "node_count": 1})()
+    start_event = type("CustomEvent", (), {"graph_id": "x", "node_count": 1})()
     assert not pattern.matches(start_event)
 
 

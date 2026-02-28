@@ -22,6 +22,7 @@ from remora.core.errors import (
     DiscoveryError,
     ExecutionError,
     RemoraError,
+    SwarmError,
     WorkspaceError,
 )
 from remora.core.event_bus import EventBus, EventHandler
@@ -64,6 +65,7 @@ __all__ = [
     "DiscoveryError",
     "ExecutionError",
     "RemoraError",
+    "SwarmError",
     "WorkspaceError",
     "load_config",
     "serialize_config",

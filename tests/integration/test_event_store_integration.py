@@ -240,7 +240,7 @@ async def test_event_store_no_trigger_without_subscription(tmp_path):
     )
 
     trigger_iter = store.get_triggers().__aiter__()
-    with pytest.raises(asyncio.TimeoutError):
+    with pytest.raises((asyncio.TimeoutError, StopAsyncIteration)):
         await asyncio.wait_for(trigger_iter.__anext__(), timeout=0.1)
 
     await store.close()

@@ -13,11 +13,7 @@ from structured_agents.events import Event as StructuredEvent
 from remora.core.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
-    AgentSkippedEvent,
     AgentStartEvent,
-    GraphCompleteEvent,
-    GraphErrorEvent,
-    GraphStartEvent,
     HumanInputRequestEvent,
     HumanInputResponseEvent,
     KernelEndEvent,
@@ -76,9 +72,7 @@ def normalize_event(event: StructuredEvent | RemoraEvent) -> dict[str, Any]:
 
 
 def _event_kind(event: StructuredEvent | RemoraEvent) -> EventKind:
-    if isinstance(event, (GraphStartEvent, GraphCompleteEvent, GraphErrorEvent)):
-        return EventKind.GRAPH
-    if isinstance(event, (AgentStartEvent, AgentCompleteEvent, AgentErrorEvent, AgentSkippedEvent)):
+    if isinstance(event, (AgentStartEvent, AgentCompleteEvent, AgentErrorEvent)):
         return EventKind.AGENT
     if isinstance(event, (HumanInputRequestEvent, HumanInputResponseEvent)):
         return EventKind.HUMAN
@@ -130,18 +124,6 @@ class UiStateProjector:
         envelope = normalize_event(event)
         self.events.append(envelope)
 
-        if isinstance(event, GraphStartEvent):
-            self.total_agents = event.node_count
-            self.completed_agents = 0
-            self.failed_agents = 0
-            return
-
-        if isinstance(event, GraphCompleteEvent):
-            self.completed_agents = event.completed_count
-            self.failed_agents = event.failed_count
-            self.total_agents = max(self.total_agents, event.completed_count + event.failed_count)
-            return
-
         if isinstance(event, AgentStartEvent):
             self.agent_states[event.agent_id] = {
                 "state": "started",
@@ -161,12 +143,11 @@ class UiStateProjector:
         elif isinstance(event, HumanInputResponseEvent):
             self.blocked.pop(event.request_id, None)
 
-        elif isinstance(event, (AgentCompleteEvent, AgentErrorEvent, AgentSkippedEvent)):
+        elif isinstance(event, (AgentCompleteEvent, AgentErrorEvent)):
             if event.agent_id in self.agent_states:
                 state_map = {
                     AgentCompleteEvent: "completed",
                     AgentErrorEvent: "failed",
-                    AgentSkippedEvent: "skipped",
                 }
                 self.agent_states[event.agent_id]["state"] = state_map[type(event)]
             if isinstance(event, AgentCompleteEvent):

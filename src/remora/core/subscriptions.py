@@ -184,6 +184,18 @@ class SubscriptionRegistry:
         self._conn.commit()
         return cursor.rowcount
 
+    async def unregister(self, subscription_id: int) -> bool:
+        """Remove a specific subscription by ID."""
+        if self._conn is None:
+            await self.initialize()
+
+        cursor = self._conn.execute(
+            "DELETE FROM subscriptions WHERE id = ?",
+            (subscription_id,),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
     async def get_subscriptions(self, agent_id: str) -> list[Subscription]:
         """Get all subscriptions for an agent."""
         if self._conn is None:

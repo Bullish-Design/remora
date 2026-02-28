@@ -22,7 +22,9 @@ from structured_agents.types import Message
 from remora.core.agent_state import AgentState
 from remora.core.discovery import CSTNode
 from remora.core.event_store import EventStore
+from remora.core.events import AgentMessageEvent
 from remora.core.subscriptions import SubscriptionRegistry
+from remora.core.swarm_state import AgentMetadata, SwarmState
 from remora.core.tools.grail import build_virtual_fs, discover_grail_tools
 from remora.core.workspace import CairnDataProvider
 from remora.core.cairn_bridge import CairnWorkspaceService
@@ -44,6 +46,7 @@ class SwarmExecutor:
         event_bus: "EventBus | None",
         event_store: EventStore,
         subscriptions: SubscriptionRegistry,
+        swarm_state: SwarmState,
         swarm_id: str,
         project_root: Path,
     ):
@@ -51,6 +54,7 @@ class SwarmExecutor:
         self._event_bus = event_bus
         self._event_store = event_store
         self._subscriptions = subscriptions
+        self._swarm_state = swarm_state
         self._swarm_id = swarm_id
         self._project_root = project_root
         self._path_resolver = PathResolver(project_root)
@@ -91,8 +95,71 @@ class SwarmExecutor:
         async def _register_sub(agent_id: str, pattern: Any) -> None:
             await self._subscriptions.register(agent_id, pattern)
 
+        async def _unsubscribe_subscription(subscription_id: int) -> str:
+            """Remove a subscription by ID."""
+            removed = await self._subscriptions.unregister(subscription_id)
+            if removed:
+                return f"Subscription {subscription_id} removed."
+            return f"No subscription found for {subscription_id}."
+
+        async def _broadcast(to_pattern: str, content: str) -> str:
+            """Broadcast a message to multiple agents."""
+            if not emit_event:
+                return "Error: Swarm event emitter is not configured."
+            metadata = await self._swarm_state.get_agent(state.agent_id)
+            if metadata is None:
+                return "Error: Agent metadata is unavailable."
+
+            agents = await self._swarm_state.list_agents()
+            pattern = to_pattern.lower()
+
+            if pattern == "children":
+                targets = [agent.agent_id for agent in agents if agent.parent_id == state.agent_id]
+            elif pattern == "siblings":
+                if not metadata.parent_id:
+                    return "Error: No parent metadata available for sibling broadcast."
+                targets = [
+                    agent.agent_id
+                    for agent in agents
+                    if agent.parent_id == metadata.parent_id and agent.agent_id != state.agent_id
+                ]
+            elif pattern.startswith("file:"):
+                file_path = to_pattern[5:].strip()
+                targets = [
+                    agent.agent_id
+                    for agent in agents
+                    if agent.file_path == file_path or agent.file_path.endswith(file_path)
+                ]
+            else:
+                return f"Unknown broadcast pattern: {to_pattern}"
+
+            if not targets:
+                return "No agents matched the broadcast pattern."
+
+            for target in targets:
+                event = AgentMessageEvent(
+                    from_agent=state.agent_id,
+                    to_agent=target,
+                    content=content,
+                    correlation_id=externals.get("correlation_id"),
+                )
+                await emit_event("AgentMessageEvent", event)
+
+            return f"Broadcast sent to {len(targets)} agents via {to_pattern}."
+
+        async def _query_agents(filter_type: str | None = None) -> list[AgentMetadata]:
+            """Query agent metadata filtered by node type."""
+            agents = await self._swarm_state.list_agents()
+            if not filter_type:
+                return agents
+            target_type = filter_type.lower()
+            return [agent for agent in agents if agent.node_type.lower() == target_type]
+
         externals["emit_event"] = _emit_event
         externals["register_subscription"] = _register_sub
+        externals["unsubscribe_subscription"] = _unsubscribe_subscription
+        externals["broadcast"] = _broadcast
+        externals["query_agents"] = _query_agents
 
         data_provider = CairnDataProvider(workspace, self._path_resolver)
         node = _state_to_cst_node(state)

@@ -42,6 +42,12 @@ class WorkspaceError(RemoraError):
     pass
 
 
+class SwarmError(RemoraError):
+    """Error in swarm operations."""
+
+    pass
+
+
 __all__ = [
     "RemoraError",
     "ConfigError",
@@ -49,4 +55,5 @@ __all__ = [
     "GraphError",
     "ExecutionError",
     "WorkspaceError",
+    "SwarmError",
 ]
