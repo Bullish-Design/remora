@@ -17,6 +17,10 @@ from remora.core.event_bus import EventBus
 from remora.core.events import ToolCallEvent, ToolResultEvent
 from remora.core.tool_registry import ToolRegistry
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class ChatServiceState:
     """Holds service state."""
@@ -54,11 +58,13 @@ async def create_session(request: Request) -> JSONResponse:
     state.sessions[session.session_id] = session
     state.event_buses[session.session_id] = event_bus
 
-    return JSONResponse({
-        "session_id": session.session_id,
-        "workspace_path": str(workspace),
-        "tool_presets": config.tool_presets,
-    })
+    return JSONResponse(
+        {
+            "session_id": session.session_id,
+            "workspace_path": str(workspace),
+            "tool_presets": config.tool_presets,
+        }
+    )
 
 
 async def delete_session(request: Request) -> Response:
@@ -90,16 +96,18 @@ async def send_message(request: Request) -> JSONResponse:
 
     try:
         response = await session.send(content)
-        return JSONResponse({
-            "message": {
-                "id": response.message.id,
-                "role": response.message.role,
-                "content": response.message.content,
-                "timestamp": response.message.timestamp,
-                "tool_calls": response.message.tool_calls,
-            },
-            "turn_count": response.turn_count,
-        })
+        return JSONResponse(
+            {
+                "message": {
+                    "id": response.message.id,
+                    "role": response.message.role,
+                    "content": response.message.content,
+                    "timestamp": response.message.timestamp,
+                    "tool_calls": response.message.tool_calls,
+                },
+                "turn_count": response.turn_count,
+            }
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -113,18 +121,20 @@ async def get_history(request: Request) -> JSONResponse:
 
     session = state.sessions[session_id]
 
-    return JSONResponse({
-        "messages": [
-            {
-                "id": m.id,
-                "role": m.role,
-                "content": m.content,
-                "timestamp": m.timestamp,
-                "tool_calls": m.tool_calls,
-            }
-            for m in session.history
-        ]
-    })
+    return JSONResponse(
+        {
+            "messages": [
+                {
+                    "id": m.id,
+                    "role": m.role,
+                    "content": m.content,
+                    "timestamp": m.timestamp,
+                    "tool_calls": m.tool_calls,
+                }
+                for m in session.history
+            ]
+        }
+    )
 
 
 async def stream_events(request: Request) -> EventSourceResponse:
@@ -142,21 +152,25 @@ async def stream_events(request: Request) -> EventSourceResponse:
                 if isinstance(event, ToolCallEvent):
                     yield {
                         "event": "tool_call",
-                        "data": json.dumps({
-                            "name": event.tool_name,
-                            "arguments": event.arguments,
-                            "timestamp": event.timestamp,
-                        }),
+                        "data": json.dumps(
+                            {
+                                "name": event.tool_name,
+                                "arguments": event.arguments,
+                                "timestamp": event.timestamp,
+                            }
+                        ),
                     }
                 elif isinstance(event, ToolResultEvent):
                     yield {
                         "event": "tool_result",
-                        "data": json.dumps({
-                            "name": event.tool_name,
-                            "output": event.output_preview,
-                            "is_error": event.is_error,
-                            "timestamp": event.timestamp,
-                        }),
+                        "data": json.dumps(
+                            {
+                                "name": event.tool_name,
+                                "output": event.output_preview,
+                                "is_error": event.is_error,
+                                "timestamp": event.timestamp,
+                            }
+                        ),
                     }
 
     return EventSourceResponse(event_generator())
@@ -164,17 +178,21 @@ async def stream_events(request: Request) -> EventSourceResponse:
 
 async def list_tools(request: Request) -> JSONResponse:
     """List available tool presets."""
-    return JSONResponse({
-        "presets": ToolRegistry.list_presets(),
-    })
+    return JSONResponse(
+        {
+            "presets": ToolRegistry.list_presets(),
+        }
+    )
 
 
 async def health(request: Request) -> JSONResponse:
     """Health check."""
-    return JSONResponse({
-        "status": "ok",
-        "sessions": len(state.sessions),
-    })
+    return JSONResponse(
+        {
+            "status": "ok",
+            "sessions": len(state.sessions),
+        }
+    )
 
 
 # Routes
@@ -191,6 +209,28 @@ routes = [
 app = Starlette(routes=routes)
 
 
+# Add startup event:
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Chat service starting...")
+    try:
+        from structured_agents import AgentKernel
+
+        logger.info("structured-agents: OK")
+    except ImportError as e:
+        logger.error(f"structured-agents not available: {e}")
+        logger.error("Install with: pip install structured-agents")
+
+    try:
+        from cairn import Cairn
+
+        logger.info("cairn: OK")
+    except ImportError as e:
+        logger.error(f"cairn not available: {e}")
+
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="127.0.0.1", port=8420)
+
