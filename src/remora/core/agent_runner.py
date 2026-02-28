@@ -1,0 +1,244 @@
+"""Agent Runner for reactive execution.
+
+The AgentRunner consumes triggers from EventStore and executes agent turns.
+It implements cascade prevention via depth limits and cooldowns.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from remora.core.config import RemoraConfig
+from remora.core.event_store import EventStore
+from remora.core.events import (
+    AgentCompleteEvent,
+    AgentErrorEvent,
+    AgentStartEvent,
+    RemoraEvent,
+)
+from remora.core.subscriptions import SubscriptionRegistry
+from remora.core.swarm_state import SwarmState
+from remora.core.agent_state import AgentState, load as load_agent_state, save as save_agent_state
+from remora.core.reconciler import get_agent_state_path
+
+if TYPE_CHECKING:
+    from remora.core.event_bus import EventBus
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ExecutionContext:
+    """Context for a single agent turn."""
+
+    agent_id: str
+    trigger_event: RemoraEvent
+    state: AgentState
+
+
+class AgentRunner:
+    """Reactive agent runner that processes EventStore triggers."""
+
+    def __init__(
+        self,
+        event_store: EventStore,
+        subscriptions: SubscriptionRegistry,
+        swarm_state: SwarmState,
+        config: RemoraConfig,
+        event_bus: "EventBus | None" = None,
+        project_root: Path | None = None,
+    ):
+        self._event_store = event_store
+        self._subscriptions = subscriptions
+        self._swarm_state = swarm_state
+        self._config = config
+        self._event_bus = event_bus
+        self._project_root = project_root or Path.cwd()
+
+        self._max_concurrency = config.execution.max_concurrency
+        self._max_trigger_depth = getattr(config, "max_trigger_depth", 5)
+        self._trigger_cooldown_ms = getattr(config, "trigger_cooldown_ms", 1000)
+
+        self._correlation_depth: dict[str, int] = {}
+        self._last_trigger_time: dict[str, float] = {}
+
+        self._semaphore = asyncio.Semaphore(self._max_concurrency)
+        self._running = False
+        self._tasks: set[asyncio.Task] = set()
+
+    async def run_forever(self) -> None:
+        """Main loop - process triggers from EventStore."""
+        self._running = True
+        logger.info("AgentRunner started")
+
+        try:
+            async for agent_id, event_id, event in self._event_store.get_triggers():
+                if not self._running:
+                    break
+
+                if not self._check_cooldown(agent_id):
+                    logger.debug(f"Skipping trigger for {agent_id} due to cooldown")
+                    continue
+
+                correlation_id = getattr(event, "correlation_id", None)
+                if not self._check_depth_limit(correlation_id):
+                    logger.warning(f"Skipping trigger for {agent_id} due to depth limit")
+                    continue
+
+                task = asyncio.create_task(self._process_trigger(agent_id, event_id, event))
+                self._tasks.add(task)
+                task.add_done_callback(self._tasks.discard)
+
+        except asyncio.CancelledError:
+            logger.info("AgentRunner cancelled")
+        finally:
+            await self._cancel_pending()
+
+    def _check_cooldown(self, agent_id: str) -> bool:
+        """Check if the agent is within cooldown period."""
+        now = time.time() * 1000
+        last_time = self._last_trigger_time.get(agent_id, 0)
+        if now - last_time < self._trigger_cooldown_ms:
+            return False
+        self._last_trigger_time[agent_id] = now
+        return True
+
+    def _check_depth_limit(self, correlation_id: str | None) -> bool:
+        """Check if the cascade depth limit is reached."""
+        if correlation_id is None:
+            return True
+
+        depth = self._correlation_depth.get(correlation_id, 0)
+        return depth < self._max_trigger_depth
+
+    async def _process_trigger(
+        self,
+        agent_id: str,
+        event_id: int,
+        event: RemoraEvent,
+    ) -> None:
+        """Process a single trigger."""
+        async with self._semaphore:
+            correlation_id = getattr(event, "correlation_id", None)
+
+            if correlation_id:
+                self._correlation_depth[correlation_id] = self._correlation_depth.get(correlation_id, 0) + 1
+
+            try:
+                await self._execute_turn(agent_id, event)
+            except Exception as e:
+                logger.error(f"Error processing trigger for {agent_id}: {e}")
+                await self._emit_error(agent_id, str(e))
+            finally:
+                if correlation_id:
+                    self._correlation_depth[correlation_id] = self._correlation_depth.get(correlation_id, 1) - 1
+                    if self._correlation_depth[correlation_id] <= 0:
+                        del self._correlation_depth[correlation_id]
+
+    async def _execute_turn(self, agent_id: str, trigger_event: RemoraEvent) -> None:
+        """Execute a single agent turn."""
+        state_path = get_agent_state_path(
+            self._project_root / ".remora",
+            agent_id,
+        )
+        state = load_agent_state(state_path)
+        if state is None:
+            logger.warning(f"No state found for agent {agent_id}")
+            return
+
+        context = ExecutionContext(
+            agent_id=agent_id,
+            trigger_event=trigger_event,
+            state=state,
+        )
+
+        if self._event_bus:
+            await self._event_bus.emit(
+                AgentStartEvent(
+                    graph_id=getattr(trigger_event, "graph_id", ""),
+                    agent_id=agent_id,
+                    node_name=state.node_type,
+                )
+            )
+
+        try:
+            result = await self._run_agent(context)
+
+            state.chat_history.append(
+                {
+                    "trigger": trigger_event.__class__.__name__,
+                    "result": "success",
+                }
+            )
+            save_agent_state(state_path, state)
+
+            if self._event_bus:
+                await self._event_bus.emit(
+                    AgentCompleteEvent(
+                        graph_id=getattr(trigger_event, "graph_id", ""),
+                        agent_id=agent_id,
+                        result_summary=str(result)[:200] if result else "",
+                    )
+                )
+
+        except Exception as e:
+            state.chat_history.append(
+                {
+                    "trigger": trigger_event.__class__.__name__,
+                    "result": "error",
+                    "error": str(e),
+                }
+            )
+            save_agent_state(state_path, state)
+
+            if self._event_bus:
+                await self._event_bus.emit(
+                    AgentErrorEvent(
+                        graph_id=getattr(trigger_event, "graph_id", ""),
+                        agent_id=agent_id,
+                        error=str(e),
+                    )
+                )
+
+    async def _run_agent(self, context: ExecutionContext) -> Any:
+        """Run the actual agent logic.
+
+        This is a placeholder - the actual implementation would
+        integrate with the kernel/executor.
+        """
+        logger.info(f"Running agent {context.agent_id} with trigger {type(context.trigger_event).__name__}")
+        return "executed"
+
+    async def _emit_error(self, agent_id: str, error: str) -> None:
+        """Emit an error event."""
+        if self._event_bus:
+            await self._event_bus.emit(
+                AgentErrorEvent(
+                    graph_id="",
+                    agent_id=agent_id,
+                    error=error,
+                )
+            )
+
+    async def _cancel_pending(self) -> None:
+        """Cancel all pending tasks."""
+        for task in self._tasks:
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks.clear()
+
+    async def stop(self) -> None:
+        """Stop the runner gracefully."""
+        self._running = False
+        await self._cancel_pending()
+        await self._event_store.close()
+        self._subscriptions.close()
+
+
+__all__ = ["AgentRunner", "ExecutionContext"]

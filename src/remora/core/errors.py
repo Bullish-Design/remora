@@ -36,12 +36,6 @@ class ExecutionError(RemoraError):
     pass
 
 
-class CheckpointError(RemoraError):
-    """Error during checkpoint save or restore."""
-
-    pass
-
-
 class WorkspaceError(RemoraError):
     """Error in workspace operations."""
 
@@ -54,6 +48,5 @@ __all__ = [
     "DiscoveryError",
     "GraphError",
     "ExecutionError",
-    "CheckpointError",
     "WorkspaceError",
 ]

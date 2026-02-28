@@ -14,7 +14,6 @@ import click
 
 from remora.adapters.starlette import create_app
 from remora.core.config import ConfigError, load_config
-from remora.core.container import RemoraContainer
 from remora.core.events import GraphCompleteEvent, GraphErrorEvent
 from remora.models import RunRequest
 from remora.service.api import RemoraService
@@ -38,8 +37,7 @@ def serve(host: str, port: int, project_root: str | None, config_path: str | Non
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
     root = Path(project_root) if project_root else Path.cwd()
-    container = RemoraContainer.create(config=config, project_root=root)
-    service = RemoraService(container=container)
+    service = RemoraService.create_default(config=config, project_root=root)
     app = create_app(service)
 
     import uvicorn
@@ -61,8 +59,7 @@ def run(target_path: str, config_path: str | None, events: bool, no_wait: bool) 
 
     project_root = _resolve_project_root([target_path])
     target_path = _normalize_target_path(target_path, project_root)
-    container = RemoraContainer.create(config=config, project_root=project_root)
-    service = RemoraService(container=container)
+    service = RemoraService.create_default(config=config, project_root=project_root)
 
     async def _run() -> None:
         event_task: asyncio.Task | None = None

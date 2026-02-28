@@ -1,22 +1,19 @@
 """Remora public API surface."""
 
-from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
+from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.cairn_externals import CairnExternals
-from remora.core.checkpoint import CheckpointManager
 from remora.core.config import (
     BundleConfig,
     ConfigError,
     DiscoveryConfig,
     ErrorPolicy,
     ExecutionConfig,
-    IndexerConfig,
     ModelConfig,
     RemoraConfig,
     WorkspaceConfig,
     load_config,
     serialize_config,
 )
-from remora.core.container import RemoraContainer, ScopedContainer
 from remora.core.context import ContextBuilder, RecentAction
 from remora.core.discovery import (
     CSTNode,
@@ -27,7 +24,7 @@ from remora.core.discovery import (
     discover,
 )
 from remora.core.errors import (
-    CheckpointError,
+    ConfigError,
     DiscoveryError,
     ExecutionError,
     GraphError,
@@ -41,8 +38,6 @@ from remora.core.events import (
     AgentErrorEvent,
     AgentSkippedEvent,
     AgentStartEvent,
-    CheckpointRestoredEvent,
-    CheckpointSavedEvent,
     GraphCompleteEvent,
     GraphErrorEvent,
     GraphStartEvent,
@@ -59,13 +54,11 @@ from remora.core.events import (
 )
 from remora.core.executor import AgentState, ExecutorState, GraphExecutor, ResultSummary
 from remora.core.graph import AgentNode, build_graph, get_execution_batches
-from remora.core.streaming_sync import FileWatcher, StreamingSyncManager, SyncStats
 from remora.core.tools import RemoraGrailTool, build_virtual_fs, discover_grail_tools
 from remora.core.workspace import AgentWorkspace, CairnDataProvider, CairnResultHandler, WorkspaceManager
 from remora.utils import PathResolver
 
 __all__ = [
-    "CheckpointError",
     "ConfigError",
     "DiscoveryError",
     "ExecutionError",
@@ -76,7 +69,6 @@ __all__ = [
     "DiscoveryConfig",
     "ErrorPolicy",
     "ExecutionConfig",
-    "IndexerConfig",
     "ModelConfig",
     "RemoraConfig",
     "WorkspaceConfig",
@@ -86,8 +78,6 @@ __all__ = [
     "AgentErrorEvent",
     "AgentSkippedEvent",
     "AgentStartEvent",
-    "CheckpointRestoredEvent",
-    "CheckpointSavedEvent",
     "GraphCompleteEvent",
     "GraphErrorEvent",
     "GraphStartEvent",
@@ -125,16 +115,9 @@ __all__ = [
     "CairnExternals",
     "CairnResultHandler",
     "CairnWorkspaceService",
-    "SyncMode",
     "WorkspaceManager",
-    "RemoraContainer",
-    "ScopedContainer",
-    "FileWatcher",
-    "StreamingSyncManager",
-    "SyncStats",
     "RemoraGrailTool",
     "build_virtual_fs",
     "discover_grail_tools",
-    "CheckpointManager",
     "PathResolver",
 ]

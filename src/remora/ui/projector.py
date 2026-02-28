@@ -15,8 +15,6 @@ from remora.core.events import (
     AgentErrorEvent,
     AgentSkippedEvent,
     AgentStartEvent,
-    CheckpointRestoredEvent,
-    CheckpointSavedEvent,
     GraphCompleteEvent,
     GraphErrorEvent,
     GraphStartEvent,
@@ -41,7 +39,6 @@ class EventKind(str, Enum):
     GRAPH = "graph"
     AGENT = "agent"
     HUMAN = "human"
-    CHECKPOINT = "checkpoint"
     TOOL = "tool"
     MODEL = "model"
     KERNEL = "kernel"
@@ -85,8 +82,6 @@ def _event_kind(event: StructuredEvent | RemoraEvent) -> EventKind:
         return EventKind.AGENT
     if isinstance(event, (HumanInputRequestEvent, HumanInputResponseEvent)):
         return EventKind.HUMAN
-    if isinstance(event, (CheckpointSavedEvent, CheckpointRestoredEvent)):
-        return EventKind.CHECKPOINT
     if isinstance(event, (ToolCallEvent, ToolResultEvent)):
         return EventKind.TOOL
     if isinstance(event, (ModelRequestEvent, ModelResponseEvent)):

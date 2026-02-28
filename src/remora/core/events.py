@@ -131,25 +131,45 @@ class HumanInputResponseEvent:
 
 
 # ============================================================================
-# Checkpoint Events
+# Reactive Swarm Events (for subscription-based routing)
 # ============================================================================
 
 
 @dataclass(frozen=True, slots=True)
-class CheckpointSavedEvent:
-    """Emitted when a checkpoint is saved."""
+class AgentMessageEvent:
+    """Message sent between agents."""
 
-    graph_id: str
-    checkpoint_id: str
+    from_agent: str
+    to_agent: str
+    content: str
+    tags: list[str] = field(default_factory=list)
+    correlation_id: str | None = None
     timestamp: float = field(default_factory=time.time)
 
 
 @dataclass(frozen=True, slots=True)
-class CheckpointRestoredEvent:
-    """Emitted when execution resumes from checkpoint."""
+class FileSavedEvent:
+    """A file was saved to disk."""
 
-    graph_id: str
-    checkpoint_id: str
+    path: str
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass(frozen=True, slots=True)
+class ContentChangedEvent:
+    """File content was modified."""
+
+    path: str
+    diff: str | None = None
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass(frozen=True, slots=True)
+class ManualTriggerEvent:
+    """Manual trigger to start an agent."""
+
+    agent_id: str
+    reason: str
     timestamp: float = field(default_factory=time.time)
 
 
@@ -173,9 +193,11 @@ RemoraEvent = (
     HumanInputRequestEvent
     | HumanInputResponseEvent
     |
-    # Checkpoint events
-    CheckpointSavedEvent
-    | CheckpointRestoredEvent
+    # Reactive swarm events
+    AgentMessageEvent
+    | FileSavedEvent
+    | ContentChangedEvent
+    | ManualTriggerEvent
     |
     # Re-exported structured-agents events
     KernelStartEvent
@@ -198,8 +220,11 @@ __all__ = [
     "AgentSkippedEvent",
     "HumanInputRequestEvent",
     "HumanInputResponseEvent",
-    "CheckpointSavedEvent",
-    "CheckpointRestoredEvent",
+    # Reactive swarm events
+    "AgentMessageEvent",
+    "FileSavedEvent",
+    "ContentChangedEvent",
+    "ManualTriggerEvent",
     # Re-exports
     "KernelStartEvent",
     "KernelEndEvent",

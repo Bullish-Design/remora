@@ -1,22 +1,19 @@
 """Core Remora runtime (framework-agnostic)."""
 
-from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
+from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.cairn_externals import CairnExternals
-from remora.core.checkpoint import CheckpointManager
 from remora.core.config import (
     BundleConfig,
     ConfigError,
     DiscoveryConfig,
     ErrorPolicy,
     ExecutionConfig,
-    IndexerConfig,
     ModelConfig,
     RemoraConfig,
     WorkspaceConfig,
     load_config,
     serialize_config,
 )
-from remora.core.container import RemoraContainer, ScopedContainer
 from remora.core.context import ContextBuilder, RecentAction
 from remora.core.discovery import (
     CSTNode,
@@ -27,7 +24,6 @@ from remora.core.discovery import (
     discover,
 )
 from remora.core.errors import (
-    CheckpointError,
     DiscoveryError,
     ExecutionError,
     GraphError,
@@ -41,8 +37,6 @@ from remora.core.events import (
     AgentErrorEvent,
     AgentSkippedEvent,
     AgentStartEvent,
-    CheckpointRestoredEvent,
-    CheckpointSavedEvent,
     GraphCompleteEvent,
     GraphErrorEvent,
     GraphStartEvent,
@@ -59,7 +53,16 @@ from remora.core.events import (
 )
 from remora.core.executor import AgentState, ExecutorState, GraphExecutor, ResultSummary
 from remora.core.graph import AgentNode, build_graph, get_execution_batches
-from remora.core.streaming_sync import FileWatcher, StreamingSyncManager, SyncStats
+from remora.core.reconciler import (
+    get_agent_dir,
+    get_agent_state_path,
+    get_agent_workspace_path,
+    reconcile_on_startup,
+)
+from remora.core.subscriptions import Subscription, SubscriptionPattern, SubscriptionRegistry
+from remora.core.swarm_state import AgentMetadata, SwarmState
+from remora.core.agent_state import AgentState as AgentRuntimeState
+from remora.core.agent_runner import AgentRunner, ExecutionContext
 from remora.core.tools import RemoraGrailTool, build_virtual_fs, discover_grail_tools
 from remora.core.workspace import AgentWorkspace, CairnDataProvider, CairnResultHandler, WorkspaceManager
 
@@ -70,17 +73,16 @@ __all__ = [
     "AgentStartEvent",
     "AgentNode",
     "AgentState",
+    "AgentRuntimeState",
+    "AgentRunner",
     "AgentWorkspace",
+    "AgentMetadata",
     "BundleConfig",
     "CSTNode",
     "CairnDataProvider",
     "CairnExternals",
     "CairnResultHandler",
     "CairnWorkspaceService",
-    "CheckpointError",
-    "CheckpointManager",
-    "CheckpointRestoredEvent",
-    "CheckpointSavedEvent",
     "ConfigError",
     "ContextBuilder",
     "DiscoveryConfig",
@@ -92,6 +94,7 @@ __all__ = [
     "EventStore",
     "ExecutionConfig",
     "ExecutionError",
+    "ExecutionContext",
     "ExecutorState",
     "GraphCompleteEvent",
     "GraphError",
@@ -100,7 +103,6 @@ __all__ = [
     "GraphStartEvent",
     "HumanInputRequestEvent",
     "HumanInputResponseEvent",
-    "IndexerConfig",
     "KernelEndEvent",
     "KernelStartEvent",
     "LANGUAGE_EXTENSIONS",
@@ -114,6 +116,10 @@ __all__ = [
     "RemoraEvent",
     "RemoraGrailTool",
     "ResultSummary",
+    "SwarmState",
+    "Subscription",
+    "SubscriptionPattern",
+    "SubscriptionRegistry",
     "ToolCallEvent",
     "ToolResultEvent",
     "TreeSitterDiscoverer",
@@ -127,12 +133,9 @@ __all__ = [
     "discover",
     "discover_grail_tools",
     "get_execution_batches",
+    "get_agent_dir",
+    "get_agent_state_path",
+    "get_agent_workspace_path",
     "load_config",
-    "RemoraContainer",
-    "SyncMode",
-    "ScopedContainer",
-    "FileWatcher",
-    "StreamingSyncManager",
-    "SyncStats",
     "serialize_config",
 ]

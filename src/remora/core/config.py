@@ -63,14 +63,6 @@ class ExecutionConfig:
     truncation_limit: int = 1024
 
 
-@dataclass(frozen=True, slots=True)
-class IndexerConfig:
-    """Indexer daemon configuration."""
-
-    watch_paths: tuple[str, ...] = ("src/",)
-    store_path: str = ".remora/index"
-
-
 DEFAULT_IGNORE_PATTERNS: tuple[str, ...] = (
     ".agentfs",
     ".git",
@@ -121,7 +113,6 @@ class RemoraConfig:
     discovery: DiscoveryConfig = field(default_factory=DiscoveryConfig)
     bundles: BundleConfig = field(default_factory=BundleConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
-    indexer: IndexerConfig = field(default_factory=IndexerConfig)
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
 
@@ -229,7 +220,6 @@ def _build_config(data: dict[str, Any]) -> RemoraConfig:
         discovery=get_section("discovery", DiscoveryConfig),
         bundles=get_section("bundles", BundleConfig),
         execution=get_section("execution", ExecutionConfig),
-        indexer=get_section("indexer", IndexerConfig),
         workspace=get_section("workspace", WorkspaceConfig),
         model=get_section("model", ModelConfig),
     )
@@ -257,7 +247,6 @@ def serialize_config(config: RemoraConfig) -> dict[str, Any]:
         "discovery": section_to_dict(config.discovery),
         "bundles": section_to_dict(config.bundles),
         "execution": section_to_dict(config.execution),
-        "indexer": section_to_dict(config.indexer),
         "workspace": section_to_dict(config.workspace),
         "model": section_to_dict(config.model),
     }
@@ -270,7 +259,6 @@ __all__ = [
     "DiscoveryConfig",
     "BundleConfig",
     "ExecutionConfig",
-    "IndexerConfig",
     "WorkspaceConfig",
     "ModelConfig",
     "load_config",

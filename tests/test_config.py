@@ -70,7 +70,6 @@ def test_serialize_config_round_trips(tmp_path: Path) -> None:
         "ignore_patterns": list(DEFAULT_IGNORE_PATTERNS),
         "ignore_dotfiles": True,
     }
-    assert serialized["indexer"] == {"watch_paths": ["src/"], "store_path": ".remora/index"}
 
 
 def test_missing_config_file_returns_defaults(tmp_path: Path) -> None:

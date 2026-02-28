@@ -34,7 +34,6 @@ from remora.core.events import (
     AgentErrorEvent,
     AgentSkippedEvent,
     AgentStartEvent,
-    CheckpointRestoredEvent,
     GraphCompleteEvent,
     GraphErrorEvent,
     GraphStartEvent,
@@ -43,7 +42,7 @@ from remora.core.events import (
 )
 from remora.core.event_bus import EventBus
 from remora.core.graph import AgentNode, get_execution_batches
-from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
+from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.tools.grail import build_virtual_fs, discover_grail_tools
 from remora.core.workspace import CairnDataProvider
 from remora.utils import PathLike, PathResolver, normalize_path, truncate
@@ -122,7 +121,7 @@ class ResultSummary:
 
 @dataclass
 class ExecutorState:
-    """State of graph execution for checkpointing."""
+    """State of graph execution."""
 
     graph_id: str
     nodes: dict[str, AgentNode]
@@ -148,7 +147,6 @@ class GraphExecutor:
     - Bounded concurrency via semaphore
     - Error policies (STOP_GRAPH, SKIP_DOWNSTREAM, CONTINUE)
     - Event emission at lifecycle points
-    - Checkpoint save/restore support
     """
 
     def __init__(
@@ -181,23 +179,6 @@ class GraphExecutor:
 
         return await self._run_with_state(graph, state, emit_graph_start=True)
 
-    async def resume(
-        self,
-        state: ExecutorState,
-        *,
-        checkpoint_id: str | None = None,
-    ) -> dict[str, ResultSummary]:
-        """Resume execution from a restored checkpoint state."""
-        graph = list(state.nodes.values())
-        if checkpoint_id:
-            await self.event_bus.emit(
-                CheckpointRestoredEvent(
-                    graph_id=state.graph_id,
-                    checkpoint_id=checkpoint_id,
-                )
-            )
-        return await self._run_with_state(graph, state, emit_graph_start=False)
-
     async def _run_with_state(
         self,
         graph: list[AgentNode],
@@ -220,7 +201,7 @@ class GraphExecutor:
             state.graph_id,
             project_root=self._path_resolver.project_root,
         )
-        await workspace_service.initialize(sync_mode=SyncMode.FULL)
+        await workspace_service.initialize()
         semaphore = asyncio.Semaphore(self.config.execution.max_concurrency)
 
         try:
@@ -228,9 +209,7 @@ class GraphExecutor:
 
             for batch in batches:
                 runnable = [
-                    n
-                    for n in batch
-                    if n.id in state.pending and n.id not in state.skipped and n.id not in state.failed
+                    n for n in batch if n.id in state.pending and n.id not in state.skipped and n.id not in state.failed
                 ]
 
                 if not runnable:
@@ -439,11 +418,7 @@ class GraphExecutor:
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             model_data = data.get("model")
             if isinstance(model_data, dict):
-                override = (
-                    model_data.get("id")
-                    or model_data.get("name")
-                    or model_data.get("model")
-                )
+                override = model_data.get("id") or model_data.get("name") or model_data.get("model")
         except Exception:
             override = None
 

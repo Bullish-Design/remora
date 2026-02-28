@@ -7,22 +7,42 @@ import json
 import sqlite3
 import time
 from dataclasses import asdict, is_dataclass
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from structured_agents.events import Event as StructuredEvent
 
 from remora.core.events import RemoraEvent
 from remora.utils import PathLike, normalize_path
 
+if TYPE_CHECKING:
+    from remora.core.event_bus import EventBus
+    from remora.core.subscriptions import SubscriptionRegistry
+
 
 class EventStore:
-    """SQLite-backed event store for event sourcing."""
+    """SQLite-backed event store for event sourcing with reactive triggers."""
 
-    def __init__(self, db_path: PathLike):
+    def __init__(
+        self,
+        db_path: PathLike,
+        subscriptions: "SubscriptionRegistry | None" = None,
+        event_bus: "EventBus | None" = None,
+    ):
         self._db_path = normalize_path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
         self._lock = asyncio.Lock()
+        self._subscriptions = subscriptions
+        self._event_bus = event_bus
+        self._trigger_queue: asyncio.Queue[tuple[str, int, RemoraEvent]] | None = None
+
+    def set_subscriptions(self, subscriptions: "SubscriptionRegistry") -> None:
+        """Set the subscription registry for trigger matching."""
+        self._subscriptions = subscriptions
+
+    def set_event_bus(self, event_bus: "EventBus") -> None:
+        """Set the event bus for UI updates."""
+        self._event_bus = event_bus
 
     async def initialize(self) -> None:
         """Initialize the database and create tables."""
@@ -45,7 +65,11 @@ class EventStore:
                     event_type TEXT NOT NULL,
                     payload TEXT NOT NULL,
                     timestamp REAL NOT NULL,
-                    created_at REAL NOT NULL
+                    created_at REAL NOT NULL,
+                    from_agent TEXT,
+                    to_agent TEXT,
+                    correlation_id TEXT,
+                    tags TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_events_graph_id
@@ -56,7 +80,44 @@ class EventStore:
 
                 CREATE INDEX IF NOT EXISTS idx_events_timestamp
                 ON events(timestamp);
+
+                CREATE INDEX IF NOT EXISTS idx_events_to_agent
+                ON events(to_agent);
                 """,
+            )
+
+            await self._migrate_routing_fields()
+
+            if self._subscriptions is not None:
+                self._trigger_queue = asyncio.Queue()
+
+    async def _migrate_routing_fields(self) -> None:
+        """Add routing fields to existing tables."""
+        cursor = await asyncio.to_thread(
+            self._conn.execute,
+            "PRAGMA table_info(events)",
+        )
+        columns = {row["name"] for row in cursor.fetchall()}
+
+        if "from_agent" not in columns:
+            await asyncio.to_thread(
+                self._conn.execute,
+                "ALTER TABLE events ADD COLUMN from_agent TEXT",
+            )
+        if "to_agent" not in columns:
+            await asyncio.to_thread(
+                self._conn.execute,
+                "ALTER TABLE events ADD COLUMN to_agent TEXT",
+            )
+        if "correlation_id" not in columns:
+            await asyncio.to_thread(
+                self._conn.execute,
+                "ALTER TABLE events ADD COLUMN correlation_id TEXT",
+            )
+        if "tags" not in columns:
+            await asyncio.to_thread(
+                self._conn.execute,
+                "ALTER TABLE events ADD COLUMN tags TEXT",
             )
 
     async def append(
@@ -75,17 +136,45 @@ class EventStore:
         timestamp = getattr(event, "timestamp", time.time())
         created_at = time.time()
 
+        from_agent = getattr(event, "from_agent", None)
+        to_agent = getattr(event, "to_agent", None)
+        correlation_id = getattr(event, "correlation_id", None)
+        tags = getattr(event, "tags", None)
+        tags_json = json.dumps(tags) if tags else None
+
         async with self._lock:
             cursor = await asyncio.to_thread(
                 self._conn.execute,
                 """
-                INSERT INTO events (graph_id, event_type, payload, timestamp, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO events (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (graph_id, event_type, payload, timestamp, created_at),
+                (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json),
             )
             await asyncio.to_thread(self._conn.commit)
-            return cursor.lastrowid or 0
+            event_id = cursor.lastrowid or 0
+
+        if self._trigger_queue is not None and self._subscriptions is not None:
+            matching_agents = await self._subscriptions.get_matching_agents(event)
+            for agent_id in matching_agents:
+                await self._trigger_queue.put((agent_id, event_id, event))
+
+        if self._event_bus is not None:
+            await self._event_bus.emit(event)
+
+        return event_id
+
+    async def get_triggers(self) -> AsyncIterator[tuple[str, int, RemoraEvent]]:
+        """Iterate over event triggers for matched subscriptions."""
+        if self._trigger_queue is None:
+            return
+
+        while True:
+            try:
+                trigger = await self._trigger_queue.get()
+                yield trigger
+            except asyncio.CancelledError:
+                break
 
     async def replay(
         self,
@@ -133,6 +222,9 @@ class EventStore:
             rows = await asyncio.to_thread(cursor.fetchall)
 
         for row in rows:
+            tags = row["tags"]
+            if tags:
+                tags = json.loads(tags)
             yield {
                 "id": row["id"],
                 "graph_id": row["graph_id"],
@@ -140,6 +232,10 @@ class EventStore:
                 "payload": json.loads(row["payload"]),
                 "timestamp": row["timestamp"],
                 "created_at": row["created_at"],
+                "from_agent": row["from_agent"],
+                "to_agent": row["to_agent"],
+                "correlation_id": row["correlation_id"],
+                "tags": tags,
             }
 
     async def get_graph_ids(
@@ -228,6 +324,7 @@ class EventStore:
             async with self._lock:
                 await asyncio.to_thread(self._conn.close)
                 self._conn = None
+        self._trigger_queue = None
 
     def _serialize_event(self, event: StructuredEvent | RemoraEvent) -> str:
         """Serialize an event to JSON."""

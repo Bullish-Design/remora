@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Any, AsyncIterator
 
-from remora.core.config import RemoraConfig
-from remora.core.container import RemoraContainer
+from remora.core.config import RemoraConfig, load_config
 from remora.core.event_bus import EventBus
+from remora.core.event_store import EventStore
 from remora.models import ConfigSnapshot, InputResponse, PlanRequest, PlanResponse, RunRequest, RunResponse
 from remora.service.datastar import render_patch, render_shell
 from remora.service.handlers import (
@@ -22,7 +23,7 @@ from remora.service.handlers import (
     handle_ui_snapshot,
 )
 from remora.ui.projector import UiStateProjector, normalize_event
-from remora.utils import PathLike
+from remora.utils import PathLike, normalize_path
 from remora.ui.view import render_dashboard
 
 
@@ -36,26 +37,36 @@ class RemoraService:
         config: RemoraConfig | None = None,
         config_path: PathLike | None = None,
         project_root: PathLike | None = None,
+        enable_event_store: bool = True,
     ) -> "RemoraService":
-        container = RemoraContainer.create(
-            config=config,
-            config_path=config_path,
-            project_root=project_root,
+        resolved_config = config or load_config(config_path)
+        resolved_root = normalize_path(project_root or Path.cwd()).resolve()
+        event_bus = EventBus()
+        event_store: EventStore | None = None
+        if enable_event_store:
+            store_path = resolved_root / ".remora/events/events.db"
+            event_store = EventStore(store_path)
+        return cls(
+            config=resolved_config,
+            project_root=resolved_root,
+            event_bus=event_bus,
+            event_store=event_store,
         )
-        return cls(container=container)
 
     def __init__(
         self,
         *,
-        container: RemoraContainer,
+        config: RemoraConfig,
+        project_root: Path,
+        event_bus: EventBus,
+        event_store: EventStore | None = None,
         projector: UiStateProjector | None = None,
         executor_factory: ExecutorFactory | None = None,
     ) -> None:
-        self._container = container
-        self._event_bus = container.event_bus
-        self._event_store = container.event_store
-        self._config = container.config
-        self._project_root = container.project_root
+        self._config = config
+        self._project_root = project_root
+        self._event_bus = event_bus
+        self._event_store = event_store
         self._projector = projector or UiStateProjector()
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._bundle_default = _resolve_bundle_default(self._config)
