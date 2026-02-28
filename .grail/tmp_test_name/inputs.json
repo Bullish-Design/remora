@@ -5,12 +5,6 @@
       "type": "int",
       "required": true,
       "default": null
-    },
-    {
-      "name": "b",
-      "type": "int",
-      "required": true,
-      "default": null
     }
   ]
 }
