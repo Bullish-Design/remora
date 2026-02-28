@@ -1,66 +1,156 @@
+-- Remora Navigation: Treesitter cursor tracking + agent discovery
+
 local M = {}
+
 M.current_agent_id = nil
+M.registered_buffers = {}
 
 function M.setup()
-  vim.api.nvim_create_autocmd("CursorMoved", {
-    callback = M.on_cursor_moved,
-  })
+    vim.api.nvim_create_autocmd("CursorMoved", {
+        callback = M.on_cursor_moved,
+    })
+    vim.api.nvim_create_autocmd("BufReadPost", {
+        pattern = "*.py",
+        callback = M.on_buffer_opened,
+    })
+    vim.api.nvim_create_autocmd("BufEnter", {
+        pattern = "*.py",
+        callback = M.on_buffer_entered,
+    })
+end
+
+function M.on_buffer_opened(ev)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local file_path = vim.api.nvim_buf_get_name(bufnr)
+
+    if file_path == "" or M.registered_buffers[file_path] then
+        return
+    end
+
+    M.registered_buffers[file_path] = true
+    require("remora_nvim.bridge").notify_buffer_opened(file_path)
+end
+
+function M.on_buffer_entered(ev)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local file_path = vim.api.nvim_buf_get_name(bufnr)
+
+    if file_path == "" or M.registered_buffers[file_path] then
+        return
+    end
+
+    M.registered_buffers[file_path] = true
+    require("remora_nvim.bridge").notify_buffer_opened(file_path)
 end
 
 function M.on_cursor_moved()
-  local bufnr = vim.api.nvim_get_current_buf()
-  local filetype = vim.api.nvim_buf_get_option(bufnr, 'filetype')
-  -- Only attempt to parse supported languages to avoid "no parser" errors
-  if filetype == '' or filetype == 'notify' or filetype == 'remora' then
-      return
-  end
+    local bufnr = vim.api.nvim_get_current_buf()
+    local filetype = vim.bo[bufnr].filetype
 
-  -- Use pcall because get_parser throws an error for unsupported filetypes
-  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
-  if not ok or not parser then return end
-
-  -- A simple way to get the node at the cursor
-  local win = vim.api.nvim_get_current_win()
-  local cursor = vim.api.nvim_win_get_cursor(win)
-  local row = cursor[1] - 1
-  local col = cursor[2]
-
-  local root_tree = parser:parse()[1]
-  if not root_tree then return end
-  local root = root_tree:root()
-  if not root then return end
-  local node = root:named_descendant_for_range(row, col, row, col)
-
-  -- Walk up to find a class or function
-  local target_node = nil
-  while node do
-    local type = node:type()
-    if type == "function_definition" or type == "class_definition" or type == "async_function_definition" then
-      target_node = node
-      break
+    if filetype ~= "python" then
+        return
     end
-    node = node:parent()
-  end
 
-  local node_type = "file"
-  local start_row = 0
-  
-  if target_node then
-    node_type = target_node:type()
-    start_row, _ = target_node:start()
-  end
+    local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+    if not ok or not parser then
+        return
+    end
 
-  -- Create a stable ID. Must match how python generates IDs
-  local file_path = vim.api.nvim_buf_get_name(bufnr)
-  local file_name = vim.fn.fnamemodify(file_path, ":t:r")
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local row = cursor[1] - 1
+    local col = cursor[2]
 
-  -- e.g. "function_definition_utils_15" or "file_remora_1"
-  local agent_id = string.format("%s_%s_%d", node_type, file_name, start_row + 1)
+    local tree = parser:parse()[1]
+    if not tree then
+        return
+    end
 
-  if agent_id ~= M.current_agent_id then
-    M.current_agent_id = agent_id
-    require("remora_nvim.sidepanel").show_agent(agent_id, file_path, node_type)
-  end
+    local root = tree:root()
+    if not root then
+        return
+    end
+
+    local node = root:named_descendant_for_range(row, col, row, col)
+
+    local target_node = nil
+    while node do
+        local node_type = node:type()
+        if M.is_agent_node_type(node_type) then
+            target_node = node
+            break
+        end
+        node = node:parent()
+    end
+
+    local file_path = vim.api.nvim_buf_get_name(bufnr)
+    local file_name = vim.fn.fnamemodify(file_path, ":t:r")
+
+    local agent_id
+    local node_type = "file"
+    local start_line = 1
+
+    if target_node then
+        node_type = target_node:type()
+        start_line, _ = target_node:start()
+        start_line = start_line + 1
+    end
+
+    agent_id = string.format("%s_%s_%d", node_type, file_name, start_line)
+
+    if agent_id ~= M.current_agent_id then
+        M.current_agent_id = agent_id
+
+        require("remora_nvim.bridge").subscribe_to_agent(agent_id)
+        require("remora_nvim.sidepanel").show_agent(agent_id, file_path, node_type, start_line)
+    end
+end
+
+function M.is_agent_node_type(node_type)
+    local agent_types = {
+        "function_definition",
+        "async_function_definition",
+        "class_definition",
+        "decorated_definition",
+    }
+    return vim.tbl_contains(agent_types, node_type)
+end
+
+function M.go_to_parent()
+    local bufnr = vim.api.nvim_get_current_buf()
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local row = cursor[1] - 1
+    local col = cursor[2]
+
+    local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+    if not ok or not parser then
+        return
+    end
+
+    local tree = parser:parse()[1]
+    if not tree then
+        return
+    end
+
+    local root = tree:root()
+    local node = root:named_descendant_for_range(row, col, row, col)
+
+    while node and not M.is_agent_node_type(node:type()) do
+        node = node:parent()
+    end
+
+    if not node then
+        return
+    end
+
+    local parent = node:parent()
+    while parent and not M.is_agent_node_type(parent:type()) do
+        parent = parent:parent()
+    end
+
+    if parent then
+        local start_row, start_col = parent:start()
+        vim.api.nvim_win_set_cursor(0, {start_row + 1, start_col})
+    end
 end
 
 return M

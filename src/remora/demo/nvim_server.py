@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
@@ -33,14 +34,51 @@ subscriptions = SubscriptionRegistry(db_path)
 event_store = EventStore(db_path, subscriptions=subscriptions, event_bus=event_bus)
 client_manager = ClientManager()
 
-app = FastAPI(title="Remora Swarm Dashboard")
-templates = Jinja2Templates(directory="src/remora/demo/templates")
 SOCKET_PATH = getattr(config, "nvim_socket", "/run/user/1000/remora.sock")
+
+
+print(f"\nNvim RPC Server will listen on Unix Socket: {SOCKET_PATH}\n")
+
+# ---- Neovim Startup commands ---- #
+
+# :set runtimepath+=/home/andrew/Documents/Projects/remora
+# :lua require('remora_nvim').setup({ socket = '/run/user/1000/remora.sock' })
+# :source plugin/remora_nvim.lua
 
 
 async def push_to_clients(event: RemoraEvent) -> None:
     """Forward EventBus events to subscribed Neovim clients."""
     await client_manager.notify_event(event)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await swarm_state.initialize()
+    await subscriptions.initialize()
+    await event_store.initialize()
+
+    event_bus.subscribe_all(push_to_clients)
+
+    rpc_task = asyncio.create_task(start_rpc_server())
+    app.state.rpc_task = rpc_task
+
+    logger.info("Remora Demo Server started")
+    logger.info("  Web UI: http://localhost:8080")
+    logger.info("  Neovim socket: %s", SOCKET_PATH)
+
+    try:
+        yield
+    finally:
+        rpc_task.cancel()
+        try:
+            await rpc_task
+        except asyncio.CancelledError:
+            pass
+        event_bus.unsubscribe(push_to_clients)
+
+
+app = FastAPI(title="Remora Swarm Dashboard", lifespan=lifespan)
+templates = Jinja2Templates(directory="src/remora/demo/templates")
 
 
 async def handle_nvim_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -238,22 +276,11 @@ async def start_rpc_server():
     Path(SOCKET_PATH).unlink(missing_ok=True)
     server = await asyncio.start_unix_server(handle_nvim_client, path=SOCKET_PATH)
     logger.info("Neovim RPC server listening on %s", SOCKET_PATH)
-    async with server:
-        await server.serve_forever()
-
-
-@app.on_event("startup")
-async def startup_event():
-    await swarm_state.initialize()
-    await subscriptions.initialize()
-    await event_store.initialize()
-
-    event_bus.subscribe_all(push_to_clients)
-    asyncio.create_task(start_rpc_server())
-
-    logger.info("Remora Demo Server started")
-    logger.info("  Web UI: http://localhost:8080")
-    logger.info("  Neovim socket: %s", SOCKET_PATH)
+    try:
+        async with server:
+            await server.serve_forever()
+    except asyncio.CancelledError:
+        pass
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -318,7 +345,6 @@ async def post_agent_chat(agent_id: str, request: Request):
 @app.get("/stream-events")
 async def stream_events(request: Request):
     """SSE endpoint for real-time events."""
-    from datastar_py.sse import ServerSentEventGenerator
 
     async def sse_generator():
         yield ServerSentEventGenerator.merge_fragments(
@@ -353,7 +379,7 @@ async def stream_events(request: Request):
                 else:
                     detail = ""
 
-                html = f'''
+                html = f"""
                     <div id="logs" data-prepend>
                         <li class="log-entry">
                             <span class="event-type">[{event_type}]</span>
@@ -361,7 +387,7 @@ async def stream_events(request: Request):
                             <span class="detail">{detail}</span>
                         </li>
                     </div>
-                '''
+                """
 
                 yield ServerSentEventGenerator.merge_fragments(html)
         except asyncio.CancelledError:
@@ -402,11 +428,7 @@ def build_agent_tree(agents: list[AgentMetadata]) -> list[dict]:
                 "children": [build_node(child) for child in sorted(children, key=lambda x: x.start_line)],
             }
 
-        roots = [
-            agent
-            for agent in file_agents
-            if agent.parent_id is None or agent.parent_id not in agents_by_id
-        ]
+        roots = [agent for agent in file_agents if agent.parent_id is None or agent.parent_id not in agents_by_id]
 
         file_node = {
             "id": f"file_{Path(file_path).stem}",

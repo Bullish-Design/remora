@@ -12,7 +12,7 @@ bundle_mapping:
 
 model_base_url: "http://remora-server:8000/v1"
 model_api_key: "EMPTY"
-model_default: "Qwen/Qwen3-4B"
+model_default: "Qwen/Qwen3-4B-Instruct-2507-FP8"
 
 swarm_root: ".remora"
 swarm_id: "swarm"
