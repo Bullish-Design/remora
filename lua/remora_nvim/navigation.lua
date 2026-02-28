@@ -32,27 +32,34 @@ function M.on_cursor_moved()
   local node = root:named_descendant_for_range(row, col, row, col)
 
   -- Walk up to find a class or function
+  local target_node = nil
   while node do
     local type = node:type()
     if type == "function_definition" or type == "class_definition" or type == "async_function_definition" then
+      target_node = node
       break
     end
     node = node:parent()
   end
 
-  if not node then return end
+  local node_type = "file"
+  local start_row = 0
+  
+  if target_node then
+    node_type = target_node:type()
+    start_row, _ = target_node:start()
+  end
 
   -- Create a stable ID. Must match how python generates IDs
-  local start_row, _ = node:start()
   local file_path = vim.api.nvim_buf_get_name(bufnr)
   local file_name = vim.fn.fnamemodify(file_path, ":t:r")
 
-  -- e.g. "function_definition_utils_15"
-  local agent_id = string.format("%s_%s_%d", node:type(), file_name, start_row + 1)
+  -- e.g. "function_definition_utils_15" or "file_remora_1"
+  local agent_id = string.format("%s_%s_%d", node_type, file_name, start_row + 1)
 
   if agent_id ~= M.current_agent_id then
     M.current_agent_id = agent_id
-    require("remora_nvim.sidepanel").show_agent(agent_id, file_path, node:type())
+    require("remora_nvim.sidepanel").show_agent(agent_id, file_path, node_type)
   end
 end
 
