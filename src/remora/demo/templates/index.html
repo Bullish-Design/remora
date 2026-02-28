@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Remora Swarm Dashboard</title>
+    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-beta.1/bundles/datastar.js"></script>
+    <style>
+        body { font-family: monospace; background: #1e1e1e; color: #d4d4d4; display: flex; height: 100vh; margin: 0; }
+        .sidebar { width: 300px; border-right: 1px solid #333; padding: 1rem; overflow-y: auto; }
+        .main { flex: 1; padding: 1rem; display: flex; flex-direction: column; }
+        .logs { flex: 1; background: #000; border: 1px solid #333; overflow-y: auto; padding: 1rem; }
+        ul { list-style: none; padding-left: 1rem; }
+        .agent-node { color: #4CAF50; cursor: pointer; }
+        .agent-node:hover { text-decoration: underline; }
+    </style>
+</head>
+<body data-on-load="@get('/stream-events')">
+
+<div class="sidebar">
+    <h3>Swarm Tree</h3>
+    <ul id="agent-tree">
+        <!-- Example hardcoded tree, ideally rendered by Jinja2 -->
+        <li>📁 src
+            <ul>
+                <li>📄 utils.py
+                    <ul>
+                        <li class="agent-node" id="agent-func_format_date_15">
+                            [DORMANT] format_date (Function)
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+        </li>
+    </ul>
+</div>
+
+<div class="main">
+    <h3>Live Swarm Logs</h3>
+    <div class="logs">
+        <ul id="logs">
+            <!-- Logs prepend here via SSE -->
+        </ul>
+    </div>
+</div>
+
+</body>
+</html>
