@@ -105,21 +105,7 @@ class AgentWorkspace:
             entries.update(stable_entries)
         return sorted(entries)
 
-    async def accept(self) -> None:
-        """Accept all changes in this workspace."""
-        raise WorkspaceError("Accept/reject is not supported by the Cairn workspace API")
 
-    async def reject(self) -> None:
-        """Reject all changes and reset to base state."""
-        raise WorkspaceError("Accept/reject is not supported by the Cairn workspace API")
-
-    async def snapshot(self, name: str) -> str:
-        """Create a named snapshot of current state."""
-        raise WorkspaceError("Snapshots are not supported by the Cairn workspace API")
-
-    async def restore(self, snapshot_id: str) -> None:
-        """Restore from a named snapshot."""
-        raise WorkspaceError("Snapshots are not supported by the Cairn workspace API")
 
 
 class CairnDataProvider:

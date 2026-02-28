@@ -57,7 +57,8 @@ class SubscriptionPattern:
             if path is None:
                 return False
             try:
-                if not PurePath(path).match(self.path_glob):
+                normalized = normalize_path(path).as_posix()
+                if not PurePath(normalized).match(self.path_glob):
                     return False
             except Exception:
                 return False
@@ -106,21 +107,24 @@ class SubscriptionRegistry:
             self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
 
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS subscriptions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    agent_id TEXT NOT NULL,
-                    pattern_json TEXT NOT NULL,
-                    is_default INTEGER NOT NULL DEFAULT 0,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL
+            def _init_db(conn: Any) -> None:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS subscriptions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        agent_id TEXT NOT NULL,
+                        pattern_json TEXT NOT NULL,
+                        is_default INTEGER NOT NULL DEFAULT 0,
+                        created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL
+                    )
+                    """
                 )
-                """
-            )
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_agent_id ON subscriptions(agent_id)")
-            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_is_default ON subscriptions(is_default)")
-            self._conn.commit()
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_agent_id ON subscriptions(agent_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_is_default ON subscriptions(is_default)")
+                conn.commit()
+            
+            await asyncio.to_thread(_init_db, self._conn)
 
     async def register(
         self,
@@ -135,17 +139,21 @@ class SubscriptionRegistry:
         now = time.time()
         pattern_json = json.dumps(asdict(pattern))
 
-        cursor = self._conn.execute(
-            """
-            INSERT INTO subscriptions (agent_id, pattern_json, is_default, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (agent_id, pattern_json, 1 if is_default else 0, now, now),
-        )
-        self._conn.commit()
+        def _exec(conn: Any) -> int:
+            cursor = conn.execute(
+                """
+                INSERT INTO subscriptions (agent_id, pattern_json, is_default, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (agent_id, pattern_json, 1 if is_default else 0, now, now),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+        lastrowid = await asyncio.to_thread(_exec, self._conn)
 
         return Subscription(
-            id=cursor.lastrowid,
+            id=lastrowid,
             agent_id=agent_id,
             pattern=pattern,
             is_default=is_default,
@@ -177,60 +185,71 @@ class SubscriptionRegistry:
         if self._conn is None:
             await self.initialize()
 
-        cursor = self._conn.execute(
-            "DELETE FROM subscriptions WHERE agent_id = ?",
-            (agent_id,),
-        )
-        self._conn.commit()
-        return cursor.rowcount
+        def _exec(conn: Any) -> int:
+            cursor = conn.execute(
+                "DELETE FROM subscriptions WHERE agent_id = ?",
+                (agent_id,),
+            )
+            conn.commit()
+            return cursor.rowcount
+
+        return await asyncio.to_thread(_exec, self._conn)
 
     async def unregister(self, subscription_id: int) -> bool:
         """Remove a specific subscription by ID."""
         if self._conn is None:
             await self.initialize()
 
-        cursor = self._conn.execute(
-            "DELETE FROM subscriptions WHERE id = ?",
-            (subscription_id,),
-        )
-        self._conn.commit()
-        return cursor.rowcount > 0
+        def _exec(conn: Any) -> bool:
+            cursor = conn.execute(
+                "DELETE FROM subscriptions WHERE id = ?",
+                (subscription_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+        return await asyncio.to_thread(_exec, self._conn)
 
     async def get_subscriptions(self, agent_id: str) -> list[Subscription]:
         """Get all subscriptions for an agent."""
         if self._conn is None:
             await self.initialize()
 
-        cursor = self._conn.execute(
-            "SELECT * FROM subscriptions WHERE agent_id = ? ORDER BY id",
-            (agent_id,),
-        )
-        rows = cursor.fetchall()
-
-        subscriptions = []
-        for row in rows:
-            pattern_data = json.loads(row["pattern_json"])
-            pattern = SubscriptionPattern(**pattern_data)
-            subscriptions.append(
-                Subscription(
-                    id=row["id"],
-                    agent_id=row["agent_id"],
-                    pattern=pattern,
-                    is_default=bool(row["is_default"]),
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
-                )
+        def _fetch(conn: Any) -> list[Subscription]:
+            cursor = conn.execute(
+                "SELECT * FROM subscriptions WHERE agent_id = ? ORDER BY id",
+                (agent_id,),
             )
+            rows = cursor.fetchall()
 
-        return subscriptions
+            subscriptions = []
+            for row in rows:
+                pattern_data = json.loads(row["pattern_json"])
+                pattern = SubscriptionPattern(**pattern_data)
+                subscriptions.append(
+                    Subscription(
+                        id=row["id"],
+                        agent_id=row["agent_id"],
+                        pattern=pattern,
+                        is_default=bool(row["is_default"]),
+                        created_at=row["created_at"],
+                        updated_at=row["updated_at"],
+                    )
+                )
+            return subscriptions
+
+        return await asyncio.to_thread(_fetch, self._conn)
 
     async def get_matching_agents(self, event: RemoraEvent) -> list[str]:
         """Get all agent IDs whose subscriptions match the event."""
         if self._conn is None:
             await self.initialize()
 
-        cursor = self._conn.execute("SELECT * FROM subscriptions ORDER BY id")
-        rows = cursor.fetchall()
+        def _fetch(conn: Any) -> list[dict[str, Any]]:
+            cursor = conn.execute("SELECT * FROM subscriptions ORDER BY id")
+            return [dict(row) for row in cursor.fetchall()]
+
+        rows = await asyncio.to_thread(_fetch, self._conn)
 
         matching_agents = []
         seen_agents = set()

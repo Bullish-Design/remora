@@ -193,21 +193,8 @@ class SwarmExecutor:
         state.chat_history.append({"role": "assistant", "content": truncated_response})
         state.chat_history = state.chat_history[-10:]
 
-        try:
-            if (self._project_root / ".jj").exists():
-                message = f"Agent {state.agent_id} completed turn."
-                process = await asyncio.create_subprocess_exec(
-                    "jj",
-                    "commit",
-                    "-m",
-                    message,
-                    cwd=str(self._project_root),
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                await process.wait()
-        except Exception as exc:  # pragma: no cover - best effort commit
-            logger.warning("Failed to create JJ commit: %s", exc)
+        from remora.core.vcs import VCSAdapter
+        await VCSAdapter.commit(self._project_root, f"Agent {state.agent_id} completed turn.")
 
         return truncated_response
 
