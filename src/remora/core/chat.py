@@ -6,10 +6,12 @@ from typing import Any
 import time
 import uuid
 
+from remora.core.discovery import discover
 from remora.core.event_bus import EventBus
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.config import Config
-from remora.core.tool_registry import ToolRegistry
+from remora.core.workspace import AgentWorkspace
+from structured_agents import Tool
 
 from structured_agents.agent import get_response_parser
 from structured_agents.client import build_client
@@ -126,14 +128,7 @@ class ChatSession:
         await self._workspace.initialize()
 
         agent_workspace = await self._workspace.get_agent_workspace(self.session_id)
-        externals = self._workspace.get_externals(self.session_id, agent_workspace)
-
-        # then feed externals into ToolRegistry as intended
-        # Get tools from registry
-        self._tools = ToolRegistry.get_tools(
-            workspace=self._workspace,
-            presets=self.config.tool_presets,
-        )
+        self._tools = build_chat_tools(agent_workspace, workspace_path)
 
         self._initialized = True
 
@@ -198,6 +193,55 @@ class ChatSession:
             message=assistant_msg,
             turn_count=result.turn_count,
         )
+
+
+def build_chat_tools(agent_workspace: AgentWorkspace, project_root: Path) -> list[Tool]:
+    """Construct the basic file and discovery tools for chat sessions."""
+
+    async def read_file(path: str) -> str:
+        return await agent_workspace.read(path)
+
+    async def write_file(path: str, content: str) -> bool:
+        await agent_workspace.write(path, content)
+        return True
+
+    async def list_dir(path: str = ".") -> list[str]:
+        return await agent_workspace.list_dir(path)
+
+    async def file_exists(path: str) -> bool:
+        return await agent_workspace.exists(path)
+
+    async def search_files(pattern: str) -> list[str]:
+        matches: list[str] = []
+        for candidate in project_root.rglob(pattern or "*"):
+            if candidate.is_file():
+                try:
+                    matches.append(str(candidate.relative_to(project_root)))
+                except ValueError:
+                    matches.append(str(candidate))
+        return sorted(matches)
+
+    async def discover_symbols(path: str = ".") -> list[dict]:
+        target = project_root / path
+        nodes = discover([target])
+        return [
+            {
+                "name": getattr(node, "name", ""),
+                "type": getattr(node, "node_type", ""),
+                "file": str(getattr(node, "file_path", "")),
+                "line": getattr(node, "start_line", 0),
+            }
+            for node in nodes
+        ]
+
+    return [
+        Tool.from_function(read_file),
+        Tool.from_function(write_file),
+        Tool.from_function(list_dir),
+        Tool.from_function(file_exists),
+        Tool.from_function(search_files),
+        Tool.from_function(discover_symbols),
+    ]
 
     @property
     def history(self) -> list[Message]:

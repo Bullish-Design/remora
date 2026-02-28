@@ -12,8 +12,9 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import remora.core.events as events_module
 from remora.core.event_store import EventStore
-from remora.core.events import AgentMessageEvent, ContentChangedEvent
+from remora.core.events import AgentMessageEvent
 from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
 from remora.utils import PathLike, normalize_path, to_project_relative
 
@@ -150,25 +151,20 @@ class NvimServer:
     async def _handle_swarm_emit(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle swarm.emit method."""
         event_type = params.get("event_type")
-        event_data = params.get("data", {})
+        event_data = dict(params.get("data") or {})
 
-        if event_type == "AgentMessageEvent":
-            event = AgentMessageEvent(
-                from_agent=event_data.get("from_agent", ""),
-                to_agent=event_data.get("to_agent", ""),
-                content=event_data.get("content", ""),
-                tags=event_data.get("tags", []),
-                correlation_id=event_data.get("correlation_id"),
-            )
-        elif event_type == "ContentChangedEvent":
-            path = event_data.get("path", "")
-            relative_path = to_project_relative(self._project_root, path)
-            event = ContentChangedEvent(
-                path=relative_path,
-                diff=event_data.get("diff"),
-            )
-        else:
-            raise ValueError(f"Unknown event type: {event_type}")
+        if "path" in event_data and event_data["path"]:
+            event_data["path"] = str(to_project_relative(self._project_root, event_data["path"]))
+
+        try:
+            event_class = getattr(events_module, str(event_type))
+        except AttributeError as exc:
+            raise ValueError(f"Unknown event type: {event_type}") from exc
+
+        try:
+            event = event_class(**event_data)
+        except TypeError as exc:
+            raise ValueError(f"Invalid arguments for {event_type}: {exc}") from exc
 
         await self._event_store.append("nvim", event)
         return {"status": "ok"}

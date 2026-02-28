@@ -11,11 +11,13 @@ This module provides the reconcile_on_startup function that:
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from remora.core.discovery import CSTNode, discover
-from remora.core.agent_state import AgentState, save as save_agent_state
+from remora.core.agent_state import AgentState, load as load_agent_state, save as save_agent_state
+from remora.core.events import ContentChangedEvent
 from remora.core.subscriptions import SubscriptionRegistry
 from remora.core.swarm_state import AgentMetadata, SwarmState
 from remora.utils import PathLike, normalize_path, to_project_relative
@@ -125,11 +127,49 @@ async def reconcile_on_startup(
         await subscriptions.unregister_all(agent_id)
         orphaned += 1
 
-    logger.info(f"Reconciliation complete: {created} new, {orphaned} orphaned")
+    updated = 0
+    common_ids = discovered_ids.intersection(existing_ids)
+
+    for node_id in common_ids:
+        node = node_map[node_id]
+        state_path = get_agent_state_path(swarm_root, node.node_id)
+        try:
+            state = load_agent_state(state_path)
+            if state is None:
+                continue
+
+            file_path = Path(node.file_path)
+            if not file_path.exists():
+                continue
+
+            file_mtime = file_path.stat().st_mtime
+            if state.last_updated < file_mtime:
+                if event_store is not None:
+                    relative_path = to_project_relative(project_path, node.file_path)
+                    event = ContentChangedEvent(
+                        path=relative_path,
+                        diff="File modified while daemon offline.",
+                    )
+                    await event_store.append(swarm_id, event)
+
+                updated += 1
+                state.last_updated = time.time()
+                save_agent_state(state_path, state)
+
+        except Exception as exc:
+            logger.warning("Failed to reconcile state for %s: %s", node_id, exc)
+
+    logger.info(
+        "Reconciliation complete: %d new, %d orphaned, %d updated",
+        created,
+        orphaned,
+        updated,
+    )
 
     return {
         "created": created,
         "orphaned": orphaned,
+        "updated": updated,
         "total": len(discovered_ids),
     }
 

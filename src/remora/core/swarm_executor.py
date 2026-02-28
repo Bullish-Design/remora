@@ -6,6 +6,7 @@ in response to events from the EventStore trigger queue.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -19,9 +20,9 @@ from structured_agents.models.adapter import ModelAdapter
 from structured_agents.types import Message
 
 from remora.core.agent_state import AgentState
-from remora.core.context import ContextBuilder
 from remora.core.discovery import CSTNode
 from remora.core.event_store import EventSourcedBus, EventStore
+from remora.core.subscriptions import SubscriptionRegistry
 from remora.core.tools.grail import build_virtual_fs, discover_grail_tools
 from remora.core.workspace import CairnDataProvider
 from remora.core.cairn_bridge import CairnWorkspaceService
@@ -42,18 +43,17 @@ class SwarmExecutor:
         config: "Config",
         event_bus: "EventBus | None",
         event_store: EventStore,
+        subscriptions: SubscriptionRegistry,
         swarm_id: str,
         project_root: Path,
     ):
         self.config = config
         self._event_bus = event_bus
         self._event_store = event_store
+        self._subscriptions = subscriptions
         self._swarm_id = swarm_id
         self._project_root = project_root
         self._path_resolver = PathResolver(project_root)
-        self._context_builder = ContextBuilder()
-        if event_bus is not None:
-            event_bus.subscribe_all(self._context_builder.handle)
 
         self._workspace_service = CairnWorkspaceService(
             config=config,
@@ -78,6 +78,18 @@ class SwarmExecutor:
         workspace = await self._workspace_service.get_agent_workspace(state.agent_id)
         externals = self._workspace_service.get_externals(state.agent_id, workspace)
 
+        externals["agent_id"] = state.agent_id
+        externals["correlation_id"] = getattr(trigger_event, "correlation_id", None) if trigger_event else None
+
+        async def _emit_event(event_type: str, event_obj: Any) -> None:
+            await self._event_store.append(self._swarm_id, event_obj)
+
+        async def _register_sub(agent_id: str, pattern: Any) -> None:
+            await self._subscriptions.register(agent_id, pattern)
+
+        externals["emit_event"] = _emit_event
+        externals["register_subscription"] = _register_sub
+
         data_provider = CairnDataProvider(workspace, self._path_resolver)
         node = _state_to_cst_node(state)
         files = await data_provider.load_files(node)
@@ -101,9 +113,32 @@ class SwarmExecutor:
         )
 
         model_name = self._resolve_model_name(bundle_path, manifest)
-        result = await self._run_kernel(manifest, prompt, tools, model_name=model_name)
+        result = await self._run_kernel(state, manifest, prompt, tools, model_name=model_name)
 
-        return truncate(str(result), max_len=self.config.truncation_limit)
+        response_text = str(result)
+        truncated_response = truncate(response_text, max_len=self.config.truncation_limit)
+
+        state.chat_history.append({"role": "user", "content": prompt})
+        state.chat_history.append({"role": "assistant", "content": truncated_response})
+        state.chat_history = state.chat_history[-10:]
+
+        try:
+            if (self._project_root / ".jj").exists():
+                message = f"Agent {state.agent_id} completed turn."
+                process = await asyncio.create_subprocess_exec(
+                    "jj",
+                    "commit",
+                    "-m",
+                    message,
+                    cwd=str(self._project_root),
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await process.wait()
+        except Exception as exc:  # pragma: no cover - best effort commit
+            logger.warning("Failed to create JJ commit: %s", exc)
+
+        return truncated_response
 
     def _resolve_bundle_path(self, state: AgentState) -> Path:
         bundle_root = Path(self.config.bundle_root)
@@ -127,7 +162,15 @@ class SwarmExecutor:
             return str(override)
         return self.config.model_default or getattr(manifest, "model", "")
 
-    async def _run_kernel(self, manifest: Any, prompt: str, tools: list[Any], *, model_name: str) -> Any:
+    async def _run_kernel(
+        self,
+        state: AgentState,
+        manifest: Any,
+        prompt: str,
+        tools: list[Any],
+        *,
+        model_name: str,
+    ) -> Any:
         parser = get_response_parser(manifest.model)
         pipeline = ConstraintPipeline(manifest.grammar_config) if manifest.grammar_config else None
         adapter = ModelAdapter(name=manifest.model, response_parser=parser, constraint_pipeline=pipeline)
@@ -142,10 +185,15 @@ class SwarmExecutor:
         event_sourced_bus = EventSourcedBus(self._event_bus, self._event_store, self._swarm_id)
         kernel = AgentKernel(client=client, adapter=adapter, tools=tools, observer=event_sourced_bus)
         try:
-            messages = [
+            messages: list[Message] = [
                 Message(role="system", content=manifest.system_prompt),
-                Message(role="user", content=prompt),
             ]
+            for entry in getattr(state, "chat_history", []):
+                role = entry.get("role")
+                content = entry.get("content")
+                if role and content:
+                    messages.append(Message(role=role, content=content))
+            messages.append(Message(role="user", content=prompt))
             tool_schemas = [tool.schema for tool in tools]
             if manifest.grammar_config and not manifest.grammar_config.send_tools_to_api:
                 tool_schemas = []
@@ -183,9 +231,16 @@ class SwarmExecutor:
             if event_content:
                 sections.append(f"Content: {event_content}")
         if requires_context:
-            context = self._context_builder.build_context_for(node)
-            if context:
-                sections.append(context)
+            history_items = []
+            for entry in state.chat_history[-5:]:
+                role = entry.get("role")
+                content = entry.get("content")
+                if role and content:
+                    history_items.append(f"{role.capitalize()}: {content}")
+            if history_items:
+                sections.append("")
+                sections.append("## Recent Chat History")
+                sections.extend(history_items)
         return "\n".join(sections)
 
 

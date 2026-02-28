@@ -10,6 +10,8 @@ from typing import Any, Awaitable, Callable
 import grail
 from structured_agents.types import ToolCall, ToolSchema, ToolResult
 
+from remora.core.tools.swarm import build_swarm_tools
+
 logger = logging.getLogger(__name__)
 
 FilesProvider = Callable[[], Awaitable[dict[str, str | bytes]]]
@@ -132,6 +134,9 @@ def discover_grail_tools(
         except Exception as exc:
             logger.warning("Failed to load %s: %s", pym_file, exc)
             continue
+
+    if externals:
+        tools.extend(build_swarm_tools(externals))
 
     return tools
 

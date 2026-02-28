@@ -71,6 +71,7 @@ class AgentRunner:
             config=config,
             event_bus=event_bus,
             event_store=event_store,
+            subscriptions=subscriptions,
             swarm_id=self._swarm_id,
             project_root=self._project_root,
         )
@@ -96,12 +97,12 @@ class AgentRunner:
                     logger.debug(f"Skipping trigger for {agent_id} due to cooldown")
                     continue
 
-                correlation_id = getattr(event, "correlation_id", None)
-                if not self._check_depth_limit(correlation_id):
+                correlation_id = self._normalize_correlation_id(event)
+                if not self._check_depth_limit(agent_id, correlation_id):
                     logger.warning(f"Skipping trigger for {agent_id} due to depth limit")
                     continue
 
-                task = asyncio.create_task(self._process_trigger(agent_id, event_id, event))
+                task = asyncio.create_task(self._process_trigger(agent_id, event_id, event, correlation_id))
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
 
@@ -119,26 +120,37 @@ class AgentRunner:
         self._last_trigger_time[agent_id] = now
         return True
 
-    def _check_depth_limit(self, correlation_id: str | None) -> bool:
+    def _check_depth_limit(self, agent_id: str, correlation_id: str) -> bool:
         """Check if the cascade depth limit is reached."""
-        if correlation_id is None:
-            return True
-
-        depth = self._correlation_depth.get(correlation_id, 0)
+        key = f"{agent_id}:{correlation_id}"
+        depth = self._correlation_depth.get(key, 0)
         return depth < self._max_trigger_depth
+
+    def _normalize_correlation_id(self, event: RemoraEvent) -> str:
+        """Ensure every event has a correlation identifier."""
+        return (
+            getattr(event, "correlation_id", None)
+            or getattr(event, "id", None)
+            or "base"
+        )
 
     async def _process_trigger(
         self,
         agent_id: str,
         event_id: int,
         event: RemoraEvent,
+        correlation_id: str,
     ) -> None:
         """Process a single trigger."""
         async with self._semaphore:
-            correlation_id = getattr(event, "correlation_id", None)
+            key = f"{agent_id}:{correlation_id}"
+            current_depth = self._correlation_depth.get(key, 0)
 
-            if correlation_id:
-                self._correlation_depth[correlation_id] = self._correlation_depth.get(correlation_id, 0) + 1
+            if current_depth >= self._max_trigger_depth:
+                logger.warning(f"Cascade limit reached for {key}")
+                return
+
+            self._correlation_depth[key] = current_depth + 1
 
             try:
                 await self._execute_turn(agent_id, event)
@@ -146,10 +158,12 @@ class AgentRunner:
                 logger.error(f"Error processing trigger for {agent_id}: {e}")
                 await self._emit_error(agent_id, str(e))
             finally:
-                if correlation_id:
-                    self._correlation_depth[correlation_id] = self._correlation_depth.get(correlation_id, 1) - 1
-                    if self._correlation_depth[correlation_id] <= 0:
-                        del self._correlation_depth[correlation_id]
+                key = f"{agent_id}:{correlation_id}"
+                remaining = self._correlation_depth.get(key, 1) - 1
+                if remaining <= 0:
+                    self._correlation_depth.pop(key, None)
+                else:
+                    self._correlation_depth[key] = remaining
 
     async def _execute_turn(self, agent_id: str, trigger_event: RemoraEvent) -> None:
         """Execute a single agent turn."""
@@ -180,12 +194,6 @@ class AgentRunner:
         try:
             result = await self._run_agent(context)
 
-            state.chat_history.append(
-                {
-                    "trigger": trigger_event.__class__.__name__,
-                    "result": "success",
-                }
-            )
             save_agent_state(state_path, state)
 
             if self._event_bus:
@@ -198,13 +206,6 @@ class AgentRunner:
                 )
 
         except Exception as e:
-            state.chat_history.append(
-                {
-                    "trigger": trigger_event.__class__.__name__,
-                    "result": "error",
-                    "error": str(e),
-                }
-            )
             save_agent_state(state_path, state)
 
             if self._event_bus:

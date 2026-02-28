@@ -15,11 +15,24 @@ from sse_starlette.sse import EventSourceResponse
 from remora.core.chat import ChatSession, ChatConfig, Message
 from remora.core.event_bus import EventBus
 from remora.core.events import ToolCallEvent, ToolResultEvent
-from remora.core.tool_registry import ToolRegistry
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_CHAT_TOOL_NAMES = [
+    "read_file",
+    "write_file",
+    "list_dir",
+    "file_exists",
+    "search_files",
+    "discover_symbols",
+]
+
+DEFAULT_TOOL_PRESETS = {
+    "file_ops": DEFAULT_CHAT_TOOL_NAMES,
+    "all": DEFAULT_CHAT_TOOL_NAMES,
+}
 
 
 class ChatServiceState:
@@ -180,7 +193,8 @@ async def list_tools(request: Request) -> JSONResponse:
     """List available tool presets."""
     return JSONResponse(
         {
-            "presets": ToolRegistry.list_presets(),
+            "tools": DEFAULT_CHAT_TOOL_NAMES,
+            "presets": DEFAULT_TOOL_PRESETS,
         }
     )
 
@@ -233,4 +247,3 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="127.0.0.1", port=8420)
-
