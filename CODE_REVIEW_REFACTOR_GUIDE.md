@@ -124,355 +124,93 @@ Delete the dynamic `ConfigError = type("ConfigError", ...)` and import from `err
 
 ---
 
-## Phase 4: Replace Storage with FSdantic KV
+## Phase 4: Implement Reactive Storage (SQLite + JSONL)
 
-This is the key new phase. Instead of writing a custom `RemoraStore` with raw SQL, use the FSdantic KV store that's already a dependency.
+This phase aligns storage with the CST Agent Swarm concept:
+- `events.db` (SQLite): Event log and trigger queue.
+- `swarm_state.db` (SQLite): Global agent registry.
+- `subscriptions.db` (SQLite): Event routing rules.
+- `state.jsonl` (JSONL): Per-agent persistent memory, stored in `agents/<id>/state.jsonl`.
 
-### Step 4.1: Create SwarmStore — FSdantic KV Wrapper
+### Step 4.1: Create SwarmState
 
-**Create**: `src/remora/core/swarm_store.py` (~120 LOC)
+**File**: `src/remora/core/swarm_state.py` (~100 LOC)
 
-This replaces `SwarmState`, `SubscriptionRegistry`, and `AgentState` with a single FSdantic workspace + KV namespaces.
+Implement SQLite-backed global agent registry (`swarm_state.db`):
+- `register_agent(agent_id, metadata)`
+- `get_agent(agent_id)`
+- `list_agents(parent_id=None)`
+- `mark_orphaned(agent_id)`
 
-```python
-# src/remora/core/swarm_store.py
-"""Unified Remora state storage via FSdantic KV.
+### Step 4.2: Create SubscriptionRegistry
 
-Replaces SwarmState, SubscriptionRegistry, and AgentState with
-namespaced KV operations on a single FSdantic workspace.
-"""
+**File**: `src/remora/core/subscriptions.py` (~150 LOC)
 
-from __future__ import annotations
+Implement SQLite-backed event routing rules (`subscriptions.db`):
+- Migrate `SubscriptionPattern` from `event_store.py` (or keep it here).
+- `register(agent_id, pattern)`
+- `register_defaults(agent_id, metadata)` (Direct messages + File changes)
+- `unregister_all(agent_id)`
+- `get_matching_agents(event) -> list[str]`
 
-import json
-import time
-from dataclasses import asdict
-from typing import Any
+### Step 4.3: Extend AgentState for JSONL Persistence
 
-from fsdantic import Fsdantic
-from pydantic import BaseModel
+**File**: `src/remora/core/agent_state.py` (~80 LOC)
 
-from remora.core.events import RemoraEvent
+The current `agent_state.py` is close, but needs to be rigorously scoped to per-agent persistence using JSONL inside the agent's folder (`agents/<agent_id>/state.jsonl`). Keep `load` and `save` functions append-only for history.
 
+### Step 4.4: Extend EventStore with Trigger Queue
 
-class AgentRecord(BaseModel):
-    """Agent metadata stored in KV."""
-    agent_id: str
-    node_type: str
-    name: str
-    full_name: str
-    file_path: str
-    parent_id: str | None = None
-    start_line: int = 0
-    end_line: int = 0
-    status: str = "active"
-    created_at: float = 0.0
-    updated_at: float = 0.0
+**File**: `src/remora/core/event_store.py` (~250 LOC)
 
+Update the existing `EventStore` class:
+1.  **Add Dependencies**: Inject `SubscriptionRegistry` and `EventBus`.
+2.  **Add Trigger Queue**: `self._trigger_queue = asyncio.Queue()`.
+3.  **Update `append`**:
+    - Persist the event to SQLite.
+    - Call `self._subscriptions.get_matching_agents(event)`.
+    - Push `(agent_id, event_id, event)` onto `_trigger_queue` for each match.
+    - Emit to `_event_bus` for UI updates.
+4.  **Add `get_triggers`**: `async def get_triggers() -> AsyncIterator[tuple[str, int, Event]]`.
 
-class AgentStateRecord(BaseModel):
-    """Per-agent persistent state stored in KV."""
-    chat_history: list[dict[str, Any]] = []
-    connections: dict[str, str] = {}
-    custom_subscriptions: list[dict[str, Any]] = []
-    last_updated: float = 0.0
+### Step 4.5: Update AgentRunner
 
+**File**: `src/remora/core/agent_runner.py` (~150 LOC)
 
-class SubscriptionRecord(BaseModel):
-    """A single subscription pattern stored in KV."""
-    agent_id: str
-    pattern: dict[str, Any]
-    is_default: bool = False
-    created_at: float = 0.0
+Rewrite the main execution loop to be completely reactive:
+- Remove polling (`last_seen_event_id`).
+- Loop over `event_store.get_triggers()`.
+- Implement cascade prevention (cooldowns + depth limits).
+- When a turn runs, load `AgentState` from JSONL, generate prompt, run `AgentKernel`, and save state.
 
+### Step 4.6: Update Reconciler
 
-class SwarmStore:
-    """Unified state storage using FSdantic KV.
+**File**: `src/remora/core/reconciler.py` (~100 LOC)
 
-    Namespaces:
-        agents:    → AgentRecord (keyed by agent_id)
-        state:     → AgentStateRecord (keyed by agent_id)
-        subs:      → SubscriptionRecord (keyed by sub_id)
-        sub_index: → list of sub_ids (keyed by agent_id)
-    """
-
-    def __init__(self, workspace_id: str = "remora-swarm"):
-        self._workspace_id = workspace_id
-        self._workspace = None
-        self._agents = None  # KV namespace
-        self._state = None   # KV namespace
-        self._subs = None    # KV namespace
-
-    async def initialize(self) -> None:
-        self._workspace = await Fsdantic.open(id=self._workspace_id)
-        self._agents = self._workspace.kv.repository(
-            prefix="agents:", model_type=AgentRecord
-        )
-        self._state = self._workspace.kv.repository(
-            prefix="state:", model_type=AgentStateRecord
-        )
-        self._subs = self._workspace.kv.namespace("subs")
-
-    # ── Agent Registry ──
-
-    async def upsert_agent(self, record: AgentRecord) -> None:
-        record.updated_at = time.time()
-        if not record.created_at:
-            record.created_at = record.updated_at
-        await self._agents.save(record.agent_id, record)
-
-    async def get_agent(self, agent_id: str) -> AgentRecord | None:
-        try:
-            return await self._agents.load(agent_id)
-        except Exception:
-            return None
-
-    async def list_agents(self, status: str | None = None) -> list[AgentRecord]:
-        all_agents = await self._agents.list_all()
-        if status:
-            return [a for a in all_agents if a.status == status]
-        return all_agents
-
-    async def mark_orphaned(self, agent_id: str) -> None:
-        agent = await self.get_agent(agent_id)
-        if agent:
-            agent.status = "orphaned"
-            await self._agents.save(agent_id, agent)
-
-    # ── Agent State ──
-
-    async def save_state(self, agent_id: str, state: AgentStateRecord) -> None:
-        state.last_updated = time.time()
-        await self._state.save(agent_id, state)
-
-    async def load_state(self, agent_id: str) -> AgentStateRecord:
-        try:
-            return await self._state.load(agent_id)
-        except Exception:
-            return AgentStateRecord()
-
-    # ── Subscriptions ──
-
-    async def register_subscription(
-        self,
-        agent_id: str,
-        pattern: dict[str, Any],
-        is_default: bool = False,
-    ) -> str:
-        sub_id = f"{agent_id}:{int(time.time() * 1000)}"
-        record = SubscriptionRecord(
-            agent_id=agent_id,
-            pattern=pattern,
-            is_default=is_default,
-            created_at=time.time(),
-        )
-        await self._subs.set(sub_id, record.model_dump())
-
-        # Update index
-        index_key = f"idx:{agent_id}"
-        existing = await self._subs.get(index_key, default=[])
-        existing.append(sub_id)
-        await self._subs.set(index_key, existing)
-        return sub_id
-
-    async def unregister_all(self, agent_id: str) -> None:
-        index_key = f"idx:{agent_id}"
-        sub_ids = await self._subs.get(index_key, default=[])
-        for sub_id in sub_ids:
-            await self._subs.delete(sub_id)
-        await self._subs.delete(index_key)
-
-    async def get_matching_agents(self, event: RemoraEvent) -> list[str]:
-        """Get agents whose subscriptions match this event."""
-        from remora.core.subscriptions import SubscriptionPattern
-
-        all_subs = await self._subs.list(prefix="")
-        matching = set()
-
-        for item in all_subs:
-            key = item.get("key", "")
-            if key.startswith("idx:"):
-                continue  # Skip index entries
-            try:
-                record = SubscriptionRecord(**item.get("value", {}))
-                pattern = SubscriptionPattern(**record.pattern)
-                if pattern.matches(event):
-                    matching.add(record.agent_id)
-            except Exception:
-                continue
-
-        return list(matching)
-
-    async def get_subscriptions(self, agent_id: str) -> list[SubscriptionRecord]:
-        index_key = f"idx:{agent_id}"
-        sub_ids = await self._subs.get(index_key, default=[])
-        results = []
-        for sub_id in sub_ids:
-            try:
-                data = await self._subs.get(sub_id)
-                results.append(SubscriptionRecord(**data))
-            except Exception:
-                continue
-        return results
-
-    # ── Lifecycle ──
-
-    async def close(self) -> None:
-        if self._workspace:
-            await self._workspace.close()
-            self._workspace = None
-```
-
-### Step 4.2: Simplify EventStore
-
-**File**: `src/remora/core/event_store.py`
-
-Remove:
-- `EventSourcedBus` (already done in Phase 1.5)
-- `get_graph_ids()` — unused in reactive model
-- `delete_graph()` — unused in reactive model
-- `_migrate_routing_fields()` — no legacy data
-- `set_subscriptions()` / `set_event_bus()` — set in constructor only
-
-Merge EventBus notification inline into `append()`:
-
-```python
-async def append(self, graph_id: str, event) -> int:
-    event_id = await self._persist(event, graph_id)
-    
-    # Notify in-memory subscribers (UI, etc.)
-    if self._event_bus:
-        await self._event_bus.emit(event)
-    
-    # Queue triggers for matching subscriptions
-    if self._swarm_store and self._trigger_queue:
-        matching = await self._swarm_store.get_matching_agents(event)
-        for agent_id in matching:
-            await self._trigger_queue.put((agent_id, event_id, event))
-    
-    return event_id
-```
-
-**Target**: ~200 LOC (down from 382).
-
-### Step 4.3: Update AgentRunner
-
-**File**: `src/remora/core/agent_runner.py`
-
-Replace three separate constructor params with one `SwarmStore`:
-
-```python
-# Before:
-def __init__(self, event_store, subscriptions, swarm_state, config, event_bus):
-
-# After:
-def __init__(self, event_store: EventStore, store: SwarmStore, config: Config):
-```
-
-Update all calls:
-- `self._subscriptions.*` → `self._store.*`
-- `self._swarm_state.*` → `self._store.*`
-- Use `config.swarm_id` instead of hardcoded `"swarm"`
-
-### Step 4.4: Update Reconciler
-
-**File**: `src/remora/core/reconciler.py`
-
-Replace `swarm_state` + `subscriptions` params with single `SwarmStore`:
-
-```python
-# Before:
-async def reconcile(swarm_state, subscriptions, project_root, config):
-
-# After:
-async def reconcile(store: SwarmStore, project_root: Path, config: Config):
-```
-
-### Step 4.5: Update SwarmExecutor
-
-**File**: `src/remora/core/swarm_executor.py`
-
-Use `SwarmStore` for agent state load/save instead of `AgentState` JSONL files.
-
-### Step 4.6: Delete Old Storage Files
-
-```bash
-rm src/remora/core/swarm_state.py      # Replaced by SwarmStore
-rm src/remora/core/subscriptions.py     # Replaced by SwarmStore  
-rm src/remora/core/agent_state.py       # Replaced by SwarmStore
-```
-
-Keep `SubscriptionPattern` — move the dataclass + `matches()` method into `swarm_store.py` or a small `models.py`.
+Update the startup reconciliation logic to use the new `SwarmState` and `SubscriptionRegistry`:
+- Diff discovered CST nodes against `SwarmState`.
+- Call `swarm_state.register_agent` and `subscriptions.register_defaults` for new nodes.
+- Call `swarm_state.mark_orphaned` and `subscriptions.unregister_all` for deleted nodes.
 
 ---
 
-## Phase 5: Simplify Cairn Bridge → FSdantic
+## Phase 5: Maintain Cairn Workspaces
 
-### Step 5.1: Refactor CairnWorkspaceService
+**File**: `src/remora/core/workspace.py` and `cairn_bridge.py`
 
-**File**: `src/remora/core/cairn_bridge.py`
+We DO NOT swap `cairn.runtime.workspace_manager` for `Fsdantic.open()`. The concept demands nested Cairn workspaces (`.remora/agents/<id>/workspace.db`) mapped over a `stable.db` layer. 
 
-Replace low-level `cairn.runtime.workspace_manager` usage with `Fsdantic.open()`:
-
-```python
-# Before:
-from cairn.runtime import workspace_manager as cairn_workspace_manager
-workspace = await cairn_workspace_manager._open_workspace(path, readonly=False)
-
-# After:
-from fsdantic import Fsdantic
-workspace = await Fsdantic.open(id=agent_id)
-```
-
-This gives us the full FSdantic API (files, kv, overlay, materialize) instead of raw workspace handles.
-
-### Step 5.2: Simplify AgentWorkspace
-
-**File**: `src/remora/core/workspace.py`
-
-Since FSdantic handles concurrency internally, remove the dual-lock pattern:
-
-```python
-class AgentWorkspace:
-    """Thin wrapper around FSdantic workspace for agent execution."""
-    
-    def __init__(self, workspace: Workspace, agent_id: str):
-        self._workspace = workspace
-        self._agent_id = agent_id
-    
-    @property
-    def files(self): return self._workspace.files
-    
-    @property 
-    def kv(self): return self._workspace.kv
-    
-    async def read(self, path): return await self._workspace.files.read(path)
-    async def write(self, path, content): await self._workspace.files.write(path, content)
-    async def close(self): await self._workspace.close()
-```
+- Keep `CairnWorkspaceService` largely as-is.
+- Continue using Cairn dependencies to enforce copy-on-write functionality per agent.
+- Ensure the agent's folder (`.remora/agents/<id>`) stores both `state.jsonl` (AgentState) and `workspace.db` (Cairn).
 
 ---
 
-## Phase 6: Flatten Service Layer
-
-### Step 6.1: Simplify RemoraService
+### Step 6.1: Service Layer Integration
 
 **File**: `src/remora/service/api.py`
 
-Replace separate `EventStore`, `SwarmState`, `SubscriptionRegistry` creation with `SwarmStore`:
-
-```python
-# Before (in create_default):
-event_store = EventStore(store_path)
-subscriptions = SubscriptionRegistry(subscriptions_path)
-swarm_state = SwarmState(swarm_state_path)
-
-# After:
-event_store = EventStore(store_path)
-store = SwarmStore(workspace_id="remora-swarm")
-```
-
-The `__init__` reduces from 10 params to ~5.
+Ensure that the main `create_default()` correctly wires up the separated SQLite/JSONL layers (`EventStore`, `SubscriptionRegistry`, `SwarmState`) with the `CairnWorkspaceService`.
 
 ---
 
@@ -553,11 +291,11 @@ After completing all phases:
 
 - [ ] `grep -r "GraphExecutor\|EventSourcedBus\|WorkspaceManager\|CairnDataProvider\|CairnResultHandler" src/` returns nothing
 - [ ] `grep -r "from remora.core.executor\|from remora.core.graph\|from remora.core.context" src/` returns nothing
-- [ ] `grep -r "from remora.core.swarm_state\|from remora.core.agent_state\|from remora.core.subscriptions" src/` only shows `SubscriptionPattern` import if kept
-- [ ] `python -c "from remora.core.swarm_store import SwarmStore"` succeeds
+- [ ] `python -c "from remora.core.subscriptions import SubscriptionRegistry"` succeeds
+- [ ] `python -c "from remora.core.swarm_state import SwarmState"` succeeds
 - [ ] `python -c "from remora.core.event_store import EventStore"` succeeds
 - [ ] `pytest tests/` passes
-- [ ] Only 2 storage concerns exist: `events.db` (SQLite) and FSdantic KV workspace
+- [ ] Storage concerns correctly separated into `events.db`, `swarm_state.db`, `subscriptions.db`, and JSONL files.
 
 ---
 
@@ -568,17 +306,17 @@ After completing all phases:
 | 1 | Remove legacy code | ~1,100 | 0 |
 | 2 | Fix critical bugs | ~5 | ~15 |
 | 3 | Fix config issues | ~5 | ~5 |
-| 4 | FSdantic KV storage | ~500 | ~120 |
-| 5 | Simplify Cairn bridge | ~100 | ~50 |
-| 6 | Flatten service layer | ~50 | ~10 |
+| 4 | SQLite & JSONL storage | - | ~250 |
+| 5 | Retain Cairn Working | ~0 | ~0 |
+| 6 | Service layer wiring | ~0 | ~10 |
 | 7 | Fix remaining issues | ~20 | ~30 |
 | 8 | Tests | 0 | ~120 |
-| **Total** | | **~1,780** | **~350** |
+| **Total** | | **~1,280** | **~480** |
 
-**Net reduction**: ~1,430 LOC while gaining:
-- 2 storage concerns instead of 6
-- FSdantic KV for typed, namespaced state access
-- No custom SQL for agent/subscription/state management
+**Net reduction**: ~800 LOC while gaining:
+- Pure Reactive architecture aligned with CST Demo
+- Dedicated SQLite databases for message bus & state tracking
+- Per-agent isolated `state.jsonl` files stored alongside `workspace.db`
 - Cleaner mental model
 
 ---

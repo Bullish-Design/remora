@@ -153,31 +153,16 @@ This revised code review analyzes the Remora library after its ground-up refacto
 
 **Problem**: 3 SQLite databases + per-agent JSONL + 2+ Cairn databases — far more complexity than necessary.
 
-### 5.2 FSdantic KV Store Analysis
+### Consolidation into SQLite and JSONL
 
-FSdantic provides a `KVManager` with:
-- Namespace-based key scoping (`kv.namespace("agents")`)
-- Typed repositories via Pydantic models
-- Batch operations (`get_many`, `set_many`)
-- Best-effort transactions
-- Already used by Remora via Cairn dependency
+The concept clearly distinguishes different types of state storage:
 
-**Can FSdantic KV replace EventStore?**
+1.  **Swarm Registry & Subscriptions (`swarm_state.db`, `subscriptions.db`)**: Global state tracking agents and their event routing profiles using SQLite.
+2.  **Message Queue (`events.db`)**: Using SQLite for quick, indexed access to historical events and simple triggering logic.
+3.  **Agent Working Set (`workspace.db` & `state.jsonl`)**: Retaining nested Cairn workspaces (`agents/<id>/workspace.db`) alongside basic JSONL representations of chat history and agent-learned topology.
 
-**No.** The EventStore requires:
-- Auto-incrementing sequential IDs
-- Time-range queries (`since`, `until`)
-- Indexed filtering by `event_type`, `graph_id`, `after_id`
-- Ordered replay
-
-These are fundamentally SQL/relational operations that a KV store doesn't support well. `kv.list()` returns items but doesn't guarantee ordering, range filtering, or indexed lookups.
-
-**Can FSdantic KV replace SwarmState, SubscriptionRegistry, and AgentState?**
-
-**Yes.** These are all simple key-value patterns:
-- SwarmState: `kv.set("agent:<id>", metadata_dict)` / `kv.list(prefix="agent:")`
-- SubscriptionRegistry: `kv.set("sub:<id>", pattern_dict)` / `kv.list(prefix="sub:")`  
-- AgentState: `kv.set("state:<agent_id>", state_dict)` / `kv.get("state:<agent_id>")`
+**Action Plan:**
+Create concrete, distinct storage components matching the `REMORA_CST_DEMO_ANALYSIS.md` concept. `EventStore` handles message queues, `SwarmState` handles registration, and `SubscriptionRegistry` tracks event subscriptions. Keep per-agent JSONL isolated securely next to the agent's Cairn `workspace.db`.
 
 ### 5.3 Recommended Storage Architecture
 
