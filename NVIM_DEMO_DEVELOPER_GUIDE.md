@@ -40,11 +40,6 @@ touch src/remora/demo/templates/index.html
 **File: `plugin/remora_nvim.lua`**
 This is the entry point that Neovim executes when the plugin is loaded.
 ```lua
--- Only load once
-if vim.g.loaded_remora_nvim then
-  return
-end
-vim.g.loaded_remora_nvim = true
 
 -- Command to manually toggle the sidepanel
 vim.api.nvim_create_user_command("RemoraToggle", function()

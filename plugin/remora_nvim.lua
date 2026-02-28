@@ -1,8 +1,3 @@
--- Only load once
-if vim.g.loaded_remora_nvim then
-  return
-end
-vim.g.loaded_remora_nvim = true
 
 -- Command to manually toggle the sidepanel
 vim.api.nvim_create_user_command("RemoraToggle", function()
