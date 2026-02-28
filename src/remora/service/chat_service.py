@@ -227,13 +227,6 @@ app = Starlette(routes=routes)
 @app.on_event("startup")
 async def startup_event():
     logger.info("Chat service starting...")
-    try:
-        from structured_agents import AgentKernel
-
-        logger.info("structured-agents: OK")
-    except ImportError as e:
-        logger.error(f"structured-agents not available: {e}")
-        logger.error("Install with: pip install structured-agents")
 
     try:
         from cairn import Cairn

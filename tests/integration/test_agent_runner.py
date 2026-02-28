@@ -8,10 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-# pytest.skip(
-#    "AgentRunner integration tests rely on structured_agents imports that hang in this environment",
-#    allow_module_level=True,
-# )
+
 
 import asyncio
 import contextlib
