@@ -11,6 +11,37 @@ The Remora library has undergone a ground-up refactor, transitioning from a batc
 
 ---
 
+## Step 0: Remove Legacy Tests
+
+The old test suite was built around the now-deprecated batch `AgentGraph`, `UIProjector`, and legacy dashboard components. Before we implement the new reactive architecture tests, we must clean house. 
+
+**Files to Delete:**
+Delete the following files (and associated directories if they become empty) as they test architecture that no longer exists:
+
+```bash
+# Remove old graph and workflow tests
+rm -f tests/unit/test_agent_graph.py
+rm -f tests/integration/test_agent_workflow_real.py
+
+# Remove old UI and dashboard tests
+rm -f tests/unit/test_dashboard_views.py
+rm -f tests/unit/test_ui_projector.py
+rm -f tests/integration/test_dashboard_real.py
+rm -f tests/integration/test_dashboard_api_real.py
+
+# Remove old resilience and smoke tests tied to the batch engine
+rm -f tests/integration/test_resilience_real.py
+rm -f tests/integration/test_smoke_real.py
+rm -f tests/integration/test_model_response_variations_real.py
+
+# Remove old service handlers tests (if entirely migrated/obsolete)
+rm -f tests/unit/test_service_handlers.py
+```
+
+*(Note: Keep code discovery tests like `test_multilanguage_discovery_real.py`, `test_cairn` tests, and any core data structure tests that remain valid).*
+
+---
+
 ## 2. Infrastructure Setup (Junior Developer Guide)
 
 Before writing tests for specific components, we need a robust fixture system in `tests/conftest.py`.
