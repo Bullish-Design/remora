@@ -269,7 +269,7 @@ return M
 ### Step 5: The Python Daemon (FastAPI + JSON-RPC + Datastar)
 
 **File: `src/remora/demo/nvim_server.py`**
-This script boots a FastAPI server. It mounts a Unix socket background task for Neovim and serves Datastar SSE streams for the Web UI.
+This script boots a FastAPI server. It mounts a Unix socket background task for Neovim and serves Datastar SSE streams for the Web UI. It is fully integrated with Remora's `SwarmState` and `EventStore`.
 
 ```python
 import asyncio
@@ -282,9 +282,22 @@ from fastapi.templating import Jinja2Templates
 from datastar_py.sse import ServerSentEventGenerator
 import uvicorn
 
+from remora.core.config import load_config
+from remora.core.swarm_state import SwarmState
+from remora.core.event_store import EventStore
+from remora.core.event_bus import EventBus
+from remora.core.events import RemoraEvent
+
+# Initialize Core Remora Services
+config = load_config()
+db_path = Path(config.swarm_root) / config.swarm_id / "workspace.db"
+swarm_state = SwarmState(db_path)
+event_bus = EventBus()
+event_store = EventStore(db_path, event_bus=event_bus)
+
 app = FastAPI(title="Remora Swarm Dashboard")
 templates = Jinja2Templates(directory="src/remora/demo/templates")
-SOCKET_PATH = "/tmp/remora.sock"
+SOCKET_PATH = config.nvim_socket or "/tmp/remora.sock"
 
 # ---- Neovim RPC Server (Unix Socket) ----
 async def handle_nvim_client(reader, writer):
@@ -300,13 +313,19 @@ async def handle_nvim_client(reader, writer):
             msg_id = request.get("id")
             
             if method == "agent.select":
-                # Mock response - In full implementation, fetch from SwarmState
+                agent_id = params.get("id")
+                
+                # Fetch Real State from Remora SwarmState
+                agent_meta = await swarm_state.get_agent(agent_id)
+                status = agent_meta.status if agent_meta else "NOT_FOUND"
+                
+                # We could fetch real triggers by querying the EventStore in a production app
                 response = {
                     "jsonrpc": "2.0",
                     "id": msg_id,
                     "result": {
-                        "status": "DORMANT",
-                        "triggers": ["FileSavedEvent (2m ago)"]
+                        "status": status,
+                        "triggers": [] # Keep MVP simple
                     }
                 }
                 writer.write(json.dumps(response).encode() + b"\n")
@@ -317,6 +336,7 @@ async def handle_nvim_client(reader, writer):
         writer.close()
 
 async def start_rpc_server():
+    Path(SOCKET_PATH).parent.mkdir(parents=True, exist_ok=True)
     Path(SOCKET_PATH).unlink(missing_ok=True)
     server = await asyncio.start_unix_server(handle_nvim_client, path=SOCKET_PATH)
     async with server:
@@ -324,6 +344,11 @@ async def start_rpc_server():
 
 @app.on_event("startup")
 async def startup_event():
+    # Initialize Databases
+    await swarm_state.initialize()
+    await event_store.initialize()
+    
+    # Start Neovim tracking socket
     asyncio.create_task(start_rpc_server())
 
 # ---- Datastar Web UI Server ----
@@ -344,17 +369,37 @@ async def get_dashboard(request: Request):
 async def stream_events(request: Request):
     """Datastar SSE endpoint for real-time updates."""
     async def sse_generator():
+        # Yield the initial connection message
         yield ServerSentEventGenerator.merge_fragments(
-            fragments='<div id="logs" data-prepend><li>Connected to Swarm...</li></div>'
+            fragments='<div id="logs" data-prepend><li>Connected to Swarm EventBus...</li></div>'
         )
         
-        while True:
-            await asyncio.sleep(2)
-            # In MVP, simulate events. In full app, subscribe to EventStore.
-            yield ServerSentEventGenerator.merge_fragments(
-                fragments='<div id="logs" data-prepend><li>[Ping] Swarm idle...</li></div>'
-            )
+        # Subscribe to EventBus to receive all RemoraEvents asynchronously
+        queue = asyncio.Queue()
+        
+        async def event_handler(event: RemoraEvent):
+            await queue.put(event)
             
+        event_bus.subscribe_all(event_handler)
+        
+        try:
+            while True:
+                # Wait for next event from Swarm
+                event = await queue.get()
+                
+                # Format the log line based on the event type
+                event_type = type(event).__name__
+                agent_id = getattr(event, "agent_id", getattr(event, "to_agent", getattr(event, "from_agent", "System")))
+                
+                html_fragment = f'<div id="logs" data-prepend><li>[{event_type}] {agent_id}</li></div>'
+                
+                # Datastar merge_fragments tells the frontend to update specific HTML fragments
+                yield ServerSentEventGenerator.merge_fragments(
+                    fragments=html_fragment
+                )
+        except asyncio.CancelledError:
+             event_bus.unsubscribe_all(event_handler)
+             
     return ServerSentEventGenerator(sse_generator())
 
 if __name__ == "__main__":
@@ -443,11 +488,68 @@ This uses Datastar's custom data attributes for reactivity and SSE processing.
    ```
    Move your cursor around Python functions/classes and observe the right-hand panel updating via JSON-RPC.
 
-## 5. Connecting the Plumbings (Next Steps for the Junior Dev)
+## 5. End-to-End Execution and Testing
 
-The above implements the bare minimum plumbing:
-*   [x] Neovim Lua Cursor Tracking -> JSON-RPC -> Python Daemon
-*   [x] Python Daemon -> Datastar SSE -> HTML UI
-*   [x] Tree visualization
+To verify this implementation end-to-end, execute a real action in Remora using a separate python script and observe the UI and sidepanel respond dynamically.
 
-To fully realize the MVP, connect the `handle_nvim_client` inside `nvim_server.py` directly to the `remora` package's `SwarmState` to return real agent statuses instead of the mock dict, and wrap the `stream_events` generator around `EventStore.event_bus.subscribe_all()`.
+**1. Create a Test Script (`demo-trigger.py`)**
+
+Create a short script to manually inject an event into the running event bus so that the Datastar web UI renders the log:
+
+```python
+import asyncio
+from pathlib import Path
+from remora.core.config import load_config
+from remora.core.events import ManualTriggerEvent
+from remora.core.event_store import EventStore
+from remora.core.event_bus import EventBus
+from remora.core.swarm_state import SwarmState, AgentMetadata
+
+async def inject_event():
+    config = load_config()
+    db_path = Path(config.swarm_root) / config.swarm_id / "workspace.db"
+    
+    # 1. Connect to same DB
+    event_bus = EventBus()
+    event_store = EventStore(db_path, event_bus=event_bus)
+    await event_store.initialize()
+    
+    swarm_state = SwarmState(db_path)
+    await swarm_state.initialize()
+    
+    # 2. Add a mock agent so Neovim actually finds it when you hover
+    await swarm_state.upsert(AgentMetadata(
+        agent_id="function_definition_utils_15",
+        node_type="function_definition",
+        name="format_date",
+        full_name="src.utils.format_date",
+        file_path="src/utils.py",
+        start_line=15,
+        end_line=25,
+        status="ACTIVE"
+    ))
+    
+    # 3. Fire a manual trigger at the new agent
+    event = ManualTriggerEvent(
+        to_agent="function_definition_utils_15",
+        reason="Testing End to End integration",
+    )
+    
+    # Writing to the EventStore will broadcast to the EventBus
+    await event_store.append("demo_graph", event)
+    
+    print("Test event injected. Check localhost dashboard!")
+
+if __name__ == "__main__":
+    asyncio.run(inject_event())
+```
+
+**2. Verify The Output**
+
+1. Ensure the web server is running.
+2. Open `http://localhost:8080`. You should see `Connected to Swarm EventBus...` in the logs.
+3. Open a neovim pane. When you move the cursor into the mock `utils.py` bounds created in step 1, the `RemoraToggle` side panel should accurately query Python over the RPC socket and return `ACTIVE` via finding the ID in the SQLite database created in `SwarmState`.
+4. Run the script: `python demo-trigger.py`.
+5. Return to the browser. Thanks to Datastar's SSE streaming hooked into Remora's `EventBus`, the web UI logs list will instantly append: `[ManualTriggerEvent] function_definition_utils_15`.
+
+You have now proven real-time observability across the core Remora database, a Neovim Editor instance, and a live web dashboard.
