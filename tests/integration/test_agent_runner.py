@@ -41,11 +41,11 @@ def runner_config(tmp_path: Path) -> Config:
 @pytest.fixture
 async def runner_components(tmp_path: Path):
     """Create all runner components."""
-    event_store = EventStore(tmp_path / "events.db")
-    await event_store.initialize()
-
     subscriptions = SubscriptionRegistry(tmp_path / "subscriptions.db")
     await subscriptions.initialize()
+
+    event_store = EventStore(tmp_path / "events.db", subscriptions=subscriptions)
+    await event_store.initialize()
 
     swarm_state = SwarmState(tmp_path / "swarm.db")
     swarm_state.initialize()
@@ -66,6 +66,7 @@ async def test_depth_limit_enforced(
     event_store, subscriptions, swarm_state = runner_components
 
     runner_config.max_trigger_depth = 3
+    runner_config.max_concurrency = 5
     runner = AgentRunner(
         event_store=event_store,
         subscriptions=subscriptions,
@@ -74,41 +75,32 @@ async def test_depth_limit_enforced(
         project_root=tmp_path,
     )
 
-    await subscriptions.register(
-        "agent_a",
-        SubscriptionPattern(to_agent="agent_a"),
-    )
-    await subscriptions.register(
-        "agent_b",
-        SubscriptionPattern(to_agent="agent_b"),
-    )
+    execution_count = 0
 
-    mock_executor = AsyncMock()
-    mock_executor.run_agent = AsyncMock(return_value="executed")
-    runner._executor = mock_executor
+    async def fake_execute_turn(agent_id: str, trigger_event: AgentMessageEvent) -> None:
+        nonlocal execution_count
+        execution_count += 1
+        await asyncio.sleep(0.05)
 
-    async def consume_triggers():
-        count = 0
-        async for agent_id, event_id, event in event_store.get_triggers():
-            count += 1
-            if count >= 3:
-                break
-        return count
+    runner._execute_turn = fake_execute_turn
 
-    trigger_task = asyncio.create_task(consume_triggers())
-
-    await asyncio.sleep(0.05)
-
-    await event_store.append(
-        "test-swarm",
-        AgentMessageEvent(from_agent="user", to_agent="agent_a", content="start"),
+    event = AgentMessageEvent(
+        from_agent="user",
+        to_agent="agent_a",
+        correlation_id="depth-chain",
+        content="start",
     )
 
-    trigger_count = await trigger_task
+    tasks = [
+        asyncio.create_task(
+            runner._process_trigger("agent_a", index, event, "depth-chain")
+        )
+        for index in range(5)
+    ]
 
-    assert trigger_count <= runner_config.max_trigger_depth
+    await asyncio.gather(*tasks)
 
-    await runner.stop()
+    assert execution_count == runner_config.max_trigger_depth
 
 
 @pytest.mark.asyncio
