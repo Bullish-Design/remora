@@ -27,6 +27,12 @@ SOCKET_PATH = getattr(config, "nvim_socket", "/run/user/1000/remora.sock")
 
 print(f"\nNvim RPC Server will listen on Unix Socket: {SOCKET_PATH}\n")
 
+# ---- Neovim Startup commands ---- #
+
+# :set runtimepath+=/home/andrew/Documents/Projects/remora
+# :lua require('remora_nvim').setup({ socket = '/run/user/1000/remora.sock' })
+# :source plugin/remora_nvim.lua
+
 
 # ---- Neovim RPC Server (Unix Socket) ----
 async def handle_nvim_client(reader, writer):
