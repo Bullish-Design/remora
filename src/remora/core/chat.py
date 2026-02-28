@@ -10,6 +10,7 @@ from remora.core.events import RemoraEvent
 from remora.core.event_bus import EventBus
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.config import WorkspaceConfig
+from remora.core.tool_registry import ToolRegistry
 
 
 @dataclass
