@@ -51,7 +51,7 @@ class ChatConfig:
     system_prompt: str
     tool_presets: list[str] = field(default_factory=lambda: ["file_ops"])
     model_name: str = "Qwen/Qwen3-4B"
-    model_base_url: str = "http://localhost:8000/v1"
+    model_base_url: str = "http://remora-server:8000/v1"
     model_api_key: str = "EMPTY"
     max_turns: int = 10
 
