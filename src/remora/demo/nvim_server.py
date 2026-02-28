@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from datastar_py.sse import ServerSentEventGenerator
 import uvicorn
@@ -141,7 +141,12 @@ async def stream_events(request: Request):
         except asyncio.CancelledError:
             event_bus.unsubscribe_all(event_handler)
 
-    return ServerSentEventGenerator(sse_generator())
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(sse_generator(), media_type="text/event-stream", headers=headers)
 
 
 if __name__ == "__main__":
