@@ -12,7 +12,6 @@ from datastar_py.starlette import DatastarResponse
 from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.routing import Route
 
-from remora.models import PlanRequest, RunRequest
 from remora.service.api import RemoraService
 
 
@@ -53,18 +52,6 @@ def create_app(service: RemoraService | None = None) -> Starlette:
 
         return _sse_response(generate())
 
-    async def run(request: Request) -> JSONResponse:
-        try:
-            payload = await request.json()
-        except Exception:
-            payload = {}
-        run_request = RunRequest.from_dict(payload)
-        try:
-            response = await service.run(run_request)
-        except ValueError as exc:
-            return _error(str(exc), status_code=400)
-        return JSONResponse(response.to_dict())
-
     async def submit_input(request: Request) -> JSONResponse:
         try:
             payload = await request.json()
@@ -78,34 +65,55 @@ def create_app(service: RemoraService | None = None) -> Starlette:
             return _error(str(exc), status_code=400)
         return JSONResponse(response.to_dict())
 
-    async def plan(request: Request) -> JSONResponse:
-        try:
-            payload = await request.json()
-        except Exception:
-            payload = {}
-        plan_request = PlanRequest.from_dict(payload)
-        try:
-            response = await service.plan(plan_request)
-        except ValueError as exc:
-            return _error(str(exc), status_code=400)
-        return JSONResponse(response.to_dict())
-
     async def config(_request: Request) -> JSONResponse:
         return JSONResponse(service.config_snapshot().to_dict())
 
     async def snapshot(_request: Request) -> JSONResponse:
         return JSONResponse(service.ui_snapshot())
 
+    async def swarm_agents(_request: Request) -> JSONResponse:
+        return JSONResponse(service.list_agents())
+
+    async def swarm_agent(request: Request) -> JSONResponse:
+        agent_id = request.path_params["id"]
+        try:
+            return JSONResponse(service.get_agent(agent_id))
+        except ValueError as exc:
+            return _error(str(exc), status_code=404)
+
+    async def swarm_events(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        event_type = payload.get("event_type")
+        data = payload.get("data", {})
+        try:
+            result = await service.emit_event(event_type, data)
+        except ValueError as exc:
+            return _error(str(exc), status_code=400)
+        return JSONResponse(result)
+
+    async def swarm_subscriptions(request: Request) -> JSONResponse:
+        agent_id = request.path_params["id"]
+        try:
+            result = await service.get_subscriptions(agent_id)
+        except ValueError as exc:
+            return _error(str(exc), status_code=404)
+        return JSONResponse(result)
+
     routes = [
         Route("/", index),
         Route("/subscribe", subscribe),
         Route("/events", events),
         Route("/replay", replay),
-        Route("/run", run, methods=["POST"]),
         Route("/input", submit_input, methods=["POST"]),
-        Route("/plan", plan, methods=["POST"]),
         Route("/config", config),
         Route("/snapshot", snapshot),
+        Route("/swarm/agents", swarm_agents),
+        Route("/swarm/agents/{id}", swarm_agent),
+        Route("/swarm/events", swarm_events, methods=["POST"]),
+        Route("/swarm/subscriptions/{id}", swarm_subscriptions),
     ]
 
     return Starlette(routes=routes)

@@ -17,6 +17,8 @@ class AgentMetadata:
 
     agent_id: str
     node_type: str
+    name: str
+    full_name: str
     file_path: str
     parent_id: str | None = None
     start_line: int = 1
@@ -44,6 +46,8 @@ class SwarmState:
             CREATE TABLE IF NOT EXISTS agents (
                 agent_id TEXT PRIMARY KEY,
                 node_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                full_name TEXT NOT NULL,
                 file_path TEXT NOT NULL,
                 parent_id TEXT,
                 start_line INTEGER NOT NULL,
@@ -65,10 +69,12 @@ class SwarmState:
         now = time.time()
         self._conn.execute(
             """
-            INSERT INTO agents (agent_id, node_type, file_path, parent_id, start_line, end_line, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
+            INSERT INTO agents (agent_id, node_type, name, full_name, file_path, parent_id, start_line, end_line, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
             ON CONFLICT(agent_id) DO UPDATE SET
                 node_type = excluded.node_type,
+                name = excluded.name,
+                full_name = excluded.full_name,
                 file_path = excluded.file_path,
                 parent_id = excluded.parent_id,
                 start_line = excluded.start_line,
@@ -79,6 +85,8 @@ class SwarmState:
             (
                 metadata.agent_id,
                 metadata.node_type,
+                metadata.name,
+                metadata.full_name,
                 metadata.file_path,
                 metadata.parent_id,
                 metadata.start_line,
@@ -119,6 +127,8 @@ class SwarmState:
             {
                 "agent_id": row["agent_id"],
                 "node_type": row["node_type"],
+                "name": row["name"],
+                "full_name": row["full_name"],
                 "file_path": row["file_path"],
                 "parent_id": row["parent_id"],
                 "start_line": row["start_line"],
@@ -147,6 +157,8 @@ class SwarmState:
         return {
             "agent_id": row["agent_id"],
             "node_type": row["node_type"],
+            "name": row["name"],
+            "full_name": row["full_name"],
             "file_path": row["file_path"],
             "parent_id": row["parent_id"],
             "start_line": row["start_line"],

@@ -10,6 +10,7 @@ from remora.core.config import (
     ExecutionConfig,
     ModelConfig,
     RemoraConfig,
+    SwarmConfig,
     WorkspaceConfig,
     load_config,
     serialize_config,
@@ -27,7 +28,6 @@ from remora.core.errors import (
     ConfigError,
     DiscoveryError,
     ExecutionError,
-    GraphError,
     RemoraError,
     WorkspaceError,
 )
@@ -36,11 +36,9 @@ from remora.core.event_store import EventSourcedBus, EventStore
 from remora.core.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
-    AgentSkippedEvent,
+    AgentMessageEvent,
     AgentStartEvent,
-    GraphCompleteEvent,
-    GraphErrorEvent,
-    GraphStartEvent,
+    ContentChangedEvent,
     HumanInputRequestEvent,
     HumanInputResponseEvent,
     KernelEndEvent,
@@ -52,17 +50,25 @@ from remora.core.events import (
     ToolResultEvent,
     TurnCompleteEvent,
 )
-from remora.core.executor import AgentState, ExecutorState, GraphExecutor, ResultSummary
-from remora.core.graph import AgentNode, build_graph, get_execution_batches
+from remora.core.agent_state import AgentState
+from remora.core.agent_runner import AgentRunner, ExecutionContext
+from remora.core.swarm_executor import SwarmExecutor
+from remora.core.subscriptions import Subscription, SubscriptionPattern, SubscriptionRegistry
+from remora.core.swarm_state import AgentMetadata, SwarmState
+from remora.core.reconciler import (
+    get_agent_dir,
+    get_agent_state_path,
+    get_agent_workspace_path,
+    reconcile_on_startup,
+)
 from remora.core.tools import RemoraGrailTool, build_virtual_fs, discover_grail_tools
 from remora.core.workspace import AgentWorkspace, CairnDataProvider, CairnResultHandler, WorkspaceManager
-from remora.utils import PathResolver
+from remora.utils import PathResolver, to_project_relative
 
 __all__ = [
     "ConfigError",
     "DiscoveryError",
     "ExecutionError",
-    "GraphError",
     "RemoraError",
     "WorkspaceError",
     "BundleConfig",
@@ -71,16 +77,15 @@ __all__ = [
     "ExecutionConfig",
     "ModelConfig",
     "RemoraConfig",
+    "SwarmConfig",
     "WorkspaceConfig",
     "load_config",
     "serialize_config",
     "AgentCompleteEvent",
     "AgentErrorEvent",
-    "AgentSkippedEvent",
+    "AgentMessageEvent",
     "AgentStartEvent",
-    "GraphCompleteEvent",
-    "GraphErrorEvent",
-    "GraphStartEvent",
+    "ContentChangedEvent",
     "HumanInputRequestEvent",
     "HumanInputResponseEvent",
     "KernelEndEvent",
@@ -95,13 +100,10 @@ __all__ = [
     "EventHandler",
     "EventSourcedBus",
     "EventStore",
-    "AgentNode",
-    "build_graph",
-    "get_execution_batches",
     "AgentState",
-    "ExecutorState",
-    "GraphExecutor",
-    "ResultSummary",
+    "AgentRunner",
+    "ExecutionContext",
+    "SwarmExecutor",
     "CSTNode",
     "LANGUAGE_EXTENSIONS",
     "NodeType",
@@ -120,4 +122,14 @@ __all__ = [
     "build_virtual_fs",
     "discover_grail_tools",
     "PathResolver",
+    "to_project_relative",
+    "Subscription",
+    "SubscriptionPattern",
+    "SubscriptionRegistry",
+    "SwarmState",
+    "AgentMetadata",
+    "get_agent_dir",
+    "get_agent_state_path",
+    "get_agent_workspace_path",
+    "reconcile_on_startup",
 ]

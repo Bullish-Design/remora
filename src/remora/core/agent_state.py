@@ -21,6 +21,8 @@ class AgentState:
 
     agent_id: str
     node_type: str
+    name: str
+    full_name: str
     file_path: str
     parent_id: str | None = None
     range: tuple[int, int] | None = None

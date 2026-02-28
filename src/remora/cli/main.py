@@ -4,25 +4,243 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
-import os
-import sys
-import uuid
 from pathlib import Path
 
 import click
 
 from remora.adapters.starlette import create_app
 from remora.core.config import ConfigError, load_config
-from remora.core.events import GraphCompleteEvent, GraphErrorEvent
-from remora.models import RunRequest
 from remora.service.api import RemoraService
-from remora.ui.projector import normalize_event
 
 
 @click.group()
 def main() -> None:
     """Remora - Agent-based code analysis."""
+
+
+@main.group()
+def swarm() -> None:
+    """Swarm commands for reactive agent management."""
+    pass
+
+
+@swarm.command("start")
+@click.option("--project-root", type=click.Path(file_okay=False, resolve_path=True))
+@click.option("--config", "config_path", type=click.Path(dir_okay=False, resolve_path=True))
+@click.option("--nvim/--no-nvim", default=False, help="Start Neovim server")
+def swarm_start(project_root: str | None, config_path: str | None, nvim: bool) -> None:
+    """Start the reactive swarm (reconciler + runner)."""
+    try:
+        config = load_config(config_path)
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    root = Path(project_root) if project_root else Path.cwd()
+
+    async def _start() -> None:
+        from remora.core.event_bus import EventBus
+        from remora.core.event_store import EventStore
+        from remora.core.swarm_state import SwarmState
+        from remora.core.subscriptions import SubscriptionRegistry
+        from remora.core.reconciler import reconcile_on_startup
+        from remora.core.agent_runner import AgentRunner
+
+        swarm_path = root / ".remora"
+        event_store_path = swarm_path / "events" / "events.db"
+        subscriptions_path = swarm_path / "subscriptions.db"
+        swarm_state_path = swarm_path / "swarm_state.db"
+
+        event_bus = EventBus()
+        subscriptions = SubscriptionRegistry(subscriptions_path)
+        swarm_state = SwarmState(swarm_state_path)
+        event_store = EventStore(
+            event_store_path,
+            subscriptions=subscriptions,
+            event_bus=event_bus,
+        )
+
+        await event_store.initialize()
+        await subscriptions.initialize()
+        swarm_state.initialize()
+
+        event_store.set_subscriptions(subscriptions)
+        event_store.set_event_bus(event_bus)
+
+        click.echo("Reconciling swarm...")
+        swarm_id = getattr(config, "swarm_id", "swarm") if hasattr(config, "__dataclass_fields__") else "swarm"
+        result = await reconcile_on_startup(
+            root,
+            swarm_state,
+            subscriptions,
+            event_store=event_store,
+            swarm_id=swarm_id,
+        )
+        click.echo(f"Swarm reconciled: {result['created']} new, {result['orphaned']} orphaned, {result['total']} total")
+
+        runner = AgentRunner(
+            event_store=event_store,
+            subscriptions=subscriptions,
+            swarm_state=swarm_state,
+            config=config,
+            event_bus=event_bus,
+            project_root=root,
+        )
+        runner_task = asyncio.create_task(runner.run_forever())
+
+        nvim_server = None
+        if nvim:
+            from remora.nvim.server import NvimServer
+
+            nvim_socket = swarm_path / "nvim.sock"
+            nvim_server = NvimServer(
+                nvim_socket,
+                event_store=event_store,
+                subscriptions=subscriptions,
+                event_bus=event_bus,
+                project_root=root,
+            )
+            await nvim_server.start()
+            click.echo(f"Neovim server started on {nvim_socket}")
+
+        click.echo("Swarm started. Press Ctrl+C to stop.")
+
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            runner_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await runner_task
+            await runner.stop()
+            if nvim_server:
+                await nvim_server.stop()
+
+    asyncio.run(_start())
+
+
+@swarm.command("reconcile")
+@click.option("--project-root", type=click.Path(file_okay=False, resolve_path=True))
+@click.option("--config", "config_path", type=click.Path(dir_okay=False, resolve_path=True))
+def swarm_reconcile(project_root: str | None, config_path: str | None) -> None:
+    """Run swarm reconciliation only."""
+    try:
+        config = load_config(config_path)
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    root = Path(project_root) if project_root else Path.cwd()
+
+    async def _reconcile() -> None:
+        from remora.core.swarm_state import SwarmState
+        from remora.core.subscriptions import SubscriptionRegistry
+        from remora.core.reconciler import reconcile_on_startup
+
+        swarm_path = root / ".remora"
+        subscriptions_path = swarm_path / "subscriptions.db"
+        swarm_state_path = swarm_path / "swarm_state.db"
+
+        subscriptions = SubscriptionRegistry(subscriptions_path)
+        swarm_state = SwarmState(swarm_state_path)
+
+        await subscriptions.initialize()
+        swarm_state.initialize()
+
+        result = await reconcile_on_startup(
+            root,
+            swarm_state,
+            subscriptions,
+        )
+        click.echo(f"Reconciliation complete:")
+        click.echo(f"  Created: {result['created']}")
+        click.echo(f"  Orphaned: {result['orphaned']}")
+        click.echo(f"  Total: {result['total']}")
+
+        await subscriptions.close()
+        swarm_state.close()
+
+    asyncio.run(_reconcile())
+
+
+@swarm.command("list")
+@click.option("--project-root", type=click.Path(file_okay=False, resolve_path=True))
+def swarm_list(project_root: str | None) -> None:
+    """List known agents in the swarm."""
+    root = Path(project_root) if project_root else Path.cwd()
+
+    swarm_path = root / ".remora"
+    swarm_state_path = swarm_path / "swarm_state.db"
+
+    if not swarm_state_path.exists():
+        click.echo("No swarm state found. Run 'remora swarm reconcile' first.")
+        return
+
+    from remora.core.swarm_state import SwarmState
+
+    swarm_state = SwarmState(swarm_state_path)
+    swarm_state.initialize()
+
+    agents = swarm_state.list_agents()
+
+    if not agents:
+        click.echo("No agents found.")
+        return
+
+    click.echo(f"Agents ({len(agents)}):")
+    for agent in agents:
+        click.echo(f"  {agent['agent_id'][:16]}... | {agent['node_type']} | {agent['file_path']} | {agent['status']}")
+
+    swarm_state.close()
+
+
+@swarm.command("emit")
+@click.argument("event_type")
+@click.argument("data", required=False)
+@click.option("--project-root", type=click.Path(file_okay=False, resolve_path=True))
+def swarm_emit(event_type: str, data: str | None, project_root: str | None) -> None:
+    """Emit an event to the swarm."""
+    root = Path(project_root) if project_root else Path.cwd()
+
+    import json
+
+    event_data = {}
+    if data:
+        try:
+            event_data = json.loads(data)
+        except json.JSONDecodeError:
+            raise click.ClickException("Data must be valid JSON")
+
+    async def _emit() -> None:
+        from remora.core.event_store import EventStore
+        from remora.core.events import AgentMessageEvent, ContentChangedEvent
+
+        swarm_path = root / ".remora"
+        event_store_path = swarm_path / "events" / "events.db"
+
+        event_store = EventStore(event_store_path)
+        await event_store.initialize()
+
+        if event_type == "AgentMessageEvent":
+            event = AgentMessageEvent(
+                from_agent=event_data.get("from_agent", "cli"),
+                to_agent=event_data.get("to_agent", ""),
+                content=event_data.get("content", ""),
+                tags=event_data.get("tags", []),
+            )
+        elif event_type == "ContentChangedEvent":
+            event = ContentChangedEvent(
+                path=event_data.get("path", ""),
+                diff=event_data.get("diff"),
+            )
+        else:
+            raise click.ClickException(f"Unknown event type: {event_type}")
+
+        event_id = await event_store.append("cli", event)
+        click.echo(f"Event emitted: {event_type} (id: {event_id})")
+
+        await event_store.close()
+
+    asyncio.run(_emit())
 
 
 @main.command()
@@ -43,136 +261,6 @@ def serve(host: str, port: int, project_root: str | None, config_path: str | Non
     import uvicorn
 
     uvicorn.run(app, host=host, port=port)
-
-
-@main.command()
-@click.argument("target_path")
-@click.option("--config", "config_path", type=click.Path(dir_okay=False, resolve_path=True))
-@click.option("--events/--no-events", default=True, show_default=True)
-@click.option("--no-wait", is_flag=True, default=False, help="Run immediately without waiting.")
-def run(target_path: str, config_path: str | None, events: bool, no_wait: bool) -> None:
-    """Run a graph execution for a target path."""
-    try:
-        config = load_config(config_path)
-    except ConfigError as exc:
-        raise click.ClickException(str(exc)) from exc
-
-    project_root = _resolve_project_root([target_path])
-    target_path = _normalize_target_path(target_path, project_root)
-    service = RemoraService.create_default(config=config, project_root=project_root)
-
-    async def _run() -> None:
-        event_task: asyncio.Task | None = None
-        graph_id = uuid.uuid4().hex[:8]
-        should_wait = sys.stdin.isatty() and not no_wait
-
-        click.echo(f"Graph ID: {graph_id}")
-        if should_wait:
-            await _wait_for_gate(graph_id)
-
-        async def _stream_events() -> None:
-            async with service.event_bus.stream() as stream:
-                async for event in stream:
-                    envelope = normalize_event(event)
-                    click.echo(json.dumps(envelope, default=str))
-
-        if events:
-            event_task = asyncio.create_task(_stream_events())
-
-        response = await service.run(RunRequest(target_path=target_path, graph_id=graph_id))
-
-        async def _wait_for(event_type):
-            return await service.event_bus.wait_for(
-                event_type,
-                lambda event: getattr(event, "graph_id", None) == response.graph_id,
-                timeout=config.execution.timeout,
-            )
-
-        completed_task = asyncio.create_task(_wait_for(GraphCompleteEvent))
-        error_task = asyncio.create_task(_wait_for(GraphErrorEvent))
-
-        try:
-            done, pending = await asyncio.wait(
-                {completed_task, error_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                task.cancel()
-        finally:
-            if event_task:
-                event_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await event_task
-
-        result = next(iter(done)).result()
-        if isinstance(result, GraphErrorEvent):
-            raise click.ClickException(result.error)
-
-        click.echo(f"Completed graph {response.graph_id}")
-
-    try:
-        asyncio.run(_run())
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
-    except asyncio.TimeoutError as exc:
-        raise click.ClickException("Graph execution timed out") from exc
-
-
-def _resolve_project_root(paths: list[str]) -> Path:
-    resolved: list[Path] = []
-    for path in paths:
-        path_obj = Path(path).resolve()
-        resolved.append(path_obj.parent if path_obj.is_file() else path_obj)
-    if not resolved:
-        return Path.cwd()
-    if len(resolved) == 1:
-        return resolved[0]
-    return Path(os.path.commonpath([str(path) for path in resolved]))
-
-
-def _normalize_target_path(target_path: str, project_root: Path) -> str:
-    resolved_target = Path(target_path).resolve()
-    try:
-        relative = resolved_target.relative_to(project_root)
-        return relative.as_posix() or "."
-    except ValueError:
-        return resolved_target.as_posix()
-
-
-def _gate_root() -> Path:
-    env_path = os.environ.get("REMORA_RUN_GATE_DIR")
-    if env_path:
-        return Path(env_path)
-    return Path.cwd() / ".remora" / "run_gates"
-
-
-async def _wait_for_gate(graph_id: str) -> None:
-    gate_root = _gate_root()
-    gate_root.mkdir(parents=True, exist_ok=True)
-    gate_path = gate_root / f"{graph_id}.start"
-
-    click.echo("Waiting for playback start.")
-    click.echo(f"Press Enter or create: {gate_path}")
-
-    input_task = asyncio.create_task(asyncio.to_thread(sys.stdin.readline))
-    try:
-        while True:
-            if gate_path.exists():
-                break
-            done, _ = await asyncio.wait(
-                {input_task},
-                timeout=0.5,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if done:
-                break
-    finally:
-        input_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await input_task
-    if gate_path.exists():
-        with contextlib.suppress(OSError):
-            gate_path.unlink()
 
 
 if __name__ == "__main__":

@@ -2,27 +2,25 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from remora.core.config import RemoraConfig
 from remora.core.discovery import discover
 from remora.core.event_bus import EventBus
-from remora.core.event_store import EventStore, EventSourcedBus
+from remora.core.event_store import EventStore
 from remora.core.events import HumanInputResponseEvent
-from remora.core.executor import GraphExecutor
-from remora.core.graph import AgentNode, build_graph
-from remora.models import ConfigSnapshot, InputResponse, PlanRequest, PlanResponse, RunRequest, RunResponse
+from remora.models import ConfigSnapshot, InputResponse
 from remora.ui.projector import UiStateProjector
 from remora.utils import PathResolver
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from remora.core.subscriptions import SubscriptionRegistry
+    from remora.core.swarm_state import SwarmState
 
-ExecutorFactory = Callable[[RemoraConfig, EventBus, Path], GraphExecutor]
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -31,52 +29,9 @@ class ServiceDeps:
     config: RemoraConfig
     project_root: Path
     projector: UiStateProjector
-    executor_factory: ExecutorFactory
-    running_tasks: dict[str, asyncio.Task]
     event_store: EventStore | None = None
-
-
-def default_executor_factory(
-    config: RemoraConfig,
-    event_bus: EventBus,
-    project_root: Path,
-) -> GraphExecutor:
-    return GraphExecutor(config, event_bus, project_root=project_root)
-
-
-async def handle_run(request: RunRequest, deps: ServiceDeps) -> RunResponse:
-    if not request.target_path:
-        raise ValueError("target_path is required")
-
-    bundle_mapping = _build_bundle_mapping(deps.config)
-    target_path = _normalize_target(request.target_path, deps.project_root)
-
-    graph_root = target_path if target_path.is_dir() else target_path.parent
-    nodes = discover(
-        [target_path],
-        languages=list(deps.config.discovery.languages) if deps.config.discovery.languages else None,
-        max_workers=deps.config.discovery.max_workers,
-    )
-    agent_nodes = build_graph(nodes, bundle_mapping)
-
-    if request.bundle:
-        target_bundle = bundle_mapping.get(request.bundle)
-        if target_bundle is None:
-            raise ValueError(f"Unknown bundle: {request.bundle}")
-        agent_nodes = [node for node in agent_nodes if node.bundle_path == target_bundle]
-
-    graph_id = request.graph_id or uuid.uuid4().hex[:8]
-    _record_target(deps.projector, target_path, deps.project_root)
-
-    task = asyncio.create_task(_execute_graph(graph_id, agent_nodes, graph_root, deps))
-    deps.running_tasks[graph_id] = task
-
-    def _cleanup(_task: asyncio.Task) -> None:
-        deps.running_tasks.pop(graph_id, None)
-
-    task.add_done_callback(_cleanup)
-
-    return RunResponse(graph_id=graph_id, status="started", node_count=len(agent_nodes))
+    swarm_state: "SwarmState | None" = None
+    subscriptions: "SubscriptionRegistry | None" = None
 
 
 async def handle_input(request_id: str, response: str, deps: ServiceDeps) -> InputResponse:
@@ -87,45 +42,12 @@ async def handle_input(request_id: str, response: str, deps: ServiceDeps) -> Inp
     return InputResponse(request_id=request_id)
 
 
-async def handle_plan(request: PlanRequest, deps: ServiceDeps) -> PlanResponse:
-    if not request.target_path:
-        raise ValueError("target_path is required")
-
-    bundle_mapping = _build_bundle_mapping(deps.config)
-    target_path = _normalize_target(request.target_path, deps.project_root)
-    nodes = discover(
-        [target_path],
-        languages=list(deps.config.discovery.languages) if deps.config.discovery.languages else None,
-        max_workers=deps.config.discovery.max_workers,
-    )
-    agent_nodes = build_graph(nodes, bundle_mapping)
-
-    if request.bundle:
-        target_bundle = bundle_mapping.get(request.bundle)
-        if target_bundle is None:
-            raise ValueError(f"Unknown bundle: {request.bundle}")
-        agent_nodes = [node for node in agent_nodes if node.bundle_path == target_bundle]
-
-    return PlanResponse(
-        nodes=[_serialize_node(node) for node in agent_nodes],
-        bundles={key: str(path) for key, path in bundle_mapping.items()},
-    )
-
-
 def handle_config_snapshot(deps: ServiceDeps) -> ConfigSnapshot:
     return ConfigSnapshot.from_config(deps.config)
 
 
 def handle_ui_snapshot(deps: ServiceDeps) -> dict[str, Any]:
     return deps.projector.snapshot()
-
-
-def _build_bundle_mapping(config: RemoraConfig) -> dict[str, Path]:
-    bundle_root = Path(config.bundles.path)
-    mapping = {name: bundle_root / bundle for name, bundle in config.bundles.mapping.items()}
-    if not mapping:
-        raise ValueError("No bundle mapping configured")
-    return mapping
 
 
 def _normalize_target(target_path: str, project_root: Path) -> Path:
@@ -142,46 +64,80 @@ def _normalize_target(target_path: str, project_root: Path) -> Path:
     return resolved
 
 
-def _record_target(projector: UiStateProjector, target_path: Path, project_root: Path) -> None:
-    try:
-        rel_target = target_path.relative_to(project_root).as_posix()
-    except ValueError:
-        rel_target = target_path.as_posix()
-    if target_path.is_dir() and not rel_target.endswith("/"):
-        rel_target = f"{rel_target}/"
-    projector.record_target(rel_target)
+async def handle_swarm_emit(request: Any, deps: ServiceDeps) -> dict[str, Any]:
+    """Handle swarm.emit - emit an event to the swarm."""
+    if deps.event_store is None:
+        raise ValueError("event store not configured")
+
+    from remora.core.events import AgentMessageEvent, ContentChangedEvent
+
+    event_type = getattr(request, "event_type", None)
+    data = getattr(request, "data", {}) or {}
+
+    if event_type == "AgentMessageEvent":
+        event = AgentMessageEvent(
+            from_agent=data.get("from_agent", "api"),
+            to_agent=data.get("to_agent", ""),
+            content=data.get("content", ""),
+            tags=data.get("tags", []),
+        )
+    elif event_type == "ContentChangedEvent":
+        from remora.utils import to_project_relative
+
+        path = to_project_relative(deps.project_root, data.get("path", ""))
+        event = ContentChangedEvent(path=path, diff=data.get("diff"))
+    else:
+        raise ValueError(f"Unknown event type: {event_type}")
+
+    event_id = await deps.event_store.append(deps.config.swarm_id, event)
+    return {"event_id": event_id}
 
 
-def _serialize_node(node: AgentNode) -> dict[str, Any]:
-    return {
-        "id": node.id,
-        "name": node.name,
-        "node_type": node.target.node_type,
-        "file_path": node.target.file_path,
-        "bundle_path": str(node.bundle_path),
-        "upstream": list(node.upstream),
-        "downstream": list(node.downstream),
-        "priority": node.priority,
-    }
+def handle_swarm_list_agents(deps: ServiceDeps) -> list[dict[str, Any]]:
+    """List all agents in the swarm."""
+    if deps.swarm_state is None:
+        raise ValueError("swarm state not configured")
+    return deps.swarm_state.list_agents()
 
 
-async def _execute_graph(graph_id: str, agent_nodes: list[AgentNode], project_root: Path, deps: ServiceDeps) -> None:
-    try:
-        event_bus: EventBus = deps.event_bus
-        if deps.event_store is not None:
-            event_bus = EventSourcedBus(deps.event_bus, deps.event_store, graph_id)  # type: ignore[assignment]
-        executor = deps.executor_factory(deps.config, event_bus, project_root)
-        await executor.run(agent_nodes, graph_id)
-    except Exception:
-        logger.exception("Graph execution failed: %s", graph_id)
+def handle_swarm_get_agent(agent_id: str, deps: ServiceDeps) -> dict[str, Any]:
+    """Get a specific agent."""
+    if deps.swarm_state is None:
+        raise ValueError("swarm state not configured")
+    agent = deps.swarm_state.get_agent(agent_id)
+    if agent is None:
+        raise ValueError("agent not found")
+    return agent
+
+
+async def handle_swarm_get_subscriptions(agent_id: str, deps: ServiceDeps) -> list[dict[str, Any]]:
+    """Get subscriptions for an agent."""
+    if deps.subscriptions is None:
+        raise ValueError("subscriptions not configured")
+    subs = await deps.subscriptions.get_subscriptions(agent_id)
+    return [
+        {
+            "id": sub.id,
+            "pattern": {
+                "event_types": sub.pattern.event_types,
+                "from_agents": sub.pattern.from_agents,
+                "to_agent": sub.pattern.to_agent,
+                "path_glob": sub.pattern.path_glob,
+                "tags": sub.pattern.tags,
+            },
+            "is_default": sub.is_default,
+        }
+        for sub in subs
+    ]
 
 
 __all__ = [
     "ServiceDeps",
-    "default_executor_factory",
     "handle_config_snapshot",
     "handle_input",
-    "handle_plan",
-    "handle_run",
     "handle_ui_snapshot",
+    "handle_swarm_emit",
+    "handle_swarm_list_agents",
+    "handle_swarm_get_agent",
+    "handle_swarm_get_subscriptions",
 ]

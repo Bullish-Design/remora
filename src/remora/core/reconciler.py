@@ -5,19 +5,23 @@ This module provides the reconcile_on_startup function that:
 - Diff against existing swarm state
 - Creates new agents, marks deleted agents as orphaned
 - Registers default subscriptions
+- Emits ContentChangedEvent for changed nodes
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from remora.core.discovery import CSTNode, discover
 from remora.core.agent_state import AgentState, save as save_agent_state
 from remora.core.subscriptions import SubscriptionRegistry
 from remora.core.swarm_state import AgentMetadata, SwarmState
-from remora.utils import PathLike, normalize_path
+from remora.utils import PathLike, normalize_path, to_project_relative
+
+if TYPE_CHECKING:
+    from remora.core.event_store import EventStore
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +47,8 @@ async def reconcile_on_startup(
     subscriptions: SubscriptionRegistry,
     discovery_paths: list[str] | None = None,
     languages: list[str] | None = None,
+    event_store: "EventStore | None" = None,
+    swarm_id: str = "swarm",
 ) -> dict[str, Any]:
     """Reconcile swarm state with discovered nodes.
 
@@ -52,6 +58,8 @@ async def reconcile_on_startup(
         subscriptions: SubscriptionRegistry for agent subscriptions
         discovery_paths: Paths to discover (default: ["src/"])
         languages: Languages to filter (default: None for all)
+        event_store: Optional EventStore for emitting ContentChangedEvents
+        swarm_id: Swarm ID for event emission
 
     Returns:
         Dictionary with counts of created, deleted, and updated agents
@@ -82,6 +90,8 @@ async def reconcile_on_startup(
         metadata = AgentMetadata(
             agent_id=node.node_id,
             node_type=node.node_type,
+            name=getattr(node, "name", ""),
+            full_name=getattr(node, "full_name", ""),
             file_path=node.file_path,
             parent_id=None,
             start_line=node.start_line,
@@ -95,14 +105,17 @@ async def reconcile_on_startup(
         state = AgentState(
             agent_id=node.node_id,
             node_type=node.node_type,
+            name=getattr(node, "name", ""),
+            full_name=getattr(node, "full_name", ""),
             file_path=node.file_path,
             range=(node.start_line, node.end_line),
         )
         save_agent_state(get_agent_state_path(swarm_root, node.node_id), state)
 
+        relative_path = to_project_relative(project_path, node.file_path)
         await subscriptions.register_defaults(
             node.node_id,
-            node.file_path,
+            relative_path,
         )
 
         created += 1

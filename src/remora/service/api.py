@@ -2,24 +2,25 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, TYPE_CHECKING
 
 from remora.core.config import RemoraConfig, load_config
 from remora.core.event_bus import EventBus
 from remora.core.event_store import EventStore
-from remora.models import ConfigSnapshot, InputResponse, PlanRequest, PlanResponse, RunRequest, RunResponse
+from remora.core.subscriptions import SubscriptionRegistry
+from remora.core.swarm_state import SwarmState
+from remora.models import ConfigSnapshot, InputResponse
 from remora.service.datastar import render_patch, render_shell
 from remora.service.handlers import (
-    ExecutorFactory,
     ServiceDeps,
-    default_executor_factory,
     handle_config_snapshot,
     handle_input,
-    handle_plan,
-    handle_run,
+    handle_swarm_emit,
+    handle_swarm_get_agent,
+    handle_swarm_get_subscriptions,
+    handle_swarm_list_agents,
     handle_ui_snapshot,
 )
 from remora.ui.projector import UiStateProjector, normalize_event
@@ -43,14 +44,28 @@ class RemoraService:
         resolved_root = normalize_path(project_root or Path.cwd()).resolve()
         event_bus = EventBus()
         event_store: EventStore | None = None
+        swarm_state: SwarmState | None = None
+        subscriptions: SubscriptionRegistry | None = None
+
+        swarm_root = resolved_root / ".remora"
+
         if enable_event_store:
-            store_path = resolved_root / ".remora/events/events.db"
+            store_path = swarm_root / "events" / "events.db"
             event_store = EventStore(store_path)
+
+        subscriptions_path = swarm_root / "subscriptions.db"
+        swarm_state_path = swarm_root / "swarm_state.db"
+
+        subscriptions = SubscriptionRegistry(subscriptions_path)
+        swarm_state = SwarmState(swarm_state_path)
+
         return cls(
             config=resolved_config,
             project_root=resolved_root,
             event_bus=event_bus,
             event_store=event_store,
+            swarm_state=swarm_state,
+            subscriptions=subscriptions,
         )
 
     def __init__(
@@ -61,14 +76,16 @@ class RemoraService:
         event_bus: EventBus,
         event_store: EventStore | None = None,
         projector: UiStateProjector | None = None,
-        executor_factory: ExecutorFactory | None = None,
+        swarm_state: SwarmState | None = None,
+        subscriptions: SubscriptionRegistry | None = None,
     ) -> None:
         self._config = config
         self._project_root = project_root
         self._event_bus = event_bus
         self._event_store = event_store
         self._projector = projector or UiStateProjector()
-        self._running_tasks: dict[str, asyncio.Task] = {}
+        self._swarm_state = swarm_state
+        self._subscriptions = subscriptions
         self._bundle_default = _resolve_bundle_default(self._config)
         self._event_bus.subscribe_all(self._projector.record)
 
@@ -77,9 +94,9 @@ class RemoraService:
             config=self._config,
             project_root=self._project_root,
             projector=self._projector,
-            executor_factory=executor_factory or default_executor_factory,
-            running_tasks=self._running_tasks,
             event_store=self._event_store,
+            swarm_state=self._swarm_state,
+            subscriptions=self._subscriptions,
         )
 
     def index_html(self) -> str:
@@ -121,14 +138,8 @@ class RemoraService:
         ):
             yield record
 
-    async def run(self, request: RunRequest) -> RunResponse:
-        return await handle_run(request, self._deps)
-
     async def input(self, request_id: str, response: str) -> InputResponse:
         return await handle_input(request_id, response, self._deps)
-
-    async def plan(self, request: PlanRequest) -> PlanResponse:
-        return await handle_plan(request, self._deps)
 
     def config_snapshot(self) -> ConfigSnapshot:
         return handle_config_snapshot(self._deps)
@@ -139,6 +150,29 @@ class RemoraService:
     @property
     def has_event_store(self) -> bool:
         return self._event_store is not None
+
+    def get_swarm_state(self) -> SwarmState | None:
+        return self._swarm_state
+
+    def get_subscriptions(self) -> SubscriptionRegistry | None:
+        return self._subscriptions
+
+    async def emit_event(self, event_type: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Emit an event to the swarm."""
+        request = type("EventRequest", (), {"event_type": event_type, "data": data})()
+        return await handle_swarm_emit(request, self._deps)
+
+    def list_agents(self) -> list[dict[str, Any]]:
+        """List all agents in the swarm."""
+        return handle_swarm_list_agents(self._deps)
+
+    def get_agent(self, agent_id: str) -> dict[str, Any]:
+        """Get a specific agent."""
+        return handle_swarm_get_agent(agent_id, self._deps)
+
+    async def get_subscriptions(self, agent_id: str) -> list[dict[str, Any]]:
+        """Get subscriptions for an agent."""
+        return await handle_swarm_get_subscriptions(agent_id, self._deps)
 
 
 def _resolve_bundle_default(config: RemoraConfig) -> str:

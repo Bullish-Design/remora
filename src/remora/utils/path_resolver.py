@@ -9,6 +9,24 @@ from remora.utils.types import PathLike, normalize_path
 logger = logging.getLogger(__name__)
 
 
+def to_project_relative(project_root: Path, path: str) -> str:
+    """Convert an absolute path to a project-relative POSIX path.
+
+    Args:
+        project_root: The project root directory
+        path: The path to convert (can be absolute or relative)
+
+    Returns:
+        Project-relative POSIX path (e.g., "src/foo.py")
+    """
+    resolved = Path(path).resolve()
+    try:
+        rel = resolved.relative_to(project_root.resolve())
+        return rel.as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
 @dataclass(frozen=True, slots=True)
 class PathResolver:
     """Normalize paths for workspace-backed operations."""

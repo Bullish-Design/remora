@@ -10,12 +10,15 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from remora.core.event_store import EventStore
 from remora.core.events import AgentMessageEvent, ContentChangedEvent
 from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
-from remora.utils import PathLike, normalize_path
+from remora.utils import PathLike, normalize_path, to_project_relative
+
+if TYPE_CHECKING:
+    from remora.core.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +31,23 @@ class NvimServer:
         socket_path: PathLike,
         event_store: EventStore,
         subscriptions: SubscriptionRegistry,
+        event_bus: "EventBus | None" = None,
+        project_root: PathLike | None = None,
     ):
         self._socket_path = normalize_path(socket_path)
         self._event_store = event_store
         self._subscriptions = subscriptions
+        self._event_bus = event_bus
+        self._project_root = normalize_path(project_root or Path.cwd())
         self._clients: set[asyncio.StreamWriter] = set()
         self._server: asyncio.Server | None = None
+        self._handlers = {
+            "swarm.emit": self._handle_swarm_emit,
+            "agent.select": self._handle_agent_select,
+            "agent.chat": self._handle_agent_chat,
+            "agent.subscribe": self._handle_agent_subscribe,
+            "agent.get_subscriptions": self._handle_agent_get_subscriptions,
+        }
 
     async def start(self) -> None:
         """Start the JSON-RPC server."""
@@ -46,8 +60,14 @@ class NvimServer:
         )
         logger.info(f"NvimServer started on {self._socket_path}")
 
+        if self._event_bus is not None:
+            self._event_bus.subscribe_all(self._broadcast_event)
+
     async def stop(self) -> None:
         """Stop the server."""
+        if self._event_bus is not None:
+            self._event_bus.unsubscribe(self._broadcast_event)
+
         if self._server:
             self._server.close()
             await self._server.wait_closed()
@@ -141,8 +161,10 @@ class NvimServer:
                 correlation_id=event_data.get("correlation_id"),
             )
         elif event_type == "ContentChangedEvent":
+            path = event_data.get("path", "")
+            relative_path = to_project_relative(self._project_root, path)
             event = ContentChangedEvent(
-                path=event_data.get("path", ""),
+                path=relative_path,
                 diff=event_data.get("diff"),
             )
         else:
@@ -238,16 +260,8 @@ class NvimServer:
             except Exception:
                 pass
 
-    _handlers: dict[str, Callable[..., Any]] = {
-        "swarm.emit": _handle_swarm_emit,
-        "agent.select": _handle_agent_select,
-        "agent.chat": _handle_agent_chat,
-        "agent.subscribe": _handle_agent_subscribe,
-        "agent.get_subscriptions": _handle_agent_get_subscriptions,
-    }
 
-
-def asdict(obj: Any) -> dict:
+def asdict(obj: Any) -> Any:
     """Simple asdict for dataclasses."""
     if hasattr(obj, "__dataclass_fields__"):
         return {k: asdict(v) for k, v in vars(obj).items()}

@@ -97,6 +97,23 @@ class ModelConfig:
     api_key: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class SwarmConfig:
+    """Reactive swarm configuration."""
+
+    enabled: bool = True
+    max_trigger_depth: int = 5
+    trigger_cooldown_ms: int = 1000
+
+
+@dataclass(frozen=True, slots=True)
+class NvimConfig:
+    """Neovim server configuration."""
+
+    enabled: bool = False
+    socket_path: str = ".remora/nvim.sock"
+
+
 # ============================================================================
 # Main Configuration
 # ============================================================================
@@ -115,6 +132,8 @@ class RemoraConfig:
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
+    swarm: SwarmConfig = field(default_factory=SwarmConfig)
+    nvim: NvimConfig = field(default_factory=NvimConfig)
 
 
 # ============================================================================
@@ -222,6 +241,8 @@ def _build_config(data: dict[str, Any]) -> RemoraConfig:
         execution=get_section("execution", ExecutionConfig),
         workspace=get_section("workspace", WorkspaceConfig),
         model=get_section("model", ModelConfig),
+        swarm=get_section("swarm", SwarmConfig),
+        nvim=get_section("nvim", NvimConfig),
     )
 
 
@@ -249,6 +270,8 @@ def serialize_config(config: RemoraConfig) -> dict[str, Any]:
         "execution": section_to_dict(config.execution),
         "workspace": section_to_dict(config.workspace),
         "model": section_to_dict(config.model),
+        "swarm": section_to_dict(config.swarm),
+        "nvim": section_to_dict(config.nvim),
     }
 
 
@@ -261,6 +284,8 @@ __all__ = [
     "ExecutionConfig",
     "WorkspaceConfig",
     "ModelConfig",
+    "SwarmConfig",
+    "NvimConfig",
     "load_config",
     "serialize_config",
 ]

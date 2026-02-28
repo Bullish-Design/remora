@@ -25,6 +25,7 @@ from remora.core.subscriptions import SubscriptionRegistry
 from remora.core.swarm_state import SwarmState
 from remora.core.agent_state import AgentState, load as load_agent_state, save as save_agent_state
 from remora.core.reconciler import get_agent_state_path
+from remora.core.swarm_executor import SwarmExecutor
 
 if TYPE_CHECKING:
     from remora.core.event_bus import EventBus
@@ -61,8 +62,18 @@ class AgentRunner:
         self._project_root = project_root or Path.cwd()
 
         self._max_concurrency = config.execution.max_concurrency
-        self._max_trigger_depth = getattr(config, "max_trigger_depth", 5)
-        self._trigger_cooldown_ms = getattr(config, "trigger_cooldown_ms", 1000)
+        self._max_trigger_depth = config.swarm.max_trigger_depth
+        self._trigger_cooldown_ms = config.swarm.trigger_cooldown_ms
+
+        self._swarm_id = "swarm"
+
+        self._executor = SwarmExecutor(
+            config=config,
+            event_bus=event_bus,
+            event_store=event_store,
+            swarm_id=self._swarm_id,
+            project_root=self._project_root,
+        )
 
         self._correlation_depth: dict[str, int] = {}
         self._last_trigger_time: dict[str, float] = {}
@@ -160,7 +171,7 @@ class AgentRunner:
         if self._event_bus:
             await self._event_bus.emit(
                 AgentStartEvent(
-                    graph_id=getattr(trigger_event, "graph_id", ""),
+                    graph_id=self._swarm_id,
                     agent_id=agent_id,
                     node_name=state.node_type,
                 )
@@ -180,7 +191,7 @@ class AgentRunner:
             if self._event_bus:
                 await self._event_bus.emit(
                     AgentCompleteEvent(
-                        graph_id=getattr(trigger_event, "graph_id", ""),
+                        graph_id=self._swarm_id,
                         agent_id=agent_id,
                         result_summary=str(result)[:200] if result else "",
                     )
@@ -199,20 +210,17 @@ class AgentRunner:
             if self._event_bus:
                 await self._event_bus.emit(
                     AgentErrorEvent(
-                        graph_id=getattr(trigger_event, "graph_id", ""),
+                        graph_id=self._swarm_id,
                         agent_id=agent_id,
                         error=str(e),
                     )
                 )
 
     async def _run_agent(self, context: ExecutionContext) -> Any:
-        """Run the actual agent logic.
-
-        This is a placeholder - the actual implementation would
-        integrate with the kernel/executor.
-        """
+        """Run the actual agent logic using SwarmExecutor."""
         logger.info(f"Running agent {context.agent_id} with trigger {type(context.trigger_event).__name__}")
-        return "executed"
+        result = await self._executor.run_agent(context.state, context.trigger_event)
+        return result
 
     async def _emit_error(self, agent_id: str, error: str) -> None:
         """Emit an error event."""

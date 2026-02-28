@@ -39,6 +39,8 @@ class EventStore:
     def set_subscriptions(self, subscriptions: "SubscriptionRegistry") -> None:
         """Set the subscription registry for trigger matching."""
         self._subscriptions = subscriptions
+        if self._trigger_queue is None:
+            self._trigger_queue = asyncio.Queue()
 
     def set_event_bus(self, event_bus: "EventBus") -> None:
         """Set the event bus for UI updates."""
@@ -167,7 +169,7 @@ class EventStore:
     async def get_triggers(self) -> AsyncIterator[tuple[str, int, RemoraEvent]]:
         """Iterate over event triggers for matched subscriptions."""
         if self._trigger_queue is None:
-            return
+            raise RuntimeError("EventStore subscriptions not configured")
 
         while True:
             try:

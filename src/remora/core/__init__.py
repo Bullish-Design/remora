@@ -10,6 +10,7 @@ from remora.core.config import (
     ExecutionConfig,
     ModelConfig,
     RemoraConfig,
+    SwarmConfig,
     WorkspaceConfig,
     load_config,
     serialize_config,
@@ -26,7 +27,6 @@ from remora.core.discovery import (
 from remora.core.errors import (
     DiscoveryError,
     ExecutionError,
-    GraphError,
     RemoraError,
     WorkspaceError,
 )
@@ -35,11 +35,9 @@ from remora.core.event_store import EventSourcedBus, EventStore
 from remora.core.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
-    AgentSkippedEvent,
+    AgentMessageEvent,
     AgentStartEvent,
-    GraphCompleteEvent,
-    GraphErrorEvent,
-    GraphStartEvent,
+    ContentChangedEvent,
     HumanInputRequestEvent,
     HumanInputResponseEvent,
     KernelEndEvent,
@@ -51,8 +49,6 @@ from remora.core.events import (
     ToolResultEvent,
     TurnCompleteEvent,
 )
-from remora.core.executor import AgentState, ExecutorState, GraphExecutor, ResultSummary
-from remora.core.graph import AgentNode, build_graph, get_execution_batches
 from remora.core.reconciler import (
     get_agent_dir,
     get_agent_state_path,
@@ -61,19 +57,18 @@ from remora.core.reconciler import (
 )
 from remora.core.subscriptions import Subscription, SubscriptionPattern, SubscriptionRegistry
 from remora.core.swarm_state import AgentMetadata, SwarmState
-from remora.core.agent_state import AgentState as AgentRuntimeState
+from remora.core.agent_state import AgentState
 from remora.core.agent_runner import AgentRunner, ExecutionContext
+from remora.core.swarm_executor import SwarmExecutor
 from remora.core.tools import RemoraGrailTool, build_virtual_fs, discover_grail_tools
 from remora.core.workspace import AgentWorkspace, CairnDataProvider, CairnResultHandler, WorkspaceManager
 
 __all__ = [
     "AgentCompleteEvent",
     "AgentErrorEvent",
-    "AgentSkippedEvent",
+    "AgentMessageEvent",
     "AgentStartEvent",
-    "AgentNode",
     "AgentState",
-    "AgentRuntimeState",
     "AgentRunner",
     "AgentWorkspace",
     "AgentMetadata",
@@ -85,6 +80,7 @@ __all__ = [
     "CairnWorkspaceService",
     "ConfigError",
     "ContextBuilder",
+    "ContentChangedEvent",
     "DiscoveryConfig",
     "DiscoveryError",
     "ErrorPolicy",
@@ -93,14 +89,8 @@ __all__ = [
     "EventSourcedBus",
     "EventStore",
     "ExecutionConfig",
-    "ExecutionError",
     "ExecutionContext",
-    "ExecutorState",
-    "GraphCompleteEvent",
-    "GraphError",
-    "GraphErrorEvent",
-    "GraphExecutor",
-    "GraphStartEvent",
+    "ExecutionError",
     "HumanInputRequestEvent",
     "HumanInputResponseEvent",
     "KernelEndEvent",
@@ -115,7 +105,8 @@ __all__ = [
     "RemoraError",
     "RemoraEvent",
     "RemoraGrailTool",
-    "ResultSummary",
+    "SwarmConfig",
+    "SwarmExecutor",
     "SwarmState",
     "Subscription",
     "SubscriptionPattern",
@@ -127,12 +118,10 @@ __all__ = [
     "WorkspaceConfig",
     "WorkspaceError",
     "WorkspaceManager",
-    "build_graph",
     "build_virtual_fs",
     "compute_node_id",
     "discover",
     "discover_grail_tools",
-    "get_execution_batches",
     "get_agent_dir",
     "get_agent_state_path",
     "get_agent_workspace_path",

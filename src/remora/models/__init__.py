@@ -13,18 +13,16 @@ def _from_mapping(data: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 @dataclass(slots=True)
-class RunRequest:
-    target_path: str
-    bundle: str | None = None
-    graph_id: str | None = None
+class SwarmEmitRequest:
+    event_type: str
+    data: dict[str, Any]
 
     @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "RunRequest":
-        payload = _from_mapping(data)
+    def from_dict(cls, data: Mapping[str, Any]) -> "SwarmEmitRequest":
+        payload = dict(data or {})
         return cls(
-            target_path=str(payload.get("target_path", "")).strip(),
-            bundle=payload.get("bundle"),
-            graph_id=payload.get("graph_id"),
+            event_type=str(payload.get("event_type", "")).strip(),
+            data=dict(payload.get("data", {}) or {}),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -32,10 +30,8 @@ class RunRequest:
 
 
 @dataclass(slots=True)
-class RunResponse:
-    graph_id: str
-    status: str
-    node_count: int | None = None
+class SwarmEmitResponse:
+    event_id: int
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -51,38 +47,13 @@ class InputResponse:
 
 
 @dataclass(slots=True)
-class PlanRequest:
-    target_path: str
-    bundle: str | None = None
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> "PlanRequest":
-        payload = _from_mapping(data)
-        return cls(
-            target_path=str(payload.get("target_path", "")).strip(),
-            bundle=payload.get("bundle"),
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(slots=True)
-class PlanResponse:
-    nodes: list[dict[str, Any]]
-    bundles: dict[str, str]
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(slots=True)
 class ConfigSnapshot:
     discovery: dict[str, Any]
     bundles: dict[str, Any]
     execution: dict[str, Any]
     workspace: dict[str, Any]
     model: dict[str, Any]
+    swarm: dict[str, Any]
 
     @classmethod
     def from_config(cls, config: RemoraConfig) -> "ConfigSnapshot":
@@ -95,6 +66,7 @@ class ConfigSnapshot:
             execution=dict(payload.get("execution", {})),
             workspace=dict(payload.get("workspace", {})),
             model=model,
+            swarm=dict(payload.get("swarm", {})),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -104,8 +76,6 @@ class ConfigSnapshot:
 __all__ = [
     "ConfigSnapshot",
     "InputResponse",
-    "PlanRequest",
-    "PlanResponse",
-    "RunRequest",
-    "RunResponse",
+    "SwarmEmitRequest",
+    "SwarmEmitResponse",
 ]
