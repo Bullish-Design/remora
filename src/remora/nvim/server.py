@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -34,12 +35,14 @@ class NvimServer:
         subscriptions: SubscriptionRegistry,
         event_bus: "EventBus | None" = None,
         project_root: PathLike | None = None,
+        swarm_id: str = "swarm",
     ):
         self._socket_path = normalize_path(socket_path)
         self._event_store = event_store
         self._subscriptions = subscriptions
         self._event_bus = event_bus
         self._project_root = normalize_path(project_root or Path.cwd())
+        self._swarm_id = swarm_id
         self._clients: set[asyncio.StreamWriter] = set()
         self._server: asyncio.Server | None = None
         self._handlers = {
@@ -166,7 +169,7 @@ class NvimServer:
         except TypeError as exc:
             raise ValueError(f"Invalid arguments for {event_type}: {exc}") from exc
 
-        await self._event_store.append("nvim", event)
+        await self._event_store.append(self._swarm_id, event)
         return {"status": "ok"}
 
     async def _handle_agent_select(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -257,14 +260,10 @@ class NvimServer:
                 pass
 
 
-def asdict(obj: Any) -> Any:
-    """Simple asdict for dataclasses."""
+def _asdict_nested(obj: Any) -> Any:
+    """Helper to convert dataclass to dict recursively."""
     if hasattr(obj, "__dataclass_fields__"):
-        return {k: asdict(v) for k, v in vars(obj).items()}
-    if isinstance(obj, (list, tuple)):
-        return [asdict(i) for i in obj]
-    if isinstance(obj, dict):
-        return {k: asdict(v) for k, v in obj.items()}
+        return asdict(obj)
     return obj
 
 

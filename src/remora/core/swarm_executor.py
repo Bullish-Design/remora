@@ -60,6 +60,7 @@ class SwarmExecutor:
             swarm_root=config.swarm_root,
             project_root=project_root,
         )
+        self._workspace_initialized = False
 
     async def run_agent(self, state: AgentState, trigger_event: Any = None) -> str:
         """Run a single agent turn.
@@ -74,7 +75,10 @@ class SwarmExecutor:
         bundle_path = self._resolve_bundle_path(state)
         manifest = load_manifest(bundle_path)
 
-        await self._workspace_service.initialize()
+        if not self._workspace_initialized:
+            await self._workspace_service.initialize()
+            self._workspace_initialized = True
+            
         workspace = await self._workspace_service.get_agent_workspace(state.agent_id)
         externals = self._workspace_service.get_externals(state.agent_id, workspace)
 

@@ -19,6 +19,7 @@ from remora.utils import PathResolver
 if TYPE_CHECKING:
     from remora.core.subscriptions import SubscriptionRegistry
     from remora.core.swarm_state import SwarmState
+    from remora.core.cairn_bridge import CairnWorkspaceService
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class ServiceDeps:
     event_store: EventStore | None = None
     swarm_state: "SwarmState | None" = None
     subscriptions: "SubscriptionRegistry | None" = None
+    workspace_service: "CairnWorkspaceService | None" = None
 
 
 async def handle_input(request_id: str, response: str, deps: ServiceDeps) -> InputResponse:

@@ -65,7 +65,7 @@ class AgentRunner:
         self._max_trigger_depth = config.max_trigger_depth
         self._trigger_cooldown_ms = config.trigger_cooldown_ms
 
-        self._swarm_id = "swarm"
+        self._swarm_id = getattr(config, "swarm_id", "swarm")
 
         self._executor = SwarmExecutor(
             config=config,
@@ -76,7 +76,8 @@ class AgentRunner:
             project_root=self._project_root,
         )
 
-        self._correlation_depth: dict[str, int] = {}
+        # depth, timestamp mapping
+        self._correlation_depth: dict[str, tuple[int, float]] = {}
         self._last_trigger_time: dict[str, float] = {}
 
         self._semaphore = asyncio.Semaphore(self._max_concurrency)
@@ -87,6 +88,8 @@ class AgentRunner:
         """Main loop - process triggers from EventStore."""
         self._running = True
         logger.info("AgentRunner started")
+        
+        cleanup_task = asyncio.create_task(self._cleanup_loop())
 
         try:
             async for agent_id, event_id, event in self._event_store.get_triggers():
@@ -109,7 +112,21 @@ class AgentRunner:
         except asyncio.CancelledError:
             logger.info("AgentRunner cancelled")
         finally:
+            cleanup_task.cancel()
             await self._cancel_pending()
+
+    async def _cleanup_loop(self) -> None:
+        """Periodically clean up stale correlation depth entries."""
+        while self._running:
+            await asyncio.sleep(60)
+            now = time.time()
+            # TTL of 300 seconds (5 minutes)
+            stale_keys = [
+                k for k, v in self._correlation_depth.items()
+                if now - v[1] > 300
+            ]
+            for k in stale_keys:
+                self._correlation_depth.pop(k, None)
 
     def _check_cooldown(self, agent_id: str) -> bool:
         """Check if the agent is within cooldown period."""
@@ -123,7 +140,7 @@ class AgentRunner:
     def _check_depth_limit(self, agent_id: str, correlation_id: str) -> bool:
         """Check if the cascade depth limit is reached."""
         key = f"{agent_id}:{correlation_id}"
-        depth = self._correlation_depth.get(key, 0)
+        depth, _ = self._correlation_depth.get(key, (0, 0.0))
         return depth < self._max_trigger_depth
 
     def _normalize_correlation_id(self, event: RemoraEvent) -> str:
@@ -144,13 +161,14 @@ class AgentRunner:
         """Process a single trigger."""
         async with self._semaphore:
             key = f"{agent_id}:{correlation_id}"
-            current_depth = self._correlation_depth.get(key, 0)
+            current_depth, _ = self._correlation_depth.get(key, (0, 0.0))
 
             if current_depth >= self._max_trigger_depth:
                 logger.warning(f"Cascade limit reached for {key}")
                 return
 
-            self._correlation_depth[key] = current_depth + 1
+            now = time.time()
+            self._correlation_depth[key] = (current_depth + 1, now)
 
             try:
                 await self._execute_turn(agent_id, event)
@@ -159,11 +177,12 @@ class AgentRunner:
                 await self._emit_error(agent_id, str(e))
             finally:
                 key = f"{agent_id}:{correlation_id}"
-                remaining = self._correlation_depth.get(key, 1) - 1
+                depth, ts = self._correlation_depth.get(key, (1, time.time()))
+                remaining = depth - 1
                 if remaining <= 0:
                     self._correlation_depth.pop(key, None)
                 else:
-                    self._correlation_depth[key] = remaining
+                    self._correlation_depth[key] = (remaining, ts)
 
     async def _execute_turn(self, agent_id: str, trigger_event: RemoraEvent) -> None:
         """Execute a single agent turn."""

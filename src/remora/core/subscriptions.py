@@ -55,7 +55,12 @@ class SubscriptionPattern:
 
         if self.path_glob is not None:
             path = getattr(event, "path", None)
-            if path is None or not fnmatch.fnmatch(path, self.path_glob):
+            if path is None:
+                return False
+            try:
+                if not fnmatch.fnmatch(str(path), str(self.path_glob)):
+                    return False
+            except Exception:
                 return False
 
         if self.tags is not None:

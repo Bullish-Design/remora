@@ -206,7 +206,7 @@ We DO NOT swap `cairn.runtime.workspace_manager` for `Fsdantic.open()`. The conc
 
 ---
 
-### Step 6.1: Service Layer Integration
+## Phase 6: Service Layer Integration
 
 **File**: `src/remora/service/api.py`
 

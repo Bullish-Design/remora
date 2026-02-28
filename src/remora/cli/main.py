@@ -98,6 +98,7 @@ def swarm_start(project_root: str | None, config_path: str | None, nvim: bool) -
                 subscriptions=subscriptions,
                 event_bus=event_bus,
                 project_root=root,
+                swarm_id=swarm_id,
             )
             await nvim_server.start()
             click.echo(f"Neovim server started on {nvim_socket}")

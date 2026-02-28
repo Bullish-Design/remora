@@ -11,6 +11,7 @@ from remora.core.event_bus import EventBus
 from remora.core.event_store import EventStore
 from remora.core.subscriptions import SubscriptionRegistry
 from remora.core.swarm_state import SwarmState
+from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.models import ConfigSnapshot, InputResponse
 from remora.service.datastar import render_patch, render_shell
 from remora.service.handlers import (
@@ -58,6 +59,11 @@ class RemoraService:
 
         subscriptions = SubscriptionRegistry(subscriptions_path)
         swarm_state = SwarmState(swarm_state_path)
+        workspace_service = CairnWorkspaceService(
+            config=resolved_config,
+            swarm_root=swarm_root,
+            project_root=resolved_root,
+        )
 
         return cls(
             config=resolved_config,
@@ -66,6 +72,7 @@ class RemoraService:
             event_store=event_store,
             swarm_state=swarm_state,
             subscriptions=subscriptions,
+            workspace_service=workspace_service,
         )
 
     def __init__(
@@ -78,6 +85,7 @@ class RemoraService:
         projector: UiStateProjector | None = None,
         swarm_state: SwarmState | None = None,
         subscriptions: SubscriptionRegistry | None = None,
+        workspace_service: CairnWorkspaceService | None = None,
     ) -> None:
         self._config = config
         self._project_root = project_root
@@ -86,6 +94,7 @@ class RemoraService:
         self._projector = projector or UiStateProjector()
         self._swarm_state = swarm_state
         self._subscriptions = subscriptions
+        self._workspace_service = workspace_service
         self._bundle_default = _resolve_bundle_default(self._config)
         self._event_bus.subscribe_all(self._projector.record)
 
@@ -97,6 +106,7 @@ class RemoraService:
             event_store=self._event_store,
             swarm_state=self._swarm_state,
             subscriptions=self._subscriptions,
+            workspace_service=self._workspace_service,
         )
 
     def index_html(self) -> str:
@@ -156,6 +166,9 @@ class RemoraService:
 
     def get_subscriptions(self) -> SubscriptionRegistry | None:
         return self._subscriptions
+        
+    def get_workspace_service(self) -> CairnWorkspaceService | None:
+        return self._workspace_service
 
     async def emit_event(self, event_type: str, data: dict[str, Any]) -> dict[str, Any]:
         """Emit an event to the swarm."""
