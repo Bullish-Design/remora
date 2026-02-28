@@ -315,6 +315,17 @@ def _walk_directory(directory: Path) -> Iterator[Path]:
             yield from _walk_directory(item)
 
 
+def parse_file(file_path: PathLike) -> list[CSTNode]:
+    """Parse a single file and return discovered CSTNodes."""
+    path_obj = normalize_path(file_path)
+    if not path_obj.exists() or not path_obj.is_file():
+        return []
+    language = _detect_language(path_obj)
+    if not language:
+        return []
+    return _parse_file(path_obj, language)
+
+
 class NodeType(str, Enum):
     FILE = "file"
     CLASS = "class"
@@ -358,4 +369,5 @@ __all__ = [
     "LANGUAGE_EXTENSIONS",
     "NodeType",
     "TreeSitterDiscoverer",
+    "parse_file",
 ]
