@@ -9,8 +9,15 @@ end
 
 function M.on_cursor_moved()
   local bufnr = vim.api.nvim_get_current_buf()
-  local parser = vim.treesitter.get_parser(bufnr)
-  if not parser then return end
+  local filetype = vim.api.nvim_buf_get_option(bufnr, 'filetype')
+  -- Only attempt to parse supported languages to avoid "no parser" errors
+  if filetype == '' or filetype == 'notify' or filetype == 'remora' then
+      return
+  end
+
+  -- Use pcall because get_parser throws an error for unsupported filetypes
+  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+  if not ok or not parser then return end
 
   -- A simple way to get the node at the cursor
   local win = vim.api.nvim_get_current_win()
@@ -19,7 +26,9 @@ function M.on_cursor_moved()
   local col = cursor[2]
 
   local root_tree = parser:parse()[1]
+  if not root_tree then return end
   local root = root_tree:root()
+  if not root then return end
   local node = root:named_descendant_for_range(row, col, row, col)
 
   -- Walk up to find a class or function
