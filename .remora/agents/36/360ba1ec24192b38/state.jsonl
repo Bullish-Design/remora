@@ -1,0 +1,1 @@
+{"agent_id": "360ba1ec24192b38", "node_type": "function", "name": "close", "full_name": "function:close", "file_path": "src/remora/core/swarm_state.py", "parent_id": null, "range": [171, 178], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.8971615}

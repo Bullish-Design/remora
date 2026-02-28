@@ -1,0 +1,1 @@
+{"agent_id": "2b320dd9546d6274", "node_type": "method", "name": "execute", "full_name": "method:execute", "file_path": "src/remora/core/tools/grail.py", "parent_id": null, "range": [71, 95], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.6819737}

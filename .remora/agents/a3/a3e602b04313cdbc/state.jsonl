@@ -1,0 +1,1 @@
+{"agent_id": "a3e602b04313cdbc", "node_type": "function", "name": "_find_config_file", "full_name": "function:_find_config_file", "file_path": "src/remora/core/config.py", "parent_id": null, "range": [91, 102], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319183.437035}

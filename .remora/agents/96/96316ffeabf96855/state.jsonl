@@ -1,0 +1,1 @@
+{"agent_id": "96316ffeabf96855", "node_type": "class", "name": "WorkspaceError", "full_name": "class:WorkspaceError", "file_path": "src/remora/core/errors.py", "parent_id": null, "range": [39, 42], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319186.7281537}

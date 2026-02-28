@@ -1,0 +1,1 @@
+{"agent_id": "3f1bcdb64bc5c344", "node_type": "function", "name": "commit", "full_name": "function:commit", "file_path": "src/remora/core/vcs.py", "parent_id": null, "range": [19, 34], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.5926685}

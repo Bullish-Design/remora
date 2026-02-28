@@ -1,0 +1,1 @@
+{"agent_id": "d3cf0dbc3a9b923e", "node_type": "function", "name": "initialize", "full_name": "function:initialize", "file_path": "src/remora/core/subscriptions.py", "parent_id": null, "range": [99, 127], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319186.0833669}

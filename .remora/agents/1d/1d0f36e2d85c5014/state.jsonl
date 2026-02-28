@@ -1,0 +1,1 @@
+{"agent_id": "1d0f36e2d85c5014", "node_type": "function", "name": "__hash__", "full_name": "function:__hash__", "file_path": "src/remora/core/discovery.py", "parent_id": null, "range": [64, 65], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.7687364}

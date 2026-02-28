@@ -2,46 +2,436 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Remora Swarm Dashboard</title>
-    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-beta.1/bundles/datastar.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-beta.11/bundles/datastar.js"></script>
     <style>
-        body { font-family: monospace; background: #1e1e1e; color: #d4d4d4; display: flex; height: 100vh; margin: 0; }
-        .sidebar { width: 300px; border-right: 1px solid #333; padding: 1rem; overflow-y: auto; }
-        .main { flex: 1; padding: 1rem; display: flex; flex-direction: column; }
-        .logs { flex: 1; background: #000; border: 1px solid #333; overflow-y: auto; padding: 1rem; }
-        ul { list-style: none; padding-left: 1rem; }
-        .agent-node { color: #4CAF50; cursor: pointer; }
-        .agent-node:hover { text-decoration: underline; }
+        :root {
+            --bg-primary: #1e1e1e;
+            --bg-secondary: #252526;
+            --bg-tertiary: #2d2d30;
+            --text-primary: #d4d4d4;
+            --text-secondary: #808080;
+            --accent: #4CAF50;
+            --accent-dim: #2d5a2e;
+            --border: #404040;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+            font-size: 13px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 300px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sidebar-header::before {
+            content: "🐙";
+        }
+
+        .agent-tree {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0;
+        }
+
+        .tree-node {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .tree-node-content {
+            display: flex;
+            align-items: center;
+            padding: 4px 8px;
+            gap: 6px;
+        }
+
+        .tree-node-content:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .tree-node.selected > .tree-node-content {
+            background: var(--accent-dim);
+        }
+
+        .tree-icon {
+            width: 16px;
+            text-align: center;
+        }
+
+        .tree-children {
+            margin-left: 16px;
+        }
+
+        .node-type-file .tree-icon::before { content: "📄"; }
+        .node-type-class_definition .tree-icon::before { content: "🔷"; }
+        .node-type-function_definition .tree-icon::before { content: "⚡"; }
+        .node-type-async_function_definition .tree-icon::before { content: "⚡"; }
+
+        .node-status {
+            font-size: 10px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+
+        .node-status.active {
+            background: var(--accent-dim);
+            color: var(--accent);
+        }
+
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .detail-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-secondary);
+            text-align: center;
+            padding: 32px;
+        }
+
+        .detail-header {
+            padding: 16px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .detail-header h2 {
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+
+        .detail-meta {
+            display: flex;
+            gap: 16px;
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
+        .detail-body {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .event-log {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border);
+        }
+
+        .event-log-header {
+            padding: 8px 16px;
+            background: var(--bg-tertiary);
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .event-log-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .log-entry {
+            padding: 6px 8px;
+            border-radius: 4px;
+            margin-bottom: 4px;
+            background: var(--bg-secondary);
+            font-size: 12px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .log-entry:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .event-type {
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        .agent-id {
+            color: var(--text-secondary);
+        }
+
+        .detail {
+            color: var(--text-primary);
+        }
+
+        .chat-panel {
+            width: 350px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-header {
+            padding: 8px 16px;
+            background: var(--bg-tertiary);
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .chat-message {
+            padding: 8px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+        }
+
+        .chat-message.user {
+            background: var(--accent-dim);
+            margin-left: 32px;
+        }
+
+        .chat-message.agent {
+            background: var(--bg-secondary);
+            margin-right: 32px;
+        }
+
+        .chat-input-container {
+            padding: 8px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 8px;
+        }
+
+        .chat-input {
+            flex: 1;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 13px;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .chat-send {
+            background: var(--accent);
+            border: none;
+            border-radius: 4px;
+            padding: 8px 16px;
+            color: white;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .chat-send:hover {
+            opacity: 0.9;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 16px;
+            color: var(--text-secondary);
+        }
     </style>
 </head>
-<body data-on-load="@get('/stream-events')">
-
-<div class="sidebar">
-    <h3>Swarm Tree</h3>
-    <ul id="agent-tree">
-        <!-- Example hardcoded tree, ideally rendered by Jinja2 -->
-        <li>📁 src
-            <ul>
-                <li>📄 utils.py
-                    <ul>
-                        <li class="agent-node" id="agent-func_format_date_15">
-                            [DORMANT] format_date (Function)
-                        </li>
-                    </ul>
-                </li>
-            </ul>
-        </li>
-    </ul>
-</div>
-
-<div class="main">
-    <h3>Live Swarm Logs</h3>
-    <div class="logs">
-        <ul id="logs">
-            <!-- Logs prepend here via SSE -->
-        </ul>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-header">Remora Swarm</div>
+        <div class="agent-tree" id="agent-tree">
+            <div class="loading">Loading agents...</div>
+        </div>
     </div>
-</div>
 
+    <div class="main">
+        <div class="detail-panel" id="detail-panel">
+            <div class="empty-state">
+                <div>
+                    <div style="font-size: 48px; margin-bottom: 16px;">🐙</div>
+                    <div>Select an agent from the tree to view details</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div data-on-load="@get('/stream-events')"></div>
+
+    <script>
+        async function loadAgentTree() {
+            try {
+                const response = await fetch('/api/agents');
+                const data = await response.json();
+                renderTree(data.agents);
+            } catch (err) {
+                document.getElementById('agent-tree').innerHTML =
+                    '<div class="loading">Failed to load agents</div>';
+            }
+        }
+
+        function renderTree(nodes, container = null) {
+            if (!container) {
+                container = document.getElementById('agent-tree');
+                container.innerHTML = '';
+            }
+
+            nodes.forEach(node => {
+                const div = document.createElement('div');
+                div.className = `tree-node node-type-${node.type}`;
+                div.dataset.id = node.id;
+
+                div.innerHTML = `
+                    <div class="tree-node-content" onclick="selectAgent('${node.id}')">
+                        <span class="tree-icon"></span>
+                        <span class="tree-name">${node.name}</span>
+                        ${node.line ? `<span class="node-status">:${node.line}</span>` : ''}
+                    </div>
+                `;
+
+                if (node.children && node.children.length > 0) {
+                    const childContainer = document.createElement('div');
+                    childContainer.className = 'tree-children';
+                    renderTree(node.children, childContainer);
+                    div.appendChild(childContainer);
+                }
+
+                container.appendChild(div);
+            });
+        }
+
+        async function selectAgent(agentId) {
+            document.querySelectorAll('.tree-node').forEach(n => n.classList.remove('selected'));
+            const selected = document.querySelector(`[data-id="${agentId}"]`);
+            if (selected) selected.classList.add('selected');
+
+            try {
+                const response = await fetch(`/api/agent/${encodeURIComponent(agentId)}`);
+                const data = await response.json();
+                renderAgentDetail(data);
+            } catch (err) {
+                console.error('Failed to load agent:', err);
+            }
+        }
+
+        function renderAgentDetail(data) {
+            const agent = data.agent;
+            const events = data.recent_events || [];
+
+            document.getElementById('detail-panel').innerHTML = `
+                <div class="detail-header">
+                    <h2>${agent.name}</h2>
+                    <div class="detail-meta">
+                        <span>Type: ${agent.node_type}</span>
+                        <span>File: ${agent.file_path.split('/').pop()}:${agent.start_line}</span>
+                        <span>Status: ${agent.status}</span>
+                    </div>
+                </div>
+                <div class="detail-body">
+                    <div class="event-log">
+                        <div class="event-log-header">Event Log</div>
+                        <div class="event-log-content" id="agent-events">
+                            ${events.length === 0 ? '<div class="loading">No events yet</div>' : ''}
+                            ${events.map(ev => `
+                                <div class="log-entry">
+                                    <span class="event-type">[${ev.event_type}]</span>
+                                    <span class="detail">${formatEventDetail(ev)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="chat-panel">
+                        <div class="chat-header">Chat</div>
+                        <div class="chat-messages" id="chat-messages"></div>
+                        <div class="chat-input-container">
+                            <input type="text" class="chat-input" id="chat-input"
+                                   placeholder="Send a message..."
+                                   onkeydown="if(event.key==='Enter') sendChat('${agent.id}')">
+                            <button class="chat-send" onclick="sendChat('${agent.id}')">Send</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function formatEventDetail(ev) {
+            const payload = ev.payload || {};
+            if (ev.event_type === 'AgentMessageEvent') {
+                return `${payload.from_agent}: ${(payload.content || '').substring(0, 50)}`;
+            }
+            if (ev.event_type === 'ToolCallEvent') {
+                return `Tool: ${payload.tool_name}`;
+            }
+            return JSON.stringify(payload).substring(0, 50);
+        }
+
+        async function sendChat(agentId) {
+            const input = document.getElementById('chat-input');
+            const message = input.value.trim();
+            if (!message) return;
+
+            const messages = document.getElementById('chat-messages');
+            messages.innerHTML += `
+                <div class="chat-message user">${message}</div>
+            `;
+            messages.scrollTop = messages.scrollHeight;
+            input.value = '';
+
+            try {
+                await fetch(`/api/agent/${encodeURIComponent(agentId)}/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message }),
+                });
+            } catch (err) {
+                console.error('Failed to send message:', err);
+            }
+        }
+
+        loadAgentTree();
+        setInterval(loadAgentTree, 30000);
+    </script>
 </body>
 </html>

@@ -1,0 +1,1 @@
+{"agent_id": "8471dbb62b9ea4f6", "node_type": "function", "name": "unsubscribe_tool", "full_name": "function:unsubscribe_tool", "file_path": "src/remora/core/tools/swarm.py", "parent_id": null, "range": [53, 58], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.5177507}

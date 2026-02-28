@@ -1,0 +1,1 @@
+{"agent_id": "3cfb40fd0173918d", "node_type": "class", "name": "DiscoveryError", "full_name": "class:DiscoveryError", "file_path": "src/remora/core/errors.py", "parent_id": null, "range": [21, 24], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.132127}

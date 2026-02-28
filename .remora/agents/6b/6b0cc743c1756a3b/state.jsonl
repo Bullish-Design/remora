@@ -1,0 +1,1 @@
+{"agent_id": "6b0cc743c1756a3b", "node_type": "method", "name": "__init__", "full_name": "method:__init__", "file_path": "src/remora/core/chat.py", "parent_id": null, "range": [82, 95], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.531978}

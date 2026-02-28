@@ -1,0 +1,1 @@
+{"agent_id": "cbaee03f2915024c", "node_type": "class", "name": "FakeToolCallFunction", "full_name": "class:FakeToolCallFunction", "file_path": "src/remora/testing/fakes.py", "parent_id": null, "range": [8, 11], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.757397}

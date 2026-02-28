@@ -1,0 +1,1 @@
+{"agent_id": "0a010501b8592396", "node_type": "function", "name": "from_dict", "full_name": "function:from_dict", "file_path": "src/remora/models/__init__.py", "parent_id": null, "range": [21, 26], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.2747505}

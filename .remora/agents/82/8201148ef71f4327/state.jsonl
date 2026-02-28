@@ -1,0 +1,1 @@
+{"agent_id": "8201148ef71f4327", "node_type": "function", "name": "broadcast_tool", "full_name": "function:broadcast_tool", "file_path": "src/remora/core/tools/swarm.py", "parent_id": null, "range": [60, 65], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.4280827}

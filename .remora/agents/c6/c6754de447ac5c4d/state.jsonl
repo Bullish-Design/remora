@@ -1,0 +1,1 @@
+{"agent_id": "c6754de447ac5c4d", "node_type": "function", "name": "send_message", "full_name": "function:send_message", "file_path": "src/remora/service/chat_service.py", "parent_id": null, "range": [95, 125], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.3273802}

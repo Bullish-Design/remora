@@ -1,0 +1,1 @@
+{"agent_id": "b22d14f53120bddc", "node_type": "function", "name": "register", "full_name": "function:register", "file_path": "src/remora/demo/client_manager.py", "parent_id": null, "range": [37, 43], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.6477647}

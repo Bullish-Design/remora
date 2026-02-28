@@ -1,0 +1,1 @@
+{"agent_id": "5b217c1d53558655", "node_type": "function", "name": "event_generator", "full_name": "function:event_generator", "file_path": "src/remora/service/chat_service.py", "parent_id": null, "range": [162, 187], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.9648292}

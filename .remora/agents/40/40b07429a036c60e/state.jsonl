@@ -1,0 +1,1 @@
+{"agent_id": "40b07429a036c60e", "node_type": "class", "name": "AgentWorkspace", "full_name": "class:AgentWorkspace", "file_path": "src/remora/core/workspace.py", "parent_id": null, "range": [24, 106], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319183.0894608}

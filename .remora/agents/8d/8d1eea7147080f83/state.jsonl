@@ -1,0 +1,1 @@
+{"agent_id": "8d1eea7147080f83", "node_type": "function", "name": "_cancel_pending", "full_name": "function:_cancel_pending", "file_path": "src/remora/core/agent_runner.py", "parent_id": null, "range": [257, 263], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.4268785}

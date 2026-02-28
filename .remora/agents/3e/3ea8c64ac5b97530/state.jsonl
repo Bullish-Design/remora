@@ -1,0 +1,1 @@
+{"agent_id": "3ea8c64ac5b97530", "node_type": "function", "name": "delete_graph", "full_name": "function:delete_graph", "file_path": "src/remora/core/event_store.py", "parent_id": null, "range": [307, 321], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.147702}

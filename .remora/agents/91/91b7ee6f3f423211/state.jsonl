@@ -1,0 +1,1 @@
+{"agent_id": "91b7ee6f3f423211", "node_type": "function", "name": "search_content", "full_name": "function:search_content", "file_path": "src/remora/core/cairn_externals.py", "parent_id": null, "range": [46, 47], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.3990498}

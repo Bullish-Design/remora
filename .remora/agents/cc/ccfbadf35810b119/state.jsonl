@@ -1,0 +1,1 @@
+{"agent_id": "ccfbadf35810b119", "node_type": "function", "name": "__init__", "full_name": "function:__init__", "file_path": "src/remora/core/swarm_state.py", "parent_id": null, "range": [33, 36], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.74302}

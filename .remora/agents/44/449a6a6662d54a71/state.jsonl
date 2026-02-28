@@ -1,0 +1,1 @@
+{"agent_id": "449a6a6662d54a71", "node_type": "method", "name": "config_snapshot", "full_name": "method:config_snapshot", "file_path": "src/remora/service/api.py", "parent_id": null, "range": [154, 155], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.6717024}

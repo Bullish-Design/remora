@@ -1,0 +1,1 @@
+{"agent_id": "c82e70a7856b7d39", "node_type": "function", "name": "rpc_agent_select", "full_name": "function:rpc_agent_select", "file_path": "src/remora/demo/nvim_server.py", "parent_id": null, "range": [177, 213], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319186.43943}

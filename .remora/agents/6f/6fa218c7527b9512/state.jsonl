@@ -1,0 +1,1 @@
+{"agent_id": "6fa218c7527b9512", "node_type": "class", "name": "ChatServiceState", "full_name": "class:ChatServiceState", "file_path": "src/remora/service/chat_service.py", "parent_id": null, "range": [38, 43], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319182.73885}

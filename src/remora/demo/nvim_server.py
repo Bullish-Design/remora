@@ -8,20 +8,23 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
+from remora.core.agent_runner import AgentRunner
 from remora.core.config import load_config
 from remora.core.discovery import CSTNode, parse_file
 from remora.core.event_bus import EventBus
 from remora.core.event_store import EventStore
 from remora.core.events import RemoraEvent, AgentMessageEvent
+from remora.core.reconciler import reconcile_on_startup
 from remora.core.subscriptions import SubscriptionRegistry
 from remora.core.swarm_state import AgentMetadata, SwarmState
 from remora.demo.client_manager import ClientManager, NvimClient
-
+from remora.utils import normalize_path
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -59,16 +62,54 @@ async def lifespan(app: FastAPI):
 
     event_bus.subscribe_all(push_to_clients)
 
+    runner = AgentRunner(
+        event_store=event_store,
+        subscriptions=subscriptions,
+        swarm_state=swarm_state,
+        config=config,
+        event_bus=event_bus,
+        project_root=Path.cwd(),
+    )
+    runner_task = asyncio.create_task(runner.run_forever())
+    app.state.runner_task = runner_task
+
     rpc_task = asyncio.create_task(start_rpc_server())
     app.state.rpc_task = rpc_task
+
+    project_root = normalize_path(config.project_path)
+    discovery_paths = list(config.discovery_paths)
+    discovery_languages = list(config.discovery_languages) if config.discovery_languages else None
+
+    result = await reconcile_on_startup(
+        project_root,
+        swarm_state,
+        subscriptions,
+        discovery_paths=discovery_paths,
+        languages=discovery_languages,
+        event_store=event_store,
+        swarm_id=config.swarm_id,
+    )
 
     logger.info("Remora Demo Server started")
     logger.info("  Web UI: http://localhost:8080")
     logger.info("  Neovim socket: %s", SOCKET_PATH)
+    logger.info("  AgentRunner: active")
+    logger.info(
+        "  Agents reconciled: created=%d orphaned=%d total=%d",
+        result["created"],
+        result["orphaned"],
+        result["total"],
+    )
 
     try:
         yield
     finally:
+        runner_task.cancel()
+        try:
+            await runner_task
+        except asyncio.CancelledError:
+            pass
+
         rpc_task.cancel()
         try:
             await rpc_task

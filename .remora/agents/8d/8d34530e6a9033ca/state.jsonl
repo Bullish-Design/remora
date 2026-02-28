@@ -1,0 +1,1 @@
+{"agent_id": "8d34530e6a9033ca", "node_type": "method", "name": "record_target", "full_name": "method:record_target", "file_path": "src/remora/ui/projector.py", "parent_id": null, "range": [113, 121], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.4505572}

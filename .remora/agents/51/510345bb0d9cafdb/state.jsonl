@@ -1,0 +1,1 @@
+{"agent_id": "510345bb0d9cafdb", "node_type": "method", "name": "get_subscriptions", "full_name": "method:get_subscriptions", "file_path": "src/remora/service/api.py", "parent_id": null, "range": [186, 188], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.0264506}

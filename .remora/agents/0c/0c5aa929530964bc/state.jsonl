@@ -1,0 +1,1 @@
+{"agent_id": "0c5aa929530964bc", "node_type": "function", "name": "render_tag", "full_name": "function:render_tag", "file_path": "src/remora/ui/view.py", "parent_id": null, "range": [119, 140], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319182.7817194}

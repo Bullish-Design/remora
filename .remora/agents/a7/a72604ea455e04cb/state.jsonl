@@ -1,0 +1,1 @@
+{"agent_id": "a72604ea455e04cb", "node_type": "function", "name": "_register_sub", "full_name": "function:_register_sub", "file_path": "src/remora/core/swarm_executor.py", "parent_id": null, "range": [95, 96], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.621607}

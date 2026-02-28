@@ -1,0 +1,1 @@
+{"agent_id": "90de0b18f87202fb", "node_type": "function", "name": "_from_mapping", "full_name": "function:_from_mapping", "file_path": "src/remora/models/__init__.py", "parent_id": null, "range": [11, 12], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319183.2012944}
