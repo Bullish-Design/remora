@@ -40,6 +40,7 @@ class AgentState:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentState":
         """Create from dictionary."""
+        data = dict(data)
         subs_data = data.pop("custom_subscriptions", [])
         custom_subscriptions = [SubscriptionPattern(**sub) for sub in subs_data]
         return cls(custom_subscriptions=custom_subscriptions, **data)
@@ -75,7 +76,8 @@ def save(path: PathLike, state: AgentState) -> None:
 
     state.last_updated = time.time()
     line = json.dumps(state.to_dict(), default=str) + "\n"
-    path.open("a", encoding="utf-8").write(line)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(line)
 
 
 __all__ = ["AgentState", "load", "save"]

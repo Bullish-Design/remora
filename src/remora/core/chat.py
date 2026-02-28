@@ -194,6 +194,20 @@ class ChatSession:
             turn_count=result.turn_count,
         )
 
+    @property
+    def history(self) -> list[Message]:
+        """Get conversation history."""
+        return self._history.copy()
+
+    def reset(self) -> None:
+        """Clear conversation history."""
+        self._history.clear()
+
+    async def close(self) -> None:
+        """Clean up resources."""
+        if self._workspace:
+            await self._workspace.cleanup()
+
 
 def build_chat_tools(agent_workspace: AgentWorkspace, project_root: Path) -> list[Tool]:
     """Construct the basic file and discovery tools for chat sessions."""
@@ -242,17 +256,3 @@ def build_chat_tools(agent_workspace: AgentWorkspace, project_root: Path) -> lis
         Tool.from_function(search_files),
         Tool.from_function(discover_symbols),
     ]
-
-    @property
-    def history(self) -> list[Message]:
-        """Get conversation history."""
-        return self._history.copy()
-
-    def reset(self) -> None:
-        """Clear conversation history."""
-        self._history.clear()
-
-    async def close(self) -> None:
-        """Clean up resources."""
-        if self._workspace:
-            await self._workspace.cleanup()
