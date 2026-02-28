@@ -29,4 +29,4 @@ workspace_ignore_patterns:
 workspace_ignore_dotfiles: false
 
 nvim_enabled: false
-nvim_socket: "/tmp/remora.sock"
+nvim_socket: "/run/user/1000/remora.sock"

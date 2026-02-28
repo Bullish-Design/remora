@@ -23,7 +23,9 @@ event_store = EventStore(db_path, event_bus=event_bus)
 
 app = FastAPI(title="Remora Swarm Dashboard")
 templates = Jinja2Templates(directory="src/remora/demo/templates")
-SOCKET_PATH = getattr(config, "nvim_socket", "/tmp/remora.sock")
+SOCKET_PATH = getattr(config, "nvim_socket", "/run/user/1000/remora.sock")
+
+print(f"\nNvim RPC Server will listen on Unix Socket: {SOCKET_PATH}\n")
 
 
 # ---- Neovim RPC Server (Unix Socket) ----
