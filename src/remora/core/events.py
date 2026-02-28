@@ -27,39 +27,6 @@ if TYPE_CHECKING:
 
 
 # ============================================================================
-# Graph-Level Events
-# ============================================================================
-
-
-@dataclass(frozen=True, slots=True)
-class GraphStartEvent:
-    """Emitted when graph execution begins."""
-
-    graph_id: str
-    node_count: int
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass(frozen=True, slots=True)
-class GraphCompleteEvent:
-    """Emitted when graph execution completes successfully."""
-
-    graph_id: str
-    completed_count: int
-    failed_count: int
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass(frozen=True, slots=True)
-class GraphErrorEvent:
-    """Emitted when graph execution fails fatally."""
-
-    graph_id: str
-    error: str
-    timestamp: float = field(default_factory=time.time)
-
-
-# ============================================================================
 # Agent-Level Events
 # ============================================================================
 
@@ -91,16 +58,6 @@ class AgentErrorEvent:
     graph_id: str
     agent_id: str
     error: str
-    timestamp: float = field(default_factory=time.time)
-
-
-@dataclass(frozen=True, slots=True)
-class AgentSkippedEvent:
-    """Emitted when an agent is skipped due to upstream failure."""
-
-    graph_id: str
-    agent_id: str
-    reason: str
     timestamp: float = field(default_factory=time.time)
 
 
@@ -178,16 +135,10 @@ class ManualTriggerEvent:
 # ============================================================================
 
 RemoraEvent = (
-    # Graph events
-    GraphStartEvent
-    | GraphCompleteEvent
-    | GraphErrorEvent
-    |
     # Agent events
     AgentStartEvent
     | AgentCompleteEvent
     | AgentErrorEvent
-    | AgentSkippedEvent
     |
     # Human-in-the-loop events
     HumanInputRequestEvent
@@ -211,13 +162,9 @@ RemoraEvent = (
 
 __all__ = [
     # Remora events
-    "GraphStartEvent",
-    "GraphCompleteEvent",
-    "GraphErrorEvent",
     "AgentStartEvent",
     "AgentCompleteEvent",
     "AgentErrorEvent",
-    "AgentSkippedEvent",
     "HumanInputRequestEvent",
     "HumanInputResponseEvent",
     # Reactive swarm events

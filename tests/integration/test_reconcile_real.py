@@ -34,7 +34,7 @@ async def test_reconcile_registers_agents_and_default_subscriptions(tmp_path: Pa
     swarm_root = project_root / ".remora"
 
     swarm_state = SwarmState(swarm_root / "swarm.db")
-    swarm_state.initialize()
+    await swarm_state.initialize()
     subscriptions = SubscriptionRegistry(swarm_root / "subscriptions.db")
     await subscriptions.initialize()
 
@@ -49,11 +49,11 @@ async def test_reconcile_registers_agents_and_default_subscriptions(tmp_path: Pa
         )
 
         assert summary["created"] >= 1
-        agents = swarm_state.list_agents()
+        agents = await swarm_state.list_agents()
         assert agents
 
         for agent in agents:
-            agent_id = agent["agent_id"]
+            agent_id = agent.agent_id
             state_path = get_agent_state_path(swarm_root, agent_id)
             assert state_path.exists()
 
@@ -65,7 +65,7 @@ async def test_reconcile_registers_agents_and_default_subscriptions(tmp_path: Pa
                 for sub in registered
             )
     finally:
-        swarm_state.close()
+        await swarm_state.close()
         await subscriptions.close()
 
 
@@ -75,7 +75,7 @@ async def test_reconcile_emits_content_changed_event_on_file_update(tmp_path: Pa
     swarm_root = project_root / ".remora"
 
     swarm_state = SwarmState(swarm_root / "swarm.db")
-    swarm_state.initialize()
+    await swarm_state.initialize()
     subscriptions = SubscriptionRegistry(swarm_root / "subscriptions.db")
     await subscriptions.initialize()
 
@@ -114,6 +114,6 @@ async def test_reconcile_emits_content_changed_event_on_file_update(tmp_path: Pa
         events = [event async for event in event_store.replay("swarm")]
         assert any(event["event_type"] == "ContentChangedEvent" for event in events)
     finally:
-        swarm_state.close()
+        await swarm_state.close()
         await subscriptions.close()
         await event_store.close()

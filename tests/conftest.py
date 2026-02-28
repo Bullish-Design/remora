@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import AsyncIterator
 
 import pytest
 
@@ -67,12 +68,14 @@ async def subscription_registry(tmp_path: Path) -> SubscriptionRegistry:
 
 
 @pytest.fixture
-def swarm_state(tmp_path: Path) -> SwarmState:
+async def swarm_state(tmp_path: Path) -> AsyncIterator[SwarmState]:
     """Create an initialized SwarmState backed by a temp database."""
     state = SwarmState(tmp_path / "swarm.db")
-    state.initialize()
-    yield state
-    state.close()
+    await state.initialize()
+    try:
+        yield state
+    finally:
+        await state.close()
 
 
 @pytest.fixture

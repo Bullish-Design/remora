@@ -28,7 +28,7 @@ class TestWorkspaceLifecycle:
         try:
             await service.initialize(sync_mode=SyncMode.FULL)
 
-            workspace_dir = Path(workspace_config.base_path) / "lifecycle-test"
+            workspace_dir = Path(workspace_config.swarm_root) / "lifecycle-test"
             assert workspace_dir.exists()
             assert (workspace_dir / "stable.db").exists()
         finally:
@@ -45,8 +45,8 @@ class TestWorkspaceLifecycle:
 
         await workspace_service.get_agent_workspace(agent_id)
 
-        workspace_dir = Path(workspace_config.base_path) / "test-graph"
-        assert (workspace_dir / f"{agent_id}.db").exists()
+        workspace_dir = Path(workspace_config.swarm_root) / "test-graph" / "agents" / agent_id[:2] / agent_id
+        assert (workspace_dir / "workspace.db").exists()
 
     @pytest.mark.asyncio
     async def test_close_releases_resources(

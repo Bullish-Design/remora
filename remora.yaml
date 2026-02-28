@@ -1,28 +1,32 @@
-bundles:
-  path: agents
-  mapping:
-    function: lint/bundle.yaml
-    class: docstring/bundle.yaml
-    method: docstring/bundle.yaml
-    file: lint/bundle.yaml
+project_path: "."
+discovery_paths: ["src/"]
+discovery_languages: ["python"]
+discovery_max_workers: 4
 
-discovery:
-  paths: ["src/"]
-  languages: ["python"]
-  max_workers: 4
+bundle_root: "agents"
+bundle_mapping:
+  function: "lint/bundle.yaml"
+  class: "docstring/bundle.yaml"
+  method: "docstring/bundle.yaml"
+  file: "lint/bundle.yaml"
 
-model:
-  base_url: "http://remora-server:8000/v1"
-  api_key: "EMPTY"
-  default_model: "Qwen/Qwen3-4B"
+model_base_url: "http://remora-server:8000/v1"
+model_api_key: "EMPTY"
+model_default: "Qwen/Qwen3-4B"
 
-execution:
-  max_concurrency: 4
-  error_policy: skip_downstream
-  timeout: 300
-  max_turns: 8
-  truncation_limit: 1024
+swarm_root: ".remora"
+swarm_id: "swarm"
+max_concurrency: 4
+max_turns: 8
+truncation_limit: 1024
+timeout_s: 300.0
+max_trigger_depth: 5
+trigger_cooldown_ms: 1000
 
-workspace:
-  base_path: ".remora/workspaces"
-  cleanup_after: "1h"
+workspace_ignore_patterns:
+  - ".git"
+  - "__pycache__"
+workspace_ignore_dotfiles: false
+
+nvim_enabled: false
+nvim_socket: ".remora/nvim.sock"

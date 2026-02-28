@@ -260,11 +260,5 @@ class NvimServer:
                 pass
 
 
-def _asdict_nested(obj: Any) -> Any:
-    """Helper to convert dataclass to dict recursively."""
-    if hasattr(obj, "__dataclass_fields__"):
-        return asdict(obj)
-    return obj
-
 
 __all__ = ["NvimServer"]

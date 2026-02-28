@@ -15,7 +15,7 @@ from typing import Any
 
 from cairn.runtime import workspace_manager as cairn_workspace_manager
 
-from remora.core.config import Config, DEFAULT_IGNORE_PATTERNS, WorkspaceConfig
+from remora.core.config import Config, DEFAULT_IGNORE_PATTERNS
 from remora.core.cairn_externals import CairnExternals
 from remora.core.errors import WorkspaceError
 from remora.core.workspace import AgentWorkspace
@@ -36,26 +36,16 @@ class CairnWorkspaceService:
 
     def __init__(
         self,
-        config: Config | WorkspaceConfig,
+        config: Config,
         *,
         graph_id: str | None = None,
         swarm_root: PathLike | None = None,
         project_root: PathLike | None = None,
     ) -> None:
         self._config = config
-        if isinstance(config, WorkspaceConfig):
-            workspace_config = config
-        else:
-            workspace_config = WorkspaceConfig(
-                base_path=config.swarm_root,
-                ignore_patterns=config.workspace_ignore_patterns or DEFAULT_IGNORE_PATTERNS,
-                ignore_dotfiles=config.workspace_ignore_dotfiles,
-            )
+        self._graph_id = graph_id or config.swarm_id or "default"
 
-        self._workspace_config = workspace_config
-        self._graph_id = graph_id or getattr(config, "swarm_id", "default") or "default"
-
-        base_path = normalize_path(swarm_root or workspace_config.base_path)
+        base_path = normalize_path(swarm_root or config.swarm_root)
         self._swarm_root = base_path / self._graph_id
         self._project_root = normalize_path(project_root or Path.cwd()).resolve()
         self._resolver = PathResolver(self._project_root)
@@ -63,8 +53,8 @@ class CairnWorkspaceService:
         self._stable_workspace: Any | None = None
         self._agent_workspaces: dict[str, AgentWorkspace] = {}
         self._stable_lock = asyncio.Lock()
-        self._ignore_patterns: set[str] = set(workspace_config.ignore_patterns or ())
-        self._ignore_dotfiles: bool = workspace_config.ignore_dotfiles
+        self._ignore_patterns: set[str] = set(config.workspace_ignore_patterns or DEFAULT_IGNORE_PATTERNS)
+        self._ignore_dotfiles: bool = config.workspace_ignore_dotfiles
 
     @property
     def project_root(self) -> Path:

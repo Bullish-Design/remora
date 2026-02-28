@@ -1,337 +1,433 @@
-# Remora Refactoring Guide (Revised)
+# Remora Code Refactoring Guide
 
-This guide provides step-by-step instructions to complete the full Remora refactor. The key change from the previous version: **use FSdantic KV for non-event state** instead of consolidating into a raw SQLite `RemoraStore`.
-
----
-
-## Phase 1: Remove Legacy Code (~1,100 LOC)
-
-### Step 1.1: Delete executor.py
-
-**File**: `src/remora/core/executor.py` (581 LOC)
-
-```bash
-rm src/remora/core/executor.py
-```
-
-Remove all imports/references: `GraphExecutor`, `from remora.core.executor`.
-
-### Step 1.2: Delete graph.py
-
-**File**: `src/remora/core/graph.py` (217 LOC)
-
-```bash
-rm src/remora/core/graph.py
-```
-
-Remove all imports: `AgentNode`, `build_graph`, `get_execution_batches`.
-
-### Step 1.3: Delete context.py
-
-**File**: `src/remora/core/context.py` (171 LOC)
-
-```bash
-rm src/remora/core/context.py
-```
-
-Only consumer was `executor.py` (already deleted). `AgentState.chat_history` replaces its function.
-
-### Step 1.4: Remove Dead Code from workspace.py
-
-**File**: `src/remora/core/workspace.py`
-
-Delete these classes (only used by deleted `executor.py`):
-- `WorkspaceManager` (~40 LOC)
-- `CairnDataProvider` (~35 LOC)
-- `CairnResultHandler` (~18 LOC)
-
-Keep only `AgentWorkspace`.
-
-### Step 1.5: Delete EventSourcedBus from event_store.py
-
-**File**: `src/remora/core/event_store.py`
-
-Delete the `EventSourcedBus` class (lines 343-379, ~40 LOC). It wraps EventBus + EventStore and causes double event emission. The EventStore already has an `_event_bus` reference for notifications.
-
-Update any imports/references to use `EventStore` directly.
-
-### Step 1.6: Update `__init__.py` Exports
-
-Remove exports for all deleted classes from `src/remora/core/__init__.py`.
-
-**Verification**:
-```bash
-grep -r "GraphExecutor\|from remora.core.executor\|from remora.core.graph\|from remora.core.context\|EventSourcedBus\|WorkspaceManager\|CairnDataProvider\|CairnResultHandler" src/
-```
+This guide provides step-by-step instructions for implementing the changes identified in the code review. Changes are organized by priority and grouped to minimize risk of breaking functionality.
 
 ---
 
-## Phase 2: Fix Critical Bugs
+## Phase 1: Remove Legacy/Dead Code
 
-### Step 2.1: Fix chat.py Syntax Error
+**Goal**: Clean up code that no longer serves a purpose in the reactive swarm architecture.
 
-**File**: `src/remora/core/chat.py`
+### Step 1.1: Remove Legacy Graph Events
 
-Move the `history` property, `reset()`, and `close()` methods from after the `return` statement in `build_chat_tools()` back into the `ChatSession` class.
+**File**: `src/remora/core/events.py`
 
-### Step 2.2: Fix Double Event Emission
+**Changes**:
+1. Remove `GraphStartEvent` dataclass (lines 34-41)
+2. Remove `GraphCompleteEvent` dataclass (lines 43-50)
+3. Remove `GraphErrorEvent` dataclass (lines 52-60)
+4. Remove `AgentSkippedEvent` dataclass (lines 98-105)
+5. Remove these from `RemoraEvent` union type (lines 181-190)
+6. Remove these from `__all__` list (lines 212-216)
 
-Already addressed by deleting `EventSourcedBus` in Phase 1.5. Ensure all callers use `EventStore.append()` directly, which already emits to `_event_bus` if configured.
-
-### Step 2.3: Fix File Handle Leak in AgentState
-
-**File**: `src/remora/core/agent_state.py`
-
+**After**:
 ```python
-# Before (leaks handle):
-path.open("a", encoding="utf-8").write(line)
-
-# After:
-with path.open("a", encoding="utf-8") as f:
-    f.write(line)
+# events.py - Only keep reactive swarm events
+RemoraEvent = (
+    # Agent events
+    AgentStartEvent
+    | AgentCompleteEvent
+    | AgentErrorEvent
+    |
+    # Human-in-the-loop events
+    HumanInputRequestEvent
+    | HumanInputResponseEvent
+    |
+    # Reactive swarm events
+    AgentMessageEvent
+    | FileSavedEvent
+    | ContentChangedEvent
+    | ManualTriggerEvent
+    |
+    # Re-exported structured-agents events
+    ...
+)
 ```
 
-### Step 2.4: Fix AgentState.from_dict() Side Effect
-
-```python
-# Before (mutates input):
-subs_data = data.pop("custom_subscriptions", [])
-
-# After:
-data = dict(data)  # Don't mutate input
-subs_data = data.pop("custom_subscriptions", [])
-```
+**Test**: Run `pytest tests/unit/test_event_bus.py tests/unit/test_subscriptions.py` to verify no breakage.
 
 ---
 
-## Phase 3: Fix Config Issues
+### Step 1.2: Remove EventBridge Dead Code
 
-### Step 3.1: Fix Frozen Dataclass with Mutable Default
+**File**: `src/remora/core/event_bus.py`
+
+**Changes**:
+1. Remove `EventBridge` class (lines 127-161)
+2. Remove from `__all__` list
+
+**After**:
+```python
+__all__ = [
+    "EventBus",
+    "EventHandler",
+]
+```
+
+**Test**: Run `pytest tests/unit/test_event_bus.py`
+
+---
+
+### Step 1.3: Remove Unused Helper Function
+
+**File**: `src/remora/nvim/server.py`
+
+**Changes**:
+1. Remove `_asdict_nested` function (lines 263-267) - it's defined but never called
+
+---
+
+### Step 1.4: Fix Duplicate API Export
+
+**File**: `src/remora/__init__.py`
+
+**Changes**:
+1. Remove duplicate `"CairnExternals"` from `__all__` (line 101)
+
+---
+
+## Phase 2: Configuration Simplification
+
+**Goal**: Consolidate all configuration into a single flat `Config` dataclass.
+
+### Step 2.1: Remove Redundant Config Classes
 
 **File**: `src/remora/core/config.py`
 
-Remove `frozen=True` — it provides little value for a config loaded once at startup, and `bundle_mapping: dict` breaks it.
+**Changes**:
+1. Remove `WorkspaceConfig` class (lines 69-76)
+2. Remove `BundleConfig` class (lines 78-84)
+3. Remove `ModelConfig` class (lines 86-93)
+4. Remove `ExecutionConfig` class (lines 95-101)
+5. Remove `RemoraConfig` class (lines 103-110)
+6. Remove these from `__all__`
+
+**After**: Only `Config`, `load_config`, `serialize_config`, `ConfigError` remain.
 
 ```python
-@dataclass(slots=True)  # Remove frozen
-class Config:
-    bundle_mapping: dict[str, str] = field(default_factory=dict)
+__all__ = [
+    "Config",
+    "ConfigError",
+    "load_config",
+    "serialize_config",
+]
 ```
 
-### Step 3.2: Remove Duplicate ConfigError
-
-Delete the dynamic `ConfigError = type("ConfigError", ...)` and import from `errors.py` instead.
-
 ---
 
-## Phase 4: Implement Reactive Storage (SQLite + JSONL)
+### Step 2.2: Update CairnWorkspaceService
 
-This phase aligns storage with the CST Agent Swarm concept:
-- `events.db` (SQLite): Event log and trigger queue.
-- `swarm_state.db` (SQLite): Global agent registry.
-- `subscriptions.db` (SQLite): Event routing rules.
-- `state.jsonl` (JSONL): Per-agent persistent memory, stored in `agents/<id>/state.jsonl`.
+**File**: `src/remora/core/cairn_bridge.py`
 
-### Step 4.1: Create SwarmState
-
-**File**: `src/remora/core/swarm_state.py` (~100 LOC)
-
-Implement SQLite-backed global agent registry (`swarm_state.db`):
-- `register_agent(agent_id, metadata)`
-- `get_agent(agent_id)`
-- `list_agents(parent_id=None)`
-- `mark_orphaned(agent_id)`
-
-### Step 4.2: Create SubscriptionRegistry
-
-**File**: `src/remora/core/subscriptions.py` (~150 LOC)
-
-Implement SQLite-backed event routing rules (`subscriptions.db`):
-- Migrate `SubscriptionPattern` from `event_store.py` (or keep it here).
-- `register(agent_id, pattern)`
-- `register_defaults(agent_id, metadata)` (Direct messages + File changes)
-- `unregister_all(agent_id)`
-- `get_matching_agents(event) -> list[str]`
-
-### Step 4.3: Extend AgentState for JSONL Persistence
-
-**File**: `src/remora/core/agent_state.py` (~80 LOC)
-
-The current `agent_state.py` is close, but needs to be rigorously scoped to per-agent persistence using JSONL inside the agent's folder (`agents/<agent_id>/state.jsonl`). Keep `load` and `save` functions append-only for history.
-
-### Step 4.4: Extend EventStore with Trigger Queue
-
-**File**: `src/remora/core/event_store.py` (~250 LOC)
-
-Update the existing `EventStore` class:
-1.  **Add Dependencies**: Inject `SubscriptionRegistry` and `EventBus`.
-2.  **Add Trigger Queue**: `self._trigger_queue = asyncio.Queue()`.
-3.  **Update `append`**:
-    - Persist the event to SQLite.
-    - Call `self._subscriptions.get_matching_agents(event)`.
-    - Push `(agent_id, event_id, event)` onto `_trigger_queue` for each match.
-    - Emit to `_event_bus` for UI updates.
-4.  **Add `get_triggers`**: `async def get_triggers() -> AsyncIterator[tuple[str, int, Event]]`.
-
-### Step 4.5: Update AgentRunner
-
-**File**: `src/remora/core/agent_runner.py` (~150 LOC)
-
-Rewrite the main execution loop to be completely reactive:
-- Remove polling (`last_seen_event_id`).
-- Loop over `event_store.get_triggers()`.
-- Implement cascade prevention (cooldowns + depth limits).
-- When a turn runs, load `AgentState` from JSONL, generate prompt, run `AgentKernel`, and save state.
-
-### Step 4.6: Update Reconciler
-
-**File**: `src/remora/core/reconciler.py` (~100 LOC)
-
-Update the startup reconciliation logic to use the new `SwarmState` and `SubscriptionRegistry`:
-- Diff discovered CST nodes against `SwarmState`.
-- Call `swarm_state.register_agent` and `subscriptions.register_defaults` for new nodes.
-- Call `swarm_state.mark_orphaned` and `subscriptions.unregister_all` for deleted nodes.
-
----
-
-## Phase 5: Maintain Cairn Workspaces
-
-**File**: `src/remora/core/workspace.py` and `cairn_bridge.py`
-
-We DO NOT swap `cairn.runtime.workspace_manager` for `Fsdantic.open()`. The concept demands nested Cairn workspaces (`.remora/agents/<id>/workspace.db`) mapped over a `stable.db` layer. 
-
-- Keep `CairnWorkspaceService` largely as-is.
-- Continue using Cairn dependencies to enforce copy-on-write functionality per agent.
-- Ensure the agent's folder (`.remora/agents/<id>`) stores both `state.jsonl` (AgentState) and `workspace.db` (Cairn).
-
----
-
-## Phase 6: Service Layer Integration
-
-**File**: `src/remora/service/api.py`
-
-Ensure that the main `create_default()` correctly wires up the separated SQLite/JSONL layers (`EventStore`, `SubscriptionRegistry`, `SwarmState`) with the `CairnWorkspaceService`.
-
----
-
-## Phase 7: Fix Remaining Issues
-
-### Step 7.1: Use Config swarm_id in AgentRunner
+**Changes**:
+1. Remove `WorkspaceConfig` import (line 18)
+2. Update `__init__` to only accept `Config`:
 
 ```python
-self._swarm_id = config.swarm_id  # Not "swarm"
+def __init__(
+    self,
+    config: Config,
+    *,
+    graph_id: str | None = None,
+    swarm_root: PathLike | None = None,
+    project_root: PathLike | None = None,
+) -> None:
+    self._config = config
+
+    base_path = normalize_path(swarm_root or config.swarm_root)
+    # ... rest unchanged, but remove WorkspaceConfig handling
 ```
-
-### Step 7.2: Clean Up Correlation Depth Tracking
-
-Add periodic cleanup with TTL-based expiry for `_correlation_depth` dict entries.
-
-### Step 7.3: Cache Workspace Initialization
-
-```python
-async def _ensure_workspace_initialized(self) -> None:
-    if not self._workspace_initialized:
-        await self._workspace_service.initialize()
-        self._workspace_initialized = True
-```
-
-### Step 7.4: Fix NvimServer
-
-- Import `asdict` from `dataclasses` instead of local function
-- Use `self._swarm_id` instead of hardcoded `"nvim"`
-
-### Step 7.5: Make SubscriptionPattern Matching Async-Safe
-
-Since `SubscriptionPattern.matches()` is used in `SwarmStore.get_matching_agents()`, ensure it handles edge cases (None fields, missing event attrs) gracefully.
 
 ---
 
-## Phase 8: Tests
+## Phase 3: API Consistency
 
-### Step 8.1: AgentRunner Cascade Prevention Tests
+**Goal**: Make all database-backed components use async API consistently.
 
-Test depth limits, cooldowns, and concurrent trigger handling.
+### Step 3.1: Make SwarmState Async
 
-### Step 8.2: SwarmStore Integration Tests
+**File**: `src/remora/core/swarm_state.py`
 
-Test KV-backed agent registry, subscription matching, and state persistence.
+**Changes**:
+1. Change `initialize()` to `async def initialize()`:
 
-### Step 8.3: EventStore Trigger Queue Tests
+```python
+async def initialize(self) -> None:
+    """Initialize the database and create tables."""
+    if self._conn is not None:
+        return
 
-Test concurrent event appending and subscription-based trigger delivery.
+    self._conn = await asyncio.to_thread(
+        sqlite3.connect, str(self._db_path), check_same_thread=False
+    )
+    self._conn.row_factory = sqlite3.Row
+
+    await asyncio.to_thread(self._conn.execute, """
+        CREATE TABLE IF NOT EXISTS agents (...)
+    """)
+    await asyncio.to_thread(self._conn.commit)
+```
+
+2. Update all methods (`upsert`, `mark_orphaned`, `list_agents`, `get_agent`, `close`) to be async
+
+3. Return `AgentMetadata` instead of dict from `list_agents` and `get_agent`:
+
+```python
+async def list_agents(self, status: str | None = None) -> list[AgentMetadata]:
+    """List all agents, optionally filtered by status."""
+    # ... query logic ...
+    return [
+        AgentMetadata(
+            agent_id=row["agent_id"],
+            node_type=row["node_type"],
+            # ... etc
+        )
+        for row in rows
+    ]
+```
 
 ---
 
-## Phase 9: Documentation
+### Step 3.2: Update Callers of SwarmState
 
-### Step 9.1: Update Module Docstrings
+**Files to update**:
+- `src/remora/cli/main.py`: Add `await` to `swarm_state.initialize()` calls
+- `src/remora/core/agent_runner.py`: If it calls swarm_state methods
 
+---
+
+### Step 3.3: Fix Async Close in AgentRunner
+
+**File**: `src/remora/core/agent_runner.py`
+
+**Change** (line 269):
 ```python
-"""Remora Core - Reactive Agent Swarm Framework.
+# Before:
+self._subscriptions.close()
 
-Storage:
-    EventStore     → SQLite append-only event log with trigger queue
-    SwarmStore     → FSdantic KV for agents, subscriptions, state
-
-Execution:
-    AgentRunner    → Reactive event loop processing triggers  
-    SwarmExecutor  → Single-agent turn execution
-
-Event Flow:
-    Event → EventStore.append() → SwarmStore.get_matching_agents()
-    → TriggerQueue → AgentRunner → SwarmExecutor → Agent Turn
-"""
+# After:
+await self._subscriptions.close()
 ```
+
+---
+
+## Phase 4: Fix Event Types
+
+**Goal**: Make event types consistent with subscription pattern matching.
+
+### Step 4.1: Fix ManualTriggerEvent
+
+**File**: `src/remora/core/events.py`
+
+**Change** `ManualTriggerEvent`:
+```python
+@dataclass(frozen=True, slots=True)
+class ManualTriggerEvent:
+    """Manual trigger to start an agent."""
+
+    to_agent: str  # Changed from agent_id to match subscription patterns
+    reason: str
+    timestamp: float = field(default_factory=time.time)
+```
+
+---
+
+### Step 4.2: Update ManualTriggerEvent Usages
+
+**Files to update**:
+- `src/remora/cli/main.py`: Change `agent_id=` to `to_agent=`
+- `tests/integration/test_agent_runner.py`: Change `agent_id=` to `to_agent=`
+
+---
+
+## Phase 5: Add Missing Components
+
+**Goal**: Add error types and tools specified in concept docs.
+
+### Step 5.1: Add SwarmError
+
+**File**: `src/remora/core/errors.py`
+
+**Add**:
+```python
+class SwarmError(RemoraError):
+    """Error in swarm operations."""
+
+    pass
+```
+
+**Update** `__all__`:
+```python
+__all__ = [
+    "RemoraError",
+    "ConfigError",
+    "DiscoveryError",
+    "GraphError",  # Keep for backwards compat, consider deprecating
+    "ExecutionError",
+    "WorkspaceError",
+    "SwarmError",
+]
+```
+
+---
+
+### Step 5.2: Complete Swarm Tools
+
+**File**: `src/remora/core/tools/swarm.py`
+
+**Add** `unsubscribe` tool:
+```python
+async def unsubscribe(subscription_id: int) -> str:
+    """Remove a subscription by ID."""
+    # Implementation depends on how subscriptions stores IDs
+    return f"Subscription {subscription_id} removed."
+```
+
+**Add** `broadcast` tool:
+```python
+async def broadcast(to_pattern: str, content: str) -> str:
+    """Broadcast message to multiple agents matching pattern.
+
+    Patterns:
+    - "children" - All child agents
+    - "siblings" - All sibling agents
+    - "file:path" - All agents in file
+    """
+    # Implementation
+    return f"Broadcast sent to {to_pattern}."
+```
+
+**Add** `query_agents` tool:
+```python
+async def query_agents(filter_type: str | None = None) -> list[dict]:
+    """Query available agents in the swarm.
+
+    Args:
+        filter_type: Optional node type filter (function, class, file)
+
+    Returns:
+        List of agent metadata
+    """
+    # Implementation using swarm_state
+    return []
+```
+
+---
+
+### Step 5.3: Export New Error Type
+
+**File**: `src/remora/__init__.py`
+
+**Add** to imports and `__all__`:
+```python
+from remora.core.errors import (
+    ...
+    SwarmError,
+)
+
+__all__ = [
+    ...
+    "SwarmError",
+]
+```
+
+---
+
+## Phase 6: Code Quality Improvements
+
+### Step 6.1: Simplify CLI Swarm ID Extraction
+
+**File**: `src/remora/cli/main.py`
+
+**Change** (line 70):
+```python
+# Before:
+swarm_id = getattr(config, "swarm_id", "swarm") if hasattr(config, "__dataclass_fields__") else "swarm"
+
+# After:
+swarm_id = config.swarm_id
+```
+
+---
+
+### Step 6.2: Add Missing Type Annotations
+
+**File**: `src/remora/core/agent_runner.py`
+
+**Add** return type to `_run_agent`:
+```python
+async def _run_agent(self, context: ExecutionContext) -> str | None:
+    """Run the actual agent logic using SwarmExecutor."""
+```
+
+---
+
+## Phase 7: Optional Simplifications
+
+These changes are more invasive but improve the architecture.
+
+### Step 7.1: Remove Human Input Events (Optional)
+
+If HITL is not being used in the reactive model, consider removing:
+- `HumanInputRequestEvent`
+- `HumanInputResponseEvent`
+
+### Step 7.2: Simplify Workspace Layering (Optional)
+
+Consider removing the stable workspace layer if not needed:
+
+**File**: `src/remora/core/workspace.py`
+
+Remove the `stable_workspace` parameter and fallback logic from `AgentWorkspace`.
 
 ---
 
 ## Verification Checklist
 
-After completing all phases:
+After completing all changes, verify:
 
-- [ ] `grep -r "GraphExecutor\|EventSourcedBus\|WorkspaceManager\|CairnDataProvider\|CairnResultHandler" src/` returns nothing
-- [ ] `grep -r "from remora.core.executor\|from remora.core.graph\|from remora.core.context" src/` returns nothing
-- [ ] `python -c "from remora.core.subscriptions import SubscriptionRegistry"` succeeds
-- [ ] `python -c "from remora.core.swarm_state import SwarmState"` succeeds
-- [ ] `python -c "from remora.core.event_store import EventStore"` succeeds
-- [ ] `pytest tests/` passes
-- [ ] Storage concerns correctly separated into `events.db`, `swarm_state.db`, `subscriptions.db`, and JSONL files.
+- [ ] `pytest tests/unit/` passes
+- [ ] `pytest tests/integration/` passes (where applicable)
+- [ ] `mypy src/remora/` has no new errors
+- [ ] `ruff check src/remora/` passes
+- [ ] CLI commands work: `remora swarm start`, `remora swarm list`
 
 ---
 
-## Summary of Changes
+## File Change Summary
 
-| Phase | Description | LOC Removed | LOC Added |
-|-------|-------------|-------------|-----------|
-| 1 | Remove legacy code | ~1,100 | 0 |
-| 2 | Fix critical bugs | ~5 | ~15 |
-| 3 | Fix config issues | ~5 | ~5 |
-| 4 | SQLite & JSONL storage | - | ~250 |
-| 5 | Retain Cairn Working | ~0 | ~0 |
-| 6 | Service layer wiring | ~0 | ~10 |
-| 7 | Fix remaining issues | ~20 | ~30 |
-| 8 | Tests | 0 | ~120 |
-| **Total** | | **~1,280** | **~480** |
-
-**Net reduction**: ~800 LOC while gaining:
-- Pure Reactive architecture aligned with CST Demo
-- Dedicated SQLite databases for message bus & state tracking
-- Per-agent isolated `state.jsonl` files stored alongside `workspace.db`
-- Cleaner mental model
+| File | Action | Est. LOC Change |
+|------|--------|-----------------|
+| `core/events.py` | Remove legacy events | -70 |
+| `core/event_bus.py` | Remove EventBridge | -35 |
+| `core/config.py` | Remove extra classes | -45 |
+| `core/errors.py` | Add SwarmError | +5 |
+| `core/swarm_state.py` | Make async | +20 |
+| `core/tools/swarm.py` | Add new tools | +60 |
+| `nvim/server.py` | Remove unused function | -5 |
+| `cli/main.py` | Simplify, fix async | +5 |
+| `__init__.py` | Fix exports | ±0 |
+| **Total** | | ~-65 LOC |
 
 ---
 
-## Order of Operations
+## Order of Implementation
 
-**Critical path** (do first, in order):
-1. Phase 1 — Remove legacy code (unblocks everything)
-2. Phase 2 — Fix critical bugs (unblocks testing)
-3. Phase 3 — Fix config (unblocks running)
-4. Phase 4 — FSdantic KV storage (core architectural change)
+Recommended order to minimize risk:
 
-**After core changes**:
-5. Phase 5 — Simplify Cairn bridge
-6. Phase 6 — Flatten service layer
-7. Phase 7 — Fix remaining issues
-8. Phase 8 — Tests
-9. Phase 9 — Documentation
+1. **Phase 1**: Remove dead code (lowest risk)
+2. **Phase 4**: Fix event types (isolated change)
+3. **Phase 5**: Add missing components (additive)
+4. **Phase 2**: Simplify config (check for usages)
+5. **Phase 3**: API consistency (requires caller updates)
+6. **Phase 6**: Code quality (polish)
+7. **Phase 7**: Optional (major changes)
+
+---
+
+## Notes
+
+- All changes are backwards-incompatible as per project guidelines
+- Test after each phase before proceeding
+- Consider adding deprecation warnings if gradual migration needed
+- Update documentation after changes are complete

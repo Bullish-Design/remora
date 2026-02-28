@@ -76,8 +76,8 @@ async def reconcile_on_startup(
 
     node_map = {node.node_id: node for node in nodes}
 
-    existing_agents = swarm_state.list_agents(status="active")
-    existing_ids = {agent["agent_id"] for agent in existing_agents}
+    existing_agents = await swarm_state.list_agents(status="active")
+    existing_ids = {agent.agent_id for agent in existing_agents}
 
     discovered_ids = set(node_map.keys())
 
@@ -99,7 +99,7 @@ async def reconcile_on_startup(
             start_line=node.start_line,
             end_line=node.end_line,
         )
-        swarm_state.upsert(metadata)
+        await swarm_state.upsert(metadata)
 
         agent_dir = get_agent_dir(swarm_root, node.node_id)
         agent_dir.mkdir(parents=True, exist_ok=True)
@@ -123,7 +123,7 @@ async def reconcile_on_startup(
         created += 1
 
     for agent_id in deleted_ids:
-        swarm_state.mark_orphaned(agent_id)
+        await swarm_state.mark_orphaned(agent_id)
         await subscriptions.unregister_all(agent_id)
         orphaned += 1
 

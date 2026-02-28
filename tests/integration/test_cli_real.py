@@ -11,70 +11,7 @@ from urllib.request import urlopen
 
 import pytest
 
-from tests.integration.helpers import (
-    agentfs_available_sync,
-    load_vllm_config,
-    vllm_available,
-    write_bundle,
-    write_config,
-)
-
-
 pytestmark = pytest.mark.integration
-
-
-def test_cli_run_real(tmp_path: Path) -> None:
-    if not agentfs_available_sync():
-        pytest.skip("AgentFS not reachable")
-    vllm_config = load_vllm_config()
-    if not vllm_available(vllm_config["base_url"]):
-        pytest.skip("vLLM server not reachable")
-
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    src_dir = project_root / "src"
-    src_dir.mkdir()
-    target_file = src_dir / "sample.py"
-    target_file.write_text("def hello():\n    return 'hi'\n", encoding="utf-8")
-
-    bundle_dir = tmp_path / "smoke_bundle"
-    bundle_path = write_bundle(bundle_dir)
-
-    config_path = tmp_path / "remora.yaml"
-    write_config(
-        config_path,
-        {
-            "bundles": {"path": str(bundle_dir), "mapping": {"function": bundle_path.name}},
-            "model": {
-                "base_url": vllm_config["base_url"],
-                "api_key": vllm_config["api_key"],
-                "default_model": vllm_config["model"],
-            },
-            "execution": {"max_turns": 2, "timeout": 120},
-            "workspace": {"base_path": str(tmp_path / "workspaces")},
-        },
-    )
-
-    repo_root = Path(__file__).resolve().parents[2]
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "remora",
-            "run",
-            str(target_file),
-            "--config",
-            str(config_path),
-        ],
-        cwd=repo_root,
-        env=_cli_env(repo_root),
-        capture_output=True,
-        text=True,
-        timeout=240,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "Completed" in result.stdout
 
 
 def _cli_env(repo_root: Path) -> dict[str, str]:
@@ -97,80 +34,7 @@ def _uvicorn_available() -> bool:
     return True
 
 
-def test_cli_run_invalid_config_fails(tmp_path: Path) -> None:
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    src_dir = project_root / "src"
-    src_dir.mkdir()
-    target_file = src_dir / "sample.py"
-    target_file.write_text("def hello():\n    return 'hi'\n", encoding="utf-8")
-
-    config_path = tmp_path / "remora.yaml"
-    config_path.write_text("bundles: [invalid", encoding="utf-8")
-
-    repo_root = Path(__file__).resolve().parents[2]
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "remora",
-            "run",
-            str(target_file),
-            "--config",
-            str(config_path),
-        ],
-        cwd=repo_root,
-        env=_cli_env(repo_root),
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-
-    assert result.returncode != 0
-    assert "Invalid YAML" in (result.stderr + result.stdout)
-
-
-def test_cli_run_missing_bundle_mapping_fails(tmp_path: Path) -> None:
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    src_dir = project_root / "src"
-    src_dir.mkdir()
-    target_file = src_dir / "sample.py"
-    target_file.write_text("def hello():\n    return 'hi'\n", encoding="utf-8")
-
-    config_path = tmp_path / "remora.yaml"
-    write_config(
-        config_path,
-        {
-            "bundles": {"path": str(tmp_path), "mapping": {}},
-            "execution": {"max_turns": 1, "timeout": 1},
-            "workspace": {"base_path": str(tmp_path / "workspaces")},
-        },
-    )
-
-    repo_root = Path(__file__).resolve().parents[2]
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "remora",
-            "run",
-            str(target_file),
-            "--config",
-            str(config_path),
-        ],
-        cwd=repo_root,
-        env=_cli_env(repo_root),
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-
-    assert result.returncode != 0
-    assert "No bundle mapping configured" in (result.stderr + result.stdout)
-
-
-def test_service_cli_run_serves_http(tmp_path: Path) -> None:
+def test_service_cli_serve_serves_http(tmp_path: Path) -> None:
     if not _uvicorn_available():
         pytest.skip("uvicorn is not available")
 
@@ -197,7 +61,7 @@ def test_service_cli_run_serves_http(tmp_path: Path) -> None:
 
     try:
         deadline = time.time() + 10
-        last_error = None
+        last_error: Exception | None = None
         while time.time() < deadline:
             if process.poll() is not None:
                 stdout, stderr = process.communicate(timeout=2)
@@ -209,7 +73,7 @@ def test_service_cli_run_serves_http(tmp_path: Path) -> None:
                 with urlopen(f"http://127.0.0.1:{port}/", timeout=1) as response:
                     assert response.status == 200
                     return
-            except Exception as exc:
+            except Exception as exc:  # pragma: no cover - best-effort probe
                 last_error = exc
                 time.sleep(0.2)
         raise AssertionError(f"Service did not start: {last_error}")
@@ -220,3 +84,28 @@ def test_service_cli_run_serves_http(tmp_path: Path) -> None:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.terminate()
+
+
+def test_cli_serve_invalid_config_fails(tmp_path: Path) -> None:
+    config_path = tmp_path / "bad_remora.yaml"
+    config_path.write_text("bundles: [invalid", encoding="utf-8")
+
+    repo_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "remora",
+            "serve",
+            "--config",
+            str(config_path),
+        ],
+        cwd=repo_root,
+        env=_cli_env(repo_root),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode != 0
+    assert "Invalid YAML" in (result.stderr + result.stdout)

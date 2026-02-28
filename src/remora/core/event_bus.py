@@ -123,45 +123,7 @@ class EventBus:
         self._handlers.clear()
         self._all_handlers.clear()
 
-
-class EventBridge:
-    """
-    Bridge Remora events to external systems.
-
-    Example with Stario Relay:
-        bridge = EventBridge(event_bus)
-        bridge.connect(relay, "agent.events")
-
-        # Now all events are published to relay
-    """
-
-    def __init__(self, event_bus: EventBus):
-        self.event_bus = event_bus
-        self._subscriptions = []
-
-    def connect(self, relay: Any, topic_prefix: str) -> None:
-        """Connect to a Stario Relay, publishing events as messages."""
-
-        async def handler(event: RemoraEvent) -> None:
-            event_type = type(event).__name__
-            relay.publish(
-                f"{topic_prefix}.{event_type}",
-                {
-                    "type": event_type,
-                    "data": event.__dict__,
-                }
-            )
-
-        self.event_bus.subscribe_all(handler)
-        self._subscriptions.append(handler)
-
-    def disconnect(self) -> None:
-        """Disconnect all bridges."""
-        # Note: Would need unsubscribe support in EventBus
-        self._subscriptions.clear()
-
 __all__ = [
     "EventBus",
     "EventHandler",
-    "EventBridge",
 ]

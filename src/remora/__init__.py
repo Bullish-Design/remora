@@ -98,7 +98,6 @@ __all__ = [
     "AgentWorkspace",
     "CairnDataProvider",
     "CairnExternals",
-    "CairnExternals",
     "build_virtual_fs",
     "discover_grail_tools",
     "PathResolver",

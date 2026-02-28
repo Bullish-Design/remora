@@ -8,7 +8,7 @@ from typing import Any, AsyncIterator
 import pytest
 
 from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
-from remora.core.config import WorkspaceConfig
+from remora.core.config import Config
 from remora.utils import PathResolver
 from tests.integration.helpers import agentfs_available_sync
 
@@ -42,20 +42,20 @@ def project_root(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def workspace_config(tmp_path: Path) -> WorkspaceConfig:
+def workspace_config(tmp_path: Path) -> Config:
     """Workspace settings for integration tests."""
     base_path = tmp_path / "workspaces"
-    return WorkspaceConfig(
-        base_path=str(base_path),
-        ignore_patterns=(".git", "__pycache__"),
-        ignore_dotfiles=False,
+    return Config(
+        swarm_root=str(base_path),
+        workspace_ignore_patterns=(".git", "__pycache__"),
+        workspace_ignore_dotfiles=False,
     )
 
 
 @pytest.fixture
 async def workspace_service(
     cairn_available: bool,
-    workspace_config: WorkspaceConfig,
+    workspace_config: Config,
     project_root: Path,
 ) -> AsyncIterator[CairnWorkspaceService]:
     """Create and initialize a CairnWorkspaceService."""

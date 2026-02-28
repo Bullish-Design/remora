@@ -266,7 +266,7 @@ class AgentRunner:
         self._running = False
         await self._cancel_pending()
         await self._event_store.close()
-        self._subscriptions.close()
+        await self._subscriptions.close()
 
 
 __all__ = ["AgentRunner", "ExecutionContext"]

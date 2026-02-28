@@ -72,12 +72,14 @@ def create_app(service: RemoraService | None = None) -> Starlette:
         return JSONResponse(service.ui_snapshot())
 
     async def swarm_agents(_request: Request) -> JSONResponse:
-        return JSONResponse(service.list_agents())
+        agents = await service.list_agents()
+        return JSONResponse(agents)
 
     async def swarm_agent(request: Request) -> JSONResponse:
         agent_id = request.path_params["id"]
         try:
-            return JSONResponse(service.get_agent(agent_id))
+            agent = await service.get_agent(agent_id)
+            return JSONResponse(agent)
         except ValueError as exc:
             return _error(str(exc), status_code=404)
 

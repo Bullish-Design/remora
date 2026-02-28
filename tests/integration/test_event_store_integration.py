@@ -239,14 +239,9 @@ async def test_event_store_no_trigger_without_subscription(tmp_path):
         AgentMessageEvent(from_agent="user", to_agent="agent_b", content="Hello"),
     )
 
-    triggers = []
-    async for agent_id, event_id, event in store.get_triggers():
-        triggers.append(agent_id)
-        await asyncio.sleep(0.05)
-        if len(triggers) > 0:
-            break
-
-    assert len(triggers) == 0
+    trigger_iter = store.get_triggers().__aiter__()
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(trigger_iter.__anext__(), timeout=0.1)
 
     await store.close()
     await subscriptions.close()

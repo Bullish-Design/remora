@@ -1,0 +1,12 @@
+{
+  "file": "/run/user/1000/pytest-of-andrew/pytest-168/test_real_vllm_grail_tool_exec0/grail_tool.pym",
+  "valid": true,
+  "errors": [],
+  "warnings": [],
+  "info": {
+    "externals_count": 0,
+    "inputs_count": 0,
+    "lines_of_code": 7,
+    "monty_features_used": []
+  }
+}

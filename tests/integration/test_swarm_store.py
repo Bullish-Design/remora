@@ -14,12 +14,13 @@ from remora.core.swarm_state import AgentMetadata, SwarmState
 from remora.core.events import AgentMessageEvent, ContentChangedEvent, FileSavedEvent
 
 
-def test_swarm_state_persistence(tmp_path):
+@pytest.mark.asyncio
+async def test_swarm_state_persistence(tmp_path):
     """Test that agents survive runner reboots (state persistence)."""
     db_path = tmp_path / "swarm.db"
 
     swarm1 = SwarmState(db_path)
-    swarm1.initialize()
+    await swarm1.initialize()
 
     meta = AgentMetadata(
         agent_id="agent_a",
@@ -31,26 +32,27 @@ def test_swarm_state_persistence(tmp_path):
         start_line=1,
         end_line=10,
     )
-    swarm1.upsert(meta)
-    swarm1.close()
+    await swarm1.upsert(meta)
+    await swarm1.close()
 
     swarm2 = SwarmState(db_path)
-    swarm2.initialize()
+    await swarm2.initialize()
 
-    recovered = swarm2.get_agent("agent_a")
+    recovered = await swarm2.get_agent("agent_a")
     assert recovered is not None
-    assert recovered["agent_id"] == "agent_a"
-    assert recovered["file_path"] == "src/main.py"
-    assert recovered["node_type"] == "function"
-    swarm2.close()
+    assert recovered.agent_id == "agent_a"
+    assert recovered.file_path == "src/main.py"
+    assert recovered.node_type == "function"
+    await swarm2.close()
 
 
-def test_swarm_state_upsert_updates_existing(tmp_path):
+@pytest.mark.asyncio
+async def test_swarm_state_upsert_updates_existing(tmp_path):
     """Test that upserting an agent updates existing data."""
     db_path = tmp_path / "swarm.db"
 
     swarm = SwarmState(db_path)
-    swarm.initialize()
+    await swarm.initialize()
 
     meta1 = AgentMetadata(
         agent_id="agent_a",
@@ -62,7 +64,7 @@ def test_swarm_state_upsert_updates_existing(tmp_path):
         start_line=1,
         end_line=10,
     )
-    swarm.upsert(meta1)
+    await swarm.upsert(meta1)
 
     meta2 = AgentMetadata(
         agent_id="agent_a",
@@ -74,25 +76,26 @@ def test_swarm_state_upsert_updates_existing(tmp_path):
         start_line=20,
         end_line=50,
     )
-    swarm.upsert(meta2)
+    await swarm.upsert(meta2)
 
-    recovered = swarm.get_agent("agent_a")
+    recovered = await swarm.get_agent("agent_a")
     assert recovered is not None
-    assert recovered["node_type"] == "class"
-    assert recovered["file_path"] == "src/models.py"
-    assert recovered["start_line"] == 20
+    assert recovered.node_type == "class"
+    assert recovered.file_path == "src/models.py"
+    assert recovered.start_line == 20
 
-    swarm.close()
+    await swarm.close()
 
 
-def test_swarm_state_list_agents(tmp_path):
+@pytest.mark.asyncio
+async def test_swarm_state_list_agents(tmp_path):
     """Test listing all agents."""
     db_path = tmp_path / "swarm.db"
 
     swarm = SwarmState(db_path)
-    swarm.initialize()
+    await swarm.initialize()
 
-    swarm.upsert(AgentMetadata(
+    await swarm.upsert(AgentMetadata(
         agent_id="agent_a",
         node_type="function",
         name="a",
@@ -101,7 +104,7 @@ def test_swarm_state_list_agents(tmp_path):
         start_line=1,
         end_line=5,
     ))
-    swarm.upsert(AgentMetadata(
+    await swarm.upsert(AgentMetadata(
         agent_id="agent_b",
         node_type="function",
         name="b",
@@ -111,22 +114,23 @@ def test_swarm_state_list_agents(tmp_path):
         end_line=5,
     ))
 
-    agents = swarm.list_agents()
+    agents = await swarm.list_agents()
     assert len(agents) == 2
-    agent_ids = {a["agent_id"] for a in agents}
+    agent_ids = {a.agent_id for a in agents}
     assert agent_ids == {"agent_a", "agent_b"}
 
-    swarm.close()
+    await swarm.close()
 
 
-def test_swarm_state_mark_orphaned(tmp_path):
+@pytest.mark.asyncio
+async def test_swarm_state_mark_orphaned(tmp_path):
     """Test marking an agent as orphaned."""
     db_path = tmp_path / "swarm.db"
 
     swarm = SwarmState(db_path)
-    swarm.initialize()
+    await swarm.initialize()
 
-    swarm.upsert(AgentMetadata(
+    await swarm.upsert(AgentMetadata(
         agent_id="agent_a",
         node_type="function",
         name="a",
@@ -136,16 +140,16 @@ def test_swarm_state_mark_orphaned(tmp_path):
         end_line=5,
     ))
 
-    swarm.mark_orphaned("agent_a")
+    await swarm.mark_orphaned("agent_a")
 
-    active = swarm.list_agents(status="active")
+    active = await swarm.list_agents(status="active")
     assert len(active) == 0
 
-    orphaned = swarm.list_agents(status="orphaned")
+    orphaned = await swarm.list_agents(status="orphaned")
     assert len(orphaned) == 1
-    assert orphaned[0]["agent_id"] == "agent_a"
+    assert orphaned[0].agent_id == "agent_a"
 
-    swarm.close()
+    await swarm.close()
 
 
 @pytest.mark.asyncio

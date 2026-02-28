@@ -1,285 +1,488 @@
-# Remora Code Review (Revised)
+# Remora Code Review
 
 ## Executive Summary
 
-This revised code review analyzes the Remora library after its ground-up refactor, incorporating new analysis of **FSdantic KV store integration** and additional simplification opportunities. The previous review's recommendations remain valid; this revision adds a deeper storage unification strategy that leverages FSdantic (already a dependency) and identifies further dead code to remove.
+This document provides a comprehensive code review of the Remora library following its ground-up refactor aimed at implementing a **reactive CST Agent Swarm** architecture. The review assesses alignment with the concepts outlined in `NVIM_DEMO_CONCEPT.md`, `REMORA_CST_DEMO_ANALYSIS.md`, and `REMORA_SIMPLIFICATION_IDEAS.md`.
 
-**Key New Insight**: Remora already depends on FSdantic/AgentFS for workspaces. The FSdantic KV store can replace 3 of 4 custom storage mechanisms (SwarmState, SubscriptionRegistry, AgentState), leaving only EventStore as purpose-built SQLite.
-
----
-
-## Part 1: Architecture Alignment
-
-### 1.1 What's Implemented Correctly
-
-| Component | Design Goal | Implementation | Status |
-|-----------|-------------|----------------|--------|
-| **SubscriptionRegistry** | Pattern-based subscription matching | `subscriptions.py` (241 LOC) | ALIGNED |
-| **EventStore** | SQLite + trigger queue | `event_store.py` (382 LOC) | ALIGNED |
-| **AgentRunner** | Reactive event loop with cascade prevention | `agent_runner.py` (253 LOC) | ALIGNED |
-| **SwarmExecutor** | Single-agent turn execution | `swarm_executor.py` (264 LOC) | ALIGNED |
-| **AgentState** | JSONL persistence | `agent_state.py` (81 LOC) | ALIGNED |
-| **SwarmState** | SQLite agent registry | `swarm_state.py` (178 LOC) | ALIGNED |
-| **Reconciler** | Startup diff + subscription registration | `reconciler.py` (182 LOC) | ALIGNED |
-| **NvimServer** | JSON-RPC for Neovim | `nvim/server.py` (271 LOC) | ALIGNED |
-| **Config** | Flat, simplified configuration | `config.py` (157 LOC) | MOSTLY ALIGNED |
-
-### 1.2 Legacy Code That Should Be Removed
-
-| File | Purpose | LOC | Reason |
-|------|---------|-----|--------|
-| `executor.py` | GraphExecutor for batch mode | 581 | Replaced by AgentRunner + SwarmExecutor |
-| `graph.py` | Agent graph topology | 217 | Superseded by reactive subscription model |
-| `context.py` | Two-Track Memory | 171 | Merged into AgentState.chat_history |
-
-**Impact**: ~970 LOC of legacy code that contradicts the unified reactive model.
-
-### 1.3 Newly Identified Dead Code
-
-| File/Class | Purpose | LOC | Reason |
-|------------|---------|-----|--------|
-| `workspace.py::WorkspaceManager` | Graph-era workspace manager | ~40 | Only used by deleted `executor.py` |
-| `workspace.py::CairnDataProvider` | Grail FS from Cairn | ~35 | Only used by deleted `executor.py` |
-| `workspace.py::CairnResultHandler` | Persist results | ~18 | Only used by deleted `executor.py` |
-| `event_store.py::EventSourcedBus` | Wrapper combining EventBus + Store | ~40 | Causes double-emit, unnecessary layer |
-
-**Additional Impact**: ~133 LOC of dead/harmful code beyond the original 970.
+**Overall Assessment**: The library has made significant progress toward the unified reactive architecture. The core components (SubscriptionRegistry, EventStore with triggers, AgentRunner, SwarmState) are implemented and functional. However, there remain areas of conceptual drift, legacy code, and inconsistencies that prevent the library from achieving the "cleanest, most elegant architecture" goal.
 
 ---
 
-## Part 2: Component-Level Analysis
+## Part 1: Library Architecture Overview
 
-### 2.1 AgentRunner (`agent_runner.py`) — Grade: A-
-
-**Strengths**: Reactive event loop, cascade prevention, semaphore concurrency, clean SwarmExecutor separation.
-
-**Issues**:
-1. `_swarm_id` hardcoded as `"swarm"` instead of `config.swarm_id`
-2. `_correlation_depth` grows unbounded — no cleanup for completed correlations
-3. `close()` calls sync `self._subscriptions.close()` inconsistently
-
-### 2.2 SwarmExecutor (`swarm_executor.py`) — Grade: B+
-
-**Strengths**: Clean single-agent turns, workspace init, prompt building, JJ integration.
-
-**Issues**:
-1. `workspace_service.initialize()` called every turn — wasteful
-2. JJ commit block catches all exceptions silently
-3. `_state_to_cst_node()` creates fake CSTNode with empty text
-
-### 2.3 SubscriptionRegistry (`subscriptions.py`) — Grade: B+
-
-**Strengths**: Pattern matching, SQLite persistence, default subscriptions, deduplication.
-
-**Issues**:
-1. Sync SQLite wrapped in async methods — inconsistent with EventStore pattern
-2. `get_matching_agents()` loads ALL subscriptions then filters in Python — O(n)
-3. `close()` is sync but other methods are async
-
-### 2.4 EventStore (`event_store.py`) — Grade: B+
-
-**Strengths**: Proper async SQLite via `asyncio.to_thread()`, trigger queue, event serialization.
-
-**Issues**:
-1. Trigger queue created in `initialize()` but could be None
-2. `EventSourcedBus.emit()` causes double emission (see Part 4.3)
-3. `__getattr__` proxy is risky — masks attribute errors
-
-### 2.5 Reconciler (`reconciler.py`) — Grade: B
-
-**Issues**: Mixed sync/async calls, no handling for renamed files.
-
-### 2.6 AgentState (`agent_state.py`) — Grade: A-
-
-**Issues**: File handle leak in `save()`, `from_dict()` mutates input dict.
-
-### 2.7 SwarmState (`swarm_state.py`) — Grade: B
-
-**Issues**: All sync but called from async context, returns raw dicts instead of typed objects.
-
-### 2.8 NvimServer (`nvim/server.py`) — Grade: B+
-
-**Issues**: Hardcoded `"nvim"` as graph_id, local `asdict()` function instead of import.
-
-### 2.9 Config (`config.py`) — Grade: B+
-
-**Issues**: `bundle_mapping: dict` with `field(default_factory=dict)` breaks frozen dataclass, duplicate ConfigError definition.
-
----
-
-## Part 3: Critical Issues
-
-### 3.1 Syntax Error in chat.py
-
-**Location**: `chat.py:246-259` — Methods after `return` statement are unreachable.
-
-### 3.2 Double Event Emission in EventSourcedBus
-
-**Location**: `event_store.py:358-361` — `append()` already calls `event_bus.emit()`, then `EventSourcedBus.emit()` calls it again.
-
-### 3.3 File Handle Leak in AgentState
-
-**Location**: `agent_state.py:78` — `path.open("a").write(line)` never closes the handle.
-
-### 3.4 AgentState.from_dict() Mutates Input
-
-**Location**: `agent_state.py:45` — uses `pop()` on the input dict.
-
----
-
-## Part 4: Async/Sync Inconsistencies
-
-| Component | Declared | Actual |
-|-----------|----------|--------|
-| SwarmState | sync | sync |
-| SubscriptionRegistry | async | sync (no await) |
-| EventStore | async | async (with to_thread) |
-| AgentState | sync | sync |
-
----
-
-## Part 5: Storage Architecture Analysis
-
-### 5.1 Current Storage Landscape (6 separate mechanisms)
-
-| Storage | Type | Location | Purpose |
-|---------|------|----------|---------|
-| **EventStore** | SQLite | `.remora/events/events.db` | Event sourcing, trigger queue |
-| **SubscriptionRegistry** | SQLite | `.remora/subscriptions.db` | Pattern-based routing |
-| **SwarmState** | SQLite | `.remora/swarm_state.db` | Agent registry |
-| **AgentState** | JSONL files | `.remora/agents/<id>/state.jsonl` | Per-agent state |
-| **Cairn Stable** | turso/libsql | `.remora/stable.db` | CoW file storage (stable) |
-| **Cairn Agent WS** | turso/libsql | `.remora/agents/<id>/workspace.db` | CoW file storage (per-agent) |
-
-**Problem**: 3 SQLite databases + per-agent JSONL + 2+ Cairn databases — far more complexity than necessary.
-
-### Consolidation into SQLite and JSONL
-
-The concept clearly distinguishes different types of state storage:
-
-1.  **Swarm Registry & Subscriptions (`swarm_state.db`, `subscriptions.db`)**: Global state tracking agents and their event routing profiles using SQLite.
-2.  **Message Queue (`events.db`)**: Using SQLite for quick, indexed access to historical events and simple triggering logic.
-3.  **Agent Working Set (`workspace.db` & `state.jsonl`)**: Retaining nested Cairn workspaces (`agents/<id>/workspace.db`) alongside basic JSONL representations of chat history and agent-learned topology.
-
-**Action Plan:**
-Create concrete, distinct storage components matching the `REMORA_CST_DEMO_ANALYSIS.md` concept. `EventStore` handles message queues, `SwarmState` handles registration, and `SubscriptionRegistry` tracks event subscriptions. Keep per-agent JSONL isolated securely next to the agent's Cairn `workspace.db`.
-
-### 5.3 Recommended Storage Architecture
+### 1.1 Current Structure (~13,400 LOC)
 
 ```
-.remora/
-  events.db          # SQLite EventStore (append-only event log) ← KEEP
-  swarm.db           # FSdantic workspace KV (agents, subs, state) ← NEW
-  stable.db          # Cairn stable workspace (CoW files) ← KEEP
-  agents/
-    <id>/
-      workspace.db   # Cairn agent workspace (CoW files) ← KEEP
+src/remora/
+├── core/                 # Core reactive framework (~3,400 LOC)
+│   ├── agent_runner.py   # Reactive trigger processing
+│   ├── agent_state.py    # Per-agent state persistence
+│   ├── swarm_state.py    # Agent registry (SQLite)
+│   ├── subscriptions.py  # SubscriptionRegistry
+│   ├── event_store.py    # Event persistence + trigger queue
+│   ├── events.py         # Event type definitions
+│   ├── event_bus.py      # UI event coordination
+│   ├── reconciler.py     # Startup reconciliation
+│   ├── swarm_executor.py # Single-agent turn execution
+│   ├── discovery.py      # Tree-sitter CST discovery
+│   ├── workspace.py      # Agent workspace abstraction
+│   ├── cairn_bridge.py   # Cairn integration
+│   ├── config.py         # Configuration loading
+│   ├── errors.py         # Error hierarchy
+│   └── tools/            # Agent tools
+├── nvim/                 # Neovim integration
+├── service/              # HTTP service layer
+├── adapters/             # Framework adapters
+├── ui/                   # UI components
+├── cli/                  # CLI commands
+└── utils/                # Utilities
 ```
 
-**Result**: 2 conceptual storage concerns:
-1. **Event log** → SQLite (sequential, indexed, filtered)
-2. **Everything else** → FSdantic KV (simple key-value CRUD)
+### 1.2 Key Components and Their Purpose
 
-The Cairn workspaces remain unchanged — they handle file CoW semantics, which is orthogonal.
-
-### 5.4 Benefits Over Previous Unified RemoraStore Proposal
-
-The previous CODE_REVIEW proposed merging all 3 SQLite DBs into a single `remora.db` with raw SQL. Using FSdantic KV instead is better because:
-
-| Aspect | Raw Unified SQLite | FSdantic KV |
-|--------|-------------------|-------------|
-| **Mental model** | Still requires understanding SQL schema | Simple `get`/`set`/`list` API |
-| **Typed access** | Manual JSON parse/serialize | `repository(model_type=...)` built in |
-| **Existing dependency** | New code to write | Already integrated via Cairn |
-| **Batch operations** | Custom SQL | `get_many`/`set_many` built in |
-| **Concurrency** | Manual locks | Handled by FSdantic/Turso |
-| **Lines of code** | ~350 LOC for RemoraStore | ~80 LOC for thin wrapper |
-
-### 5.5 Additional Consolidation: Merge EventBus into EventStore
-
-Currently three classes exist:
-- `EventBus` — in-memory pub/sub
-- `EventStore` — SQLite persistence  
-- `EventSourcedBus` — wrapper combining both (causes double-emit bug)
-
-**Fix**: Merge EventBus subscriber notification directly into EventStore. The EventStore already has an `_event_bus` reference — just inline the callback pattern and delete both `EventBus` and `EventSourcedBus` as separate classes.
+| Component | Purpose | Alignment |
+|-----------|---------|-----------|
+| `SubscriptionRegistry` | Pattern-based event matching | ✅ Fully aligned |
+| `EventStore` | SQLite persistence + trigger queue | ✅ Fully aligned |
+| `AgentRunner` | Reactive trigger processing | ✅ Mostly aligned |
+| `SwarmState` | Agent registry | ✅ Fully aligned |
+| `AgentState` | Per-agent persistence | ✅ Mostly aligned |
+| `SwarmExecutor` | Turn execution | ⚠️ Needs review |
+| `NvimServer` | Neovim RPC | ✅ Aligned |
+| `reconciler` | Startup sync | ✅ Aligned |
 
 ---
 
-## Part 6: Further Simplification Opportunities
+## Part 2: Alignment Analysis
 
-### 6.1 CairnBridge → Use FSdantic Directly
+### 2.1 What's Well-Aligned with Concept Documents
 
-**Current**: `cairn_bridge.py` imports `cairn.runtime.workspace_manager` (low-level Cairn internals).
+#### ✅ Reactive Subscription Model
+The core reactive model is correctly implemented:
+- `SubscriptionPattern` with `event_types`, `from_agents`, `to_agent`, `path_glob`, `tags`
+- Default subscriptions: direct messages + file changes
+- `get_matching_agents()` returns agents whose patterns match events
+- No `last_seen_event_id` tracking (per spec)
 
-**Better**: Use `Fsdantic.open(id=agent_id)` directly. This is literally what FSdantic was designed for — to be the high-level wrapper around AgentFS/Cairn.
+```python
+# subscriptions.py - Correctly implements the reactive model
+async def get_matching_agents(self, event: RemoraEvent) -> list[str]:
+    # Matches event against all subscriptions
+```
 
-**Impact**: Simplifies `cairn_bridge.py` from ~168 LOC of manual workspace management to ~50 LOC using the FSdantic API. Also removes the need for manual `_sync_project_to_workspace()` if using FSdantic's overlay merge.
+#### ✅ EventStore with Trigger Queue
+EventStore correctly integrates with subscriptions:
+- Appends events and matches against subscriptions
+- Queues `(agent_id, event_id, event)` tuples
+- Provides `get_triggers()` async iterator
 
-### 6.2 Simplify workspace.py
+```python
+# event_store.py - Correct trigger queue integration
+if self._subscriptions is not None:
+    matching_agents = await self._subscriptions.get_matching_agents(event)
+    for agent_id in matching_agents:
+        await self._trigger_queue.put((agent_id, event_id, event))
+```
 
-**Current**: 242 LOC with 4 classes:
-- `AgentWorkspace` — thin wrapper with dual-lock concurrency
-- `WorkspaceManager` — dead code (graph-era)
-- `CairnDataProvider` — dead code (graph-era)
-- `CairnResultHandler` — dead code (graph-era)
+#### ✅ AgentRunner Cascade Prevention
+Implements depth limits and cooldowns as specified:
+- `max_trigger_depth` configuration
+- `trigger_cooldown_ms` to prevent rapid re-triggering
+- Correlation-based depth tracking
 
-**After cleanup**: Only `AgentWorkspace` remains (~80 LOC), and even that could be simplified since FSdantic handles concurrency internally.
+#### ✅ AgentState Without Polling
+Agent state correctly excludes `last_seen_event_id`:
+- `agent_id`, `node_type`, `name`, `file_path`, `range`
+- `connections`, `chat_history`, `custom_subscriptions`
+- JSONL persistence (append-only)
 
-### 6.3 Flatten Service Layer
+#### ✅ SwarmState Registry
+SQLite-backed agent registry:
+- `upsert()`, `mark_orphaned()`, `list_agents()`, `get_agent()`
+- Status tracking (`active`, `orphaned`)
 
-**Current**: `RemoraService` (187 LOC) is a passthrough wrapper that:
-1. Creates EventBus, EventStore, SwarmState, SubscriptionRegistry
-2. Wraps them in `ServiceDeps`
-3. Delegates to handler functions
+#### ✅ Reconciliation on Startup
+Correctly implements the startup flow:
+- Discover CST nodes via tree-sitter
+- Diff against saved agents
+- Create new agents + register defaults
+- Mark deleted agents as orphaned
+- Emit `ContentChangedEvent` for changed files
 
-**Better**: `AgentRunner` IS the API. The service layer adds no logic, only indirection. The handler functions (`handlers.py`) can take `AgentRunner` directly.
+#### ✅ Neovim Integration
+NvimServer implements JSON-RPC as specified:
+- `swarm.emit`, `agent.select`, `agent.chat`, `agent.subscribe`
+- Event broadcasting to connected clients
 
-### 6.4 Simplify EventStore
+### 2.2 Areas of Misalignment and Issues
 
-After removing EventSourcedBus and merging EventBus callbacks inline, EventStore can be dramatically simplified. Remove:
-- `get_graph_ids()` — unused in reactive model
-- `delete_graph()` — unused in reactive model
-- `_migrate_routing_fields()` — no legacy data to migrate (ground-up rewrite)
+#### ⚠️ Configuration Complexity (SIMPLIFY)
+**Issue**: Multiple configuration dataclasses still exist despite simplification goal.
 
-**Estimated reduction**: 382 → ~200 LOC.
+**Current State**:
+```python
+# config.py contains:
+Config              # ~20 fields - GOOD (flat)
+WorkspaceConfig     # Should be absorbed into Config
+BundleConfig        # Should be absorbed into Config
+ModelConfig         # Should be absorbed into Config
+ExecutionConfig     # Should be absorbed into Config
+RemoraConfig        # Should be removed entirely
+```
+
+**Expected per docs**: Single flat `Config` dataclass.
+
+**Location**: `src/remora/core/config.py:69-110`
 
 ---
 
-## Part 7: Test Coverage Gaps
+#### ⚠️ Legacy Graph Events (REMOVE)
+**Issue**: Graph-level events remain from old batch execution model.
 
-1. AgentRunner cascade prevention — No tests for depth limits
-2. SubscriptionRegistry pattern matching — Edge cases for glob patterns
-3. Reconciler — No tests for update detection
-4. NvimServer — No integration tests
-5. EventStore trigger queue — No tests for concurrent triggers
+**Current State**:
+```python
+# events.py still has:
+GraphStartEvent      # Legacy - batch execution
+GraphCompleteEvent   # Legacy - batch execution
+GraphErrorEvent      # Legacy - batch execution
+AgentSkippedEvent    # Legacy - dependency failure
+```
+
+**Expected**: Only reactive swarm events should remain.
+
+**Location**: `src/remora/core/events.py:34-104`
 
 ---
 
-## Part 8: Performance Concerns
+#### ⚠️ Dead Code - EventBridge
+**Issue**: `EventBridge` class appears unused and incomplete.
 
-### 8.1 Subscription Matching O(n)
+**Current State**:
+```python
+# event_bus.py:127-161
+class EventBridge:
+    """Bridge Remora events to external systems."""
+    # Note in code: "Would need unsubscribe support"
+    # Never imported or used anywhere
+```
 
-`get_matching_agents()` loads ALL subscriptions and filters in Python. For large swarms, use SQL WHERE clauses or FSdantic KV prefix filtering.
+**Location**: `src/remora/core/event_bus.py:127-161`
 
-### 8.2 Workspace Initialization Per Turn
+---
 
-`SwarmExecutor.run_agent()` calls `workspace_service.initialize()` every turn. Initialize once at startup.
+#### ⚠️ Inconsistent Async/Sync API
+**Issue**: Mix of async and sync initialization patterns.
+
+| Component | API Pattern |
+|-----------|-------------|
+| `SubscriptionRegistry` | `async initialize()` |
+| `EventStore` | `async initialize()` |
+| `SwarmState` | sync `initialize()` |
+
+**Expected**: Consistent async API across all database-backed components.
+
+**Location**: `src/remora/core/swarm_state.py:36` (sync), others async
+
+---
+
+#### ⚠️ ManualTriggerEvent Missing `to_agent`
+**Issue**: `ManualTriggerEvent` has `agent_id` but subscription matching expects `to_agent`.
+
+**Current State**:
+```python
+# events.py
+@dataclass(frozen=True, slots=True)
+class ManualTriggerEvent:
+    agent_id: str      # Different from AgentMessageEvent's to_agent
+    reason: str
+```
+
+**Expected**: Use `to_agent` for consistency with subscription pattern matching.
+
+**Location**: `src/remora/core/events.py:167-173`
+
+---
+
+#### ⚠️ Missing Error Type
+**Issue**: No `SwarmError` despite concept docs mentioning it.
+
+**Current State** in `errors.py`:
+- `RemoraError` (base)
+- `ConfigError`, `DiscoveryError`, `GraphError`, `ExecutionError`, `WorkspaceError`
+
+**Missing**: `SwarmError` for swarm-specific failures.
+
+**Location**: `src/remora/core/errors.py`
+
+---
+
+#### ⚠️ Incomplete Swarm Tools
+**Issue**: Limited inter-agent communication tools.
+
+**Current tools** in `tools/swarm.py`:
+- `send_message` - Send direct message
+- `subscribe` - Register subscription
+
+**Missing**:
+- `unsubscribe` - Remove subscription
+- `broadcast` - Send to multiple agents
+- `query_agents` - List related agents
+
+**Location**: `src/remora/core/tools/swarm.py`
+
+---
+
+#### ⚠️ Complex Workspace Layering
+**Issue**: Stable workspace + agent workspace pattern adds complexity.
+
+**Current State**:
+```python
+# workspace.py
+class AgentWorkspace:
+    def __init__(self, workspace, agent_id, stable_workspace=None, ...):
+        # Reads try agent workspace, fall back to stable workspace
+```
+
+**Concern**: This layering adds cognitive complexity. Per simplification docs, each agent should have isolated workspace without shared stable layer.
+
+**Location**: `src/remora/core/workspace.py:24-123`
+
+---
+
+#### ⚠️ HumanInputEvents Unclear Purpose
+**Issue**: `HumanInputRequestEvent` and `HumanInputResponseEvent` purpose unclear in reactive model.
+
+**Question**: Are these for HITL during agent turns? If so, how do they integrate with reactive subscriptions?
+
+**Location**: `src/remora/core/events.py:109-130`
+
+---
+
+#### ⚠️ Duplicate Public API Exports
+**Issue**: `__init__.py` has duplicate exports.
+
+```python
+# __init__.py
+"CairnExternals",
+"CairnExternals",  # Duplicate
+```
+
+**Location**: `src/remora/__init__.py:101`
+
+---
+
+#### ⚠️ CLI Swarm ID Handling
+**Issue**: Inconsistent swarm_id extraction in CLI.
+
+```python
+# cli/main.py:70
+swarm_id = getattr(config, "swarm_id", "swarm") if hasattr(config, "__dataclass_fields__") else "swarm"
+```
+
+**Concern**: This is fragile - Config is always a dataclass with `swarm_id` field.
+
+**Location**: `src/remora/cli/main.py:70`
+
+---
+
+### 2.3 Code Quality Issues
+
+#### Minor: Type Annotations
+- Some `dict[str, Any]` could be more specific dataclasses
+- `swarm_state.list_agents()` returns `list[dict]` instead of `list[AgentMetadata]`
+
+#### Minor: Logging Consistency
+- Some modules use `logger.info()`, others `logger.warning()` for similar situations
+- No structured logging format
+
+#### Minor: Test Import Pattern
+- `test_agent_runner.py` uses module-level `pytest.skip()` which prevents any code from running
+
+---
+
+## Part 3: Module-by-Module Analysis
+
+### 3.1 Core Module
+
+#### `subscriptions.py` (246 LOC) - ✅ GOOD
+- Clean implementation of `SubscriptionPattern` and `SubscriptionRegistry`
+- SQLite persistence with proper indexing
+- Thread-safe with asyncio.Lock
+- **No issues identified**
+
+#### `event_store.py` (344 LOC) - ✅ GOOD
+- Correct trigger queue integration
+- Routing fields (from_agent, to_agent, correlation_id, tags)
+- Migration for schema changes
+- **Minor**: Could add index on `from_agent`
+
+#### `agent_runner.py` (273 LOC) - ✅ GOOD
+- Correct reactive loop with `get_triggers()`
+- Cascade prevention via depth + cooldown
+- Cleanup loop for stale correlation entries
+- **Minor**: `_subscriptions.close()` should be `await _subscriptions.close()` line 269
+
+#### `agent_state.py` (84 LOC) - ✅ GOOD
+- Simple JSONL persistence
+- No polling-related fields
+- **No issues**
+
+#### `swarm_state.py` (179 LOC) - ⚠️ NEEDS WORK
+- Should be async for consistency
+- `list_agents()` returns dict instead of dataclass
+- Missing `get_agent_by_file()` method
+
+#### `events.py` (239 LOC) - ⚠️ NEEDS CLEANUP
+- Contains legacy graph events
+- `ManualTriggerEvent.agent_id` should be `to_agent`
+- Good use of frozen dataclasses with slots
+
+#### `event_bus.py` (168 LOC) - ⚠️ NEEDS CLEANUP
+- `EventBridge` class is dead code
+- Core `EventBus` is clean and functional
+
+#### `reconciler.py` (183 LOC) - ✅ GOOD
+- Correct startup flow
+- Proper subscription registration
+- ContentChangedEvent emission for modified files
+
+#### `swarm_executor.py` (277 LOC) - ⚠️ COMPLEX
+- Complex bundle resolution logic
+- JJ commit integration (optional feature)
+- Should be simplified - too many responsibilities
+
+#### `config.py` (212 LOC) - ⚠️ NEEDS CLEANUP
+- Extra dataclasses should be removed
+- `_build_config()` could be simplified
+
+#### `discovery.py` (362 LOC) - ✅ GOOD
+- Clean tree-sitter integration
+- Deterministic node ID computation
+- Multi-language support
+
+#### `workspace.py` (180 LOC) - ⚠️ COMPLEX
+- Stable + agent workspace layering adds complexity
+- Error messages could be more helpful
+
+#### `tools/grail.py` (145 LOC) - ✅ GOOD
+- Clean Grail integration
+- Dynamic tool discovery
+
+#### `tools/swarm.py` (56 LOC) - ⚠️ INCOMPLETE
+- Missing `unsubscribe`, `broadcast` tools
+- Error messages could be more specific
+
+### 3.2 Nvim Module
+
+#### `server.py` (271 LOC) - ✅ GOOD
+- Clean JSON-RPC implementation
+- Proper event broadcasting
+- All required handlers implemented
+- **Minor**: `_asdict_nested` function unused
+
+### 3.3 CLI Module
+
+#### `main.py` (269 LOC) - ✅ GOOD
+- Clean Click interface
+- Proper async handling
+- All swarm commands implemented
+- **Minor**: Fragile swarm_id extraction (line 70)
+
+### 3.4 Service Module
+
+#### `api.py` - NOT REVIEWED (service layer)
+#### `chat_service.py` - NOT TESTED (0% coverage)
+#### `handlers.py` - MIXED (UI + service logic)
+
+---
+
+## Part 4: Architectural Recommendations
+
+### 4.1 Critical Changes
+
+1. **Remove Legacy Events**: Delete `GraphStartEvent`, `GraphCompleteEvent`, `GraphErrorEvent`, `AgentSkippedEvent`
+
+2. **Fix ManualTriggerEvent**: Change `agent_id` to `to_agent` for subscription matching
+
+3. **Remove Dead Code**: Delete `EventBridge` class
+
+4. **Unify SwarmState API**: Make it async for consistency
+
+5. **Clean Config**: Remove `RemoraConfig`, `WorkspaceConfig`, `BundleConfig`, `ModelConfig`, `ExecutionConfig`
+
+### 4.2 Important Changes
+
+1. **Add SwarmError**: New error type for swarm-specific failures
+
+2. **Complete Swarm Tools**: Add `unsubscribe`, `broadcast`, `query_agents`
+
+3. **Fix API Exports**: Remove duplicate `CairnExternals` export
+
+4. **Simplify Workspace**: Consider making the stable workspace layer more implicit
+
+### 4.3 Minor Changes
+
+1. **Fix Async Close**: `agent_runner.py:269` should await subscriptions.close()
+
+2. **Return Types**: `swarm_state.list_agents()` should return `list[AgentMetadata]`
+
+3. **Remove Unused Code**: `_asdict_nested` in nvim/server.py
+
+4. **Simplify CLI**: Remove fragile swarm_id extraction
+
+---
+
+## Part 5: Summary
+
+### What's Working Well
+
+- **Core reactive model** is correctly implemented
+- **Subscription pattern matching** works as designed
+- **EventStore trigger queue** correctly integrates with subscriptions
+- **Cascade prevention** properly implemented
+- **Neovim integration** follows the spec
+- **Reconciliation** handles startup correctly
+
+### What Needs Attention
+
+- **Configuration complexity** - multiple redundant config classes
+- **Legacy events** - graph execution remnants
+- **Dead code** - EventBridge, unused helpers
+- **API inconsistency** - async/sync mix in SwarmState
+- **Missing tools** - incomplete swarm tool set
+- **Workspace complexity** - stable/agent layering
+
+### Metrics
+
+| Metric | Value |
+|--------|-------|
+| Total LOC | ~13,400 |
+| Core Module LOC | ~3,400 |
+| Dead Code (estimated) | ~400 |
+| Test Coverage | 32% |
+
+### Risk Assessment
+
+| Area | Risk Level | Reason |
+|------|------------|--------|
+| Event Processing | Low | Well tested, clean implementation |
+| Subscriptions | Low | Comprehensive tests |
+| Agent Execution | Medium | SwarmExecutor complexity |
+| Workspace | Medium | Complex layering, partial tests |
+| Service Layer | High | Low test coverage |
+| Chat | High | No tests, unclear integration |
 
 ---
 
 ## Conclusion
 
-The Remora refactor has successfully implemented the core reactive architecture. The primary opportunities for further simplification are:
+The Remora library has successfully implemented the core reactive swarm architecture. The subscription-based event routing, trigger queue, and cascade prevention are all working correctly. However, to achieve the "cleanest, most elegant architecture" goal, the following cleanup is needed:
 
-1. **Remove ~1100 LOC of legacy/dead code** (executor.py, graph.py, context.py, dead workspace classes, EventSourcedBus)
-2. **Replace 3 storage mechanisms with FSdantic KV** (~400 LOC removed, ~80 LOC added)
-3. **Simplify EventStore** by merging EventBus inline (~180 LOC removed)
-4. **Use FSdantic directly** instead of low-level Cairn internals (~100 LOC simplified)
-5. **Flatten service layer** (~200 LOC removed)
-6. **Fix critical bugs** (chat.py syntax error, double emission, file handle leak)
+1. Remove legacy graph execution code
+2. Consolidate configuration into single flat dataclass
+3. Make APIs consistent (all async)
+4. Complete the swarm tool set
+5. Remove dead code
+6. Add missing error types
 
-**Estimated net reduction**: ~1,800 LOC removed, ~250 LOC added = **~1,550 lines smaller** while gaining a cleaner architecture with only 2 storage concerns instead of 6.
-
-**The mental model becomes**:
-> Events flow through a SQLite log. Everything else is FSdantic KV. Agents are discovery nodes with FSdantic workspaces. Execution is reactive: event → subscription match → trigger → agent turn → emit.
+The refactoring guide in `CODE_REVIEW_REFACTOR_GUIDE.md` provides step-by-step instructions for implementing these changes.

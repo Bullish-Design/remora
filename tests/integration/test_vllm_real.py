@@ -1,21 +1,24 @@
 """Real vLLM integration tests.
 
 These tests verify actual LLM communication and tool calling.
-They require a running vLLM server and are marked to be skipped
-in environments without backend access.
+They require a running vLLM server that should always be accessible
+at `http://remora-server:8000/v1`.
 
-Run with: pytest -m requires_vllm
+Run with: pytest tests/integration/test_vllm_real.py
 """
 
 from __future__ import annotations
 
+import textwrap
+from pathlib import Path
+from typing import Any
+
 import pytest
 
-pytestmark = pytest.mark.requires_vllm
+from tests.integration.helpers import load_vllm_config, vllm_available
 
 
 @pytest.mark.asyncio
-@pytest.mark.requires_vllm
 async def test_real_vllm_tool_calling():
     """Test that AgentKernel communicates correctly with live vLLM instance.
 
@@ -25,11 +28,15 @@ async def test_real_vllm_tool_calling():
     3. Prompt formatting and model instruction-following are aligned
     """
     try:
-        from structured_agents import AgentKernel, ModelAdapter, QwenResponseParser
+        from structured_agents import AgentKernel, ModelAdapter, QwenResponseParser, ToolSchema
         from structured_agents.client import build_client
-        from structured_agents.types import Message
-    except ImportError:
-        pytest.skip("structured_agents not available")
+        from structured_agents.types import Message, ToolCall, ToolResult
+    except ImportError as exc:
+        pytest.fail("structured_agents not available", pytrace=False)  # re-raise to fail fast
+
+    vllm_config = load_vllm_config()
+    if not vllm_available(vllm_config["base_url"]):
+        pytest.fail(f"vLLM server not reachable at {vllm_config['base_url']}", pytrace=False)
 
     client = build_client(
         {
@@ -46,11 +53,11 @@ async def test_real_vllm_tool_calling():
         """Test tool for sending messages between agents."""
 
         @property
-        def schema(self):
-            return {
-                "name": "send_message",
-                "description": "Send a message to another agent",
-                "parameters": {
+        def schema(self) -> ToolSchema:
+            return ToolSchema(
+                name="send_message",
+                description="Send a message to another agent",
+                parameters={
                     "type": "object",
                     "properties": {
                         "to_agent": {
@@ -64,10 +71,17 @@ async def test_real_vllm_tool_calling():
                     },
                     "required": ["to_agent", "content"],
                 },
-            }
+            )
 
-        async def __call__(self, to_agent: str, content: str):
-            return f"Message sent to {to_agent}: {content}"
+        async def execute(self, arguments: dict[str, Any], context: ToolCall | None) -> ToolResult:
+            to_agent = str(arguments.get("to_agent", "unknown"))
+            content = str(arguments.get("content", ""))
+            return ToolResult(
+                call_id=context.id if context else "",
+                name=self.schema.name,
+                output=f"Message sent to {to_agent}: {content}",
+                is_error=False,
+            )
 
     tools = [SendMessageTool()]
     tool_schemas = [t.schema for t in tools]
@@ -81,7 +95,13 @@ async def test_real_vllm_tool_calling():
             max_turns=2,
         )
 
-        tool_call_names = [tc.name for tc in result.tool_calls]
+        tool_calls = [
+            tc
+            for message in result.history
+            if message.tool_calls
+            for tc in message.tool_calls
+        ]
+        tool_call_names = [tc.name for tc in tool_calls]
         assert "send_message" in tool_call_names, f"Expected send_message tool call, got {tool_call_names}"
 
     finally:
@@ -89,8 +109,7 @@ async def test_real_vllm_tool_calling():
 
 
 @pytest.mark.asyncio
-@pytest.mark.requires_vllm
-async def test_real_vllm_grail_tool_execution():
+async def test_real_vllm_grail_tool_execution(tmp_path: Path):
     """Test that Grail tools work with live vLLM.
 
     Verifies:
@@ -103,8 +122,13 @@ async def test_real_vllm_grail_tool_execution():
         from structured_agents.client import build_client
         from structured_agents.types import Message
         from structured_agents import GrailTool
-    except ImportError:
-        pytest.skip("structured_agents not available")
+        import grail
+    except ImportError as exc:
+        pytest.fail("structured_agents/ml dependencies not available", pytrace=False)
+
+    vllm_config = load_vllm_config()
+    if not vllm_available(vllm_config["base_url"]):
+        pytest.fail(f"vLLM server not reachable at {vllm_config['base_url']}", pytrace=False)
 
     client = build_client(
         {
@@ -127,7 +151,11 @@ def multiply(a: int, b: int) -> int:
     return a * b
 '''
 
-    tools = [GrailTool.from_script(grail_script)]
+    tools = []
+    grail_script_path = tmp_path / "grail_tool.pym"
+    grail_script_path.write_text(textwrap.dedent(grail_script).strip() + "\n", encoding="utf-8")
+    grail_script_obj = grail.load(grail_script_path)
+    tools.append(GrailTool(grail_script_obj))
     tool_schemas = [t.schema for t in tools]
 
     kernel = AgentKernel(client=client, adapter=adapter, tools=tools)
@@ -139,13 +167,19 @@ def multiply(a: int, b: int) -> int:
             max_turns=2,
         )
 
-        tool_call_names = [tc.name for tc in result.tool_calls]
+        tool_calls = [
+            tc
+            for message in result.history
+            if message.tool_calls
+            for tc in message.tool_calls
+        ]
+        tool_call_names = [tc.name for tc in tool_calls]
         assert "add" in tool_call_names, f"Expected add tool call, got {tool_call_names}"
 
-        for tc in result.tool_calls:
+        for tc in tool_calls:
             if tc.name == "add":
-                assert tc.arguments.get("a") == 5 or tc.arguments.get("a") == 3
-                assert tc.arguments.get("b") == 3 or tc.arguments.get("b") == 5
+                assert tc.arguments.get("a") in {3, 5}
+                assert tc.arguments.get("b") in {3, 5}
                 break
 
     finally:
@@ -153,7 +187,6 @@ def multiply(a: int, b: int) -> int:
 
 
 @pytest.mark.asyncio
-@pytest.mark.requires_vllm
 async def test_real_vllm_multi_agent_interaction(tmp_path):
     """Test end-to-end multi-agent reactive interaction with live vLLM.
 
@@ -198,10 +231,3 @@ async def test_real_vllm_multi_agent_interaction(tmp_path):
     await event_store.close()
     await subscriptions.close()
 
-
-def pytest_configure(config):
-    """Register the requires_vllm marker."""
-    config.addinivalue_line(
-        "markers",
-        "requires_vllm: mark test as requiring a running vLLM server",
-    )

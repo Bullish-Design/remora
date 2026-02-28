@@ -61,7 +61,7 @@ def swarm_start(project_root: str | None, config_path: str | None, nvim: bool) -
 
         await event_store.initialize()
         await subscriptions.initialize()
-        swarm_state.initialize()
+        await swarm_state.initialize()
 
         event_store.set_subscriptions(subscriptions)
         event_store.set_event_bus(event_bus)
@@ -116,6 +116,7 @@ def swarm_start(project_root: str | None, config_path: str | None, nvim: bool) -
             await runner.stop()
             if nvim_server:
                 await nvim_server.stop()
+            await swarm_state.close()
 
     asyncio.run(_start())
 
@@ -145,7 +146,7 @@ def swarm_reconcile(project_root: str | None, config_path: str | None) -> None:
         swarm_state = SwarmState(swarm_state_path)
 
         await subscriptions.initialize()
-        swarm_state.initialize()
+        await swarm_state.initialize()
 
         result = await reconcile_on_startup(
             root,
@@ -158,7 +159,7 @@ def swarm_reconcile(project_root: str | None, config_path: str | None) -> None:
         click.echo(f"  Total: {result['total']}")
 
         await subscriptions.close()
-        swarm_state.close()
+        await swarm_state.close()
 
     asyncio.run(_reconcile())
 
@@ -178,20 +179,24 @@ def swarm_list(project_root: str | None) -> None:
 
     from remora.core.swarm_state import SwarmState
 
-    swarm_state = SwarmState(swarm_state_path)
-    swarm_state.initialize()
+    async def _list() -> None:
+        swarm_state = SwarmState(swarm_state_path)
+        await swarm_state.initialize()
 
-    agents = swarm_state.list_agents()
+        agents = await swarm_state.list_agents()
 
-    if not agents:
-        click.echo("No agents found.")
-        return
+        if not agents:
+            click.echo("No agents found.")
+        else:
+            click.echo(f"Agents ({len(agents)}):")
+            for agent in agents:
+                click.echo(
+                    f"  {agent.agent_id[:16]}... | {agent.node_type} | {agent.file_path} | {agent.status}"
+                )
 
-    click.echo(f"Agents ({len(agents)}):")
-    for agent in agents:
-        click.echo(f"  {agent['agent_id'][:16]}... | {agent['node_type']} | {agent['file_path']} | {agent['status']}")
+        await swarm_state.close()
 
-    swarm_state.close()
+    asyncio.run(_list())
 
 
 @swarm.command("emit")

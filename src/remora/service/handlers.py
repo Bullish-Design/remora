@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -95,21 +95,22 @@ async def handle_swarm_emit(request: Any, deps: ServiceDeps) -> dict[str, Any]:
     return {"event_id": event_id}
 
 
-def handle_swarm_list_agents(deps: ServiceDeps) -> list[dict[str, Any]]:
+async def handle_swarm_list_agents(deps: ServiceDeps) -> list[dict[str, Any]]:
     """List all agents in the swarm."""
     if deps.swarm_state is None:
         raise ValueError("swarm state not configured")
-    return deps.swarm_state.list_agents()
+    agents = await deps.swarm_state.list_agents()
+    return [asdict(agent) for agent in agents]
 
 
-def handle_swarm_get_agent(agent_id: str, deps: ServiceDeps) -> dict[str, Any]:
+async def handle_swarm_get_agent(agent_id: str, deps: ServiceDeps) -> dict[str, Any]:
     """Get a specific agent."""
     if deps.swarm_state is None:
         raise ValueError("swarm state not configured")
-    agent = deps.swarm_state.get_agent(agent_id)
+    agent = await deps.swarm_state.get_agent(agent_id)
     if agent is None:
         raise ValueError("agent not found")
-    return agent
+    return asdict(agent)
 
 
 async def handle_swarm_get_subscriptions(agent_id: str, deps: ServiceDeps) -> list[dict[str, Any]]:

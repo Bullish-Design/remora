@@ -175,13 +175,13 @@ class RemoraService:
         request = type("EventRequest", (), {"event_type": event_type, "data": data})()
         return await handle_swarm_emit(request, self._deps)
 
-    def list_agents(self) -> list[dict[str, Any]]:
+    async def list_agents(self) -> list[dict[str, Any]]:
         """List all agents in the swarm."""
-        return handle_swarm_list_agents(self._deps)
+        return await handle_swarm_list_agents(self._deps)
 
-    def get_agent(self, agent_id: str) -> dict[str, Any]:
+    async def get_agent(self, agent_id: str) -> dict[str, Any]:
         """Get a specific agent."""
-        return handle_swarm_get_agent(agent_id, self._deps)
+        return await handle_swarm_get_agent(agent_id, self._deps)
 
     async def get_subscriptions(self, agent_id: str) -> list[dict[str, Any]]:
         """Get subscriptions for an agent."""

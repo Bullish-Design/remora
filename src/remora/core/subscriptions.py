@@ -8,11 +8,10 @@ matching events occur.
 from __future__ import annotations
 
 import asyncio
-import fnmatch
 import json
 import time
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any
 
 from remora.utils import PathLike, normalize_path
@@ -58,7 +57,7 @@ class SubscriptionPattern:
             if path is None:
                 return False
             try:
-                if not fnmatch.fnmatch(str(path), str(self.path_glob)):
+                if not PurePath(path).match(self.path_glob):
                     return False
             except Exception:
                 return False
