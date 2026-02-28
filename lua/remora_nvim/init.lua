@@ -2,7 +2,7 @@ local M = {}
 
 function M.setup(config)
   config = config or {}
-  local socket_path = config.socket_path or "/tmp/remora.sock"
+  local socket_path = config.socket or "/tmp/remora.sock"
 
   -- 1. Initialize the UI
   require("remora_nvim.sidepanel").setup()
