@@ -104,15 +104,22 @@ class ChatSession:
         return session
 
     async def _initialize(self) -> None:
-        """Initialize workspace and tools."""
-        from remora.core.tool_registry import ToolRegistry
-
-        # Create workspace
         workspace_path = Path(self.config.workspace_path).expanduser().resolve()
-        self._workspace = await CairnWorkspaceService.create(
-            base_path=workspace_path,
-        )
 
+        workspace_config = WorkspaceConfig(
+            base_path=str(workspace_path / ".remora" / "workspaces"),
+        )
+        self._workspace = CairnWorkspaceService(
+            config=workspace_config,
+            graph_id=self.session_id,
+            project_root=workspace_path,
+        )
+        await self._workspace.initialize()
+
+        agent_workspace = await self._workspace.get_agent_workspace(self.session_id)
+        externals = self._workspace.get_externals(self.session_id, agent_workspace)
+
+        # then feed externals into ToolRegistry as intended
         # Get tools from registry
         self._tools = ToolRegistry.get_tools(
             workspace=self._workspace,
