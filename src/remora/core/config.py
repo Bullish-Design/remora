@@ -34,7 +34,7 @@ DEFAULT_IGNORE_PATTERNS: tuple[str, ...] = (
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class Config:
     """Flat Remora configuration for swarm-only mode."""
 
@@ -151,7 +151,7 @@ def serialize_config(config: Config) -> dict[str, Any]:
     return data
 
 
-ConfigError = type("ConfigError", (Exception,), {})
+from remora.core.errors import ConfigError
 
 
 __all__ = ["Config", "ConfigError", "load_config", "serialize_config"]
