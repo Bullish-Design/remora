@@ -1,0 +1,6 @@
+from grail import Input
+a: int = Input('a')
+b: int = Input('b')
+
+def add() -> int:
+    return a + b
