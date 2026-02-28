@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, AsyncIterator, TYPE_CHECKING
 
-from remora.core.config import RemoraConfig, load_config
+from remora.core.config import Config, load_config
 from remora.core.event_bus import EventBus
 from remora.core.event_store import EventStore
 from remora.core.subscriptions import SubscriptionRegistry
@@ -35,7 +35,7 @@ class RemoraService:
     def create_default(
         cls,
         *,
-        config: RemoraConfig | None = None,
+        config: Config | None = None,
         config_path: PathLike | None = None,
         project_root: PathLike | None = None,
         enable_event_store: bool = True,
@@ -71,7 +71,7 @@ class RemoraService:
     def __init__(
         self,
         *,
-        config: RemoraConfig,
+        config: Config,
         project_root: Path,
         event_bus: EventBus,
         event_store: EventStore | None = None,
@@ -175,7 +175,7 @@ class RemoraService:
         return await handle_swarm_get_subscriptions(agent_id, self._deps)
 
 
-def _resolve_bundle_default(config: RemoraConfig) -> str:
+def _resolve_bundle_default(config: Config) -> str:
     snapshot = ConfigSnapshot.from_config(config)
     mapping = snapshot.bundles.get("mapping", {})
     if isinstance(mapping, dict) and mapping:

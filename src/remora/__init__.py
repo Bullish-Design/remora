@@ -3,15 +3,8 @@
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.cairn_externals import CairnExternals
 from remora.core.config import (
-    BundleConfig,
+    Config,
     ConfigError,
-    DiscoveryConfig,
-    ErrorPolicy,
-    ExecutionConfig,
-    ModelConfig,
-    RemoraConfig,
-    SwarmConfig,
-    WorkspaceConfig,
     load_config,
     serialize_config,
 )
@@ -66,19 +59,12 @@ from remora.core.workspace import AgentWorkspace, CairnDataProvider, CairnResult
 from remora.utils import PathResolver, to_project_relative
 
 __all__ = [
+    "Config",
     "ConfigError",
     "DiscoveryError",
     "ExecutionError",
     "RemoraError",
     "WorkspaceError",
-    "BundleConfig",
-    "DiscoveryConfig",
-    "ErrorPolicy",
-    "ExecutionConfig",
-    "ModelConfig",
-    "RemoraConfig",
-    "SwarmConfig",
-    "WorkspaceConfig",
     "load_config",
     "serialize_config",
     "AgentCompleteEvent",

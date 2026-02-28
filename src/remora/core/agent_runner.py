@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from remora.core.config import RemoraConfig
+from remora.core.config import Config
 from remora.core.event_store import EventStore
 from remora.core.events import (
     AgentCompleteEvent,
@@ -50,7 +50,7 @@ class AgentRunner:
         event_store: EventStore,
         subscriptions: SubscriptionRegistry,
         swarm_state: SwarmState,
-        config: RemoraConfig,
+        config: Config,
         event_bus: "EventBus | None" = None,
         project_root: Path | None = None,
     ):
@@ -61,9 +61,9 @@ class AgentRunner:
         self._event_bus = event_bus
         self._project_root = project_root or Path.cwd()
 
-        self._max_concurrency = config.execution.max_concurrency
-        self._max_trigger_depth = config.swarm.max_trigger_depth
-        self._trigger_cooldown_ms = config.swarm.trigger_cooldown_ms
+        self._max_concurrency = config.max_concurrency
+        self._max_trigger_depth = config.max_trigger_depth
+        self._trigger_cooldown_ms = config.trigger_cooldown_ms
 
         self._swarm_id = "swarm"
 

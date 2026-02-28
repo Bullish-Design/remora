@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from remora.core.config import RemoraConfig
+from remora.core.config import Config
 from remora.core.discovery import discover
 from remora.core.event_bus import EventBus
 from remora.core.event_store import EventStore
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class ServiceDeps:
     event_bus: EventBus
-    config: RemoraConfig
+    config: Config
     project_root: Path
     projector: UiStateProjector
     event_store: EventStore | None = None

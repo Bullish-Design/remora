@@ -28,7 +28,7 @@ from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.utils import PathLike, PathResolver, truncate
 
 if TYPE_CHECKING:
-    from remora.core.config import RemoraConfig, WorkspaceConfig
+    from remora.core.config import Config
     from remora.core.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ class SwarmExecutor:
 
     def __init__(
         self,
-        config: "RemoraConfig",
+        config: "Config",
         event_bus: "EventBus | None",
         event_store: EventStore,
         swarm_id: str,
@@ -55,9 +55,8 @@ class SwarmExecutor:
         if event_bus is not None:
             event_bus.subscribe_all(self._context_builder.handle)
 
-        workspace_config = config.workspace
         self._workspace_service = CairnWorkspaceService(
-            config=workspace_config,
+            config=config,
             graph_id=swarm_id,
             project_root=project_root,
         )
@@ -104,11 +103,11 @@ class SwarmExecutor:
         model_name = self._resolve_model_name(bundle_path, manifest)
         result = await self._run_kernel(manifest, prompt, tools, model_name=model_name)
 
-        return truncate(str(result), max_len=self.config.execution.truncation_limit)
+        return truncate(str(result), max_len=self.config.truncation_limit)
 
     def _resolve_bundle_path(self, state: AgentState) -> Path:
-        bundle_root = Path(self.config.bundles.path)
-        mapping = self.config.bundles.mapping
+        bundle_root = Path(self.config.bundle_root)
+        mapping = self.config.bundle_mapping
         if state.node_type not in mapping:
             logger.warning(f"No bundle mapping for node_type: {state.node_type}, using default")
             return bundle_root
