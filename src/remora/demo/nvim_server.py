@@ -139,7 +139,7 @@ async def stream_events(request: Request):
                 # Datastar merge_fragments tells the frontend to update specific HTML fragments
                 yield ServerSentEventGenerator.merge_fragments(fragments=html_fragment)
         except asyncio.CancelledError:
-            event_bus.unsubscribe_all(event_handler)
+            event_bus.unsubscribe(event_handler)
 
     headers = {
         "Cache-Control": "no-cache",

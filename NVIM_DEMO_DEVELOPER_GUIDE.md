@@ -407,7 +407,7 @@ async def stream_events(request: Request):
                     html_fragment
                 )
         except asyncio.CancelledError:
-             event_bus.unsubscribe_all(event_handler)
+             event_bus.unsubscribe(event_handler)
              
     headers = {
         "Cache-Control": "no-cache",
