@@ -1,6 +1,6 @@
 # Configuration Schema
 
-This document describes the `remora.yaml` schema for Remora v0.4.3 and how to configure core components.
+Remora uses a flat configuration in `remora.yaml`.
 
 ## File Resolution
 
@@ -10,90 +10,79 @@ This document describes the `remora.yaml` schema for Remora v0.4.3 and how to co
 ## Example
 
 ```yaml
-bundles:
-  path: agents
-  mapping:
-    function: lint/bundle.yaml
-    class: docstring/bundle.yaml
-    method: docstring/bundle.yaml
-    file: lint/bundle.yaml
+project_path: "."
+discovery_paths: ["src/"]
+discovery_languages: ["python"]
+discovery_max_workers: 4
 
-discovery:
-  paths: ["src/"]
-  languages: ["python"]
-  max_workers: 4
+bundle_root: "agents"
+bundle_mapping:
+  function: "lint/bundle.yaml"
+  class: "docstring/bundle.yaml"
+  method: "docstring/bundle.yaml"
+  file: "lint/bundle.yaml"
 
-model:
-  base_url: "http://remora-server:8000/v1"
-  api_key: "EMPTY"
-  default_model: "Qwen/Qwen3-4B"
+model_base_url: "http://localhost:8000/v1"
+model_api_key: "EMPTY"
+model_default: "Qwen/Qwen3-4B"
 
-execution:
-  max_concurrency: 4
-  error_policy: skip_downstream
-  timeout: 300
-  max_turns: 8
-  truncation_limit: 1024
+swarm_root: ".remora"
+swarm_id: "swarm"
+max_concurrency: 4
+max_turns: 8
+truncation_limit: 1024
+timeout_s: 300.0
+max_trigger_depth: 5
+trigger_cooldown_ms: 1000
 
-indexer:
-  watch_paths: ["src/"]
-  store_path: ".remora/index"
+workspace_ignore_patterns:
+  - ".git"
+  - ".venv"
+  - "node_modules"
+  - "__pycache__"
+workspace_ignore_dotfiles: true
 
-workspace:
-  base_path: ".remora/workspaces"
-  cleanup_after: "1h"
+nvim_enabled: false
+nvim_socket: ".remora/nvim.sock"
 ```
 
-## Top-Level Keys
+## Configuration Keys
 
-### `bundles`
-Mapping from node type to bundle path (single bundle per node type).
+### Discovery
 
-- `path`: base directory for bundles (default: `agents/`).
-- `mapping`: map node type string (e.g., `function`, `class`, `file`) to a bundle path relative to `path`.
+- `project_path`: Root of the project (default: ".")
+- `discovery_paths`: List of paths to scan (default: ["src/"])
+- `discovery_languages`: List of languages to parse (e.g., ["python"])
+- `discovery_max_workers`: Thread pool size for parsing (default: 4)
 
-### `discovery`
-Tree-sitter discovery settings.
+### Bundles
 
-- `paths`: list of paths (files or directories) to scan.
-- `languages`: list of languages (by name, e.g., `python`). If omitted, uses extension mapping.
-- `max_workers`: thread pool size for parsing.
+- `bundle_root`: Base directory for agent bundles (default: "agents")
+- `bundle_mapping`: Map from node type to bundle path
 
-### `model`
-Default model server configuration.
+### Model
 
-- `base_url`: OpenAI-compatible API base URL.
-- `api_key`: API token (use `EMPTY` for local servers).
-- `default_model`: model identifier passed to structured-agents.
+- `model_base_url`: OpenAI-compatible API base URL
+- `model_api_key`: API token (use "EMPTY" for local servers)
+- `model_default`: Default model identifier
 
-### `execution`
-Graph execution behavior.
+### Swarm
 
-- `max_concurrency`: maximum concurrent agents.
-- `error_policy`: `stop_graph`, `skip_downstream`, or `continue`.
-- `timeout`: per-agent timeout in seconds.
-- `max_turns`: max turns for structured-agents kernel.
-- `truncation_limit`: output truncation for summaries.
+- `swarm_root`: Directory for swarm state (default: ".remora")
+- `swarm_id`: Swarm identifier (default: "swarm")
+- `max_concurrency`: Max concurrent agent executions (default: 4)
+- `max_turns`: Max turns for structured-agents kernel (default: 8)
+- `truncation_limit`: Output truncation length (default: 1024)
+- `timeout_s`: Per-agent timeout in seconds (default: 300.0)
+- `max_trigger_depth`: Max recursion depth for trigger chains (default: 5)
+- `trigger_cooldown_ms`: Cooldown between triggers (default: 1000)
 
-### `indexer`
-Indexer daemon configuration.
+### Workspace
 
-- `watch_paths`: list of paths to monitor for changes.
-- `store_path`: path to the indexer storage.
+- `workspace_ignore_patterns`: List of patterns to ignore
+- `workspace_ignore_dotfiles`: Whether to ignore dotfiles (default: true)
 
-### `workspace`
-Workspace settings.
+### Neovim
 
-- `base_path`: directory for workspace storage.
-- `cleanup_after`: duration string used by cleanup routines.
-
-## Environment Overrides
-
-Environment variables override config values on load:
-
-- `REMORA_MODEL_BASE_URL`
-- `REMORA_MODEL_API_KEY`
-- `REMORA_MODEL_DEFAULT`
-- `REMORA_EXECUTION_MAX_CONCURRENCY`
-- `REMORA_EXECUTION_TIMEOUT`
-- `REMORA_WORKSPACE_BASE_PATH`
+- `nvim_enabled`: Enable Neovim server (default: false)
+- `nvim_socket`: Socket path for Neovim server (default: ".remora/nvim.sock")

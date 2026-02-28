@@ -1,65 +1,66 @@
 # API Reference
 
-This document summarizes the public CLI commands and Python APIs available in Remora.
-
 ## CLI
+
+### `remora swarm start`
+
+Start the reactive swarm.
+
+Key flags:
+- `--config`: path to `remora.yaml`
+- `--nvim`: start Neovim JSON-RPC server
+
+### `remora swarm list`
+
+List discovered agents.
+
+### `remora swarm emit`
+
+Emit an event to trigger agents.
+
+```bash
+remora swarm emit AgentMessageEvent '{"to_agent": "agent_123", "content": "hello"}'
+remora swarm emit ContentChangedEvent '{"path": "src/main.py"}'
+```
 
 ### `remora serve`
 
-Start the Remora service (Starlette adapter).
+Start the HTTP service (Starlette adapter).
 
 Key flags:
-
-- `--host`, `--port`: bind address for the service.
-- `--project-root`: override the root directory used for relative targets.
-- `--config`: path to `remora.yaml`.
-
-### `remora run`
-
-Run a graph execution for a target path.
-
-Key flags:
-
-- `--config`: path to `remora.yaml`.
-
-### `remora-index`
-
-Start the indexer daemon.
-
-Key flags:
-
-- `--watch-paths`: paths to monitor for changes.
-- `--store-path`: path to the index store.
+- `--host`, `--port`: bind address
+- `--project-root`: override project root
+- `--config`: path to `remora.yaml`
 
 ## Python Modules
 
 ### Core Runtime (`remora.core`)
 
-Framework-agnostic runtime modules:
-
-- `remora.core.config`: `RemoraConfig`, `ExecutionConfig`, `BundleConfig`, `load_config()`
+- `remora.core.config`: `Config`, `load_config()`, `serialize_config()`
 - `remora.core.discovery`: `discover()`, `CSTNode`, `TreeSitterDiscoverer`
-- `remora.core.graph`: `AgentNode`, `build_graph()`, `get_execution_batches()`
-- `remora.core.executor`: `GraphExecutor`, `ExecutorState`, `AgentState`
-- `remora.core.event_bus`: `EventBus` (explicit injection recommended; `get_event_bus()` remains for legacy usage)
-- `remora.core.events`: Remora + structured-agent event classes
-- `remora.core.workspace`: Cairn workspace helpers
-- `remora.core.checkpoint`: `CheckpointManager`
+- `remora.core.event_store`: `EventStore`, `EventSourcedBus`
+- `remora.core.event_bus`: `EventBus`
+- `remora.core.subscriptions`: `SubscriptionRegistry`, `SubscriptionPattern`
+- `remora.core.swarm_state`: `SwarmState`, `AgentMetadata`
+- `remora.core.agent_runner`: `AgentRunner`
+- `remora.core.swarm_executor`: `SwarmExecutor`
+- `remora.core.agent_state`: `AgentState`
+- `remora.core.reconciler`: `reconcile_on_startup`, `get_agent_workspace_path`
+
+### Events
+
+- `remora.core.events`: Event classes (`AgentMessageEvent`, `ContentChangedEvent`, `FileSavedEvent`, `ManualTriggerEvent`, etc.)
+
+### Workspaces
+
+- `remora.core.workspace`: `AgentWorkspace`, `CairnDataProvider`
+- `remora.core.cairn_bridge`: `CairnWorkspaceService`
 
 ### Service Layer
 
-- `remora.service.RemoraService`: framework-agnostic API surface for `/`, `/subscribe`, `/events`, `/run`, `/input`, `/plan`, `/config`, `/snapshot`
-- `remora.service.RemoraService.create_default()`: convenience constructor that creates a service with a fresh EventBus and loaded config
-- `remora.adapters.starlette.create_app`: Starlette adapter for the service
-
-### UI Helpers
-
-- `remora.ui.projector.UiStateProjector`: event → UI state reducer
-- `remora.ui.view.render_dashboard`: HTML snapshot renderer
+- `remora.service.RemoraService`: API surface with `/swarm/agents`, `/swarm/events`, etc.
+- `remora.adapters.starlette.create_app`: Starlette adapter
 
 ### Models
 
-- `remora.models.RunRequest`, `RunResponse`
-- `remora.models.PlanRequest`, `PlanResponse`
-- `remora.models.InputResponse`
-- `remora.models.ConfigSnapshot`
+- `remora.models.SwarmEmitRequest`, `SwarmEmitResponse`

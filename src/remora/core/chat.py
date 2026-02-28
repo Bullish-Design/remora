@@ -8,7 +8,7 @@ import uuid
 
 from remora.core.event_bus import EventBus
 from remora.core.cairn_bridge import CairnWorkspaceService
-from remora.core.config import WorkspaceConfig
+from remora.core.config import Config
 from remora.core.tool_registry import ToolRegistry
 
 from structured_agents.agent import get_response_parser
@@ -113,12 +113,14 @@ class ChatSession:
     async def _initialize(self) -> None:
         workspace_path = Path(self.config.workspace_path).expanduser().resolve()
 
-        workspace_config = WorkspaceConfig(
-            base_path=str(workspace_path / ".remora" / "workspaces"),
+        workspace_config = Config(
+            bundle_root=str(workspace_path / ".remora"),
+            workspace_ignore_patterns=(),
+            workspace_ignore_dotfiles=False,
         )
         self._workspace = CairnWorkspaceService(
             config=workspace_config,
-            graph_id=self.session_id,
+            swarm_root=workspace_path / ".remora",
             project_root=workspace_path,
         )
         await self._workspace.initialize()

@@ -104,7 +104,6 @@ __all__ = [
     "ToolResultEvent",
     "TreeSitterDiscoverer",
     "TurnCompleteEvent",
-    "WorkspaceConfig",
     "WorkspaceError",
     "WorkspaceManager",
     "build_virtual_fs",

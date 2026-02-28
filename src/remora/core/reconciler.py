@@ -38,7 +38,7 @@ def get_agent_state_path(swarm_root: Path, agent_id: str) -> Path:
 
 def get_agent_workspace_path(swarm_root: Path, agent_id: str) -> Path:
     """Get the path to an agent's workspace."""
-    return swarm_root / "workspaces" / f"{agent_id}.db"
+    return get_agent_dir(swarm_root, agent_id) / "workspace.db"
 
 
 async def reconcile_on_startup(

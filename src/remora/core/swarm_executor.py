@@ -57,7 +57,7 @@ class SwarmExecutor:
 
         self._workspace_service = CairnWorkspaceService(
             config=config,
-            graph_id=swarm_id,
+            swarm_root=config.swarm_root,
             project_root=project_root,
         )
 
@@ -125,7 +125,7 @@ class SwarmExecutor:
             override = None
         if override:
             return str(override)
-        return self.config.model.default_model or getattr(manifest, "model", "")
+        return self.config.model_default or getattr(manifest, "model", "")
 
     async def _run_kernel(self, manifest: Any, prompt: str, tools: list[Any], *, model_name: str) -> Any:
         parser = get_response_parser(manifest.model)
@@ -133,10 +133,10 @@ class SwarmExecutor:
         adapter = ModelAdapter(name=manifest.model, response_parser=parser, constraint_pipeline=pipeline)
         client = build_client(
             {
-                "base_url": self.config.model.base_url,
-                "api_key": self.config.model.api_key or "EMPTY",
+                "base_url": self.config.model_base_url,
+                "api_key": self.config.model_api_key or "EMPTY",
                 "model": model_name,
-                "timeout": self.config.execution.timeout,
+                "timeout": self.config.timeout_s,
             }
         )
         event_sourced_bus = EventSourcedBus(self._event_bus, self._event_store, self._swarm_id)
@@ -149,7 +149,7 @@ class SwarmExecutor:
             tool_schemas = [tool.schema for tool in tools]
             if manifest.grammar_config and not manifest.grammar_config.send_tools_to_api:
                 tool_schemas = []
-            max_turns = getattr(manifest, "max_turns", None) or self.config.execution.max_turns
+            max_turns = getattr(manifest, "max_turns", None) or self.config.max_turns
             return await kernel.run(messages, tool_schemas, max_turns=max_turns)
         finally:
             await kernel.close()

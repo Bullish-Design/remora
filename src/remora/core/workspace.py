@@ -13,7 +13,7 @@ from typing import Any, Awaitable, Callable
 
 from cairn.runtime import workspace_manager as cairn_workspace_manager
 
-from remora.core.config import WorkspaceConfig
+from remora.core.config import Config
 from remora.core.discovery import CSTNode
 from remora.core.errors import WorkspaceError
 from remora.utils import PathLike, PathResolver, normalize_path
@@ -128,10 +128,10 @@ class WorkspaceManager:
     Creates isolated workspaces per agent with CoW semantics.
     """
 
-    def __init__(self, config: WorkspaceConfig, graph_id: str):
+    def __init__(self, config: Config, graph_id: str):
         self._config = config
         self._graph_id = graph_id
-        self._base_path = Path(config.base_path) / graph_id
+        self._base_path = Path(config.bundle_root) / graph_id
         self._workspaces: dict[str, AgentWorkspace] = {}
         self._manager = cairn_workspace_manager.WorkspaceManager()
 

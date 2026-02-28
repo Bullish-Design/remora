@@ -1,43 +1,39 @@
 # Remora configuration example
 # Copy to remora.yaml and adjust as needed.
 
-bundles:
-  path: agents
-  mapping:
-    function: lint/bundle.yaml
-    class: docstring/bundle.yaml
-    method: docstring/bundle.yaml
-    file: lint/bundle.yaml
+project_path: "."
+discovery_paths: ["src/"]
+discovery_languages: ["python"]
+discovery_max_workers: 4
 
-discovery:
-  paths: ["src/"]
-  languages: ["python"]
-  max_workers: 4
+bundle_root: "agents"
+bundle_mapping:
+  function: "lint/bundle.yaml"
+  class: "docstring/bundle.yaml"
+  method: "docstring/bundle.yaml"
+  file: "lint/bundle.yaml"
 
-model:
-  base_url: "http://remora-server:8000/v1"
-  api_key: "EMPTY"
-  default_model: "Qwen/Qwen3-4B"
+model_base_url: "http://localhost:8000/v1"
+model_api_key: "EMPTY"
+model_default: "Qwen/Qwen3-4B"
 
-execution:
-  max_concurrency: 4
-  error_policy: skip_downstream
-  timeout: 300
-  max_turns: 8
-  truncation_limit: 1024
+swarm_root: ".remora"
+swarm_id: "swarm"
+max_concurrency: 4
+max_turns: 8
+truncation_limit: 1024
+timeout_s: 300.0
+max_trigger_depth: 5
+trigger_cooldown_ms: 1000
 
-indexer:
-  watch_paths: ["src/"]
-  store_path: ".remora/index"
+workspace_ignore_patterns:
+  - ".git"
+  - ".venv"
+  - "node_modules"
+  - "__pycache__"
+  - ".mypy_cache"
+  - ".pytest_cache"
+workspace_ignore_dotfiles: true
 
-workspace:
-  base_path: ".remora/workspaces"
-  cleanup_after: "1h"
-  ignore_patterns:
-    - ".git"
-    - ".venv"
-    - "node_modules"
-    - "__pycache__"
-    - ".mypy_cache"
-    - ".pytest_cache"
-  ignore_dotfiles: true
+nvim_enabled: false
+nvim_socket: ".remora/nvim.sock"

@@ -1,75 +1,84 @@
-Remora V2 is built around three nouns: **events**, **agents**, and **workspaces**. Every state change, tool call, and UI update flows through the same `EventBus`. Agents are defined through declarative graph builders, execution happens in deterministic batches, and dashboards simply replay the event stream.
+# Remora Architecture
+
+Remora V2 uses a reactive swarm architecture built around events, subscriptions, and per-agent workspaces.
 
 ```
-                 ┌────────────┐         ┌────────────┐
-                 │   User     │◀────▶│ Service    │
-                 │ Interface  │      │  / CLI     │
-                 └────────────┘      └────────────┘
-                        │                  ▲
-                        ▼                  │
-                  ┌────────────────────Event Bus────────────────────┐
-                  │  Publishes kernel events, tool results, and logs │
-                  └─────────────┬──────────────┬────────────▲────────┘
-                                │              │            │
-                        ┌───────▼───────┐ ┌────▼────┐ ┌─────▼─────┐
-                        │ Graph Builder │ │ Context │ │ Service   │
-                        │ (core.graph)  │ │ Builder │ │ / SSE     │
-                        └───────────────┘ └─────────┘ └────────────┘
+                  ┌────────────┐         ┌────────────┐
+                  │   User     │◀───────▶│ Service    │
+                  │ Interface  │         │  / CLI     │
+                  └────────────┘         └────────────┘
+                         │                  ▲
+                         ▼                  │
+                   ┌──────────────────────────────────────────┐
+                   │              EventStore                    │
+                   │  (Append-only log, single source of truth) │
+                   └─────────────┬──────────────┬──────────────┘
+                                 │              │
+                    ┌────────────▼───┐  ┌───────▼────────┐
+                    │ Subscription   │  │   AgentRunner  │
+                    │   Registry     │  │  (reactive loop)│
+                    └───────┬────────┘  └───────┬────────┘
+                            │                   │
+                    ┌───────▼────────┐  ┌───────▼────────┐
+                    │  EventBus       │  │  SwarmExecutor │
+                    │  (notifications)│  │  (agent turns) │
+                    └─────────────────┘  └────────────────┘
 ```
 
 ## Core Components
 
-### Event Bus (`remora.core.event_bus.EventBus`)
+### EventStore (`remora.core.event_store`)
 
-- Centralized observer that implements the structured-agents `Observer` protocol.
-- Type-based subscriptions and `stream()` support SSE/WebSocket consumers.
-- Every tool call, human input request, and agent completion emits through the bus.
+- Append-only event log, the single source of truth
+- All events flow through it (not EventBus alone)
+- Provides `append()` to write events and `get_triggers()` to iterate matched subscriptions
+- Used by AgentRunner to consume triggers
 
-### Graph Builder & Executor (`remora.core.graph`, `remora.core.executor.GraphExecutor`)
+### SubscriptionRegistry (`remora.core.subscriptions`)
 
-- `build_graph()` maps `CSTNode` objects to bundles via metadata, respecting priorities and dependencies.
-- `GraphExecutor` runs those nodes, provisions per-agent Cairn workspaces, injects the EventBus as the structured-agents observer, and emits `AgentStart/Complete/Error` events.
-- Execution is governed by `ExecutionConfig`, `ErrorPolicy`, and the shared `ContextBuilder` for prompt context and knowledge.
+- Maps event patterns to agents
+- Each subscription has: event_types, from_agents, to_agent, path_glob, tags
+- Supports default subscriptions for newly discovered agents
 
-### Context & Knowledge (`remora.core.context.ContextBuilder`)
+### SwarmState (`remora.core.swarm_state`)
 
-- Subscribes to `ToolResultEvent` and `AgentCompleteEvent` to maintain rolling recent actions and persistent knowledge summaries.
-- Supplies prompt sections (`build_context_for`) that `execute_agent()` uses when calling `Agent.run()`.
-- `ingest_summary()` captures every `ResultSummary` so downstream UIs know what changed.
+- Tracks discovered agents and metadata
+- Stores agent_id, node_type, name, full_name, file_path, range
+- Provides CRUD operations for agents
 
-### Workspaces (`remora.core.workspace`, `remora.core.checkpoint`)
+### AgentRunner (`remora.core.agent_runner`)
 
-- `WorkspaceConfig` describes base path + cleanup cadence for `CairnWorkspace` instances.
-- `CairnDataProvider` feeds file contents (source + related files) into prompts and results.
-- `CairnResultHandler` persists tool outputs + file writes and returns `ResultSummary` objects.
-- `CheckpointManager` snapshots both SQLite state and metadata for versioned replay.
+- Main reactive loop
+- Consumes triggers from EventStore
+- Uses SwarmExecutor to run agent turns
+- Respects concurrency and cooldown limits
 
-### Service Layer (`remora.service.RemoraService`)
+### SwarmExecutor (`remora.core.swarm_executor`)
 
-- Framework-agnostic API surface for `/subscribe`, `/events`, `/run`, `/input`, `/plan`, `/config`, and `/snapshot`.
-- Streams Datastar patches and raw JSON event envelopes.
-- Adapters (e.g., `remora.adapters.starlette.create_app`) map HTTP requests to the service.
+- Runs single agent turns via structured-agents kernel
+- Provisions per-agent Cairn workspaces
+- Emits lifecycle events (AgentStart, AgentComplete, AgentError)
 
-### Public API (`src/remora/__init__.py`)
+### CairnWorkspaceService (`remora.core.cairn_bridge`)
 
-- `build_graph()`, `AgentNode`, `GraphExecutor`
-- `EventBus`, `RemoraEvent` (explicit injection recommended)
-- `ContextBuilder`, `ResultSummary`
-- `WorkspaceConfig`, `AgentWorkspace`, `CairnDataProvider`, `CairnResultHandler`
+- Manages stable and per-agent workspaces
+- Stable workspace: `.remora/stable.db` (synced project files)
+- Agent workspaces: `.remora/agents/<id>/workspace.db`
 
 ## Data Flow
 
-1. `discover()` parses the target paths via Tree-sitter and yields `CSTNode` objects.
-2. `build_graph()` selects bundles using metadata supplied via `remora.yaml`.
-3. `GraphExecutor` provisions `CairnWorkspace`, builds context, sets `STRUCTURED_AGENTS_*` env vars, and runs each agent via `Agent.from_bundle()`.
-4. Tool results are persisted through `CairnResultHandler`, producing `ResultSummary` objects that feed `ContextBuilder` and the service layer.
-5. Frontends consume `/subscribe` (Datastar patches) or `/events` (raw SSE) and post human responses via `/input`.
-6. `CheckpointManager` snapshots the SQLite files + metadata so workflows can resume or version control entire graphs.
+1. Discovery finds code elements via tree-sitter
+2. Reconciliation creates agents in SwarmState with default subscriptions
+3. Events are emitted (via CLI, Neovim, or service API)
+4. EventStore appends events and matches subscriptions
+5. AgentRunner picks up triggers and executes agent turns
+6. Agent completes, emits result events
+7. Repeat
 
-## Testing Strategy
+## Public API (`src/remora/__init__.py`)
 
-- `tests/unit/test_event_bus.py`: validates pub/sub, filtering, streaming, `wait_for()`, and human-in-the-loop patterns.
-- `tests/test_context_manager.py`: exercises `ContextBuilder` short/long tracks and summary ingestion.
-- `tests/unit/test_workspace.py`: verifies Cairn workspace creation, snapshots, and shared areas.
-
-Run the suite with `pytest tests/unit/ -v` (see `docs/TESTING_GUIDELINES.md` for extra expectations).
+- `EventStore`, `EventBus`, `SubscriptionRegistry`, `SubscriptionPattern`
+- `SwarmState`, `AgentMetadata`
+- `AgentRunner`, `AgentState`
+- `AgentMessageEvent`, `ContentChangedEvent`, `FileSavedEvent`, `ManualTriggerEvent`
+- `reconcile_on_startup` and path helpers

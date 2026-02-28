@@ -14,7 +14,7 @@ from typing import Any
 
 from cairn.runtime import workspace_manager as cairn_workspace_manager
 
-from remora.core.config import WorkspaceConfig
+from remora.core.config import Config
 from remora.core.cairn_externals import CairnExternals
 from remora.core.errors import WorkspaceError
 from remora.core.workspace import AgentWorkspace
@@ -28,21 +28,20 @@ class CairnWorkspaceService:
 
     def __init__(
         self,
-        config: WorkspaceConfig,
-        graph_id: str,
+        config: Config,
+        swarm_root: PathLike,
         project_root: PathLike | None = None,
     ) -> None:
         self._config = config
-        self._graph_id = graph_id
+        self._swarm_root = normalize_path(swarm_root)
         self._project_root = normalize_path(project_root or Path.cwd()).resolve()
         self._resolver = PathResolver(self._project_root)
-        self._base_path = normalize_path(config.base_path) / graph_id
         self._manager = cairn_workspace_manager.WorkspaceManager()
         self._stable_workspace: Any | None = None
         self._agent_workspaces: dict[str, AgentWorkspace] = {}
         self._stable_lock = asyncio.Lock()
-        self._ignore_patterns: set[str] = set(config.ignore_patterns or ())
-        self._ignore_dotfiles: bool = config.ignore_dotfiles
+        self._ignore_patterns: set[str] = set(config.workspace_ignore_patterns or ())
+        self._ignore_dotfiles: bool = config.workspace_ignore_dotfiles
 
     @property
     def project_root(self) -> Path:
@@ -57,8 +56,8 @@ class CairnWorkspaceService:
         if self._stable_workspace is not None:
             return
 
-        self._base_path.mkdir(parents=True, exist_ok=True)
-        stable_path = self._base_path / "stable.db"
+        self._swarm_root.mkdir(parents=True, exist_ok=True)
+        stable_path = self._swarm_root / "stable.db"
 
         try:
             self._stable_workspace = await cairn_workspace_manager._open_workspace(
@@ -79,7 +78,7 @@ class CairnWorkspaceService:
         if self._stable_workspace is None:
             raise WorkspaceError("CairnWorkspaceService is not initialized")
 
-        workspace_path = self._base_path / f"{agent_id}.db"
+        workspace_path = self._swarm_root / "agents" / agent_id[:2] / agent_id / "workspace.db"
         workspace_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
