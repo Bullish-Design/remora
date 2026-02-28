@@ -66,6 +66,50 @@ class Config:
     nvim_socket: str = ".remora/nvim.sock"
 
 
+@dataclass(slots=True)
+class WorkspaceConfig:
+    """Workspace storage settings."""
+
+    base_path: str
+    ignore_patterns: tuple[str, ...] = DEFAULT_IGNORE_PATTERNS
+    ignore_dotfiles: bool = True
+
+
+@dataclass(slots=True)
+class BundleConfig:
+    """Bundle discovery metadata."""
+
+    path: str
+    mapping: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ModelConfig:
+    """Settings that describe the model endpoint used by agents."""
+
+    base_url: str
+    api_key: str
+    default_model: str
+
+
+@dataclass(slots=True)
+class ExecutionConfig:
+    """Runtime limits for agent execution."""
+
+    max_turns: int
+    timeout: float
+
+
+@dataclass(slots=True)
+class RemoraConfig:
+    """Structured configuration surfaced to graph builders and executors."""
+
+    bundles: BundleConfig
+    model: ModelConfig
+    execution: ExecutionConfig
+    workspace: WorkspaceConfig
+
+
 def load_config(path: PathLike | None = None) -> Config:
     """Load configuration from YAML file."""
     if path is None:
@@ -154,4 +198,14 @@ def serialize_config(config: Config) -> dict[str, Any]:
 from remora.core.errors import ConfigError
 
 
-__all__ = ["Config", "ConfigError", "load_config", "serialize_config"]
+__all__ = [
+    "BundleConfig",
+    "Config",
+    "ConfigError",
+    "ExecutionConfig",
+    "ModelConfig",
+    "RemoraConfig",
+    "WorkspaceConfig",
+    "load_config",
+    "serialize_config",
+]

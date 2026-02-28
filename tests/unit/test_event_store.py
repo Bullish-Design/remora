@@ -1,11 +1,15 @@
+"""Unit tests for EventStore basic operations.
+
+Tests basic CRUD operations without the reactive subscription layer.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-from remora.core.event_bus import EventBus
-from remora.core.event_store import EventSourcedBus, EventStore
+from remora.core.event_store import EventStore
 from remora.core.events import GraphStartEvent
 
 
@@ -31,19 +35,4 @@ async def test_event_store_append_and_replay(tmp_path: Path) -> None:
     assert deleted == 1
     assert await store.get_event_count("graph-1") == 0
 
-
-@pytest.mark.asyncio
-async def test_event_sourced_bus_persists_and_emits(tmp_path: Path) -> None:
-    store = EventStore(tmp_path / "events.db")
-    await store.initialize()
-
-    bus = EventBus()
-    captured: list[object] = []
-    bus.subscribe_all(captured.append)
-
-    sourced = EventSourcedBus(bus, store, "graph-2")
-    event = GraphStartEvent(graph_id="graph-2", node_count=2)
-    await sourced.emit(event)
-
-    assert captured == [event]
-    assert await store.get_event_count("graph-2") == 1
+    await store.close()

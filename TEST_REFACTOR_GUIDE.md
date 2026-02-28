@@ -212,7 +212,7 @@ def test_swarm_state_persistence(tmp_path: Path):
 
 ## Step 8.3: EventStore Trigger Queue Tests
 
-**Target File:** `tests/integration/test_event_store.py`
+**Target File:** `tests/integration/test_event_store_integration.py`
 
 **Context:** The `EventStore` is the message bus. Everything flows through it. Concurrent database access handles appending natively, and it feeds the `AgentRunner`.
 

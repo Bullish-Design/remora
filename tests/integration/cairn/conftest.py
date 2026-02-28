@@ -28,12 +28,6 @@ def _require_cairn(cairn_available: bool) -> None:
 
 
 @pytest.fixture
-def workspace_config(tmp_path: Path) -> WorkspaceConfig:
-    """Create a workspace config pointing to temp directory."""
-    return WorkspaceConfig(base_path=str(tmp_path / "workspaces"))
-
-
-@pytest.fixture
 def project_root(tmp_path: Path) -> Path:
     """Create a project root with sample files."""
     root = tmp_path / "project"
@@ -45,6 +39,17 @@ def project_root(tmp_path: Path) -> Path:
     (root / "README.md").write_text("# Test Project\n", encoding="utf-8")
 
     return root
+
+
+@pytest.fixture
+def workspace_config(tmp_path: Path) -> WorkspaceConfig:
+    """Workspace settings for integration tests."""
+    base_path = tmp_path / "workspaces"
+    return WorkspaceConfig(
+        base_path=str(base_path),
+        ignore_patterns=(".git", "__pycache__"),
+        ignore_dotfiles=False,
+    )
 
 
 @pytest.fixture
