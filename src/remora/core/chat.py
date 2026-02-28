@@ -6,11 +6,16 @@ from typing import Any
 import time
 import uuid
 
-from remora.core.events import RemoraEvent
 from remora.core.event_bus import EventBus
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.config import WorkspaceConfig
 from remora.core.tool_registry import ToolRegistry
+
+from structured_agents.agent import get_response_parser
+from structured_agents.client import build_client
+from structured_agents.kernel import AgentKernel
+from structured_agents.models.adapter import ModelAdapter
+from structured_agents.types import Message as KernelMessage
 
 
 @dataclass
@@ -140,29 +145,46 @@ class ChatSession:
         self._history.append(user_msg)
 
         # Build messages for kernel
-        messages = [{"role": m.role, "content": m.content} for m in self._history]
+        messages = [KernelMessage(role="system", content=self.config.system_prompt)]
+        messages += [KernelMessage(role=m.role, content=m.content) for m in self._history]
+        tool_schemas = [tool.schema for tool in self._tools]
 
         # Run agent
-        from structured_agents import AgentKernel, ModelAdapter
+        parser = get_response_parser(self.config.model_name)
+        adapter = ModelAdapter(
+            name=self.config.model_name,
+            response_parser=parser,
+        )
+        client = build_client(
+            {
+                "base_url": self.config.model_base_url,
+                "api_key": self.config.model_api_key or "EMPTY",
+                "model": self.config.model_name,
+            }
+        )
 
         kernel = AgentKernel(
-            model=ModelAdapter.from_config(
-                base_url=self.config.model_base_url,
-                api_key=self.config.model_api_key,
-                model=self.config.model_name,
-            ),
+            client=client,
+            adapter=adapter,
             tools=self._tools,
-            system_prompt=self.config.system_prompt,
             observer=self.event_bus,
         )
 
-        result = await kernel.run(
-            messages=messages,
-            max_turns=self.config.max_turns,
-        )
+        try:
+            result = await kernel.run(
+                messages,
+                tool_schemas,
+                max_turns=self.config.max_turns,
+            )
+        finally:
+            await kernel.close()
 
         # Extract response
-        tool_calls = [{"name": tc.name, "arguments": tc.arguments} for tc in result.tool_calls]
+        tool_calls = []
+        if result.final_message.tool_calls:
+            tool_calls = [
+                {"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in result.final_message.tool_calls
+            ]
 
         assistant_msg = Message.assistant(
             content=result.final_message.content or "",
