@@ -1,22 +1,48 @@
 from __future__ import annotations
 
-import asyncio
+import os
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
 from lsprotocol import types as lsp
 
-import importlib
-
-from remora.cli.main import swarm_start
+from remora.lsp.handlers import actions, documents, lens
 from remora.lsp.server import server
+from remora.lsp.db import RemoraDB
+from remora.lsp.graph import LazyGraph
+from remora.lsp.watcher import ASTWatcher
 
 pytestmark = pytest.mark.integration
 
 
-def test_lsp_handlers_register_and_advertise_capabilities() -> None:
-    """Ensure the LSP handlers register and declare execute-command options."""
+def _cli_env(repo_root: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{repo_root / 'src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    return env
 
+
+@pytest.fixture
+def isolated_lsp_server(tmp_path: Path) -> None:
+    """Rebuild the shared LSP server to operate inside a scratch directory."""
+
+    server.shutdown()
+    server.db = RemoraDB(str(tmp_path / "indexer.db"))
+    server.graph = LazyGraph(server.db)
+    server.proposals.clear()
+    server.watcher = ASTWatcher()
+    server._injecting.clear()
+
+    yield
+
+    server.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_lsp_handlers_register_and_advertise_capabilities(isolated_lsp_server) -> None:
     feature_names = set(server.protocol.fm.features.keys())
     expected = {
         "textDocument/didOpen",
@@ -33,16 +59,17 @@ def test_lsp_handlers_register_and_advertise_capabilities() -> None:
     missing = expected - feature_names
     assert not missing, f"Expected features missing: {sorted(missing)}"
 
-    # Fire the initialize handler to populate executeCommand options
     if not hasattr(server.protocol, "server_capabilities"):
         import types
 
         server.protocol.server_capabilities = types.SimpleNamespace()
 
     init_handler = server.protocol.fm.features["initialize"]
-    asyncio.run(
-        init_handler(
-            lsp.InitializeParams(process_id=None, root_uri=None, capabilities=lsp.ClientCapabilities())
+    await init_handler(
+        lsp.InitializeParams(
+            process_id=None,
+            root_uri=None,
+            capabilities=lsp.ClientCapabilities(),
         )
     )
 
@@ -52,40 +79,91 @@ def test_lsp_handlers_register_and_advertise_capabilities() -> None:
     assert "remora.acceptProposal" in commands.commands
 
 
-def test_cli_swarm_start_lsp_initializes_services(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`remora swarm start --lsp` should pass the prepared services into the LSP server."""
+@pytest.mark.asyncio
+async def test_document_handlers_populate_db_and_code_lenses(tmp_path: Path, isolated_lsp_server) -> None:
+    source = "def foo():\n    return 1\n"
+    uri = f"file://{tmp_path / 'test.py'}"
+    params = lsp.DidOpenTextDocumentParams(
+        text_document=lsp.TextDocumentItem(
+            uri=uri,
+            language_id="python",
+            version=1,
+            text=source,
+        )
+    )
 
-    dummy_store = object()
-    dummy_subscriptions = object()
-    dummy_state = object()
-    run_called: dict[str, bool] = {}
-    lsp_called: dict[str, tuple] = {}
+    await documents.did_open(params)
+    nodes = await server.db.get_nodes_for_file(uri)
+    assert any(node["node_type"] == "function" for node in nodes)
 
-    def fake_run(coro):
-        run_called["called"] = True
-        try:
-            coro.close()
-        except Exception:
-            pass
-        return dummy_store, dummy_subscriptions, dummy_state
+    lens_params = lsp.CodeLensParams(text_document=lsp.TextDocumentIdentifier(uri=uri))
+    code_lenses = await lens.code_lens(lens_params)
+    assert code_lenses
+    assert all(isinstance(cl.command.title, str) for cl in code_lenses)
 
-    def stub(event_store=None, subscriptions=None, swarm_state=None) -> None:
-        lsp_called["args"] = (event_store, subscriptions, swarm_state)
+    action_params = lsp.CodeActionParams(
+        text_document=lsp.TextDocumentIdentifier(uri=uri),
+        range=lsp.Range(start=lsp.Position(line=0, character=0), end=lsp.Position(line=0, character=2)),
+        context=lsp.CodeActionContext(diagnostics=[]),
+    )
+    actions_result = await actions.code_action(action_params)
+    commands = {act.command.command for act in actions_result if act.command}
+    assert "remora.chat" in commands
+    assert "remora.requestRewrite" in commands
 
-    monkeypatch.setattr("remora.lsp.__main__.main", stub)
-    cli_module = importlib.import_module("remora.cli.main")
-    monkeypatch.setattr(cli_module.asyncio, "run", fake_run)
 
+def test_swarm_start_lsp_smoke(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
     project_root = tmp_path / "project"
     project_root.mkdir()
     config_path = project_root / "remora.yaml"
     config_path.write_text("", encoding="utf-8")
 
-    swarm_start.callback(str(project_root), str(config_path), False, True)
+    cmd = [
+        sys.executable,
+        "-m",
+        "remora",
+        "swarm",
+        "start",
+        "--project-root",
+        str(project_root),
+        "--config",
+        str(config_path),
+        "--lsp",
+    ]
 
-    assert run_called.get("called"), "asyncio.run was not invoked"
-    assert "args" in lsp_called
-    event_store, subscriptions, swarm_state = lsp_called["args"]
-    assert event_store is dummy_store
-    assert subscriptions is dummy_subscriptions
-    assert swarm_state is dummy_state
+    proc = subprocess.Popen(
+        cmd,
+        cwd=repo_root,
+        env=_cli_env(repo_root),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        deadline = time.time() + 30
+        events_db = project_root / ".remora" / "events" / "events.db"
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                stdout, stderr = proc.communicate(timeout=1)
+                raise AssertionError(
+                    f"CLI exited early (code={proc.returncode})\nstdout={stdout}\nstderr={stderr}"
+                )
+            if events_db.exists():
+                break
+            time.sleep(0.2)
+        else:
+            raise AssertionError("Failed to create events.db within timeout")
+
+        # We only require that the event store has been written before we're satisfied.
+    finally:
+        if proc.poll() is None:
+            proc.send_signal(signal.SIGINT)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.terminate()
+        proc.communicate(timeout=1)
+
+    assert events_db.exists()
