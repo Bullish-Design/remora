@@ -18,12 +18,12 @@ Usage:
 import asyncio
 import sys
 
-from demo.lsp.server import server
-from demo.agent.runner import AgentRunner
+from remora.lsp.server import server
+from remora.lsp.runner import AgentRunner
 
 
 async def main():
-    runner = AgentRunner()
+    runner = AgentRunner(server=server)
     server.runner = runner
 
     runner_task = asyncio.create_task(runner.run_forever())

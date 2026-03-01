@@ -16,72 +16,49 @@ Features:
 - Document symbols        → textDocument/documentSymbol
 ```
 
-## File Structure
-
-```
-demo/
-├── __main__.py           # Entry: python -m demo
-├── __init__.py
-├── lsp/
-│   ├── __init__.py
-│   └── server.py         # RemoraLanguageServer (pygls)
-├── core/
-│   ├── __init__.py
-│   ├── models.py         # ASTAgentNode, RewriteProposal, events
-│   ├── db.py             # SQLite operations
-│   ├── graph.py          # Rustworkx lazy graph
-│   └── watcher.py        # Tree-sitter parsing + ID injection
-├── agent/
-│   ├── __init__.py
-│   └── runner.py         # AgentRunner execution loop
-└── nvim/
-    └── lua/
-        └── remora/
-            ├── __init__.lua   # Setup + handlers
-            └── panel.lua      # Sidepanel UI
-```
-
 ## Quick Start
 
-### 1. Install Dependencies
-
-The demo requires:
-- `pygls` - Python LSP framework
-- `lsprotocol` - LSP protocol types
-- `tree-sitter` + `tree-sitter-python` - For AST parsing
-
-### 2. Start the LSP Server
+### Install
 
 ```bash
-python -m demo.lsp.server
+uv pip install -e ".[dev]"
 ```
 
-Or with the agent runner:
+### Start the LSP Server
+
 ```bash
-python -m demo
+# Standalone
+remora-lsp
+
+# Or via CLI
+remora swarm start --lsp
+
+# Or via Python module
+python -m remora.lsp
 ```
 
-### 3. Configure Neovim
+### Configure Neovim
 
 Add to your `init.lua`:
 
 ```lua
--- Add demo to Lua path
-package.path = package.path .. ";./demo/nvim/lua/?.lua"
-
-local remora = require("remora")
-remora.setup({
-    -- options
+vim.lsp.start({
+    name = "remora",
+    cmd = { "remora-lsp" },
+    root_dir = vim.fn.getcwd(),
+    filetypes = { "python" },
 })
+require("remora").setup()
 ```
 
-### 4. Commands
+### Commands
 
 - `:RemoraChat` - Chat with agent at cursor
 - `:RemoraRewrite` - Ask agent to rewrite itself  
 - `:RemoraAccept` - Accept pending proposal
 - `:RemoraReject` - Reject with feedback
 - `:RemoraTogglePanel` - Toggle agent sidepanel
+- `<leader>ra` - Toggle panel (default keybinding)
 
 ## Features
 

@@ -1,4 +1,7 @@
-from .models import (
+# demo/core/__init__.py
+"""Demo core module - re-exports from src/remora/lsp for backward compatibility."""
+
+from remora.lsp import (
     ASTAgentNode,
     ToolSchema,
     RewriteProposal,
@@ -10,10 +13,11 @@ from .models import (
     RewriteRejectedEvent,
     AgentErrorEvent,
     generate_id,
+    RemoraDB,
+    LazyGraph,
+    ASTWatcher,
+    inject_ids,
 )
-from .db import RemoraDB
-from .graph import LazyGraph
-from .watcher import ASTWatcher, inject_ids
 
 __all__ = [
     "ASTAgentNode",

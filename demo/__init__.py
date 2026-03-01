@@ -1,9 +1,42 @@
-"""
-Remora Neovim V2.1 Demo - LSP-Native Architecture
+# demo/__init__.py
+"""Demo package - re-exports from src/remora/lsp for backward compatibility."""
 
-This demo implements the full LSP-native architecture where Remora
-connects to Neovim as a language server using Pydantic models as
-the bridge between agent structure and LSP protocol.
-"""
+from remora.lsp import (
+    ASTAgentNode,
+    ToolSchema,
+    RewriteProposal,
+    AgentEvent,
+    HumanChatEvent,
+    AgentMessageEvent,
+    RewriteProposalEvent,
+    RewriteAppliedEvent,
+    RewriteRejectedEvent,
+    AgentErrorEvent,
+    generate_id,
+    RemoraDB,
+    LazyGraph,
+    ASTWatcher,
+    inject_ids,
+    RemoraLanguageServer,
+)
 
 __version__ = "2.1.0"
+
+__all__ = [
+    "ASTAgentNode",
+    "ToolSchema",
+    "RewriteProposal",
+    "AgentEvent",
+    "HumanChatEvent",
+    "AgentMessageEvent",
+    "RewriteProposalEvent",
+    "RewriteAppliedEvent",
+    "RewriteRejectedEvent",
+    "AgentErrorEvent",
+    "generate_id",
+    "RemoraDB",
+    "LazyGraph",
+    "ASTWatcher",
+    "inject_ids",
+    "RemoraLanguageServer",
+]
