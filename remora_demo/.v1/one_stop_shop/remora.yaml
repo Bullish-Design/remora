@@ -1,0 +1,36 @@
+bundles:
+  path: agents
+  mapping:
+    function: lint/bundle.yaml
+    class: docstring/bundle.yaml
+    method: docstring/bundle.yaml
+    file: lint/bundle.yaml
+
+discovery:
+  paths: ["demo/one_stop_shop/project/src"]
+  languages: ["python"]
+  max_workers: 4
+
+model:
+  base_url: "http://remora-server:8000/v1"
+  api_key: "EMPTY"
+  default_model: "Qwen/Qwen3-4B-Instruct-2507-FP8"
+
+execution:
+  max_concurrency: 4
+  error_policy: skip_downstream
+  timeout: 300
+  max_turns: 8
+  truncation_limit: 1024
+
+indexer:
+  watch_paths: ["demo/one_stop_shop/project/src"]
+  store_path: "demo/one_stop_shop/index"
+
+dashboard:
+  host: "0.0.0.0"
+  port: 8420
+
+workspace:
+  base_path: "demo/one_stop_shop/workspaces"
+  cleanup_after: "2h"

@@ -1,0 +1,100 @@
+{
+  "orders": [
+    {
+      "order_id": "ORD-1001",
+      "sku": "BX-100",
+      "qty": 140,
+      "order_date": "2024-05-18",
+      "warehouse_id": "SEA-1",
+      "channel": "ecom"
+    },
+    {
+      "order_id": "ORD-1002",
+      "sku": "BX-100",
+      "qty": 120,
+      "order_date": "2024-05-20",
+      "warehouse_id": "DAL-1",
+      "channel": "b2b"
+    },
+    {
+      "order_id": "ORD-1003",
+      "sku": "BX-200",
+      "qty": 80,
+      "order_date": "2024-05-21",
+      "warehouse_id": "SEA-1",
+      "channel": "retail"
+    },
+    {
+      "order_id": "ORD-1004",
+      "sku": "BX-200",
+      "qty": 95,
+      "order_date": "2024-05-23",
+      "warehouse_id": "DAL-1",
+      "channel": "b2b"
+    },
+    {
+      "order_id": "ORD-1005",
+      "sku": "PL-050",
+      "qty": 45,
+      "order_date": "2024-05-19",
+      "warehouse_id": "SEA-1",
+      "channel": "ecom"
+    },
+    {
+      "order_id": "ORD-1006",
+      "sku": "PL-050",
+      "qty": 35,
+      "order_date": "2024-05-24",
+      "warehouse_id": "DAL-1",
+      "channel": "retail"
+    },
+    {
+      "order_id": "ORD-1007",
+      "sku": "KT-010",
+      "qty": 60,
+      "order_date": "2024-05-20",
+      "warehouse_id": "SEA-1",
+      "channel": "ecom"
+    },
+    {
+      "order_id": "ORD-1008",
+      "sku": "KT-010",
+      "qty": 75,
+      "order_date": "2024-05-25",
+      "warehouse_id": "DAL-1",
+      "channel": "b2b"
+    },
+    {
+      "order_id": "ORD-1009",
+      "sku": "BX-100",
+      "qty": 160,
+      "order_date": "2024-05-26",
+      "warehouse_id": "SEA-1",
+      "channel": "retail"
+    },
+    {
+      "order_id": "ORD-1010",
+      "sku": "BX-200",
+      "qty": 110,
+      "order_date": "2024-05-27",
+      "warehouse_id": "DAL-1",
+      "channel": "ecom"
+    },
+    {
+      "order_id": "ORD-1011",
+      "sku": "PL-050",
+      "qty": 50,
+      "order_date": "2024-05-27",
+      "warehouse_id": "SEA-1",
+      "channel": "b2b"
+    },
+    {
+      "order_id": "ORD-1012",
+      "sku": "KT-010",
+      "qty": 90,
+      "order_date": "2024-05-28",
+      "warehouse_id": "SEA-1",
+      "channel": "retail"
+    }
+  ]
+}

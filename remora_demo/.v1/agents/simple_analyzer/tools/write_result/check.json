@@ -1,0 +1,12 @@
+{
+  "file": "/home/andrew/Documents/Projects/remora/demo/agents/simple_analyzer/tools/write_result.pym",
+  "valid": true,
+  "errors": [],
+  "warnings": [],
+  "info": {
+    "externals_count": 0,
+    "inputs_count": 1,
+    "lines_of_code": 13,
+    "monty_features_used": []
+  }
+}

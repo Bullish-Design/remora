@@ -1,0 +1,255 @@
+{
+  "generated_at": "2026-02-27T04:33:44.088274",
+  "recommendations": [
+    {
+      "sku": "BX-100",
+      "warehouse_id": "SEA-1",
+      "recommended_qty": 5738,
+      "reorder_point": 2117.958679947383,
+      "priority": 3,
+      "reason": "Net available 1070 below reorder point 2118.0 (lead time 14 days)"
+    },
+    {
+      "sku": "BX-100",
+      "warehouse_id": "DAL-1",
+      "recommended_qty": 6188,
+      "reorder_point": 2117.958679947383,
+      "priority": 4,
+      "reason": "Net available 620 below reorder point 2118.0 (lead time 14 days)"
+    },
+    {
+      "sku": "BX-200",
+      "warehouse_id": "SEA-1",
+      "recommended_qty": 4768,
+      "reorder_point": 1623.2631597900554,
+      "priority": 4,
+      "reason": "Net available 450 below reorder point 1623.3 (lead time 14 days)"
+    },
+    {
+      "sku": "BX-200",
+      "warehouse_id": "DAL-1",
+      "recommended_qty": 4958,
+      "reorder_point": 1623.2631597900554,
+      "priority": 5,
+      "reason": "Net available 260 below reorder point 1623.3 (lead time 14 days)"
+    },
+    {
+      "sku": "PL-050",
+      "warehouse_id": "SEA-1",
+      "recommended_qty": 2250,
+      "reorder_point": 745.1160290660454,
+      "priority": 5,
+      "reason": "Net available 145 below reorder point 745.1 (lead time 14 days)"
+    },
+    {
+      "sku": "PL-050",
+      "warehouse_id": "DAL-1",
+      "recommended_qty": 2300,
+      "reorder_point": 745.1160290660454,
+      "priority": 5,
+      "reason": "Net available 95 below reorder point 745.1 (lead time 14 days)"
+    },
+    {
+      "sku": "KT-010",
+      "warehouse_id": "SEA-1",
+      "recommended_qty": 4229,
+      "reorder_point": 1716.551205188608,
+      "priority": 5,
+      "reason": "Net available 185 below reorder point 1716.6 (lead time 21 days)"
+    },
+    {
+      "sku": "KT-010",
+      "warehouse_id": "DAL-1",
+      "recommended_qty": 4314,
+      "reorder_point": 1716.551205188608,
+      "priority": 5,
+      "reason": "Net available 100 below reorder point 1716.6 (lead time 21 days)"
+    }
+  ],
+  "pricing": [
+    {
+      "sku": "BX-100",
+      "list_price": 5.0,
+      "recommended_price": 4.25,
+      "discount_pct": 0.15,
+      "notes": "category rule"
+    },
+    {
+      "sku": "BX-200",
+      "list_price": 7.5,
+      "recommended_price": 6.38,
+      "discount_pct": 0.1493,
+      "notes": "category rule"
+    },
+    {
+      "sku": "PL-050",
+      "list_price": 15.0,
+      "recommended_price": 13.2,
+      "discount_pct": 0.12,
+      "notes": "category rule"
+    },
+    {
+      "sku": "KT-010",
+      "list_price": 26.0,
+      "recommended_price": 23.4,
+      "discount_pct": 0.1,
+      "notes": "sku rule"
+    }
+  ],
+  "metrics": {
+    "total_reorder_units": 34745.0,
+    "reorder_lines": 8.0,
+    "high_priority_lines": 7.0,
+    "average_discount": 0.1298
+  },
+  "forecast_snapshot": {
+    "BX-100": [
+      {
+        "sku": "BX-100",
+        "date": "2024-05-27",
+        "expected_units": 60.733955890044875
+      },
+      {
+        "sku": "BX-100",
+        "date": "2024-05-28",
+        "expected_units": 61.838209633500234
+      },
+      {
+        "sku": "BX-100",
+        "date": "2024-05-29",
+        "expected_units": 62.9424633769556
+      },
+      {
+        "sku": "BX-100",
+        "date": "2024-05-30",
+        "expected_units": 64.04671712041096
+      },
+      {
+        "sku": "BX-100",
+        "date": "2024-05-31",
+        "expected_units": 65.15097086386632
+      },
+      {
+        "sku": "BX-100",
+        "date": "2024-06-01",
+        "expected_units": 66.25522460732168
+      },
+      {
+        "sku": "BX-100",
+        "date": "2024-06-02",
+        "expected_units": 67.35947835077704
+      }
+    ],
+    "BX-200": [
+      {
+        "sku": "BX-200",
+        "date": "2024-05-28",
+        "expected_units": 46.54821365404226
+      },
+      {
+        "sku": "BX-200",
+        "date": "2024-05-29",
+        "expected_units": 47.39454481138848
+      },
+      {
+        "sku": "BX-200",
+        "date": "2024-05-30",
+        "expected_units": 48.240875968734706
+      },
+      {
+        "sku": "BX-200",
+        "date": "2024-05-31",
+        "expected_units": 49.087207126080926
+      },
+      {
+        "sku": "BX-200",
+        "date": "2024-06-01",
+        "expected_units": 49.93353828342715
+      },
+      {
+        "sku": "BX-200",
+        "date": "2024-06-02",
+        "expected_units": 50.77986944077337
+      },
+      {
+        "sku": "BX-200",
+        "date": "2024-06-03",
+        "expected_units": 51.626200598119595
+      }
+    ],
+    "KT-010": [
+      {
+        "sku": "KT-010",
+        "date": "2024-05-29",
+        "expected_units": 39.3786512139201
+      },
+      {
+        "sku": "KT-010",
+        "date": "2024-05-30",
+        "expected_units": 40.09462669053683
+      },
+      {
+        "sku": "KT-010",
+        "date": "2024-05-31",
+        "expected_units": 40.81060216715356
+      },
+      {
+        "sku": "KT-010",
+        "date": "2024-06-01",
+        "expected_units": 41.52657764377029
+      },
+      {
+        "sku": "KT-010",
+        "date": "2024-06-02",
+        "expected_units": 42.242553120387015
+      },
+      {
+        "sku": "KT-010",
+        "date": "2024-06-03",
+        "expected_units": 42.95852859700375
+      },
+      {
+        "sku": "KT-010",
+        "date": "2024-06-04",
+        "expected_units": 43.674504073620476
+      }
+    ],
+    "PL-050": [
+      {
+        "sku": "PL-050",
+        "date": "2024-05-28",
+        "expected_units": 21.36672658948514
+      },
+      {
+        "sku": "PL-050",
+        "date": "2024-05-29",
+        "expected_units": 21.755212527475777
+      },
+      {
+        "sku": "PL-050",
+        "date": "2024-05-30",
+        "expected_units": 22.143698465466418
+      },
+      {
+        "sku": "PL-050",
+        "date": "2024-05-31",
+        "expected_units": 22.532184403457055
+      },
+      {
+        "sku": "PL-050",
+        "date": "2024-06-01",
+        "expected_units": 22.920670341447696
+      },
+      {
+        "sku": "PL-050",
+        "date": "2024-06-02",
+        "expected_units": 23.309156279438334
+      },
+      {
+        "sku": "PL-050",
+        "date": "2024-06-03",
+        "expected_units": 23.697642217428974
+      }
+    ]
+  }
+}
