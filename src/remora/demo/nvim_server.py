@@ -330,6 +330,7 @@ async def rpc_get_events(params: dict) -> dict:
 
 
 def compute_agent_id(node: CSTNode, file_path: Path) -> str:
+    """Compute unique agent ID using hash."""
     return compute_node_id(str(file_path), node.name, node.start_line, node.end_line)
 
 

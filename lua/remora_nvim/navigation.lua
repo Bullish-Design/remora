@@ -3,8 +3,8 @@
 local M = {}
 
 M.current_agent_id = nil
-M.registered_buffers = {}
-M.agent_id_cache = {}
+M.registered_buffers = {}      -- file_path -> "pending" | "ready"
+M.agent_id_cache = {}          -- cache_key -> agent_id (hash)
 
 function M.setup()
     vim.api.nvim_create_autocmd("CursorMoved", {
@@ -28,17 +28,34 @@ function M.on_buffer_opened(ev)
         return
     end
 
-    M.registered_buffers[file_path] = true
+    -- Mark as pending while we wait for server response
+    M.registered_buffers[file_path] = "pending"
+
     require("remora_nvim.bridge").notify_buffer_opened(file_path, function(result)
         if not result or not result.agents then
+            M.registered_buffers[file_path] = "ready"  -- Mark ready even if no agents
+            vim.notify("Remora: No agents returned for " .. file_path, vim.log.levels.DEBUG)
             return
         end
 
         local file_name = vim.fn.fnamemodify(file_path, ":t:r")
+        vim.notify(string.format("Remora: Caching %d agents for %s", #result.agents, file_name), vim.log.levels.INFO)
+
         for _, agent in ipairs(result.agents) do
             local cache_key = string.format("%s_%s_%d", agent.type, file_name, agent.line)
             M.agent_id_cache[cache_key] = agent.agent_id
+            -- Debug: show what we're caching
+            -- Uncomment to debug: vim.notify(string.format("  Cache: %s -> %s", cache_key, agent.agent_id), vim.log.levels.INFO)
         end
+
+        -- Mark as ready and trigger cursor update
+        M.registered_buffers[file_path] = "ready"
+        vim.notify("Remora: Buffer ready, triggering cursor update", vim.log.levels.INFO)
+
+        -- Re-trigger cursor moved to update with correct agent IDs
+        vim.schedule(function()
+            M.on_cursor_moved()
+        end)
     end)
 end
 
@@ -51,6 +68,13 @@ function M.on_cursor_moved()
     local filetype = vim.bo[bufnr].filetype
 
     if filetype ~= "python" then
+        return
+    end
+
+    local file_path = vim.api.nvim_buf_get_name(bufnr)
+
+    -- Skip if buffer agents aren't loaded yet
+    if M.registered_buffers[file_path] ~= "ready" then
         return
     end
 
@@ -85,7 +109,6 @@ function M.on_cursor_moved()
         node = node:parent()
     end
 
-    local file_path = vim.api.nvim_buf_get_name(bufnr)
     local file_name = vim.fn.fnamemodify(file_path, ":t:r")
 
     local ts_node_type = "file"
@@ -100,7 +123,14 @@ function M.on_cursor_moved()
     -- Normalize the type to match server format (function, class, etc.)
     local node_type = M.normalize_node_type(ts_node_type)
     local cache_key = string.format("%s_%s_%d", node_type, file_name, start_line)
-    local agent_id = M.agent_id_cache[cache_key] or cache_key
+
+    -- Look up the hash ID from cache (required - don't use fallback)
+    local agent_id = M.agent_id_cache[cache_key]
+    if not agent_id then
+        -- Debug: show what we're looking for (comment out after debugging)
+        vim.notify(string.format("Remora: Cache miss for %s", cache_key), vim.log.levels.WARN)
+        return
+    end
 
     if agent_id ~= M.current_agent_id then
         M.current_agent_id = agent_id
