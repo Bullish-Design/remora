@@ -38,7 +38,7 @@ echo ""
 
 # Start LSP server in background
 echo "Starting Remora LSP server..."
-python -m demo.lsp.server &
+python -m remora_demo.lsp.server &
 LSP_PID=$!
 
 echo "LSP server started (PID: $LSP_PID)"
@@ -48,14 +48,14 @@ echo ""
 echo "=== To use in Neovim ==="
 echo ""
 echo "Option 1: Vim script (quick)"
-echo "  :source demo/nvim/remora.vim"
+echo "  :source remora_demo/nvim/remora.vim"
 echo "  :RemoraSetup"
 echo "  :RemoraStart"
 echo ""
 echo "Option 2: Lua (recommended)"
 echo "  In your init.lua, add:"
 echo "    -- Set up demo path"
-echo '    vim.opt.runtimepath:append("/path/to/remora/demo/nvim/lua")'
+echo '    vim.opt.runtimepath:append("/path/to/remora/remora_demo/nvim/lua")'
 echo '    require("remora_starter")'
 echo ""
 echo "Option 3: Manual"

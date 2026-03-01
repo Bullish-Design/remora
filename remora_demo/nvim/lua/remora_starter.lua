@@ -12,9 +12,9 @@ local M = {}
 -- Configuration
 M.config = {
     -- Path to the Remora demo directory (adjust as needed)
-    demo_path = vim.fn.stdpath("config") .. "/lua/../../../demo",
+    demo_path = vim.fn.stdpath("config") .. "/lua/../../../remora_demo",
     -- LSP command
-    lsp_cmd = { "python", "-m", "demo.lsp.server" },
+    lsp_cmd = { "python", "-m", "remora_demo.lsp.server" },
     -- File types to enable
     filetypes = { "python" },
     -- Root markers
@@ -38,10 +38,10 @@ function M.setup(config)
     if not vim.fn.isdirectory(M.config.demo_path) == 1 then
         -- Try alternative paths
         local paths = {
-            vim.fn.stdpath("config") .. "/../remora/demo",
-            vim.fn.stdpath("config") .. "/../../remora/demo",
-            "./demo",
-            "../demo",
+            vim.fn.stdpath("config") .. "/../remora/remora_demo",
+            vim.fn.stdpath("config") .. "/../../remora/remora_demo",
+            "./remora_demo",
+            "../remora_demo",
         }
         for _, p in ipairs(paths) do
             if vim.fn.isdirectory(p) == 1 then
