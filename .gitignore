@@ -5,7 +5,7 @@ __pycache__/
 scripts/training_examples/**
 .remora/**
 agents/**
-**/**.db
+**/**.db**
 
 
 # Personal Dev Environment:
