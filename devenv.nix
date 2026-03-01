@@ -47,7 +47,7 @@
     if ok then
       remora.setup({
         -- Use the demo LSP server (runs via python -m)
-        cmd = { "python", "-m", "remora_demo.lsp.server" },
+        cmd = { "remora-lsp" },
         filetypes = { "python", "markdown" },
         root_markers = { ".remora", ".git", "pyproject.toml" },
         prefix = "<leader>r",
