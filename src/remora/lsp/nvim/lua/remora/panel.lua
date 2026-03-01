@@ -52,11 +52,11 @@ local event_hls = {
 }
 
 local function get_selected_agent()
-    local selected = M.state.selected_agent:get()
+    local selected = M.state.selected_agent:get_value()
     if not selected then
         return nil
     end
-    return M.state.agents:get()[selected]
+    return M.state.agents:get_value()[selected]
 end
 
 local function refresh_renderer()
@@ -67,9 +67,9 @@ end
 
 local function animate_border_for_event(event_type)
     if event_type == "RewriteProposalEvent" then
-        M.state.border_hl:set("DiagnosticWarn")
+        M.state.border_hl = "DiagnosticWarn"
         vim.defer_fn(function()
-            M.state.border_hl:set("RemoraBorder")
+            M.state.border_hl = "RemoraBorder"
             refresh_renderer()
         end, 2000)
     end
@@ -205,7 +205,7 @@ function M.events_tab(state)
 end
 
 function M.chat_tab(state)
-    local input_value = Signal.create("")
+    local input_state = Signal.create({ value = "" })
     return n.rows({
         n.scroll({
             max_height = 10,
@@ -225,7 +225,7 @@ function M.chat_tab(state)
         n.separator(),
         n.input({
             placeholder = "Message agent...",
-            value = input_value,
+            value = input_state.value,
             on_submit = function(value)
                 if value and value ~= "" then
                     local agent = get_selected_agent()
@@ -234,7 +234,7 @@ function M.chat_tab(state)
                             agent_id = agent.id,
                             input = value,
                         })
-                        input_value:set("")
+                        input_state.value = ""
                     end
                 end
             end,
@@ -248,7 +248,7 @@ function M.create_panel()
         n.columns({
             n.if_(
                 function()
-                    return not state.expanded:get()
+                    return not state.expanded:get_value()
                 end,
                 n.rows({
                     n.each(state.agents, function(agent)
@@ -256,8 +256,8 @@ function M.create_panel()
                             content = M.status_icon(agent.status),
                             hl_group = M.status_hl(agent.status),
                             on_click = function()
-                                state.selected_agent:set(agent.id)
-                                state.expanded:set(true)
+                                state.selected_agent = agent.id
+                                state.expanded = true
                                 refresh_renderer()
                             end,
                         })
@@ -266,7 +266,7 @@ function M.create_panel()
             ),
             n.if_(
                 function()
-                    return state.expanded:get()
+                    return state.expanded:get_value()
                 end,
                 n.rows({
                     M.agent_header(state),
@@ -286,7 +286,7 @@ function M.create_panel()
             border = {
                 style = "rounded",
                 hl_group = function()
-                    return state.border_hl:get()
+                    return state.border_hl:get_value()
                 end,
             },
         },
@@ -304,7 +304,7 @@ function M.open()
         end,
     })
     M.renderer:mount()
-    M.state.is_open:set(true)
+    M.state.is_open = true
 end
 
 function M.close()
@@ -314,7 +314,7 @@ function M.close()
 
     M.renderer:unmount()
     M.renderer = nil
-    M.state.is_open:set(false)
+    M.state.is_open = false
 end
 
 function M.toggle_panel()
@@ -326,24 +326,24 @@ function M.toggle_panel()
 end
 
 function M.is_open()
-    return M.state.is_open:get()
+    return M.state.is_open:get_value()
 end
 
 function M.add_event(event)
-    local events = vim.deepcopy(M.state.events:get())
+    local events = vim.deepcopy(M.state.events:get_value())
     table.insert(events, 1, event)
     if #events > 50 then
         table.remove(events)
     end
-    M.state.events:set(events)
+    M.state.events = events
     animate_border_for_event(event.event_type)
     refresh_renderer()
 end
 
 function M.select_agent(agent_id)
-    local agents = M.state.agents:get()
+    local agents = M.state.agents:get_value()
     if agents[agent_id] then
-        M.state.selected_agent:set(agent_id)
+        M.state.selected_agent = agent_id
         refresh_renderer()
     end
 end
@@ -358,7 +358,7 @@ function M.update_agents(agent_list)
             parent_id = agent.parent_id,
         }
     end
-    M.state.agents:set(mapping)
+    M.state.agents = mapping
     refresh_renderer()
 end
 
