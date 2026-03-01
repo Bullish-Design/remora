@@ -16,38 +16,47 @@ Features:
 - Document symbols        → textDocument/documentSymbol
 ```
 
-## Quick Start
+## Quick Start (devenv)
 
-### Install
+The recommended way to run the demo is via devenv, which automatically configures the nv2 editor (custom Neovim) with the remora plugin.
+
+### 1. Enter the devenv shell
 
 ```bash
+cd /path/to/remora
+devenv shell
+```
+
+### 2. Launch the editor
+
+```bash
+nv2
+```
+
+That's it! The remora plugin is automatically loaded and the LSP server will start when you open a Python file.
+
+### Manual Setup (Alternative)
+
+If you're not using devenv, you can manually configure Neovim:
+
+```bash
+# Install dependencies
 uv pip install -e ".[dev]"
 ```
-
-### Start the Demo LSP Server
-
-```bash
-# Start the server with the Mock LLM injected for demo purposes
-remora-demo
-```
-
-*(Note: `remora-lsp` starts the production core server without the mock demo LLM)*
-
-### Configure Neovim
 
 Add to your `init.lua`:
 
 ```lua
-vim.lsp.start({
-    name = "remora",
-    cmd = { "remora-demo" },
-    root_dir = vim.fn.getcwd(),
-    filetypes = { "python" },
-})
-require("remora_nvim").setup()
-```
+-- Add remora to runtimepath
+vim.opt.runtimepath:prepend("/path/to/remora/src/remora/lsp/nvim")
 
-**Or:** `luafile demo/remora_nvim_startup.lua`
+-- Setup remora
+require("remora").setup({
+    cmd = { "python", "-m", "remora_demo.lsp.server" },
+    filetypes = { "python", "markdown" },
+    root_markers = { ".remora", ".git", "pyproject.toml" },
+})
+```
 
 ### Commands
 

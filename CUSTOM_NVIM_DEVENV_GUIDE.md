@@ -1,12 +1,13 @@
 # Importing nv2 Into Your devenv.sh Projects
 
-This guide explains how to import the `nix_neovim_v2` Neovim configuration
+This guide explains how to import the `nixvim` Neovim configuration
 into any project managed by [devenv.sh](https://devenv.sh), giving you a
 fully configured editor (LSPs, formatters, linters, treesitter, DAP, AI
 companion) that activates automatically when you enter the project directory.
 
-It covers local filesystem imports, git repository imports, per-project
-overrides, and Neovim plugin development workflows.
+It covers local filesystem imports (via direct NixOS module import with
+impure mode), git repository imports, per-project overrides, and Neovim
+plugin development workflows.
 
 ---
 
@@ -18,10 +19,10 @@ overrides, and Neovim plugin development workflows.
   - [What You Get](#what-you-get)
   - [The Module Option System](#the-module-option-system)
 - [Import Methods](#import-methods)
-  - [Local Filesystem (git+file)](#local-filesystem-gitfile)
-  - [Local Filesystem (path)](#local-filesystem-path)
-  - [Git Repository](#git-repository)
+  - [Direct NixOS Module Import (Recommended)](#direct-nixos-module-import-recommended)
+  - [Git Repository (GitHub / Remote)](#git-repository-github--remote)
   - [Updating the Import](#updating-the-import)
+  - [Known Issues: devenv Input Mechanisms](#known-issues-devenv-input-mechanisms)
 - [Per-Project Overrides](#per-project-overrides)
   - [Available Options](#available-options)
   - [Extra Lua Init Code](#extra-lua-init-code)
@@ -44,45 +45,40 @@ overrides, and Neovim plugin development workflows.
 
 This section gets nv2 running in your project in under two minutes.
 
-### 1. Add the input to your project's devenv.yaml
+### 1. Enable impure mode in your project's devenv.yaml
 
-**From your local filesystem** (recommended during development):
-
-```yaml
-# my-project/devenv.yaml
-inputs:
-  nixpkgs:
-    url: github:NixOS/nixpkgs/nixos-unstable
-  nix-neovim:
-    url: git+file:///home/andrew/Documents/Projects/IDE/nix_neovim_v2
-    flake: false
-imports:
-  - nix-neovim
-```
-
-**From a git repository** (for sharing across machines):
+Add `impure: true` to your `devenv.yaml`. This is required because we use
+a direct Nix module import from an absolute filesystem path, which is not
+allowed in Nix's default pure evaluation mode.
 
 ```yaml
 # my-project/devenv.yaml
+impure: true
 inputs:
   nixpkgs:
     url: github:NixOS/nixpkgs/nixos-unstable
-  nix-neovim:
-    url: github:yourusername/nix_neovim_v2
-    flake: false
-imports:
-  - nix-neovim
+  # ... your other inputs
 ```
 
-### 2. Create or update your project's devenv.nix
+> **Why impure mode?** devenv's official input/import mechanism (`devenv.yaml`
+> inputs + imports) has a [known bug](#known-issues-devenv-input-mechanisms)
+> with local filesystem sources. The `impure: true` + direct NixOS module
+> import approach is the reliable workaround. See
+> [Import Methods](#import-methods) for details and alternatives.
 
-If your project already has a `devenv.nix`, the nv2 module merges into it.
-If you don't have one yet, create a minimal one:
+### 2. Import the nv2 module in your project's devenv.nix
+
+Add the nixvim `devenv.nix` to the NixOS-style `imports` list directly in
+your `devenv.nix`:
 
 ```nix
 # my-project/devenv.nix
 { pkgs, ... }:
 {
+  imports = [
+    /home/andrew/Documents/Projects/nixvim/devenv.nix
+  ];
+
   # Your project's own devenv config goes here.
   # The nv2 editor is already available via the import.
 }
@@ -114,7 +110,7 @@ linters available. When you leave the devenv shell (or cd out with direnv),
 
 ### Architecture Overview
 
-The `nix_neovim_v2` repository exposes a **devenv module** -- a Nix function
+The `nixvim` repository exposes a **devenv module** -- a Nix function
 that declares options, packages, and scripts. When you import it into your
 project, devenv merges its configuration with your project's own `devenv.nix`.
 
@@ -122,15 +118,27 @@ project, devenv merges its configuration with your project's own `devenv.nix`.
 ┌─────────────────────────────────────────────┐
 │  Your project's devenv.yaml                 │
 │                                             │
+│  impure: true                               │
 │  inputs:                                    │
-│    nix-neovim: git+file:///path/to/repo     │
-│  imports:                                   │
-│    - nix-neovim                             │
+│    nixpkgs: ...                             │
 └───────────────┬─────────────────────────────┘
-                │ imports devenv.nix from nix_neovim_v2
+                │
                 ▼
 ┌─────────────────────────────────────────────┐
-│  nix_neovim_v2/devenv.nix (the module)      │
+│  Your project's devenv.nix                  │
+│                                             │
+│  imports = [                                │
+│    /path/to/nixvim/devenv.nix               │
+│  ];                                         │
+│  Can set: nv2.extraPlugins, nv2.env,        │
+│    nv2.extraInitLua, etc.                   │
+│  Plus your own: packages, languages,        │
+│    services, scripts, processes, etc.       │
+└───────────────┬─────────────────────────────┘
+                │ imports devenv.nix from nixvim
+                ▼
+┌─────────────────────────────────────────────┐
+│  nixvim/devenv.nix (the module)             │
 │                                             │
 │  Declares: options.nv2.{extraPlugins,       │
 │    extraRuntimePaths, extraInitLua, env,    │
@@ -138,16 +146,6 @@ project, devenv merges its configuration with your project's own `devenv.nix`.
 │                                             │
 │  Provides: wrapped neovim binary + nv2      │
 │    script + LSPs + formatters + linters     │
-└───────────────┬─────────────────────────────┘
-                │ merged with
-                ▼
-┌─────────────────────────────────────────────┐
-│  Your project's devenv.nix                  │
-│                                             │
-│  Can set: nv2.extraPlugins, nv2.env,        │
-│    nv2.extraInitLua, etc.                   │
-│  Plus your own: packages, languages,        │
-│    services, scripts, processes, etc.       │
 └─────────────────────────────────────────────┘
 ```
 
@@ -180,7 +178,7 @@ pollute your system -- they only exist within the project environment.
 ### The Module Option System
 
 The nv2 module exposes a set of options under the `nv2` namespace that let
-consumer projects customize the editor without modifying the nix_neovim_v2
+consumer projects customize the editor without modifying the nixvim
 repository. These options are evaluated at Nix build time and produce a
 tailored `nv2` wrapper script.
 
@@ -197,103 +195,121 @@ your project's `devenv.lock`.
 
 ## Import Methods
 
-### Local Filesystem (git+file)
+### Direct NixOS Module Import (Recommended)
+
+This is the working approach. It uses a standard NixOS-style `imports` list
+directly in your `devenv.nix`, bypassing devenv's input/import system entirely.
+
+**Requirements:** `impure: true` in `devenv.yaml` (to allow absolute path
+access during Nix evaluation).
 
 ```yaml
+# my-project/devenv.yaml
+impure: true
 inputs:
-  nix-neovim:
-    url: git+file:///home/andrew/Documents/Projects/IDE/nix_neovim_v2
-    flake: false
-imports:
-  - nix-neovim
+  nixpkgs:
+    url: github:cachix/devenv-nixpkgs/rolling
 ```
 
-**How it works:** Nix clones the git repository at the given path and copies
-the git-tracked files into the Nix store. The store path is recorded in
-`devenv.lock` with the exact commit hash.
+```nix
+# my-project/devenv.nix
+{ pkgs, ... }:
+{
+  imports = [
+    /home/andrew/Documents/Projects/nixvim/devenv.nix
+  ];
 
-**Key behaviors:**
-- Only **git-tracked, committed** files are visible. Uncommitted changes
-  are not picked up.
-- Uses the currently checked-out branch (typically `v2-lua`).
-- Fast: no network access required, copies from local disk.
-- Reproducible: locked to a specific commit in `devenv.lock`.
-
-**When to use:** Day-to-day development on your local machine. This is the
-recommended method when the nix_neovim_v2 repo lives on the same filesystem.
-
-### Local Filesystem (path)
-
-```yaml
-inputs:
-  nix-neovim:
-    url: path:/home/andrew/Documents/Projects/IDE/nix_neovim_v2
-    flake: false
-imports:
-  - nix-neovim
+  # Your project config here...
+}
 ```
 
-**How it works:** Nix copies the **entire directory** (not just git-tracked
-files) into the Nix store on every evaluation.
+**How it works:** The `imports` list in `devenv.nix` is standard NixOS module
+machinery. Nix reads the file at the absolute path and merges the module's
+options and configuration with your project's `devenv.nix`. The nixvim module
+uses relative paths (`./nvim`, `./plugins.nix`) internally, which resolve
+relative to its own location.
 
 **Key behaviors:**
-- Picks up uncommitted changes immediately -- no need to commit first.
-- Ignores `.gitignore` -- copies everything including `.devenv/`, build
-  artifacts, etc.
-- Slower: re-copies the entire directory on every `devenv shell` invocation
-  if anything changed.
-- Not reproducible: no commit hash to lock to.
+- Picks up the current state of the file on disk (including uncommitted
+  changes) -- this is useful during development.
+- No lock file entry for nixvim -- the import is not version-pinned.
+- Requires `impure: true` because Nix's pure evaluation mode forbids
+  access to absolute filesystem paths.
+- The absolute path is not portable across machines. Each developer needs
+  the nixvim repo at the same path, or must adjust the import.
 
-**When to use:** Only during active development of the nix_neovim_v2 config
-itself, when you need to test changes without committing. Switch back to
-`git+file://` once you're done iterating.
+**When to use:** Local development on your machine. This is the only
+method that reliably works for local filesystem imports as of devenv 1.11.2.
 
-### Git Repository
+**Trade-offs:**
+- Not reproducible: no commit hash lock.
+- Not portable: hardcoded absolute path.
+- `impure: true` relaxes evaluation purity for the entire devenv environment.
+  This is acceptable for development environments but means Nix cannot
+  guarantee perfect reproducibility.
+
+### Git Repository (GitHub / Remote)
+
+For sharing across machines or with teammates, push your nixvim config to
+a git host and use devenv's standard input mechanism:
 
 ```yaml
+# my-project/devenv.yaml
 inputs:
-  nix-neovim:
-    url: github:yourusername/nix_neovim_v2
+  nixpkgs:
+    url: github:cachix/devenv-nixpkgs/rolling
+  nixvim:
+    url: github:yourusername/nixvim
     flake: false
 imports:
-  - nix-neovim
+  - nixvim
 ```
 
 Or for a self-hosted git server:
 
 ```yaml
 inputs:
-  nix-neovim:
-    url: git+https://git.example.com/user/nix_neovim_v2
+  nixvim:
+    url: git+https://git.example.com/user/nixvim
     flake: false
+imports:
+  - nixvim
 ```
 
 Or pinned to a specific branch or tag:
 
 ```yaml
 inputs:
-  nix-neovim:
-    url: github:yourusername/nix_neovim_v2?ref=v2-lua
+  nixvim:
+    url: github:yourusername/nixvim?ref=main
     flake: false
 ```
 
 **How it works:** Nix fetches the repository from the remote, caches it
-locally, and locks the exact commit in `devenv.lock`.
+locally, and locks the exact commit in `devenv.lock`. devenv's auto-generated
+flake imports the `devenv.nix` from the fetched source.
 
-**When to use:** When sharing the editor config across multiple machines,
-with teammates, or in CI. This is the production-grade method.
+**Key behaviors:**
+- Fully reproducible: locked to a specific commit in `devenv.lock`.
+- Portable: any machine with network access can fetch the repo.
+- Does **not** require `impure: true`.
+- Only committed, pushed changes are visible.
+
+**When to use:** Production, CI, sharing with teammates, or when you want
+reproducible builds. This is the production-grade method.
 
 ### Updating the Import
 
-When you make changes to the nix_neovim_v2 repo (and commit them), consumer
-projects don't automatically pick them up. The commit hash is locked in
-`devenv.lock`.
+**For the direct NixOS module import:** Changes to the nixvim directory on
+disk are picked up immediately on the next `devenv shell` invocation (Nix
+re-evaluates the file each time).
 
-To update:
+**For the git repository method:** The commit hash is locked in
+`devenv.lock`. To update:
 
 ```sh
-# Update just the nix-neovim input
-devenv update nix-neovim
+# Update just the nixvim input
+devenv update nixvim
 
 # Or update all inputs
 devenv update
@@ -301,6 +317,23 @@ devenv update
 
 This fetches the latest commit, updates `devenv.lock`, and the next
 `devenv shell` invocation will use the new version.
+
+### Known Issues: devenv Input Mechanisms {#known-issues-devenv-input-mechanisms}
+
+The following approaches for local filesystem imports were tested and found
+to be broken as of devenv 1.11.2 (Nix 2.30.4):
+
+| Approach | Issue |
+|----------|-------|
+| `git+file:///path` input | **Nix SIGABRT crash** -- `CanonPath::removePrefix` assertion failure in Nix 2.30.4. This is a bug in Nix's C++ path handling for local git repos. |
+| `path:/path` input + `flake: false` | Lock resolves but evaluation fails: `'nixvim' is too short to be a valid store path`. devenv's `importModule` function coerces the input to a store path, but non-flake `path:` inputs aren't copied to the store. |
+| `path:/path` input + `flake: true` | Nix tries to find `.devenv.flake.nix` inside the nixvim source, which doesn't exist. |
+| `../nixvim` relative import | devenv CLI rejects paths that resolve outside the git repository. |
+| Direct NixOS `imports` without `impure: true` | Fails with `access to absolute path is forbidden in pure evaluation mode`. |
+
+The `github:` and `git+https:` input methods work correctly because they
+use Nix's archive/remote fetching rather than the buggy local git path
+handling.
 
 ---
 
@@ -650,20 +683,20 @@ my-plugin.nvim/
 
 ```yaml
 # my-plugin.nvim/devenv.yaml
+impure: true
 inputs:
   nixpkgs:
-    url: github:NixOS/nixpkgs/nixos-unstable
-  nix-neovim:
-    url: git+file:///home/andrew/Documents/Projects/IDE/nix_neovim_v2
-    flake: false
-imports:
-  - nix-neovim
+    url: github:cachix/devenv-nixpkgs/rolling
 ```
 
 ```nix
 # my-plugin.nvim/devenv.nix
 { pkgs, ... }:
 {
+  imports = [
+    /home/andrew/Documents/Projects/nixvim/devenv.nix
+  ];
+
   # Add the current project root to Neovim's runtimepath.
   # builtins.toString ./. resolves to the project directory.
   nv2.extraRuntimePaths = [ (builtins.toString ./.) ];
@@ -894,14 +927,16 @@ Verify your runtimepath inside Neovim:
 :echo &runtimepath
 ```
 
-#### Changes to nix_neovim_v2 aren't showing up
+#### Changes to nixvim aren't showing up
 
-If you use `git+file://`, only committed files are visible. Commit your
-changes in the nix_neovim_v2 repo, then run `devenv update nix-neovim` in
-the consumer project.
+If you use the **direct NixOS module import** (recommended), changes to
+the nixvim directory on disk are picked up on the next `devenv shell`
+invocation. If they still don't appear, try removing `.devenv/` and
+retrying.
 
-If you use `path:`, changes should be immediate, but Nix may cache the
-evaluation. Try `devenv shell` again or remove `.devenv/` and retry.
+If you use the **github: input** method, only committed and pushed files
+are visible. Commit your changes in the nixvim repo, push them, then run
+`devenv update nixvim` in the consumer project.
 
 #### nv2.extraInitLua changes require devenv rebuild
 

@@ -1,4 +1,5 @@
 # yaml-language-server: $schema=https://devenv.sh/devenv.schema.json
+impure: true
 inputs:
   nixpkgs:
     url: github:cachix/devenv-nixpkgs/rolling
@@ -8,12 +9,6 @@ inputs:
     url: github:nlewo/nix2container
   mk-shell-bin:
     url: github:rrbutani/nix-mk-shell-bin
-  nixvim:
-    url: git+file:///home/andrew/Documents/Projects/nixvim
-    flake: false
-
-imports:
-  - nixvim
 
 
 # If you're using non-OSS software, you can set allowUnfree to true.
