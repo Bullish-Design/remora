@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import logging
 import time
 import uuid
@@ -70,6 +71,17 @@ class RemoraLanguageServer(LanguageServer):
         self.send_notification("$/remora/event", event.model_dump())
         return event
 
+    def shutdown(self) -> None:
+        """Cleanly close all persistent connections."""
+        try:
+            self.db.close()
+        except Exception:
+            logger.warning("Failed to close RemoraDB", exc_info=True)
+        try:
+            self.graph.close()
+        except Exception:
+            logger.warning("Failed to close LazyGraph", exc_info=True)
+
     async def discover_tools_for_agent(self, agent: ASTAgentNode) -> list[ToolSchema]:
         try:
             from remora.core.config import load_config
@@ -127,3 +139,5 @@ def register_handlers() -> None:
 
 
 register_handlers()
+
+atexit.register(server.shutdown)
