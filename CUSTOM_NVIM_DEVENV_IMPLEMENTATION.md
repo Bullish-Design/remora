@@ -1,14 +1,14 @@
 # Custom Neovim Devenv Implementation Guide
 
-This guide details the step-by-step instructions for refactoring the `remora_demo` to utilize the Custom Neovim (`nix_neovim_v2`) environment via `devenv`. This shift replaces the manual bootstrap scripts (like `start.sh` and `remora_nvim_startup.lua`) with a declarative, reproducible Nix-managed environment.
+This guide details the step-by-step instructions for refactoring the `remora_demo` to utilize the Custom Neovim (`nixvim`) environment via `devenv`. This shift replaces the manual bootstrap scripts (like `start.sh` and `remora_nvim_startup.lua`) with a declarative, reproducible Nix-managed environment.
 
 ## Goal Description
 
-Currently, the `remora_demo` relies on a shell script (`start.sh`) to start the Python LSP and instruct the user to manually alter the Neovim runtimepath. By integrating with the custom `nix_neovim_v2` configuration via `devenv`, we can automatically configure `nv2` to include the `remora_demo` plugin code, pre-install all necessary Python packages (like `pygls`, `lsprotocol`, and `tree-sitter`), and automatically set up the Remora LSP server directly within the `devenv` shell environment.
+Currently, the `remora_demo` relies on a shell script (`start.sh`) to start the Python LSP and instruct the user to manually alter the Neovim runtimepath. By integrating with the custom `nixvim` configuration via `devenv`, we can automatically configure `nixvim` to include the `remora_demo` plugin code, pre-install all necessary Python packages (like `pygls`, `lsprotocol`, and `tree-sitter`), and automatically set up the Remora LSP server directly within the `devenv` shell environment.
 
 ## Phase 1: Configuring `devenv.yaml`
 
-We must first declare the `nix_neovim_v2` flake as an input and import it. 
+We must first declare the `nixvim` flake as an input and import it. 
 
 ### Modify `devenv.yaml`
 
@@ -22,12 +22,12 @@ We must first declare the `nix_neovim_v2` flake as an input and import it.
       url: github:nlewo/nix2container
     mk-shell-bin:
       url: github:rrbutani/nix-mk-shell-bin
-+   nix-neovim:
-+     url: git+file:///home/andrew/Documents/Projects/IDE/nix_neovim_v2
++   nixvim:
++     url: git+file:///home/andrew/Documents/Projects/nixvim
 +     flake: false
 +
 + imports:
-+   - nix-neovim
++   - nixvim
 ```
 > [!NOTE]
 > Since this project runs on your NixOS Linux environment implicitly inside WSL/Linux despite the Windows system, we utilize the exact local `git+file` URL as recommended in `CUSTOM_NVIM_DEVENV_GUIDE.md`.
@@ -56,7 +56,7 @@ Update `devenv.nix` to include `nv2` module settings and inject the Neovim-speci
       };
 
 +   # Custom Neovim Integration
-+   nv2 = {
++   nixvim = {
 +     # Add the remora_demo plugin directory to the runtimepath
 +     extraRuntimePaths = [ 
 +       (builtins.toString ./remora_demo/nvim) 
@@ -80,7 +80,7 @@ Update `devenv.nix` to include `nv2` module settings and inject the Neovim-speci
 +           root_markers = { ".remora", ".git" },
 +           prefix = "<leader>r"
 +         })
-+         vim.notify("[Remora] nv2 initialized remora_demo plugin", vim.log.levels.INFO)
++         vim.notify("[Remora] nixvim initialized remora_demo plugin", vim.log.levels.INFO)
 +       else
 +         vim.notify("[Remora] Failed to load remora_nvim plugin from devenv runtimepath", vim.log.levels.ERROR)
 +       end
@@ -96,10 +96,10 @@ Update `devenv.nix` to include `nv2` module settings and inject the Neovim-speci
 
 ## Phase 3: Cleanup Demo Artifacts
 
-Since `nv2` fully handles the lifecycle of the editor and its runtime paths, we no longer need the manual bash script bootstrap method.
+Since `nixvim` fully handles the lifecycle of the editor and its runtime paths, we no longer need the manual bash script bootstrap method.
 
 1. **Delete** `remora_demo/start.sh` - It is obsolete. `devenv` replaces the dependency checking, and the LSP should be spawned by the editor, not as a background process holding a PID.
-2. **Delete** `remora_demo/remora_nvim_startup.lua` - The lua initialization logic has been seamlessly integrated directly into the `nv2.extraInitLua` configuration inside `devenv.nix`.
+2. **Delete** `remora_demo/remora_nvim_startup.lua` - The lua initialization logic has been seamlessly integrated directly into the `nixvim.extraInitLua` configuration inside `devenv.nix`.
 
 ## Phase 4: Validation & Execution
 
@@ -111,22 +111,22 @@ Since `nv2` fully handles the lifecycle of the editor and its runtime paths, we 
    cd /path/to/remora
    devenv shell
    ```
-   *Expected outcome:* The environment processes updates to `devenv.yaml`, reads the Nix directives, and downloads the `nix_neovim_v2` binaries seamlessly.
+   *Expected outcome:* The environment processes updates to `devenv.yaml`, reads the Nix directives, and downloads the `nixvim` binaries seamlessly.
 
 
-2. **Launch Custom Neovim (`nv2`):**
-   Execute `nv2` to launch the custom editor.
+2. **Launch Custom Neovim (`nixvim`):**
+   Execute `nixvim` to launch the custom editor.
    ```bash
-   nv2
+   nixvim
    ```
-   *Expected outcome:* Neovim successfully opens. The notification `[Remora] nv2 initialized remora_demo plugin` alerts confirming that `remora_nvim.setup()` ran successfully.
+   *Expected outcome:* Neovim successfully opens. The notification `[Remora] nixvim initialized remora_demo plugin` alerts confirming that `remora_nvim.setup()` ran successfully.
 
 
 3. **Test LSP Connectivity:**
-   Open any python file in the project (e.g., `nv2 src/remora/core.py`) to trigger the LSP start based on the `python` filetype configuration. Then check the attached LSPs:
+   Open any python file in the project (e.g., `nixvim src/remora/core.py`) to trigger the LSP start based on the `python` filetype configuration. Then check the attached LSPs:
    ```vim
    :LspInfo
    ```
    *Expected outcome:* You should see an active client connected to the buffer executing the command: `python -m remora_demo.lsp.server`.
 
-By completing these phases, the codebase becomes closely intertwined with your robust `nv2` environment, removing manual configuration complexities and empowering effortless demo evaluation within `devenv`.
+By completing these phases, the codebase becomes closely intertwined with your robust `nixvim` environment, removing manual configuration complexities and empowering effortless demo evaluation within `devenv`.
