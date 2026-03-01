@@ -94,6 +94,7 @@ class AgentRunner:
 
         try:
             async for agent_id, event_id, event in self._event_store.get_triggers():
+                logger.info(f"AgentRunner: Received trigger for {agent_id} (event_id={event_id})")
                 if not self._running:
                     break
 
@@ -106,6 +107,7 @@ class AgentRunner:
                     logger.warning(f"Skipping trigger for {agent_id} due to depth limit")
                     continue
 
+                logger.info(f"AgentRunner: Processing trigger for {agent_id}")
                 task = asyncio.create_task(self._process_trigger(agent_id, event_id, event, correlation_id))
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)

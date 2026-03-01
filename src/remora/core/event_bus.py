@@ -35,6 +35,10 @@ class EventBus:
 
     async def emit(self, event: StructuredEvent | RemoraEvent) -> None:
         event_type = type(event)
+        event_name = event_type.__name__
+        agent_id = getattr(event, "agent_id", None) or getattr(event, "to_agent", None)
+        logger.info(f"EventBus.emit: {event_name} agent_id={agent_id}")
+
         handlers: list[EventHandler] = []
 
         for registered_type, registered_handlers in self._handlers.items():
@@ -42,6 +46,7 @@ class EventBus:
                 handlers.extend(registered_handlers)
 
         handlers.extend(self._all_handlers)
+        logger.info(f"EventBus.emit: {len(handlers)} handlers for {event_name}")
 
         for handler in handlers:
             try:

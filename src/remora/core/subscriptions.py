@@ -242,6 +242,9 @@ class SubscriptionRegistry:
 
     async def get_matching_agents(self, event: RemoraEvent) -> list[str]:
         """Get all agent IDs whose subscriptions match the event."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         if self._conn is None:
             await self.initialize()
 
@@ -251,12 +254,19 @@ class SubscriptionRegistry:
 
         rows = await asyncio.to_thread(_fetch, self._conn)
 
+        event_to_agent = getattr(event, "to_agent", None)
+        logger.info(f"Matching event to_agent={event_to_agent} against {len(rows)} subscriptions")
+
         matching_agents = []
         seen_agents = set()
 
         for row in rows:
             pattern_data = json.loads(row["pattern_json"])
             pattern = SubscriptionPattern(**pattern_data)
+
+            # Log subscriptions that have to_agent matching
+            if pattern.to_agent and pattern.to_agent == event_to_agent:
+                logger.info(f"  Found matching subscription: agent={row['agent_id']} pattern.to_agent={pattern.to_agent}")
 
             if pattern.matches(event):
                 agent_id = row["agent_id"]
