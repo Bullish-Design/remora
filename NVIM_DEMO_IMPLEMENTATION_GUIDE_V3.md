@@ -243,7 +243,7 @@ def compute_agent_id(node_type: str, filename_stem: str, start_line: int) -> str
     return f"{node_type}_{filename_stem}_{start_line}"
 ```
 
-This is simpler but loses some uniqueness guarantees.
+This is simpler but loses some uniqueness guarantees. Lets *not* use this.
 
 ### 3.2 Create AgentState Files in buffer.opened (CRITICAL)
 
