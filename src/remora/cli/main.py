@@ -27,9 +27,25 @@ def swarm() -> None:
 @swarm.command("start")
 @click.option("--project-root", type=click.Path(file_okay=False, resolve_path=True))
 @click.option("--config", "config_path", type=click.Path(dir_okay=False, resolve_path=True))
-@click.option("--nvim/--no-nvim", default=False, help="Start Neovim server")
-def swarm_start(project_root: str | None, config_path: str | None, nvim: bool) -> None:
+@click.option("--nvim", is_flag=True, help="Start JSON-RPC NvimServer")
+@click.option(
+    "--lsp",
+    is_flag=True,
+    help="Start LSP server for Neovim integration",
+)
+def swarm_start(
+    project_root: str | None,
+    config_path: str | None,
+    nvim: bool,
+    lsp: bool,
+) -> None:
     """Start the reactive swarm (reconciler + runner)."""
+    if lsp:
+        from remora.lsp.__main__ import main as lsp_main
+
+        lsp_main()
+        return
+
     try:
         config = load_config(config_path)
     except ConfigError as exc:
@@ -190,9 +206,7 @@ def swarm_list(project_root: str | None) -> None:
         else:
             click.echo(f"Agents ({len(agents)}):")
             for agent in agents:
-                click.echo(
-                    f"  {agent.agent_id[:16]}... | {agent.node_type} | {agent.file_path} | {agent.status}"
-                )
+                click.echo(f"  {agent.agent_id[:16]}... | {agent.node_type} | {agent.file_path} | {agent.status}")
 
         await swarm_state.close()
 
