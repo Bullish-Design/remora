@@ -45,6 +45,7 @@ class Config:
 
     bundle_root: str = "agents"
     bundle_mapping: dict[str, str] = field(default_factory=dict)
+    bundle_mapping_tools: dict[str, str] = field(default_factory=dict)
 
     model_base_url: str = "http://localhost:8000/v1"
     model_default: str = "Qwen/Qwen3-4B"
@@ -132,6 +133,7 @@ def serialize_config(config: Config) -> dict[str, Any]:
         "discovery_max_workers": config.discovery_max_workers,
         "bundle_root": config.bundle_root,
         "bundle_mapping": normalize(config.bundle_mapping),
+        "bundle_mapping_tools": normalize(config.bundle_mapping_tools),
         "model_base_url": config.model_base_url,
         "model_default": config.model_default,
         "model_api_key": config.model_api_key,

@@ -88,15 +88,17 @@ function M.on_cursor_moved()
     local file_path = vim.api.nvim_buf_get_name(bufnr)
     local file_name = vim.fn.fnamemodify(file_path, ":t:r")
 
-    local node_type = "file"
+    local ts_node_type = "file"
     local start_line = 1
 
     if target_node then
-        node_type = target_node:type()
+        ts_node_type = target_node:type()
         start_line, _ = target_node:start()
         start_line = start_line + 1
     end
 
+    -- Normalize the type to match server format (function, class, etc.)
+    local node_type = M.normalize_node_type(ts_node_type)
     local cache_key = string.format("%s_%s_%d", node_type, file_name, start_line)
     local agent_id = M.agent_id_cache[cache_key] or cache_key
 
@@ -116,6 +118,19 @@ function M.is_agent_node_type(node_type)
         "decorated_definition",
     }
     return vim.tbl_contains(agent_types, node_type)
+end
+
+-- Normalize treesitter node type to server node type
+-- Server uses: function, method, class, file
+-- Treesitter uses: function_definition, class_definition, etc.
+function M.normalize_node_type(ts_type)
+    local type_map = {
+        ["function_definition"] = "function",
+        ["async_function_definition"] = "function",
+        ["class_definition"] = "class",
+        ["decorated_definition"] = "function",  -- decorated functions/methods
+    }
+    return type_map[ts_type] or ts_type
 end
 
 function M.go_to_parent()
