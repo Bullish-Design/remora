@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 
+from lsprotocol import types as lsp
+
 from remora.lsp.server import server
 from remora.lsp.runner import AgentRunner
 
@@ -19,9 +21,9 @@ def main(
     runner = AgentRunner(server=server)
     server.runner = runner
 
-    @server.thread()
-    async def _start_runner() -> None:
-        await runner.run_forever()
+    @server.feature(lsp.INITIALIZED)
+    async def _on_initialized(params: lsp.InitializedParams) -> None:
+        asyncio.ensure_future(runner.run_forever())
 
     server.start_io()
 
