@@ -7,8 +7,15 @@ from remora.lsp.server import server
 from remora.lsp.runner import AgentRunner
 
 
-def main() -> None:
+def main(
+    event_store=None,
+    subscriptions=None,
+    swarm_state=None,
+) -> None:
     """Start the Remora LSP server with agent runner."""
+    server.event_store = event_store
+    server.subscriptions = subscriptions
+    server.swarm_state = swarm_state
     runner = AgentRunner(server=server)
     server.runner = runner
 

@@ -1,13 +1,20 @@
-# src/remora/lsp/models.py
 from __future__ import annotations
 
+import difflib
 import hashlib
 import random
 import string
-import difflib
-from pydantic import BaseModel, Field, computed_field, model_validator, ConfigDict
-from lsprotocol import types as lsp
 from typing import Literal
+
+from lsprotocol import types as lsp
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+
+from remora.core.events import (
+    AgentCompleteEvent as CoreAgentCompleteEvent,
+    AgentErrorEvent as CoreAgentErrorEvent,
+    AgentMessageEvent as CoreAgentMessageEvent,
+    ManualTriggerEvent as CoreManualTriggerEvent,
+)
 
 
 def generate_id() -> str:
@@ -204,7 +211,7 @@ class ASTAgentNode(BaseModel):
 1. You may ONLY edit your own body using `rewrite_self()`.
 2. To request changes elsewhere, use `message_node(target_id, request)`.
 3. Your parent can edit you. You cannot edit your parent. You may *request* your parent edit themselves (add a parameter/attribute, maybe) but they can decline.
-4. All edits are proposals\u2014the human must approve before they apply.
+4. All edits are proposals—the human must approve before they apply.
 """
 
     @classmethod
@@ -335,6 +342,15 @@ class HumanChatEvent(AgentEvent):
         values.setdefault("summary", f"Human message to {values.get('to_agent', '')}")
         return values
 
+    def to_core_event(self):
+        return CoreAgentMessageEvent(
+            from_agent="human",
+            to_agent=self.to_agent,
+            content=self.message,
+            correlation_id=self.correlation_id or None,
+            timestamp=self.timestamp,
+        )
+
 
 class AgentMessageEvent(AgentEvent):
     from_agent: str = ""
@@ -348,6 +364,15 @@ class AgentMessageEvent(AgentEvent):
         values.setdefault("summary", f"Message from {values.get('from_agent', '')} to {values.get('to_agent', '')}")
         return values
 
+    def to_core_event(self):
+        return CoreAgentMessageEvent(
+            from_agent=self.from_agent,
+            to_agent=self.to_agent,
+            content=self.message,
+            correlation_id=self.correlation_id or None,
+            timestamp=self.timestamp,
+        )
+
 
 class RewriteProposalEvent(AgentEvent):
     proposal_id: str = ""
@@ -360,6 +385,13 @@ class RewriteProposalEvent(AgentEvent):
         values.setdefault("summary", f"Rewrite proposal from {values.get('agent_id', '')}")
         return values
 
+    def to_core_event(self):
+        return CoreManualTriggerEvent(
+            to_agent=self.agent_id or "",
+            reason=self.summary,
+            timestamp=self.timestamp,
+        )
+
 
 class RewriteAppliedEvent(AgentEvent):
     agent_id: str = ""
@@ -371,6 +403,15 @@ class RewriteAppliedEvent(AgentEvent):
         values.setdefault("event_type", "RewriteAppliedEvent")
         values.setdefault("summary", f"Proposal {values.get('proposal_id', '')} accepted")
         return values
+
+    def to_core_event(self):
+        return CoreAgentCompleteEvent(
+            graph_id=self.correlation_id or "lsp",
+            agent_id=self.agent_id or "",
+            result_summary=self.summary,
+            response=self.proposal_id,
+            timestamp=self.timestamp,
+        )
 
 
 class RewriteRejectedEvent(AgentEvent):
@@ -385,6 +426,14 @@ class RewriteRejectedEvent(AgentEvent):
         values.setdefault("summary", "Proposal rejected with feedback")
         return values
 
+    def to_core_event(self):
+        return CoreAgentErrorEvent(
+            graph_id=self.correlation_id or "lsp",
+            agent_id=self.agent_id or "",
+            error=self.feedback or self.summary,
+            timestamp=self.timestamp,
+        )
+
 
 class AgentErrorEvent(AgentEvent):
     error: str = ""
@@ -395,3 +444,23 @@ class AgentErrorEvent(AgentEvent):
         values.setdefault("event_type", "AgentErrorEvent")
         values.setdefault("summary", f"Error: {values.get('error', '')[:50]}")
         return values
+
+    def to_core_event(self):
+        return CoreAgentErrorEvent(
+            graph_id=self.correlation_id or "lsp",
+            agent_id=self.agent_id or "",
+            error=self.error,
+            timestamp=self.timestamp,
+        )
+
+
+# Resolve forward references explicitly for Pydantic
+ASTAgentNode.model_rebuild()
+RewriteProposal.model_rebuild()
+AgentEvent.model_rebuild()
+HumanChatEvent.model_rebuild()
+AgentMessageEvent.model_rebuild()
+RewriteProposalEvent.model_rebuild()
+RewriteAppliedEvent.model_rebuild()
+RewriteRejectedEvent.model_rebuild()
+AgentErrorEvent.model_rebuild()

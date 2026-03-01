@@ -13,7 +13,11 @@ try:
 except ImportError:
     TREESITTER_AVAILABLE = False
 
+import logging
+
 from remora.lsp.models import ASTAgentNode, generate_id
+
+logger = logging.getLogger("remora.lsp.watcher")
 
 
 class ASTWatcher:
@@ -22,6 +26,7 @@ class ASTWatcher:
             self.parser = Parser(Language(py_language()))
         else:
             self.parser = None
+        self._fallback_warned = False
 
     def parse_and_inject_ids(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[ASTAgentNode]:
         if not TREESITTER_AVAILABLE:
@@ -29,7 +34,7 @@ class ASTWatcher:
 
         tree = self.parser.parse(bytes(text, "utf8"))
 
-        nodes = []
+        nodes: list[ASTAgentNode] = []
         old_by_key = {(n["name"], n["node_type"]): n for n in (old_nodes or [])}
 
         self._find_definitions(tree.root_node, text, uri, nodes, old_by_key)
@@ -131,8 +136,16 @@ class ASTWatcher:
             self._find_definitions(child, text, uri, nodes, old_by_key)
 
     def _parse_fallback(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[ASTAgentNode]:
-        nodes = []
+        if not self._fallback_warned:
+            logger.warning(
+                "tree-sitter not available; using fallback parser with approximate ranges"
+            )
+            self._fallback_warned = True
+
+        nodes: list[ASTAgentNode] = []
         old_by_key = {(n["name"], n["node_type"]): n for n in (old_nodes or [])}
+        lines = text.split("\n")
+        total_lines = len(lines)
 
         for match in re.finditer(r"^(\s*)(def|class)\s+(\w+)", text, re.MULTILINE):
             indent = match.group(1)
@@ -154,17 +167,8 @@ class ASTWatcher:
             else:
                 remora_id = generate_id()
 
-            lines = text.split("\n")
             start_line = line_num
-            end_line = line_num
-            for i in range(line_num - 1, len(lines)):
-                if lines[i].strip() and not lines[i].startswith(" ") and not lines[i].startswith("\t"):
-                    if i > line_num - 1:
-                        end_line = i
-                        break
-            else:
-                end_line = len(lines)
-
+            end_line = total_lines
             source = "\n".join(lines[start_line - 1 : end_line])
 
             nodes.append(

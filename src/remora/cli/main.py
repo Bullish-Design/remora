@@ -40,16 +40,66 @@ def swarm_start(
     lsp: bool,
 ) -> None:
     """Start the reactive swarm (reconciler + runner)."""
-    if lsp:
-        from remora.lsp.__main__ import main as lsp_main
-
-        lsp_main()
-        return
-
     try:
         config = load_config(config_path)
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
+
+    if lsp:
+        async def _prepare_lsp():
+            from remora.core.event_bus import EventBus
+            from remora.core.event_store import EventStore
+            from remora.core.reconciler import reconcile_on_startup
+            from remora.core.subscriptions import SubscriptionRegistry
+            from remora.core.swarm_state import SwarmState
+
+            root = Path(project_root) if project_root else Path.cwd()
+            swarm_path = root / ".remora"
+            event_store_path = swarm_path / "events" / "events.db"
+            subscriptions_path = swarm_path / "subscriptions.db"
+            swarm_state_path = swarm_path / "swarm_state.db"
+
+            event_bus = EventBus()
+            subscriptions = SubscriptionRegistry(subscriptions_path)
+            swarm_state = SwarmState(swarm_state_path)
+            event_store = EventStore(
+                event_store_path,
+                subscriptions=subscriptions,
+                event_bus=event_bus,
+            )
+
+            await event_store.initialize()
+            await subscriptions.initialize()
+            await swarm_state.initialize()
+
+            event_store.set_subscriptions(subscriptions)
+            event_store.set_event_bus(event_bus)
+
+            click.echo("Reconciling swarm...")
+            swarm_id = (
+                getattr(config, "swarm_id", "swarm") if hasattr(config, "__dataclass_fields__") else "swarm"
+            )
+            result = await reconcile_on_startup(
+                root,
+                swarm_state,
+                subscriptions,
+                event_store=event_store,
+                swarm_id=swarm_id,
+            )
+            click.echo(f"Swarm reconciled: {result['created']} new, {result['orphaned']} orphaned, {result['total']} total")
+
+            return event_store, subscriptions, swarm_state
+
+        event_store, subscriptions, swarm_state = asyncio.run(_prepare_lsp())
+
+        from remora.lsp.__main__ import main as lsp_main
+
+        lsp_main(
+            event_store=event_store,
+            subscriptions=subscriptions,
+            swarm_state=swarm_state,
+        )
+        return
 
     root = Path(project_root) if project_root else Path.cwd()
 

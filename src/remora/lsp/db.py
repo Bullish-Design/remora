@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import threading
 import time
 from pathlib import Path
 from typing import ParamSpec, TypeVar
@@ -21,7 +22,11 @@ def async_db(fn):
 
     @functools.wraps(fn)
     async def wrapper(self, *args: P.args, **kwargs: P.kwargs) -> R:
-        return await asyncio.to_thread(fn, self, *args, **kwargs)
+        def _locked():
+            with self._lock:
+                return fn(self, *args, **kwargs)
+
+        return await asyncio.to_thread(_locked)
 
     return wrapper
 
@@ -34,6 +39,7 @@ class RemoraDB:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
         self._init_schema()
 
     def _init_schema(self):

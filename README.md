@@ -60,3 +60,9 @@ pip install "remora[full]"      # Everything included
 - `docs/ARCHITECTURE.md` — Swarm architecture and data flow
 - `docs/CONFIGURATION.md` — Configuration reference
 - `HOW_TO_USE_REMORA.md` — Detailed usage guide
+
+## Neovim Integration
+
+The bundled Neovim LSP client under `src/remora/lsp/nvim` now requires Neovim 0.11+ and the
+`nui-components.nvim` plugin (in addition to `nui.nvim`). Install both plugins so the reactive
+Remora panel can mount using the `nui-components` renderer.

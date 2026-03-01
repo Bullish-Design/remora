@@ -1,29 +1,25 @@
-# src/remora/lsp/runner.py
 from __future__ import annotations
 
 import asyncio
-import importlib
-import json
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, ConfigDict
 
+from remora.lsp.extensions import load_extensions_from_disk
 from remora.lsp.models import (
-    ASTAgentNode,
-    RewriteProposal,
-    AgentEvent,
-    HumanChatEvent,
-    AgentMessageEvent,
-    RewriteProposalEvent,
     AgentErrorEvent,
-    ToolSchema,
+    AgentEvent,
+    AgentMessageEvent,
+    ASTAgentNode,
+    HumanChatEvent,
+    RewriteProposal,
+    RewriteProposalEvent,
     generate_id,
 )
 
 if TYPE_CHECKING:
-    from remora.lsp.server import RemoraLanguageServer
     from remora.core.swarm_executor import SwarmExecutor
+    from remora.lsp.server import RemoraLanguageServer
 
 
 MAX_CHAIN_DEPTH = 10
@@ -45,14 +41,15 @@ class MockLLMClient:
         return MockResponse()
 
 
-class AgentRunner(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+class AgentRunner:
+    """Asynchronous agent execution coordinator for the Remora LSP server."""
 
-    server: "RemoraLanguageServer"
-    llm: MockLLMClient = Field(default_factory=MockLLMClient)
-    executor: "SwarmExecutor | None" = None
-    queue: asyncio.Queue = Field(default_factory=asyncio.Queue)
-    _running: bool = False
+    def __init__(self, server: "RemoraLanguageServer") -> None:
+        self.server = server
+        self.llm = MockLLMClient()
+        self.executor: "SwarmExecutor | None" = None
+        self.queue: asyncio.Queue[Trigger] = asyncio.Queue()
+        self._running = False
 
     async def run_forever(self) -> None:
         self._running = True
@@ -79,7 +76,9 @@ class AgentRunner(BaseModel):
     async def emit_error(self, agent_id: str, error: str, correlation_id: str) -> None:
         from remora.lsp.server import emit_event
 
-        await emit_event(AgentErrorEvent(agent_id=agent_id, error=error, correlation_id=correlation_id))
+        await emit_event(
+            AgentErrorEvent(agent_id=agent_id, error=error, correlation_id=correlation_id, timestamp=0.0)
+        )
 
     async def execute_turn(self, trigger: Trigger) -> None:
         from remora.lsp.server import emit_event, refresh_code_lenses
@@ -93,7 +92,7 @@ class AgentRunner(BaseModel):
 
         node = await self.server.db.get_node(agent_id)
         if not node:
-            await self_id, "Node not found", correlation.emit_error(agent_id)
+            await self.emit_error(agent_id, "Node not found", correlation_id)
             return
 
         try:
@@ -176,7 +175,7 @@ class AgentRunner(BaseModel):
                             "source": target.get("source_code", ""),
                             "file": target.get("file_path", ""),
                         }
-                        # Would need to add to messages - this is handled in real implementation
+                        # Currently not used, but left for future integrations.
 
                 case _:
                     await self.execute_extension_tool(agent, tool_name, args, correlation_id)
@@ -202,7 +201,6 @@ class AgentRunner(BaseModel):
         await self.server.db.store_proposal(proposal_id, agent.remora_id, agent.source_code, new_source, proposal.diff)
 
         await publish_diagnostics(agent.file_path, [proposal])
-
         await refresh_code_lenses()
 
         await emit_event(
@@ -217,10 +215,7 @@ class AgentRunner(BaseModel):
     async def message_node(self, from_id: str, to_id: str, message: str, correlation_id: str) -> None:
         from remora.lsp.server import emit_event
 
-        await emit_event(
-            AgentMessageEvent(from_agent=from_id, to_agent=to_id, message=message, correlation_id=correlation_id)
-        )
-
+        await emit_event(AgentMessageEvent(from_agent=from_id, to_agent=to_id, message=message, correlation_id=correlation_id))
         await self.trigger(to_id, correlation_id)
 
     async def refresh_code_lens(self, agent_id: str) -> None:
@@ -228,7 +223,6 @@ class AgentRunner(BaseModel):
 
         node = await self.server.db.get_node(agent_id)
         if node:
-            agent = ASTAgentNode(**node)
             await refresh_code_lenses()
 
     def get_agent_tools(self, agent: ASTAgentNode) -> list[dict]:
@@ -311,46 +305,6 @@ class AgentRunner(BaseModel):
                 correlation_id=correlation_id,
                 summary=f"Tool {tool_name} executed",
                 timestamp=0.0,
+                payload={"tool_name": tool_name, "params": params},
             )
         )
-
-
-def load_extensions_from_disk() -> list:
-    extensions = []
-    models_dir = Path(".remora/models")
-
-    if not models_dir.exists():
-        return extensions
-
-    for py_file in models_dir.glob("*.py"):
-        try:
-            spec = importlib.util.spec_from_file_location(py_file.stem, py_file)
-            if spec and spec.loader:
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-
-                for name, obj in module.__dict__.items():
-                    if isinstance(obj, type) and issubclass(obj, ExtensionNode) and obj is not ExtensionNode:
-                        extensions.append(obj)
-        except Exception:
-            pass
-
-    return extensions
-
-
-class ExtensionNode(BaseModel):
-    model_config = ConfigDict(frozen=False)
-
-    @classmethod
-    def matches(cls, node_type: str, name: str) -> bool:
-        return False
-
-    @property
-    def system_prompt(self) -> str:
-        return ""
-
-    def get_workspaces(self) -> str:
-        return ""
-
-    def get_tool_schemas(self) -> list[ToolSchema]:
-        return []

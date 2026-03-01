@@ -9,11 +9,19 @@ M.panel = panel
 function M.setup(opts)
     opts = opts or {}
 
+    if not vim.lsp or not vim.lsp.config then
+        vim.notify(
+            "[Remora] Neovim 0.11+ required for LSP integration",
+            vim.log.levels.ERROR
+        )
+        return
+    end
+
     vim.lsp.config["remora"] = {
-        cmd = { "remora-lsp" },
-        filetypes = { "python" },
-        root_markers = { ".remora", ".git" },
-        settings = {},
+        cmd = opts.cmd or { "remora-lsp" },
+        filetypes = opts.filetypes or { "python" },
+        root_markers = opts.root_markers or { ".remora", ".git" },
+        settings = opts.settings or {},
     }
 
     vim.lsp.enable("remora")
