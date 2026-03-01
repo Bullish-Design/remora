@@ -32,6 +32,8 @@ dependencies = [
   "structured-agents[grammar,vllm]>=0.3",
   "openai>=1.0",
   "fastapi>=0.133.1",
+  "pygls",
+  "lsprotocol",
 ]
 
 [project.optional-dependencies]
