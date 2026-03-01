@@ -174,7 +174,7 @@ class AgentRunner:
             try:
                 await self._execute_turn(agent_id, event)
             except Exception as e:
-                logger.error(f"Error processing trigger for {agent_id}: {e}")
+                logger.exception(f"Error processing trigger for {agent_id}: {e}")
                 await self._emit_error(agent_id, str(e))
             finally:
                 key = f"{agent_id}:{correlation_id}"
@@ -226,15 +226,16 @@ class AgentRunner:
             save_agent_state(state_path, state)
 
             if self._event_bus:
-                await self._event_bus.emit(
-                    AgentCompleteEvent(
-                        graph_id=self._swarm_id,
-                        agent_id=agent_id,
-                        result_summary=str(result)[:200] if result else "",
-                    )
+                complete_event = AgentCompleteEvent(
+                    graph_id=self._swarm_id,
+                    agent_id=agent_id,
+                    result_summary=str(result)[:200] if result else "",
                 )
+                logger.info(f"Emitting AgentCompleteEvent for {agent_id}")
+                await self._event_bus.emit(complete_event)
 
         except Exception as e:
+            logger.exception(f"Error executing agent {agent_id}: {e}")
             save_agent_state(state_path, state)
 
             if self._event_bus:

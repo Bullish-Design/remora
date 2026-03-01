@@ -1,1 +1,0 @@
-{"agent_id": "489d85f15b14c9b1", "node_type": "function", "name": "read_file", "full_name": "function:read_file", "file_path": "src/remora/core/chat.py", "parent_id": null, "range": [215, 216], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.4971905}

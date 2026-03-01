@@ -1,1 +1,0 @@
-{"agent_id": "ec4869eb12374a34", "node_type": "method", "name": "get_swarm_state", "full_name": "method:get_swarm_state", "file_path": "src/remora/service/api.py", "parent_id": null, "range": [164, 165], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319186.1698263}

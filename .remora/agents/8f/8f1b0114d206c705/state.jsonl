@@ -1,1 +1,0 @@
-{"agent_id": "8f1b0114d206c705", "node_type": "class", "name": "AgentRunner", "full_name": "class:AgentRunner", "file_path": "src/remora/core/agent_runner.py", "parent_id": null, "range": [45, 270], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319186.0162454}

@@ -129,7 +129,18 @@ class CairnDataProvider:
             if node.file_path != target_path:
                 files[node.file_path] = content
         except Exception as e:
-            logger.warning("Could not load target file %s: %s", node.file_path, e)
+            fallback_content = self._load_from_disk(node.file_path)
+            if fallback_content is not None:
+                files[target_path] = fallback_content
+                if node.file_path != target_path:
+                    files[node.file_path] = fallback_content
+                logger.debug(
+                    "Loaded %s directly from disk after workspace miss: %s",
+                    node.file_path,
+                    target_path,
+                )
+            else:
+                logger.warning("Could not load target file %s: %s", node.file_path, e)
 
         if related:
             for path in related:
@@ -144,6 +155,20 @@ class CairnDataProvider:
                     logger.debug("Could not load related file %s: %s", path, e)
 
         return files
+
+    def _resolve_disk_path(self, path: str) -> Path:
+        path_obj = normalize_path(path)
+        if not path_obj.is_absolute():
+            path_obj = (self._resolver.project_root / path_obj).resolve()
+        return path_obj
+
+    def _load_from_disk(self, path: str) -> str | None:
+        try:
+            disk_path = self._resolve_disk_path(path)
+            return disk_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.debug("Fallback read failed for %s: %s", path, exc)
+            return None
 
 
 __all__ = [

@@ -76,15 +76,24 @@ class SwarmExecutor:
         Returns:
             The agent's response as a string
         """
+        logger.info(f"SwarmExecutor.run_agent starting for {state.agent_id}")
+
         bundle_path = self._resolve_bundle_path(state)
+        logger.info(f"Resolved bundle path: {bundle_path}")
+
         manifest = load_manifest(bundle_path)
+        logger.info(f"Loaded manifest: {manifest.name if hasattr(manifest, 'name') else 'unknown'}")
 
         if not self._workspace_initialized:
+            logger.info("Initializing workspace service...")
             await self._workspace_service.initialize()
             self._workspace_initialized = True
-            
+            logger.info("Workspace service initialized")
+
+        logger.info(f"Getting workspace for agent {state.agent_id}")
         workspace = await self._workspace_service.get_agent_workspace(state.agent_id)
         externals = self._workspace_service.get_externals(state.agent_id, workspace)
+        logger.info("Workspace and externals ready")
 
         externals["agent_id"] = state.agent_id
         externals["correlation_id"] = getattr(trigger_event, "correlation_id", None) if trigger_event else None
@@ -177,14 +186,22 @@ class SwarmExecutor:
             current_files = await data_provider.load_files(node)
             return dict(build_virtual_fs(current_files))
 
-        tools = discover_grail_tools(
-            manifest.agents_dir,
-            externals=externals,
-            files_provider=files_provider,
-        )
+        # Only discover tools if agents_dir is set (chat bundles have no tools)
+        tools = []
+        if manifest.agents_dir:
+            tools = discover_grail_tools(
+                manifest.agents_dir,
+                externals=externals,
+                files_provider=files_provider,
+            )
+        logger.info(f"Discovered {len(tools)} tools (agents_dir={manifest.agents_dir})")
 
         model_name = self._resolve_model_name(bundle_path, manifest)
+        logger.info(f"Using model: {model_name} at {self.config.model_base_url}")
+        logger.info(f"Running kernel with {len(tools)} tools, prompt length={len(prompt)}")
+
         result = await self._run_kernel(state, manifest, prompt, tools, model_name=model_name)
+        logger.info(f"Kernel completed with result length={len(str(result)) if result else 0}")
 
         response_text = str(result)
         truncated_response = truncate(response_text, max_len=self.config.truncation_limit)
@@ -193,8 +210,11 @@ class SwarmExecutor:
         state.chat_history.append({"role": "assistant", "content": truncated_response})
         state.chat_history = state.chat_history[-10:]
 
-        from remora.core.vcs import VCSAdapter
-        await VCSAdapter.commit(self._project_root, f"Agent {state.agent_id} completed turn.")
+        # Only commit if agent made file changes (not for simple chat)
+        # TODO: Track if file changes were made and only commit then
+        # For now, skip VCS commit to avoid triggering cascades
+        # from remora.core.vcs import VCSAdapter
+        # await VCSAdapter.commit(self._project_root, f"Agent {state.agent_id} completed turn.")
 
         return truncated_response
 
@@ -250,10 +270,13 @@ class SwarmExecutor:
                 
         observer = _EventStoreObserver(self._event_store, self._swarm_id)
         kernel = AgentKernel(client=client, adapter=adapter, tools=tools, observer=observer)
+        logger.info(f"Created kernel with client pointing to {self.config.model_base_url}")
+
         try:
             messages: list[Message] = [
                 Message(role="system", content=manifest.system_prompt),
             ]
+            logger.info(f"Prepared {len(messages)} initial messages")
             for entry in getattr(state, "chat_history", []):
                 role = entry.get("role")
                 content = entry.get("content")
@@ -264,7 +287,10 @@ class SwarmExecutor:
             if manifest.grammar_config and not manifest.grammar_config.send_tools_to_api:
                 tool_schemas = []
             max_turns = getattr(manifest, "max_turns", None) or self.config.max_turns
-            return await kernel.run(messages, tool_schemas, max_turns=max_turns)
+            logger.info(f"Calling kernel.run with {len(messages)} messages, {len(tool_schemas)} tools, max_turns={max_turns}")
+            result = await kernel.run(messages, tool_schemas, max_turns=max_turns)
+            logger.info("kernel.run completed successfully")
+            return result
         finally:
             await kernel.close()
 

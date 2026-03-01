@@ -1,1 +1,0 @@
-{"agent_id": "4b0f01f953d5e96d", "node_type": "function", "name": "ensure_file_synced", "full_name": "function:ensure_file_synced", "file_path": "src/remora/core/cairn_bridge.py", "parent_id": null, "range": [164, 166], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319186.3283525}

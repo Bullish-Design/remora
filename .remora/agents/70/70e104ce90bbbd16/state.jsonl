@@ -1,1 +1,0 @@
-{"agent_id": "70e104ce90bbbd16", "node_type": "function", "name": "handler", "full_name": "function:handler", "file_path": "src/remora/core/event_bus.py", "parent_id": null, "range": [101, 114], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319186.2091103}

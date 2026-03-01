@@ -1,1 +1,0 @@
-{"agent_id": "1f16cb6a8ad8f18c", "node_type": "function", "name": "replay", "full_name": "function:replay", "file_path": "src/remora/core/event_store.py", "parent_id": null, "range": [181, 241], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.6425257}

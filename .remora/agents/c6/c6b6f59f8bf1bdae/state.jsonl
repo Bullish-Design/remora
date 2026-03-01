@@ -1,1 +1,0 @@
-{"agent_id": "c6b6f59f8bf1bdae", "node_type": "function", "name": "snapshot", "full_name": "function:snapshot", "file_path": "src/remora/adapters/starlette.py", "parent_id": null, "range": [71, 72], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.6617723}

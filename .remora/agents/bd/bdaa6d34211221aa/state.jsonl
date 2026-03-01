@@ -1,1 +1,0 @@
-{"agent_id": "bdaa6d34211221aa", "node_type": "function", "name": "_fetch", "full_name": "function:_fetch", "file_path": "src/remora/core/subscriptions.py", "parent_id": null, "range": [248, 250], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319182.7570453}

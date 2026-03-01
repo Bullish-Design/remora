@@ -1,1 +1,0 @@
-{"agent_id": "b7f6af45eaea5a04", "node_type": "function", "name": "append", "full_name": "function:append", "file_path": "src/remora/core/event_store.py", "parent_id": null, "range": [125, 167], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319186.0320942}

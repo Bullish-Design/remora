@@ -1,1 +1,0 @@
-{"agent_id": "bbe11fd0e39dc2f7", "node_type": "function", "name": "get_externals", "full_name": "function:get_externals", "file_path": "src/remora/core/cairn_bridge.py", "parent_id": null, "range": [119, 130], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.1211264}

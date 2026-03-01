@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable
 import grail
 from structured_agents.types import ToolCall, ToolSchema, ToolResult
 
-from remora.core.tools.swarm import build_swarm_tools
+from remora.core.tools.swarm import SwarmTool, build_swarm_tools
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ def discover_grail_tools(
     files_provider: FilesProvider,
     limits: grail.Limits | None = None,
     grail_dir: str | Path | None = None,
-) -> list[RemoraGrailTool]:
+) -> list[RemoraGrailTool | SwarmTool]:
     """Discover and load .pym tools from a directory."""
     tools: list[RemoraGrailTool] = []
     if not agents_dir.exists():

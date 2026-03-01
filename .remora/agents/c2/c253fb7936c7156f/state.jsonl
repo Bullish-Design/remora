@@ -1,1 +1,0 @@
-{"agent_id": "c253fb7936c7156f", "node_type": "function", "name": "unregister", "full_name": "function:unregister", "file_path": "src/remora/core/subscriptions.py", "parent_id": null, "range": [198, 211], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319186.3014283}

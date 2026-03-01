@@ -3,6 +3,10 @@ __pycache__/
 *.py[codz]
 *$py.class
 scripts/training_examples/**
+.remora/**
+agents/**
+**/**.db
+
 
 # Personal Dev Environment:
 .devenv/**

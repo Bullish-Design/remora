@@ -1,1 +1,0 @@
-{"agent_id": "a107be3d78791094", "node_type": "function", "name": "exists", "full_name": "function:exists", "file_path": "src/remora/core/workspace.py", "parent_id": null, "range": [83, 92], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319183.9493937}

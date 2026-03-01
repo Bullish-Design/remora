@@ -5,6 +5,14 @@ discovery_max_workers: 4
 
 bundle_root: "agents"
 bundle_mapping:
+  # Default to simple chat for all node types
+  function: "chat/bundle.yaml"
+  class: "chat/bundle.yaml"
+  method: "chat/bundle.yaml"
+  file: "chat/bundle.yaml"
+
+# Tool bundles (used when explicitly requested)
+bundle_mapping_tools:
   function: "lint/bundle.yaml"
   class: "docstring/bundle.yaml"
   method: "docstring/bundle.yaml"

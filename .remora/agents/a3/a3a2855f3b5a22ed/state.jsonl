@@ -1,1 +1,0 @@
-{"agent_id": "a3a2855f3b5a22ed", "node_type": "function", "name": "_execute_turn", "full_name": "function:_execute_turn", "file_path": "src/remora/core/agent_runner.py", "parent_id": null, "range": [188, 238], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319182.926462}

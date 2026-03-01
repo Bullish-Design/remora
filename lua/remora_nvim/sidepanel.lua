@@ -62,7 +62,11 @@ function M.show_agent(agent_id, file_path, node_type, start_line)
     M.current_agent = agent_id
     M.event_log = {}
 
-    require("remora_nvim.bridge").call("agent.select", { id = agent_id }, function(state)
+    -- Subscribe to receive push notifications for this agent
+    local bridge = require("remora_nvim.bridge")
+    bridge.subscribe_to_agent(agent_id)
+
+    bridge.call("agent.select", { id = agent_id }, function(state)
         M.current_state = state
         M.render()
 

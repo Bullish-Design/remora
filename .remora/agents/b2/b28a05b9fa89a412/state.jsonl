@@ -1,1 +1,0 @@
-{"agent_id": "b28a05b9fa89a412", "node_type": "function", "name": "swarm_reconcile", "full_name": "function:swarm_reconcile", "file_path": "src/remora/cli/main.py", "parent_id": null, "range": [127, 164], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.1559381}

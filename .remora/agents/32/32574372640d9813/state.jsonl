@@ -1,1 +1,0 @@
-{"agent_id": "32574372640d9813", "node_type": "function", "name": "run_forever", "full_name": "function:run_forever", "file_path": "src/remora/core/agent_runner.py", "parent_id": null, "range": [88, 117], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319182.8860908}

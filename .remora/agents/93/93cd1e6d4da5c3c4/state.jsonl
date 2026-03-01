@@ -1,1 +1,0 @@
-{"agent_id": "93cd1e6d4da5c3c4", "node_type": "function", "name": "subscribe", "full_name": "function:subscribe", "file_path": "src/remora/adapters/starlette.py", "parent_id": null, "range": [24, 25], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.040327}

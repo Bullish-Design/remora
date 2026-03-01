@@ -1,1 +1,0 @@
-{"agent_id": "5def0897961d4c17", "node_type": "method", "name": "snapshot", "full_name": "method:snapshot", "file_path": "src/remora/ui/projector.py", "parent_id": null, "range": [171, 183], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319183.8309271}

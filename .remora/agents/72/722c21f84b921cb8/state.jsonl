@@ -1,1 +1,0 @@
-{"agent_id": "722c21f84b921cb8", "node_type": "function", "name": "_serialize_event", "full_name": "function:_serialize_event", "file_path": "src/remora/core/event_store.py", "parent_id": null, "range": [331, 340], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.8414977}

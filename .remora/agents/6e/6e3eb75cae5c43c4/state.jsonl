@@ -1,1 +1,0 @@
-{"agent_id": "6e3eb75cae5c43c4", "node_type": "class", "name": "FakeCompletionMessage", "full_name": "class:FakeCompletionMessage", "file_path": "src/remora/testing/fakes.py", "parent_id": null, "range": [21, 40], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.247529}

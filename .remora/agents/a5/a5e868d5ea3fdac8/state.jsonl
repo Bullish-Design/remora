@@ -1,1 +1,0 @@
-{"agent_id": "a5e868d5ea3fdac8", "node_type": "function", "name": "_get_parser", "full_name": "function:_get_parser", "file_path": "src/remora/core/discovery.py", "parent_id": null, "range": [108, 118], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319183.066233}

@@ -1,1 +1,0 @@
-{"agent_id": "2ef55c9471b1c147", "node_type": "function", "name": "escape", "full_name": "function:escape", "file_path": "src/remora/ui/components/base.py", "parent_id": null, "range": [96, 98], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319185.042509}

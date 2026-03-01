@@ -1,1 +1,0 @@
-{"agent_id": "f99094b8782af18c", "node_type": "function", "name": "events", "full_name": "function:events", "file_path": "src/remora/adapters/starlette.py", "parent_id": null, "range": [27, 28], "connections": {}, "chat_history": [], "custom_subscriptions": [], "last_updated": 1772319184.9983683}

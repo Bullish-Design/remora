@@ -53,17 +53,21 @@ class ClientManager:
         async with self._lock:
             client.subscribed_agents.clear()
             client.subscribed_agents.add(agent_id)
-        logger.debug(f"Client {client.client_id} subscribed to {agent_id}")
+        logger.info(f"Client {client.client_id} subscribed to agent {agent_id}")
 
     async def notify_event(self, event: RemoraEvent) -> None:
         """Push an event to all clients subscribed to the relevant agent."""
+        event_type = type(event).__name__
         agent_id = (
             getattr(event, "agent_id", None)
             or getattr(event, "to_agent", None)
             or getattr(event, "from_agent", None)
         )
 
+        logger.info(f"notify_event: {event_type} agent_id={agent_id}")
+
         if not agent_id:
+            logger.warning(f"notify_event: Skipping {event_type} - no agent_id")
             return
 
         notification = {
@@ -79,14 +83,20 @@ class ClientManager:
         msg = json.dumps(notification).encode() + b"\n"
 
         async with self._lock:
+            all_clients = list(self._clients.values())
             clients_to_notify = [
-                c for c in self._clients.values() if agent_id in c.subscribed_agents
+                c for c in all_clients if agent_id in c.subscribed_agents
             ]
+
+        logger.info(f"notify_event: {len(all_clients)} clients connected, {len(clients_to_notify)} subscribed to {agent_id}")
+        for c in all_clients:
+            logger.debug(f"  Client {c.client_id} subscribed to: {c.subscribed_agents}")
 
         for client in clients_to_notify:
             try:
                 client.writer.write(msg)
                 await client.writer.drain()
+                logger.info(f"Pushed {event_type} to {client.client_id}")
             except Exception as e:
                 logger.warning(f"Failed to push to {client.client_id}: {e}")
 
