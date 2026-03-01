@@ -32,12 +32,18 @@
   # nui.nvim and nui-components.nvim (required by remora's panel UI) are
   # included in the base nixvim plugin set.
 
-  # Add the remora neovim plugin directories to the runtimepath
-  nv2.extraRuntimePaths = [
+  # Add the remora neovim plugin directories to the runtimepath.
+  # NOTE: The remora devenv.nix is the flake root, so Nix path literals
+  # (./src/...) get copied into the store — edits won't take effect until
+  # rebuild.  We use builtins.getEnv "PWD" to get the real working directory
+  # so that nv2 always loads the live source tree.
+  nv2.extraRuntimePaths = let
+    root = builtins.getEnv "PWD";
+  in [
     # Main remora nvim plugin (contains lua/remora/init.lua)
-    (builtins.toString ./src/remora/lsp/nvim)
+    "${root}/src/remora/lsp/nvim"
     # Demo-specific starter module
-    (builtins.toString ./remora_demo/nvim)
+    "${root}/remora_demo/nvim"
   ];
 
   # Extra Lua init to automatically set up the remora plugin on nv2 startup

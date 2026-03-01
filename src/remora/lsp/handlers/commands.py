@@ -6,68 +6,95 @@ from remora.lsp.models import ASTAgentNode, RewriteAppliedEvent, RewriteRejected
 from remora.lsp.server import emit_event, logger, server
 
 
-@server.feature(lsp.WORKSPACE_EXECUTE_COMMAND)
-async def execute_command(params: lsp.ExecuteCommandParams) -> None:
+@server.command("remora.chat")
+async def cmd_chat(ls, *args) -> None:
     try:
-        cmd = params.command
-        args = params.arguments or []
-
-        match cmd:
-            case "remora.chat":
-                agent_id = args[0]
-                server.send_notification("$/remora/requestInput", {"agent_id": agent_id, "prompt": "Message to agent:"})
-
-            case "remora.requestRewrite":
-                agent_id = args[0]
-                server.send_notification(
-                    "$/remora/requestInput", {"agent_id": agent_id, "prompt": "What should this code do?"}
-                )
-
-            case "remora.executeTool":
-                agent_id, tool_name, tool_params = args[0], args[1], args[2] if len(args) > 2 else {}
-                if server.runner:
-                    node = await server.db.get_node(agent_id)
-                    if node:
-                        agent = ASTAgentNode(**node)
-                        await server.runner.execute_extension_tool(
-                            agent, tool_name, tool_params, server.generate_correlation_id()
-                        )
-
-            case "remora.acceptProposal":
-                proposal_id = args[0]
-                proposal = server.proposals.get(proposal_id)
-                if not proposal:
-                    return
-
-                await server.workspace_apply_edit(lsp.ApplyWorkspaceEditParams(edit=proposal.to_workspace_edit()))
-
-                del server.proposals[proposal_id]
-                agent = await server.db.get_node(proposal.agent_id)
-                if agent:
-                    await server.db.set_status(agent["id"], "active")
-                    await server.db.clear_pending_proposal(agent["id"])
-
-                await emit_event(
-                    RewriteAppliedEvent(
-                        agent_id=proposal.agent_id,
-                        proposal_id=proposal_id,
-                        correlation_id=proposal.correlation_id or "",
-                        timestamp=0.0,
-                    )
-                )
-
-            case "remora.rejectProposal":
-                proposal_id = args[0]
-                server.send_notification(
-                    "$/remora/requestInput", {"proposal_id": proposal_id, "prompt": "Feedback for agent:"}
-                )
-
-            case "remora.selectAgent":
-                agent_id = args[0]
-                server.send_notification("$/remora/agentSelected", {"agent_id": agent_id})
-
-            case _:
-                pass
-
+        agent_id = args[0] if args else None
+        ls.protocol.notify(
+            "$/remora/requestInput",
+            {"agent_id": agent_id, "prompt": "Message to agent:"},
+        )
     except Exception:
-        logger.exception("Error in execute_command handler")
+        logger.exception("Error in remora.chat")
+
+
+@server.command("remora.requestRewrite")
+async def cmd_request_rewrite(ls, *args) -> None:
+    try:
+        agent_id = args[0] if args else None
+        ls.protocol.notify(
+            "$/remora/requestInput",
+            {"agent_id": agent_id, "prompt": "What should this code do?"},
+        )
+    except Exception:
+        logger.exception("Error in remora.requestRewrite")
+
+
+@server.command("remora.executeTool")
+async def cmd_execute_tool(ls, agent_id: str, tool_name: str, *args) -> None:
+    try:
+        tool_params = args[0] if args else {}
+        if ls.runner:
+            node = await ls.db.get_node(agent_id)
+            if node:
+                agent = ASTAgentNode(**node)
+                await ls.runner.execute_extension_tool(agent, tool_name, tool_params, ls.generate_correlation_id())
+    except Exception:
+        logger.exception("Error in remora.executeTool")
+
+
+@server.command("remora.acceptProposal")
+async def cmd_accept_proposal(ls, proposal_id: str) -> None:
+    try:
+        proposal = ls.proposals.get(proposal_id)
+        if not proposal:
+            return
+
+        await ls.workspace_apply_edit(lsp.ApplyWorkspaceEditParams(edit=proposal.to_workspace_edit()))
+
+        del ls.proposals[proposal_id]
+        agent = await ls.db.get_node(proposal.agent_id)
+        if agent:
+            await ls.db.set_status(agent["id"], "active")
+            await ls.db.clear_pending_proposal(agent["id"])
+
+        await emit_event(
+            RewriteAppliedEvent(
+                agent_id=proposal.agent_id,
+                proposal_id=proposal_id,
+                correlation_id=proposal.correlation_id or "",
+                timestamp=0.0,
+            )
+        )
+    except Exception:
+        logger.exception("Error in remora.acceptProposal")
+
+
+@server.command("remora.rejectProposal")
+async def cmd_reject_proposal(ls, proposal_id: str) -> None:
+    try:
+        ls.protocol.notify(
+            "$/remora/requestInput",
+            {"proposal_id": proposal_id, "prompt": "Feedback for agent:"},
+        )
+    except Exception:
+        logger.exception("Error in remora.rejectProposal")
+
+
+@server.command("remora.selectAgent")
+async def cmd_select_agent(ls, agent_id: str) -> None:
+    try:
+        ls.protocol.notify("$/remora/agentSelected", {"agent_id": agent_id})
+    except Exception:
+        logger.exception("Error in remora.selectAgent")
+
+
+@server.command("remora.messageNode")
+async def cmd_message_node(ls, agent_id: str) -> None:
+    try:
+        ls.protocol.notify(
+            "$/remora/requestInput",
+            {"agent_id": agent_id, "prompt": "Message to send:"},
+        )
+    except Exception:
+        logger.exception("Error in remora.messageNode")

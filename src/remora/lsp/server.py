@@ -50,9 +50,7 @@ class RemoraLanguageServer(LanguageServer):
 
     async def publish_diagnostics(self, uri: str, proposals: list[RewriteProposal]) -> None:
         diagnostics = [p.to_diagnostic() for p in proposals]
-        self.text_document_publish_diagnostics(
-            lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diagnostics)
-        )
+        self.text_document_publish_diagnostics(lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diagnostics))
 
     async def emit_event(self, event) -> Any:
         if not getattr(event, "timestamp", None):
@@ -68,7 +66,7 @@ class RemoraLanguageServer(LanguageServer):
                 if core_event:
                     await self.event_store.append("swarm", core_event)
 
-        self.send_notification("$/remora/event", event.model_dump())
+        self.protocol.notify("$/remora/event", event.model_dump())
         return event
 
     def shutdown(self) -> None:

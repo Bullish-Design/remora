@@ -1,25 +1,34 @@
 local n = require("nui-components")
+local Line = require("nui.line")
 local Renderer = require("nui-components.renderer")
 local Signal = require("nui-components.signal")
 
 local M = {}
 
+-- ---------------------------------------------------------------------------
+-- State
+-- ---------------------------------------------------------------------------
+
 M.state = Signal.create({
     expanded = false,
     selected_agent = nil,
-    agents = {},
-    events = {},
-    border_hl = "RemoraBorder",
+    agents = {},        -- { [id] = { id, name, status, parent_id } }
+    events = {},        -- list, newest first
+    active_tab = "state",
     is_open = false,
 })
 
 M.renderer = nil
 
+-- ---------------------------------------------------------------------------
+-- Icon / highlight tables
+-- ---------------------------------------------------------------------------
+
 local status_icons = {
-    active = "●",
-    running = "▶",
-    pending_approval = "⏸",
-    orphaned = "○",
+    active = " ",
+    running = " ",
+    pending_approval = " ",
+    orphaned = " ",
 }
 
 local status_hls = {
@@ -30,14 +39,14 @@ local status_hls = {
 }
 
 local event_icons = {
-    AgentStartEvent = "▶",
-    AgentCompleteEvent = "✓",
-    AgentErrorEvent = "✗",
-    RewriteProposalEvent = "✏",
-    RewriteAppliedEvent = "✓",
-    RewriteRejectedEvent = "✗",
-    HumanChatEvent = "👤",
-    AgentMessageEvent = "💬",
+    AgentStartEvent = " ",
+    AgentCompleteEvent = " ",
+    AgentErrorEvent = " ",
+    RewriteProposalEvent = " ",
+    RewriteAppliedEvent = " ",
+    RewriteRejectedEvent = " ",
+    HumanChatEvent = " ",
+    AgentMessageEvent = " ",
 }
 
 local event_hls = {
@@ -51,182 +60,354 @@ local event_hls = {
     AgentMessageEvent = "Comment",
 }
 
+-- ---------------------------------------------------------------------------
+-- Helpers
+-- ---------------------------------------------------------------------------
+
 local function get_selected_agent()
     local selected = M.state.selected_agent:get_value()
-    if not selected then
-        return nil
-    end
+    if not selected then return nil end
     return M.state.agents:get_value()[selected]
 end
 
-local function refresh_renderer()
-    if M.renderer then
-        M.renderer:update()
-    end
-end
-
-local function animate_border_for_event(event_type)
-    if event_type == "RewriteProposalEvent" then
-        M.state.border_hl = "DiagnosticWarn"
-        vim.defer_fn(function()
-            M.state.border_hl = "RemoraBorder"
-            refresh_renderer()
-        end, 2000)
-    end
-end
-
-function M.status_icon(status)
-    return status_icons[status] or "?"
-end
-
-function M.status_hl(status)
-    return status_hls[status] or "Normal"
-end
-
-function M.event_icon(event_type)
-    return event_icons[event_type] or "?"
-end
-
-function M.event_hl(event_type)
-    return event_hls[event_type] or "Normal"
-end
-
-function M.format_time(timestamp)
-    if not timestamp then
-        return ""
-    end
+local function format_time(timestamp)
+    if not timestamp then return "" end
     return os.date("%H:%M:%S", timestamp)
 end
 
-function M.agent_header(state)
-    return n.rows({
-        n.text({
-            content = function()
-                local agent = get_selected_agent()
-                if not agent then
-                    return "No agent selected"
-                end
-                return string.format("## %s", agent.name)
-            end,
-            hl_group = "Title",
-        }),
-        n.text({
-            content = function()
-                local agent = get_selected_agent()
-                if not agent then
-                    return ""
-                end
-                return string.format("ID: %s | %s", agent.id, agent.status)
-            end,
-            hl_group = function()
-                local agent = get_selected_agent()
-                return agent and M.status_hl(agent.status) or "Normal"
-            end,
-        }),
-        n.separator(),
-        n.text({
-            content = function()
-                local agent = get_selected_agent()
-                if not agent then
-                    return ""
-                end
-                return string.format("Parent: %s", agent.parent_id or "None")
-            end,
-            hl_group = "Comment",
-        }),
-    })
+-- ---------------------------------------------------------------------------
+-- Line builders  (return tables of NuiLine for n.paragraph)
+-- ---------------------------------------------------------------------------
+
+--- Build lines for the collapsed agent-icon sidebar.
+local function build_agent_icon_lines()
+    local agents = M.state.agents:get_value()
+    local lines = {}
+    for _, agent in pairs(agents) do
+        local icon = status_icons[agent.status] or "?"
+        local hl = status_hls[agent.status] or "Normal"
+        local line = Line()
+        line:append(icon, hl)
+        line:append(" " .. (agent.name or agent.id), hl)
+        table.insert(lines, line)
+    end
+    if #lines == 0 then
+        local line = Line()
+        line:append("No agents", "Comment")
+        table.insert(lines, line)
+    end
+    return lines
 end
 
-function M.state_tab(state)
-    return n.rows({
-        n.text({
-            content = function()
-                local agent = get_selected_agent()
-                if not agent then
-                    return "Select an agent to see more details."
-                end
-                return string.format("Status: %s", agent.status)
-            end,
-            hl_group = "Comment",
-        }),
-        n.text({
-            content = function()
-                local agent = get_selected_agent()
-                if not agent then
-                    return ""
-                end
-                return string.format("Range: %s", agent.range or "unknown")
-            end,
-            hl_group = "Comment",
-        }),
-    })
+--- Build lines for the agent header (shown when expanded).
+local function build_header_lines()
+    local agent = get_selected_agent()
+    local lines = {}
+    if not agent then
+        local line = Line()
+        line:append("No agent selected", "Comment")
+        table.insert(lines, line)
+        return lines
+    end
+
+    local title = Line()
+    title:append(agent.name or agent.id, "Title")
+    table.insert(lines, title)
+
+    local status_line = Line()
+    local hl = status_hls[agent.status] or "Normal"
+    local icon = status_icons[agent.status] or "?"
+    status_line:append(icon .. " " .. (agent.status or "unknown"), hl)
+    status_line:append("  ID: " .. agent.id, "Comment")
+    table.insert(lines, status_line)
+
+    local parent_line = Line()
+    parent_line:append("Parent: " .. (agent.parent_id or "none"), "Comment")
+    table.insert(lines, parent_line)
+
+    return lines
 end
 
-function M.events_tab(state)
-    return n.rows({
-        n.scroll({
-            max_height = 15,
-            content = n.each(state.events, function(event)
-                return n.rows({
-                    n.columns({
-                        n.text({
-                            content = M.event_icon(event.event_type),
-                            hl_group = M.event_hl(event.event_type),
-                            flex = 0,
-                            size = 3,
-                        }),
-                        n.text({
-                            content = event.summary or event.event_type,
-                            flex = 1,
-                        }),
-                        n.text({
-                            content = M.format_time(event.timestamp),
-                            hl_group = "Comment",
-                            flex = 0,
-                            size = 8,
-                        }),
-                    }),
-                    n.if_(
-                        function()
-                            return event.event_type == "RewriteProposalEvent"
-                        end,
-                        n.box({
-                            border = "single",
-                            content = n.text({
-                                content = event.diff or "",
-                                hl_group = "DiffText",
-                            }),
-                        })
-                    ),
+--- Build lines for the State tab.
+local function build_state_lines()
+    local agent = get_selected_agent()
+    if not agent then
+        local line = Line()
+        line:append("Select an agent to see details.", "Comment")
+        return { line }
+    end
+    local lines = {}
+    local s = Line()
+    s:append("Status: " .. (agent.status or "unknown"), "Comment")
+    table.insert(lines, s)
+
+    local r = Line()
+    r:append("Range: " .. (agent.range or "unknown"), "Comment")
+    table.insert(lines, r)
+    return lines
+end
+
+--- Build lines for the Events tab.
+local function build_event_lines()
+    local events = M.state.events:get_value()
+    if #events == 0 then
+        local line = Line()
+        line:append("No events yet.", "Comment")
+        return { line }
+    end
+
+    local lines = {}
+    for i, ev in ipairs(events) do
+        if i > 30 then break end  -- cap display
+        local icon = event_icons[ev.event_type] or "?"
+        local hl = event_hls[ev.event_type] or "Normal"
+        local line = Line()
+        line:append(icon, hl)
+        line:append(" " .. (ev.summary or ev.event_type), hl)
+        local ts = format_time(ev.timestamp)
+        if ts ~= "" then
+            line:append("  " .. ts, "Comment")
+        end
+        table.insert(lines, line)
+
+        -- Show diff snippet for rewrite proposals
+        if ev.event_type == "RewriteProposalEvent" and ev.diff then
+            for _, diff_line in ipairs(vim.split(ev.diff, "\n")) do
+                local dl = Line()
+                dl:append("  " .. diff_line, "DiffText")
+                table.insert(lines, dl)
+            end
+        end
+    end
+    return lines
+end
+
+--- Build lines for the Chat tab.
+local function build_chat_lines()
+    local events = M.state.events:get_value()
+    local lines = {}
+    for _, ev in ipairs(events) do
+        if ev.event_type == "HumanChatEvent" or ev.event_type == "AgentMessageEvent" then
+            local is_human = ev.event_type == "HumanChatEvent"
+            local prefix = is_human and "You: " or "Agent: "
+            local hl = is_human and "Title" or "Comment"
+            local line = Line()
+            line:append(prefix, hl)
+            line:append(ev.message or ev.summary or "")
+            table.insert(lines, line)
+        end
+    end
+    if #lines == 0 then
+        local line = Line()
+        line:append("No messages yet.", "Comment")
+        table.insert(lines, line)
+    end
+    return lines
+end
+
+-- ---------------------------------------------------------------------------
+-- Component tree
+-- ---------------------------------------------------------------------------
+
+function M.create_panel()
+    local state = M.state
+
+    -- Map signal values to lines for paragraphs.
+    -- The `hidden` prop accepts a signal value, so collapsed/expanded is driven
+    -- directly by the `expanded` signal.
+
+    local collapsed_hidden = state.expanded  -- hidden when expanded == true
+    local expanded_hidden = state.expanded:dup():negate()  -- hidden when expanded == false
+
+    -- Which tab is active? Drive tab visibility via active_tab signal.
+    local state_tab_hidden = state.active_tab:dup():map(function(t) return t ~= "state" end)
+    local events_tab_hidden = state.active_tab:dup():map(function(t) return t ~= "events" end)
+    local chat_tab_hidden = state.active_tab:dup():map(function(t) return t ~= "chat" end)
+
+    return n.rows(
+        -- ── Collapsed view: agent icon list ──────────────────────
+        n.paragraph({
+            id = "agent_list",
+            hidden = collapsed_hidden,
+            lines = build_agent_icon_lines(),
+            border_label = "Agents",
+            border_style = "rounded",
+            flex = 1,
+        }),
+
+        -- ── Expanded view ────────────────────────────────────────
+        n.rows(
+            { hidden = expanded_hidden, flex = 1 },
+
+            -- Header
+            n.paragraph({
+                id = "agent_header",
+                lines = build_header_lines(),
+                border_label = "Agent",
+                border_style = "rounded",
+                size = 5,
+            }),
+
+            -- Tab bar (buttons)
+            n.columns(
+                { size = 1 },
+                n.button({
+                    id = "tab_state",
+                    label = " State ",
+                    on_press = function()
+                        state.active_tab = "state"
+                    end,
+                    is_active = n.is_active_factory(state.active_tab)("state"),
+                }),
+                n.button({
+                    id = "tab_events",
+                    label = " Events ",
+                    on_press = function()
+                        state.active_tab = "events"
+                    end,
+                    is_active = n.is_active_factory(state.active_tab)("events"),
+                }),
+                n.button({
+                    id = "tab_chat",
+                    label = " Chat ",
+                    on_press = function()
+                        state.active_tab = "chat"
+                    end,
+                    is_active = n.is_active_factory(state.active_tab)("chat"),
                 })
-            end),
-        }),
-    })
+            ),
+
+            -- State tab content
+            n.paragraph({
+                id = "tab_state_content",
+                hidden = state_tab_hidden,
+                lines = build_state_lines(),
+                flex = 1,
+            }),
+
+            -- Events tab content
+            n.paragraph({
+                id = "tab_events_content",
+                hidden = events_tab_hidden,
+                lines = build_event_lines(),
+                flex = 1,
+            }),
+
+            -- Chat tab content
+            n.rows(
+                { hidden = chat_tab_hidden, flex = 1 },
+                n.paragraph({
+                    id = "tab_chat_messages",
+                    lines = build_chat_lines(),
+                    flex = 1,
+                }),
+                n.text_input({
+                    id = "chat_input",
+                    border_label = "Message",
+                    border_style = "rounded",
+                    placeholder = "Message agent...",
+                    size = 1,
+                    autofocus = true,
+                    on_change = function(value, component)
+                        -- Store current value for submit
+                        M._pending_chat = value
+                    end,
+                })
+            ),
+
+            -- Help line
+            n.paragraph({
+                id = "help_line",
+                lines = "[Esc] close  [Tab] navigate  [1] state  [2] events  [3] chat",
+                size = 1,
+            })
+        )
+    )
 end
 
-function M.chat_tab(state)
-    local input_state = Signal.create({ value = "" })
-    return n.rows({
-        n.scroll({
-            max_height = 10,
-            content = n.each(state.events, function(event)
-                if event.event_type ~= "HumanChatEvent" and event.event_type ~= "AgentMessageEvent" then
-                    return nil
-                end
+-- ---------------------------------------------------------------------------
+-- Refresh paragraph content (called when state changes)
+-- ---------------------------------------------------------------------------
 
-                local is_human = event.event_type == "HumanChatEvent"
-                return n.box({
-                    border = is_human and "rounded" or "single",
-                    hl_group = is_human and "Normal" or "Comment",
-                    content = n.text({ content = event.message or event.summary or "" }),
-                })
-            end),
-        }),
-        n.separator(),
-        n.input({
-            placeholder = "Message agent...",
-            value = input_state.value,
-            on_submit = function(value)
+local function update_paragraphs()
+    if not M.renderer then return end
+
+    local function update_component(id, lines)
+        local comp = M.renderer:get_component_by_id(id)
+        if not comp then return end
+        -- Props are read-only via metatable; use rawset to bypass.
+        pcall(function()
+            rawset(comp._private.props, "lines", lines)
+            comp:redraw()
+        end)
+    end
+
+    update_component("agent_list", build_agent_icon_lines())
+    update_component("agent_header", build_header_lines())
+    update_component("tab_state_content", build_state_lines())
+    update_component("tab_events_content", build_event_lines())
+    update_component("tab_chat_messages", build_chat_lines())
+end
+
+-- ---------------------------------------------------------------------------
+-- Lifecycle
+-- ---------------------------------------------------------------------------
+
+function M.open()
+    if M.renderer then
+        return
+    end
+
+    M.renderer = Renderer.create({
+        width = 60,
+        height = 30,
+        position = "50%",
+        relative = "editor",
+        keymap = {
+            close = "<Esc>",
+            focus_next = "<Tab>",
+            focus_prev = "<S-Tab>",
+        },
+        on_unmount = function()
+            M.renderer = nil
+            M.state.is_open = false
+        end,
+    })
+
+    M.renderer:render(function()
+        return M.create_panel()
+    end)
+    M.state.is_open = true
+
+    -- Add global keymaps for tab switching & chat submit
+    M.renderer:add_mappings({
+        {
+            mode = { "n" },
+            key = "1",
+            handler = function() M.state.active_tab = "state" end,
+        },
+        {
+            mode = { "n" },
+            key = "2",
+            handler = function() M.state.active_tab = "events" end,
+        },
+        {
+            mode = { "n" },
+            key = "3",
+            handler = function() M.state.active_tab = "chat" end,
+        },
+        {
+            mode = { "n" },
+            key = "e",
+            handler = function()
+                M.state.expanded = not M.state.expanded:get_value()
+            end,
+        },
+        {
+            mode = { "i" },
+            key = "<C-CR>",
+            handler = function()
+                local value = M._pending_chat
                 if value and value ~= "" then
                     local agent = get_selected_agent()
                     if agent then
@@ -234,85 +415,24 @@ function M.chat_tab(state)
                             agent_id = agent.id,
                             input = value,
                         })
-                        input_state.value = ""
+                        M._pending_chat = ""
+                        -- Clear the text input
+                        local input = M.renderer:get_component_by_id("chat_input")
+                        if input and input.bufnr and vim.api.nvim_buf_is_valid(input.bufnr) then
+                            vim.api.nvim_buf_set_lines(input.bufnr, 0, -1, false, { "" })
+                        end
                     end
                 end
             end,
-        }),
-    })
-end
-
-function M.create_panel()
-    local state = M.state
-    return n.rows({
-        n.columns({
-            n.if_(
-                function()
-                    return not state.expanded:get_value()
-                end,
-                n.rows({
-                    n.each(state.agents, function(agent)
-                        return n.text({
-                            content = M.status_icon(agent.status),
-                            hl_group = M.status_hl(agent.status),
-                            on_click = function()
-                                state.selected_agent = agent.id
-                                state.expanded = true
-                                refresh_renderer()
-                            end,
-                        })
-                    end),
-                })
-            ),
-            n.if_(
-                function()
-                    return state.expanded:get_value()
-                end,
-                n.rows({
-                    M.agent_header(state),
-                    n.tabs({
-                        n.tab({ label = "State" }, M.state_tab(state)),
-                        n.tab({ label = "Events" }, M.events_tab(state)),
-                        n.tab({ label = "Chat" }, M.chat_tab(state)),
-                    }),
-                    n.text({
-                        content = "[q]uit  [c]hat  [r]efresh",
-                        hl_group = "Comment",
-                    }),
-                })
-            ),
-        }),
-        {
-            border = {
-                style = "rounded",
-                hl_group = function()
-                    return state.border_hl:get_value()
-                end,
-            },
         },
     })
-end
-
-function M.open()
-    if M.renderer then
-        return
-    end
-
-    M.renderer = Renderer.new({
-        render = function()
-            return M.create_panel()
-        end,
-    })
-    M.renderer:mount()
-    M.state.is_open = true
 end
 
 function M.close()
     if not M.renderer then
         return
     end
-
-    M.renderer:unmount()
+    M.renderer:close()
     M.renderer = nil
     M.state.is_open = false
 end
@@ -329,6 +449,10 @@ function M.is_open()
     return M.state.is_open:get_value()
 end
 
+-- ---------------------------------------------------------------------------
+-- External API  (called from init.lua LSP handlers)
+-- ---------------------------------------------------------------------------
+
 function M.add_event(event)
     local events = vim.deepcopy(M.state.events:get_value())
     table.insert(events, 1, event)
@@ -336,15 +460,15 @@ function M.add_event(event)
         table.remove(events)
     end
     M.state.events = events
-    animate_border_for_event(event.event_type)
-    refresh_renderer()
+    update_paragraphs()
 end
 
 function M.select_agent(agent_id)
     local agents = M.state.agents:get_value()
     if agents[agent_id] then
         M.state.selected_agent = agent_id
-        refresh_renderer()
+        M.state.expanded = true
+        update_paragraphs()
     end
 end
 
@@ -359,7 +483,7 @@ function M.update_agents(agent_list)
         }
     end
     M.state.agents = mapping
-    refresh_renderer()
+    update_paragraphs()
 end
 
 return M

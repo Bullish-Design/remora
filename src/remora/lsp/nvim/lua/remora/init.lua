@@ -73,41 +73,68 @@ function M.setup(opts)
         panel.select_agent(result.agent_id)
     end
 
+    --- Get the first active remora LSP client, or nil.
+    local function get_client()
+        -- Try buffer-attached clients first, then fall back to all clients.
+        local clients = vim.lsp.get_clients({ name = "remora", bufnr = 0 })
+        if #clients == 0 then
+            clients = vim.lsp.get_clients({ name = "remora" })
+        end
+        if #clients == 0 then
+            vim.notify("[Remora] LSP not running — is this a supported filetype?", vim.log.levels.WARN)
+            return nil
+        end
+        return clients[1]
+    end
+
+    --- Send workspace/executeCommand to the remora server.
+    local function exec_command(command, arguments)
+        local client = get_client()
+        if not client then return end
+        client.request("workspace/executeCommand", {
+            command = command,
+            arguments = arguments or {},
+        }, function(err)
+            if err then
+                vim.notify(
+                    "[Remora] " .. (err.message or tostring(err)),
+                    vim.log.levels.ERROR
+                )
+            end
+        end)
+    end
+
+    --- Try to apply a code action matching `command_name`.
+    --- Shows a friendly message instead of the cryptic default error.
+    local function apply_code_action(command_name, not_found_msg)
+        local client = get_client()
+        if not client then return end
+        vim.lsp.buf.code_action({
+            filter = function(action)
+                return action.command
+                    and action.command.command == command_name
+            end,
+            apply = true,
+        })
+    end
+
     local function setup_commands()
         vim.api.nvim_create_user_command("RemoraChat", function()
-            vim.lsp.buf.code_action({
-                filter = function(action)
-                    return action.command and action.command.command == "remora.chat"
-                end,
-                apply = true
-            })
+            exec_command("remora.chat")
         end, {})
 
         vim.api.nvim_create_user_command("RemoraRewrite", function()
-            vim.lsp.buf.code_action({
-                filter = function(action)
-                    return action.command and action.command.command == "remora.requestRewrite"
-                end,
-                apply = true
-            })
+            exec_command("remora.requestRewrite")
         end, {})
 
         vim.api.nvim_create_user_command("RemoraAccept", function()
-            vim.lsp.buf.code_action({
-                filter = function(action)
-                    return action.command and action.command.command == "remora.acceptProposal"
-                end,
-                apply = true
-            })
+            apply_code_action("remora.acceptProposal",
+                "No pending proposal at cursor")
         end, {})
 
         vim.api.nvim_create_user_command("RemoraReject", function()
-            vim.lsp.buf.code_action({
-                filter = function(action)
-                    return action.command and action.command.command == "remora.rejectProposal"
-                end,
-                apply = true
-            })
+            apply_code_action("remora.rejectProposal",
+                "No pending proposal at cursor")
         end, {})
 
         vim.api.nvim_create_user_command("RemoraTogglePanel", function()
