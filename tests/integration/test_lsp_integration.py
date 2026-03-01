@@ -35,10 +35,17 @@ def isolated_lsp_server(tmp_path: Path) -> None:
     server.proposals.clear()
     server.watcher = ASTWatcher()
     server._injecting.clear()
+    original_discover = server.discover_tools_for_agent
+
+    async def _stub_discover(_: object) -> list[object]:
+        return []
+
+    server.discover_tools_for_agent = _stub_discover
 
     yield
 
     server.shutdown()
+    server.discover_tools_for_agent = original_discover
 
 
 @pytest.mark.asyncio

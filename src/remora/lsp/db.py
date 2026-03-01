@@ -102,6 +102,12 @@ class RemoraDB:
         """)
         self.conn.commit()
 
+    def _normalize_node(self, row: sqlite3.Row) -> dict:
+        data = dict(row)
+        if "id" in data:
+            data["remora_id"] = data.pop("id")
+        return data
+
     @async_db
     def upsert_nodes(self, nodes: list[ASTAgentNode]) -> None:
         cursor = self.conn.cursor()
@@ -136,13 +142,13 @@ class RemoraDB:
         cursor = self.conn.cursor()
         cursor.execute("SELECT * FROM nodes WHERE id = ?", (node_id,))
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return self._normalize_node(row) if row else None
 
     @async_db
     def get_nodes_for_file(self, uri: str) -> list[dict]:
         cursor = self.conn.cursor()
         cursor.execute("SELECT * FROM nodes WHERE file_path = ?", (uri,))
-        return [dict(row) for row in cursor.fetchall()]
+        return [self._normalize_node(row) for row in cursor.fetchall()]
 
     @async_db
     def get_node_at_position(self, uri: str, line: int, character: int) -> dict | None:
@@ -156,7 +162,7 @@ class RemoraDB:
             (uri, line, line),
         )
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return self._normalize_node(row) if row else None
 
     @async_db
     def set_status(self, node_id: str, status: str) -> None:
@@ -311,7 +317,7 @@ class RemoraDB:
 
         placeholders = ",".join("?" * len(node_ids))
         cursor.execute(f"SELECT * FROM nodes WHERE id IN ({placeholders})", node_ids)
-        return [dict(row) for row in cursor.fetchall()]
+        return [self._normalize_node(row) for row in cursor.fetchall()]
 
     @async_db
     def get_edges_for_nodes(self, node_ids: list[str]) -> list[dict]:

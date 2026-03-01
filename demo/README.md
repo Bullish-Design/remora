@@ -51,6 +51,8 @@ vim.lsp.start({
 require("remora").setup()
 ```
 
+**Or:** luafile demo/remora_nvim_startup.lua
+
 ### Commands
 
 - `:RemoraChat` - Chat with agent at cursor
