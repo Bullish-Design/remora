@@ -228,12 +228,14 @@ class AgentRunner:
             save_agent_state(state_path, state)
 
             if self._event_bus:
+                response_text = str(result) if result else ""
                 complete_event = AgentCompleteEvent(
                     graph_id=self._swarm_id,
                     agent_id=agent_id,
-                    result_summary=str(result)[:200] if result else "",
+                    result_summary=response_text[:200],
+                    response=response_text,
                 )
-                logger.info(f"Emitting AgentCompleteEvent for {agent_id}")
+                logger.info(f"Emitting AgentCompleteEvent for {agent_id} with response length={len(response_text)}")
                 await self._event_bus.emit(complete_event)
 
         except Exception as e:

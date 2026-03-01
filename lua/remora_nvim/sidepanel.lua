@@ -211,8 +211,12 @@ function M.format_event(ev)
     elseif ev.type == "AgentStartEvent" then
         table.insert(lines, "│  Agent execution started")
     elseif ev.type == "AgentCompleteEvent" then
-        local summary = ev.data.result_summary or ""
-        table.insert(lines, "│  Completed: " .. summary:sub(1, 30))
+        -- Show the actual response content
+        local response = ev.data.response or ev.data.result_summary or ""
+        table.insert(lines, "│  Response:")
+        for _, line in ipairs(M.wrap_text(response, 38)) do
+            table.insert(lines, "│  " .. line)
+        end
     elseif ev.type == "AgentErrorEvent" then
         local err = ev.data.error or "unknown"
         table.insert(lines, "│  Error: " .. err:sub(1, 35))

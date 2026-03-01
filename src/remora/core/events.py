@@ -48,6 +48,7 @@ class AgentCompleteEvent:
     graph_id: str
     agent_id: str
     result_summary: str
+    response: str = ""  # Full response content for display
     timestamp: float = field(default_factory=time.time)
 
 

@@ -25,17 +25,10 @@ end
 
 function M.send(agent_id, message)
     local bridge = require("remora_nvim.bridge")
-    local sidepanel = require("remora_nvim.sidepanel")
 
     vim.notify("Remora: Sending message...", vim.log.levels.INFO)
 
-    sidepanel.add_event_to_log("AgentMessageEvent", {
-        from_agent = "user",
-        to_agent = agent_id,
-        content = message,
-    })
-    sidepanel.render()
-
+    -- Don't add locally - server will push the event back
     bridge.send_chat(agent_id, message, function(result)
         if result and result.status == "sent" then
             vim.notify("Remora: Message sent, agent triggered", vim.log.levels.INFO)

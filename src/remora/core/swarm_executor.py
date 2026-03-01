@@ -201,9 +201,27 @@ class SwarmExecutor:
         logger.info(f"Running kernel with {len(tools)} tools, prompt length={len(prompt)}")
 
         result = await self._run_kernel(state, manifest, prompt, tools, model_name=model_name)
-        logger.info(f"Kernel completed with result length={len(str(result)) if result else 0}")
+        logger.info(f"Kernel completed with result type: {type(result)}")
 
-        response_text = str(result)
+        # Extract actual content from RunResult
+        response_text = ""
+        if hasattr(result, "final_message") and result.final_message:
+            msg = result.final_message
+            logger.info(f"final_message type: {type(msg)}, has content: {hasattr(msg, 'content')}")
+            if hasattr(msg, "content") and msg.content:
+                response_text = msg.content
+                logger.info(f"Extracted content from final_message.content")
+            else:
+                response_text = str(result)
+                logger.info(f"Using str(result) fallback - content was empty")
+        elif hasattr(result, "content") and result.content:
+            response_text = result.content
+            logger.info(f"Extracted content from result.content")
+        else:
+            response_text = str(result)
+            logger.info(f"Using str(result) fallback")
+
+        logger.info(f"Response text (first 100 chars): {response_text[:100] if response_text else 'empty'}")
         truncated_response = truncate(response_text, max_len=self.config.truncation_limit)
 
         state.chat_history.append({"role": "user", "content": prompt})
