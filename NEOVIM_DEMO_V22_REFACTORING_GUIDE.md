@@ -480,3 +480,604 @@ The LSP server does NOT own the `AgentRunner`. Instead:
 
 ---
 
+## 5. Phase 3 — CLI Integration & Entrypoints
+
+### 5a. Add `--lsp` Flag to `swarm start`
+
+#### [MODIFY] [cli/main.py](file:///c:/Users/Andrew/Documents/Projects/remora/src/remora/cli/main.py)
+
+The current `swarm_start` command has `--nvim` (line 30). Add a `--lsp` flag that starts the `pygls` LSP server instead of (or alongside) the JSON-RPC `NvimServer`:
+
+```python
+@swarm.command("start")
+@click.option("--project-root", type=click.Path(file_okay=False, resolve_path=True))
+@click.option("--config", "config_path", type=click.Path(dir_okay=False, resolve_path=True))
+@click.option("--nvim/--no-nvim", default=False, help="Start JSON-RPC Neovim server")
+@click.option("--lsp/--no-lsp", default=False, help="Start LSP server (stdio)")
+def swarm_start(project_root, config_path, nvim, lsp):
+    # ... existing setup ...
+    if lsp:
+        from remora.lsp.__main__ import main as lsp_main
+        lsp_main()  # This blocks — stdio mode
+        return
+    # ... rest of existing swarm start (runner, nvim server, etc.) ...
+```
+
+> [!WARNING]
+> The LSP server runs in **stdio mode** (blocking). When `--lsp` is passed, the swarm start should initialize services, then hand control to the LSP server's event loop. The `AgentRunner` must run as a background task within the same event loop.
+
+### 5b. Add Standalone `remora lsp` Subcommand
+
+```python
+@main.command()
+def lsp():
+    """Start the Remora LSP server (stdio mode for editor integration)."""
+    from remora.lsp.__main__ import main as lsp_main
+    lsp_main()
+```
+
+### 5c. Add `pyproject.toml` Script Entrypoint
+
+#### [MODIFY] [pyproject.toml](file:///c:/Users/Andrew/Documents/Projects/remora/pyproject.toml)
+
+```toml
+[project.scripts]
+remora = "remora.cli:main"
+remora-lsp = "remora.lsp.__main__:main"   # NEW
+remora-index = "remora.indexer.cli:main"
+```
+
+This allows Neovim to use `cmd = { "remora-lsp" }` or `cmd = { "remora", "lsp" }` in the LSP config.
+
+---
+
+## 6. Phase 4 — Lua Plugin Rewrite (LSP-Native)
+
+The current Lua plugin is a v1 JSON-RPC client that connects to a Unix socket server. The V2.1 concept replaces this with standard LSP client integration plus custom notification handlers.
+
+### 6a. Current State (To Be Replaced)
+
+| File | Purpose | Status |
+|------|---------|--------|
+| `plugin/remora_nvim.lua` | Plugin entry — registers `:RemoraToggle`, `:RemoraConnect`, `:RemoraChat`, `:RemoraRefresh` | **Replace** — commands should use LSP code actions |
+| `lua/remora_nvim/.v1/init.lua` | JSON-RPC client setup | **Delete** — LSP replaces this |
+| `lua/remora_nvim/.v1/bridge.lua` | Unix socket JSON-RPC transport | **Delete** — LSP handles transport |
+| `lua/remora_nvim/.v1/sidepanel.lua` | nui.nvim sidebar (9KB) | **Rewrite** — migrate to nui-components with reactive Signals |
+| `lua/remora_nvim/.v1/chat.lua` | Chat window | **Rewrite** — use `$/remora/submitInput` |
+| `lua/remora_nvim/.v1/navigation.lua` | Agent navigation | **Rewrite** — use `textDocument/codeLens` |
+
+### 6b. New Plugin Structure
+
+```
+lua/remora/
+├── init.lua          # Setup: vim.lsp.config + vim.lsp.enable()
+├── handlers.lua      # $/remora/* notification handlers
+├── panel.lua         # nui-components sidepanel (reactive Signals)
+├── sse.lua           # SSE event subscription (background curl job)
+└── highlights.lua    # Remora-specific highlight groups
+plugin/
+└── remora.lua        # Plugin entry (renamed from remora_nvim.lua)
+```
+
+### 6c. Core Setup
+
+#### [NEW] `lua/remora/init.lua`
+
+```lua
+-- lua/remora/init.lua
+local M = {}
+
+function M.setup(opts)
+    opts = opts or {}
+
+    -- Register Remora as a language server (Neovim 0.11+ API)
+    vim.lsp.config["remora"] = {
+        cmd = opts.cmd or { "remora-lsp" },
+        filetypes = opts.filetypes or { "python" },
+        root_markers = { ".remora", ".git" },
+        settings = {},
+    }
+
+    vim.lsp.enable("remora")
+
+    -- Custom notification handlers
+    vim.lsp.handlers["$/remora/event"] = M.on_event
+    vim.lsp.handlers["$/remora/requestInput"] = M.on_request_input
+    vim.lsp.handlers["$/remora/agentSelected"] = M.on_agent_selected
+
+    -- Set up highlights
+    require("remora.highlights").setup()
+
+    -- Set up commands
+    M.setup_commands()
+end
+
+function M.on_event(err, result, ctx)
+    -- Forward to panel if open
+    local panel = require("remora.panel")
+    panel.handle_event(result)
+end
+
+function M.on_request_input(err, result, ctx)
+    vim.ui.input({ prompt = result.prompt }, function(input)
+        if input then
+            vim.lsp.buf_notify(0, "$/remora/submitInput", {
+                agent_id = result.agent_id,
+                proposal_id = result.proposal_id,
+                input = input,
+            })
+        end
+    end)
+end
+
+function M.setup_commands()
+    vim.api.nvim_create_user_command("RemoraChat", function()
+        vim.lsp.buf.code_action({
+            filter = function(action)
+                return action.command
+                    and action.command.command == "remora.chat"
+            end,
+            apply = true,
+        })
+    end, { desc = "Chat with agent at cursor" })
+
+    vim.api.nvim_create_user_command("RemoraRewrite", function()
+        vim.lsp.buf.code_action({
+            filter = function(action)
+                return action.command
+                    and action.command.command == "remora.requestRewrite"
+            end,
+            apply = true,
+        })
+    end, { desc = "Request agent rewrite" })
+
+    vim.api.nvim_create_user_command("RemoraAccept", function()
+        vim.lsp.buf.code_action({
+            filter = function(action)
+                return action.command
+                    and action.command.command == "remora.acceptProposal"
+            end,
+            apply = true,
+        })
+    end, { desc = "Accept pending proposal" })
+
+    vim.api.nvim_create_user_command("RemoraToggle", function()
+        require("remora.panel").toggle()
+    end, { desc = "Toggle Remora sidepanel" })
+end
+
+return M
+```
+
+### 6d. What You Get For Free (Standard LSP)
+
+Once the Python LSP server is running, these features work automatically without any custom Lua:
+
+| Feature | How | Custom Lua Needed? |
+|---------|-----|--------------------|
+| Agent IDs inline on defs | `textDocument/codeLens` → virtual text | ❌ No |
+| Hover for agent details | `textDocument/hover` → popup | ❌ No |
+| Tool menu on cursor | `textDocument/codeAction` → quickfix menu | ❌ No |
+| Pending proposals | `publishDiagnostics` → gutter signs | ❌ No |
+| Apply rewrites | `workspace/applyEdit` → buffer edits | ❌ No |
+| Input prompts | `$/remora/requestInput` → `vim.ui.input` | ✅ Minimal |
+| Event stream | `$/remora/event` → panel update | ✅ Minimal |
+| Rich sidebar | nui-components reactive panel | ✅ Yes |
+
+### 6e. Panel Rewrite (nui-components)
+
+The v1 `sidepanel.lua` (9KB) uses raw `nui.nvim` buffers. The V2.1 concept uses `nui-components` with reactive `Signal` state. This is a full rewrite — see the V2.1 concept Appendix A sections A1–A5 for the target implementation with:
+
+- Collapsible sidebar (4-col collapsed → 40-col expanded)
+- Reactive agent status updates via Signals
+- Tabbed views (State, Events, Chat)
+- SSE event subscription for real-time updates
+- Grail trigger border flash effects
+
+---
+
+## 7. Phase 5 — AgentRunner ↔ LSP Bridge
+
+The existing `AgentRunner` and `SwarmExecutor` in `core/` are functional. The challenge is connecting them to the new LSP server so that:
+1. User actions in Neovim (via LSP) trigger agent execution
+2. Agent results flow back to Neovim as LSP notifications/diagnostics/workspace edits
+
+### 7a. Current AgentRunner Architecture
+
+```
+EventStore.get_triggers()  →  AgentRunner._process_trigger()
+                                    ↓
+                              SwarmExecutor.run_agent()
+                                    ↓
+                              AgentKernel (structured-agents)
+                                    ↓
+                              EventBus.emit(AgentCompleteEvent)
+```
+
+This is **already event-driven** via `EventStore` triggers and `EventBus` emissions. The key insight: the LSP server just needs to:
+- **Write** events to `EventStore` (this triggers `AgentRunner` automatically)
+- **Listen** to `EventBus` for results
+
+### 7b. LSP Server ← EventBus Subscription
+
+#### [MODIFY] [lsp/server.py](file:///c:/Users/Andrew/Documents/Projects/remora/src/remora/lsp/server.py)
+
+Add an `EventBus` subscriber that forwards agent events to Neovim as `$/remora/event` notifications:
+
+```python
+class RemoraLanguageServer(LanguageServer):
+    async def initialize_services(self, ..., event_bus: EventBus) -> None:
+        # ... existing setup ...
+        self._event_bus = event_bus
+        event_bus.subscribe(AgentCompleteEvent, self._on_agent_complete)
+        event_bus.subscribe(AgentErrorEvent, self._on_agent_error)
+        event_bus.subscribe_all(self._on_any_event)
+
+    async def _on_agent_complete(self, event: AgentCompleteEvent) -> None:
+        # If agent produced a rewrite, create a RewriteProposal
+        # and publish as diagnostic
+        await self.send_notification("$/remora/event", {
+            "event_type": "AgentCompleteEvent",
+            "agent_id": event.agent_id,
+            "result_summary": event.result_summary,
+        })
+        # Refresh code lenses for the agent's file
+        # (status changed from "running" back to "active")
+
+    async def _on_any_event(self, event) -> None:
+        # Forward all events to Neovim for the sidepanel
+        event_type = type(event).__name__
+        await self.send_notification("$/remora/event", {
+            "event_type": event_type,
+            "agent_id": getattr(event, "agent_id", None),
+        })
+```
+
+### 7c. LSP Server → EventStore Writes
+
+When the user triggers a chat or rewrite via code action, the LSP command handler writes to `EventStore`:
+
+```python
+# In lsp/handlers/commands.py
+async def handle_chat(server, agent_id, message):
+    event = AgentMessageEvent(
+        from_agent="human",
+        to_agent=agent_id,
+        content=message,
+    )
+    await server.event_store.append(server.swarm_id, event)
+    # This automatically triggers AgentRunner via subscription matching
+```
+
+### 7d. RewriteProposal Flow
+
+When an agent produces a rewrite (via `rewrite_self` tool call):
+
+1. `SwarmExecutor` handles the tool call response
+2. Creates a `RewriteProposal` and stores it on the LSP server
+3. Publishes diagnostic to Neovim (yellow squiggly on the affected lines)
+4. User sees the diagnostic, triggers `:RemoraAccept` code action
+5. LSP server applies the `WorkspaceEdit` via `server.apply_edit()`
+
+> [!NOTE]
+> This requires adding `rewrite_self` tool result handling in `SwarmExecutor.run_agent()`. Currently, `SwarmExecutor` just stores chat history — it doesn't create `RewriteProposal` objects. The proposal creation logic from V2.1 concept Section 3a `handle_response()` needs to be integrated.
+
+### 7e. Concurrency Model
+
+The LSP server and `AgentRunner` share the same async event loop:
+
+```python
+async def start_lsp_with_runner():
+    server = RemoraLanguageServer()
+    # ... initialize services ...
+
+    runner = AgentRunner(event_store=..., ...)
+    runner_task = asyncio.create_task(runner.run_forever())
+
+    try:
+        server.start_io()  # Blocks, but pygls uses asyncio internally
+    finally:
+        runner_task.cancel()
+```
+
+---
+
+## 8. Phase 6 — ID Management & Injection
+
+The V2.1 concept uses short, human-readable `rm_` prefixed IDs injected as inline comments on definition lines. The current codebase uses 16-char SHA256 hash IDs that are never visible in source files.
+
+### 8a. Current ID Scheme
+
+In [discovery.py](file:///c:/Users/Andrew/Documents/Projects/remora/src/remora/core/discovery.py):
+
+```python
+def compute_node_id(file_path: str, name: str, start_line: int, end_line: int) -> str:
+    content = f"{file_path}:{name}:{start_line}:{end_line}"
+    return hashlib.sha256(content.encode()).hexdigest()[:16]
+```
+
+Problems:
+- IDs change when line numbers shift (fragile)
+- IDs are invisible to users (no inline presence in source)
+- IDs are not human-readable (16 hex chars)
+
+### 8b. Target ID Scheme
+
+```
+rm_a1b2c3d4  (rm_ prefix + 8 lowercase alphanumeric)
+```
+
+- **Prefix:** `rm_` (always)
+- **Body:** 8 lowercase alphanumeric characters
+- **Placement:** End of definition line as inline comment
+
+```python
+class ConfigLoader:  # rm_a1b2c3d4
+    def load(self):  # rm_e5f6g7h8
+        ...
+```
+
+File-level IDs go on line 1 (or after shebang):
+
+```python
+# remora-file: rm_xyz12345
+"""This module handles configuration loading."""
+```
+
+### 8c. Implementation
+
+#### [NEW] `src/remora/core/ids.py`
+
+```python
+# src/remora/core/ids.py
+from __future__ import annotations
+import re
+import secrets
+import string
+
+ID_PREFIX = "rm_"
+ID_BODY_LENGTH = 8
+ID_ALPHABET = string.ascii_lowercase + string.digits
+ID_PATTERN = re.compile(r'# rm_[a-z0-9]{8}\s*$')
+FILE_ID_PATTERN = re.compile(r'^# remora-file: rm_[a-z0-9]{8}')
+
+def generate_id() -> str:
+    body = ''.join(secrets.choice(ID_ALPHABET) for _ in range(ID_BODY_LENGTH))
+    return f"{ID_PREFIX}{body}"
+
+def inject_ids(file_path: Path, nodes: list[ASTAgentNode]) -> str:
+    """Inject/update remora IDs in source file."""
+    lines = file_path.read_text().splitlines()
+    nodes_sorted = sorted(nodes, key=lambda n: n.start_line, reverse=True)
+    for node in nodes_sorted:
+        line_idx = node.start_line - 1
+        line = lines[line_idx]
+        line = ID_PATTERN.sub('', line)  # Remove existing
+        lines[line_idx] = f"{line}  # {node.remora_id}"
+    return "\n".join(lines) + "\n"
+```
+
+#### [MODIFY] [discovery.py](file:///c:/Users/Andrew/Documents/Projects/remora/src/remora/core/discovery.py)
+
+Update `compute_node_id()` to use the new `rm_` scheme. For **new** nodes, generate a fresh `rm_` ID. For **existing** nodes (re-parse on save), match by `(name, node_type)` to preserve the existing ID.
+
+### 8d. ID Preservation Across Saves
+
+On `textDocument/didSave`:
+1. Parse new AST to get new nodes
+2. Match against old nodes by `(name, node_type)` key
+3. Carry over `remora_id` from old to new where matched
+4. Mark unmatched old nodes as "orphaned"
+5. Generate new `rm_` IDs for unmatched new nodes
+6. Re-inject IDs into the file
+
+---
+
+## 9. Phase 7 — Graph & Cycle Detection
+
+### 9a. SQLite Schema Additions
+
+The V2.1 concept describes additional tables not present in the current schema. The existing `EventStore` has an `events` table, and `SwarmState` has an `agents` table. Missing:
+
+#### Activation Chain Table
+
+```sql
+CREATE TABLE activation_chain (
+    correlation_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    depth INTEGER NOT NULL,
+    timestamp REAL NOT NULL,
+    PRIMARY KEY (correlation_id, agent_id)
+);
+CREATE INDEX idx_chain_correlation ON activation_chain(correlation_id);
+```
+
+**Current state:** `AgentRunner` tracks cascade depth in an **in-memory** dict (`_correlation_depth`). This works but doesn't survive restarts and can't be queried by the LSP server.
+
+**Target:** Move to SQLite for persistence and cross-component visibility. Add this table to `SwarmState` or create a dedicated `ActivationTracker` class.
+
+#### Edges Table
+
+```sql
+CREATE TABLE edges (
+    from_id TEXT NOT NULL REFERENCES agents(agent_id),
+    to_id TEXT NOT NULL REFERENCES agents(agent_id),
+    edge_type TEXT NOT NULL,  -- parent_of, calls, imports
+    PRIMARY KEY (from_id, to_id, edge_type)
+);
+```
+
+**Current state:** `CSTNode` has no caller/callee relationships. Discovery only extracts definitions, not call graphs.
+
+**Target:** Add call-graph extraction to the tree-sitter discovery phase. This is a **nice-to-have** for V2.2 — the parent/child relationship is already tracked via `parent_id` in `SwarmState`.
+
+### 9b. LazyGraph (Rustworkx)
+
+The V2.1 concept describes a `LazyGraph` using `rustworkx.PyDiGraph` for in-memory graph queries. This is needed for:
+- Parent/child navigation (hover details)
+- Caller/callee display
+- Cycle detection in activation chains
+
+**Current state:** No `rustworkx` usage anywhere. The `pyproject.toml` doesn't list it as a dependency.
+
+**Recommendation for V2.2:** Skip `rustworkx` initially. Use SQLite queries for graph traversal. The `edges` table + simple recursive queries cover the MVP use cases. Add `rustworkx` later for performance if needed.
+
+---
+
+## 10. Phase 8 — Extension Discovery
+
+### 10a. Concept
+
+The V2.1 concept allows users to define custom agent behaviors in `.remora/models/*.py` files. These `ExtensionNode` subclasses inject:
+- Custom system prompts
+- Mounted workspaces
+- Extra tools (as `ToolSchema` objects → code actions in Neovim)
+
+### 10b. Implementation
+
+#### [NEW] `src/remora/lsp/extensions.py`
+
+```python
+# src/remora/lsp/extensions.py
+from __future__ import annotations
+import importlib.util
+from pathlib import Path
+from pydantic import BaseModel
+
+class ExtensionNode(BaseModel):
+    """Base class for user-defined agent extensions."""
+    target_node_type: str | None = None
+    target_name_pattern: str | None = None
+    system_prompt: str = ""
+
+    def matches(self, node_type: str, name: str) -> bool:
+        if self.target_node_type and self.target_node_type != node_type:
+            return False
+        if self.target_name_pattern:
+            import re
+            if not re.match(self.target_name_pattern, name):
+                return False
+        return True
+
+    def get_workspaces(self) -> str:
+        return ""
+
+    def get_tool_schemas(self) -> list[ToolSchema]:
+        return []
+
+
+def load_extensions(models_dir: Path) -> list[type[ExtensionNode]]:
+    """Load ExtensionNode subclasses from .remora/models/"""
+    extensions = []
+    if not models_dir.exists():
+        return extensions
+    for py_file in models_dir.glob("*.py"):
+        spec = importlib.util.spec_from_file_location(py_file.stem, py_file)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for obj in module.__dict__.values():
+            if (isinstance(obj, type)
+                and issubclass(obj, ExtensionNode)
+                and obj is not ExtensionNode):
+                extensions.append(obj)
+    return extensions
+```
+
+### 10c. Integration Point
+
+In `SwarmExecutor._build_prompt()` or in the LSP handler for hydrating an `ASTAgentNode`:
+
+```python
+def apply_extensions(agent: ASTAgentNode) -> ASTAgentNode:
+    extensions = load_extensions(Path(".remora/models"))
+    for ext_cls in extensions:
+        if ext_cls().matches(agent.node_type, agent.name):
+            ext = ext_cls()
+            agent.custom_system_prompt = ext.system_prompt
+            agent.mounted_workspaces = ext.get_workspaces()
+            agent.extra_tools = ext.get_tool_schemas()
+            break
+    return agent
+```
+
+---
+
+## 11. Appendix A — File-by-File Audit
+
+### Python Source (`src/remora/`)
+
+| File | Lines | Status | Action Required |
+|------|-------|--------|-----------------|
+| `core/agent_state.py` | 84 | ⚠️ Dataclass | Convert to Pydantic `BaseModel` |
+| `core/agent_runner.py` | 288 | ✅ Functional | Wire to LSP server via `EventBus` |
+| `core/config.py` | 165 | ⚠️ Dataclass | Convert to Pydantic, delete `serialize_config()` |
+| `core/discovery.py` | 374 | ⚠️ Dataclass `CSTNode` | Convert to Pydantic, update ID scheme to `rm_` |
+| `core/event_bus.py` | 135 | ✅ Functional | No changes needed |
+| `core/event_store.py` | 354 | ⚠️ Uses `asdict()` | Update serialization for Pydantic (`model_dump()`) |
+| `core/events.py` | 187 | ⚠️ Dataclasses | Convert Remora events to Pydantic, keep SA re-exports |
+| `core/reconciler.py` | ~200 | ✅ Functional | Minor updates for Pydantic model API |
+| `core/subscriptions.py` | ~300 | ⚠️ Dataclass `SubscriptionPattern` | Convert to Pydantic |
+| `core/swarm_executor.py` | 375 | ✅ Functional | Add `rewrite_self` tool response handling |
+| `core/swarm_state.py` | 197 | ⚠️ Dataclass `AgentMetadata` | Convert to Pydantic |
+| `core/workspace.py` | ~200 | ✅ Functional | No changes needed |
+| `cli/main.py` | 274 | ⚠️ Missing `--lsp` | Add `--lsp` flag and `lsp` subcommand |
+| `models/__init__.py` | 101 | ⚠️ Dataclasses | Convert to Pydantic |
+| `nvim/server.py` | 265 | ✅ v1 JSON-RPC | **Keep** for backward compat, but superseded by LSP |
+| **`lsp/` (entire package)** | 0 | 🔴 Missing | **Create** — 8+ new files |
+| **`core/ids.py`** | 0 | 🔴 Missing | **Create** — `rm_` ID generation and injection |
+
+### Lua Plugin
+
+| File | Lines | Status | Action Required |
+|------|-------|--------|-----------------|
+| `plugin/remora_nvim.lua` | 24 | ⚠️ v1 commands | **Replace** with `plugin/remora.lua` |
+| `lua/remora_nvim/.v1/init.lua` | ~50 | ❌ v1 JSON-RPC | **Delete** or archive |
+| `lua/remora_nvim/.v1/bridge.lua` | ~200 | ❌ v1 transport | **Delete** or archive |
+| `lua/remora_nvim/.v1/sidepanel.lua` | ~300 | ❌ v1 nui.nvim | **Rewrite** as `lua/remora/panel.lua` |
+| `lua/remora_nvim/.v1/chat.lua` | ~50 | ❌ v1 chat | **Rewrite** using LSP notifications |
+| `lua/remora_nvim/.v1/navigation.lua` | ~200 | ❌ v1 navigation | **Delete** — LSP code lens replaces this |
+| **`lua/remora/init.lua`** | 0 | 🔴 Missing | **Create** — LSP config + handlers |
+| **`lua/remora/panel.lua`** | 0 | 🔴 Missing | **Create** — nui-components sidebar |
+| **`lua/remora/sse.lua`** | 0 | 🔴 Missing | **Create** — SSE event subscription |
+| **`lua/remora/highlights.lua`** | 0 | 🔴 Missing | **Create** — highlight group definitions |
+
+---
+
+## 12. Appendix B — Dependency Check
+
+### Python Dependencies
+
+| Package | In `pyproject.toml`? | Used Currently? | Needed For V2.2? |
+|---------|---------------------|-----------------|-------------------|
+| `pygls` | ✅ Yes | ❌ No (listed but unused) | ✅ Required — LSP server |
+| `lsprotocol` | ✅ Yes | ❌ No (listed but unused) | ✅ Required — LSP types |
+| `pydantic` | ✅ Yes | ⚠️ Only for `AgentRunner` wrapper (stale) | ✅ Required — all models |
+| `tree-sitter` | ✅ Yes | ✅ Yes (`discovery.py`) | ✅ Required — code parsing |
+| `tree-sitter-python` | ✅ Yes | ✅ Yes | ✅ Required |
+| `rustworkx` | ❌ No | ❌ No | 🟡 Optional — skip for MVP |
+
+### Neovim Plugin Dependencies
+
+| Package | Required? | Purpose |
+|---------|-----------|---------|
+| Neovim ≥ 0.11 | ✅ Yes | `vim.lsp.config` / `vim.lsp.enable()` API |
+| `nui-components.nvim` | 🟡 Optional | Rich sidebar UI (reactive Signals) |
+| `nui.nvim` | 🟡 Optional | Required by nui-components |
+| `nvim-notify` | 🟡 Optional | Better notification display |
+
+### Version Verification
+
+```bash
+# Check pygls is installed and importable
+python -c "import pygls; print(pygls.__version__)"
+
+# Check lsprotocol
+python -c "import lsprotocol; print(lsprotocol.__version__)"
+
+# Check Neovim version (need 0.11+ for vim.lsp.config)
+nvim --version | head -1
+```
+
+---
+
+*End of V2.2 Refactoring Guide*
