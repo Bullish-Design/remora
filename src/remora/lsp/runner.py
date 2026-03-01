@@ -33,20 +33,13 @@ class Trigger(BaseModel):
     context: dict = Field(default_factory=dict)
 
 
-class MockLLMClient:
-    async def chat(self, messages, tools=None):
-        class MockResponse:
-            tool_calls = []
-
-        return MockResponse()
-
 
 class AgentRunner:
     """Asynchronous agent execution coordinator for the Remora LSP server."""
 
-    def __init__(self, server: "RemoraLanguageServer") -> None:
+    def __init__(self, server: "RemoraLanguageServer", llm: Any = None) -> None:
         self.server = server
-        self.llm = MockLLMClient()
+        self.llm = llm
         self.executor: "SwarmExecutor | None" = None
         self.queue: asyncio.Queue[Trigger] = asyncio.Queue()
         self._running = False
@@ -126,8 +119,11 @@ class AgentRunner:
 
                 tools = self.get_agent_tools(agent)
 
-                response = await self.llm.chat(messages, tools)
-                await self.handle_response(agent, response, correlation_id)
+                if self.llm:
+                    response = await self.llm.chat(messages, tools)
+                    await self.handle_response(agent, response, correlation_id)
+                else:
+                    await self.emit_error(agent_id, "No LLM client configured", correlation_id)
         except Exception as e:
             await self.emit_error(agent_id, str(e), correlation_id)
         finally:

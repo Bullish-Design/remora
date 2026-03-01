@@ -5,7 +5,7 @@
 local function normalize_opts(opts)
     opts = opts or {}
     return {
-        cmd = opts.cmd or { "remora-lsp" },
+        cmd = opts.cmd or { "remora-demo" },
         filetypes = opts.filetypes or { "python" },
         root_markers = opts.root_markers or { ".remora", ".git" },
         settings = opts.settings or {},
@@ -20,7 +20,7 @@ end
 local function bootstrap(opts)
     opts = normalize_opts(opts)
     local repo_root = "/home/andrew/Documents/Projects/remora"
-    local nvim_plugin_path = repo_root .. "/src/remora/lsp/nvim"
+    local nvim_plugin_path = repo_root .. "/demo/nvim"
     vim.opt.runtimepath:prepend(repo_root)
     vim.opt.runtimepath:prepend(nvim_plugin_path)
     package.path = nvim_plugin_path .. "/lua/?.lua;" .. package.path
@@ -29,7 +29,7 @@ local function bootstrap(opts)
     trace("runtimepath prepended with: " .. nvim_plugin_path)
     trace("package.path updated for lua modules")
 
-    local ok, remora = pcall(require, "remora")
+    local ok, remora_nvim = pcall(require, "remora_nvim")
     if not ok then
         vim.notify(
             "[Remora] Failed to load plugin; check runtimepath\n"
@@ -40,7 +40,7 @@ local function bootstrap(opts)
     end
 
     local start = vim.loop.hrtime()
-    remora.setup(opts)
+    remora_nvim.setup(opts)
     local took = (vim.loop.hrtime() - start) / 1e6
     trace(string.format("setup completed in %.2f ms", took))
 

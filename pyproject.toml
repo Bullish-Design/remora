@@ -71,6 +71,7 @@ grail = { git = "https://github.com/Bullish-Design/grail.git", rev = "main" }
 remora = "remora.cli:main"
 remora-index = "remora.indexer.cli:main"
 remora-lsp = "remora.lsp:main"
+remora-demo = "demo.__main__:main"
 
 #[project.urls]
 #homepage = "https://github.com/Bullish-Design/template-py"
@@ -85,8 +86,6 @@ packages = ["src/remora", "scripts", "demo"]
 include = [
     "src/remora/indexer/scripts/**/*.pym",
     "src/remora/fixtures/**",
-    "src/remora/lsp/nvim/**/*.lua",
-    "src/remora/lsp/nvim/**/*.vim",
 ]
 
 [tool.hatch.build.targets.sdist]

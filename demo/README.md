@@ -24,18 +24,14 @@ Features:
 uv pip install -e ".[dev]"
 ```
 
-### Start the LSP Server
+### Start the Demo LSP Server
 
 ```bash
-# Standalone
-remora-lsp
-
-# Or via CLI
-remora swarm start --lsp
-
-# Or via Python module
-python -m remora.lsp
+# Start the server with the Mock LLM injected for demo purposes
+remora-demo
 ```
+
+*(Note: `remora-lsp` starts the production core server without the mock demo LLM)*
 
 ### Configure Neovim
 
@@ -44,14 +40,14 @@ Add to your `init.lua`:
 ```lua
 vim.lsp.start({
     name = "remora",
-    cmd = { "remora-lsp" },
+    cmd = { "remora-demo" },
     root_dir = vim.fn.getcwd(),
     filetypes = { "python" },
 })
-require("remora").setup()
+require("remora_nvim").setup()
 ```
 
-**Or:** luafile demo/remora_nvim_startup.lua
+**Or:** `luafile demo/remora_nvim_startup.lua`
 
 ### Commands
 
