@@ -13,6 +13,12 @@ M.notification_handlers = {}
 -- ============================================================================
 
 function M.setup(socket_path)
+    -- Prevent multiple connections
+    if M.client then
+        vim.notify("Remora: Bridge already connected, skipping setup", vim.log.levels.WARN)
+        return
+    end
+
     M.client = vim.loop.new_pipe(false)
 
     M.client:connect(socket_path, function(err)
@@ -54,7 +60,7 @@ function M.call(method, params, callback)
     local id = M.next_id
     M.next_id = M.next_id + 1
 
-    local msg = vim.fn.json_encode({
+    local msg = vim.json.encode({
         jsonrpc = "2.0",
         id = id,
         method = method,
@@ -63,6 +69,7 @@ function M.call(method, params, callback)
 
     if callback then
         M.callbacks[id] = callback
+        -- Debug: vim.notify(string.format("Remora: RPC call %s (id=%d)", method, id), vim.log.levels.INFO)
     end
 
     M.client:write(msg .. "\n")
@@ -72,18 +79,41 @@ end
 -- Handle Incoming Data (Responses + Notifications)
 -- ============================================================================
 
+-- Buffer for partial messages (TCP can chunk data)
+M.read_buffer = ""
+
 function M.handle_incoming(data)
-    for line in data:gmatch("[^\n]+") do
-        local ok, msg = pcall(vim.fn.json_decode, line)
-        if ok and msg then
-            if msg.id and M.callbacks[msg.id] then
+    -- Append to buffer and process complete lines
+    M.read_buffer = M.read_buffer .. data
+
+    while true do
+        local newline_pos = M.read_buffer:find("\n")
+        if not newline_pos then
+            break  -- No complete line yet
+        end
+
+        local line = M.read_buffer:sub(1, newline_pos - 1)
+        M.read_buffer = M.read_buffer:sub(newline_pos + 1)
+
+        if line ~= "" then
+            local ok, msg = pcall(vim.json.decode, line)
+            if ok and msg then
+                if msg.id then
+                    local callback = M.callbacks[msg.id]
+                    if callback then
+                        vim.schedule(function()
+                            callback(msg.result)
+                            M.callbacks[msg.id] = nil
+                        end)
+                    end
+                elseif msg.method then
+                    vim.schedule(function()
+                        M.handle_notification(msg.method, msg.params)
+                    end)
+                end
+            else
                 vim.schedule(function()
-                    M.callbacks[msg.id](msg.result)
-                    M.callbacks[msg.id] = nil
-                end)
-            elseif msg.method then
-                vim.schedule(function()
-                    M.handle_notification(msg.method, msg.params)
+                    vim.notify("Remora: JSON decode error: " .. tostring(msg), vim.log.levels.ERROR)
                 end)
             end
         end

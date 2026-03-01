@@ -52,6 +52,9 @@ print(f"\nNvim RPC Server will listen on Unix Socket: {SOCKET_PATH}\n")
 # :lua require('remora_nvim').setup({ socket = '/run/user/1000/remora.sock' })
 # :source plugin/remora_nvim.lua
 
+## Updated to:
+# so /home/andrew/Documents/Projects/remora/load.vim
+
 
 async def push_to_clients(event: RemoraEvent) -> None:
     """Forward EventBus events to subscribed Neovim clients."""

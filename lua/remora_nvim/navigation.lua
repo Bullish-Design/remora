@@ -39,7 +39,7 @@ function M.on_buffer_opened(ev)
         end
 
         local file_name = vim.fn.fnamemodify(file_path, ":t:r")
-        vim.notify(string.format("Remora: Caching %d agents for %s", #result.agents, file_name), vim.log.levels.INFO)
+        -- Debug: vim.notify(string.format("Remora: Caching %d agents for %s", #result.agents, file_name), vim.log.levels.INFO)
 
         for _, agent in ipairs(result.agents) do
             local cache_key = string.format("%s_%s_%d", agent.type, file_name, agent.line)
@@ -50,7 +50,7 @@ function M.on_buffer_opened(ev)
 
         -- Mark as ready and trigger cursor update
         M.registered_buffers[file_path] = "ready"
-        vim.notify("Remora: Buffer ready, triggering cursor update", vim.log.levels.INFO)
+        -- Debug: vim.notify("Remora: Buffer ready, triggering cursor update", vim.log.levels.INFO)
 
         -- Re-trigger cursor moved to update with correct agent IDs
         vim.schedule(function()
@@ -127,8 +127,8 @@ function M.on_cursor_moved()
     -- Look up the hash ID from cache (required - don't use fallback)
     local agent_id = M.agent_id_cache[cache_key]
     if not agent_id then
-        -- Debug: show what we're looking for (comment out after debugging)
-        vim.notify(string.format("Remora: Cache miss for %s", cache_key), vim.log.levels.WARN)
+        -- Debug: show what we're looking for (uncomment for debugging)
+        -- vim.notify(string.format("Remora: Cache miss for %s", cache_key), vim.log.levels.WARN)
         return
     end
 
