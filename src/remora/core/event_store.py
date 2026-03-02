@@ -91,6 +91,38 @@ class EventStore:
                 """,
             )
 
+            await asyncio.to_thread(
+                self._conn.executescript,
+                """
+                CREATE TABLE IF NOT EXISTS nodes (
+                    node_id         TEXT PRIMARY KEY,
+                    node_type       TEXT NOT NULL,
+                    name            TEXT NOT NULL,
+                    full_name       TEXT NOT NULL,
+                    file_path       TEXT NOT NULL,
+                    start_line      INTEGER NOT NULL,
+                    end_line        INTEGER NOT NULL,
+                    source_code     TEXT NOT NULL,
+                    source_hash     TEXT NOT NULL,
+                    parent_id       TEXT,
+                    caller_ids      TEXT NOT NULL DEFAULT '[]',
+                    callee_ids      TEXT NOT NULL DEFAULT '[]',
+                    status          TEXT NOT NULL DEFAULT 'idle',
+                    last_trigger_event TEXT NOT NULL DEFAULT '',
+                    last_completed_at  REAL,
+                    extension_name  TEXT,
+                    custom_system_prompt TEXT NOT NULL DEFAULT '',
+                    mounted_workspaces TEXT NOT NULL DEFAULT '[]',
+                    extra_tools     TEXT NOT NULL DEFAULT '[]',
+                    extra_subscriptions TEXT NOT NULL DEFAULT '[]'
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_nodes_file_path ON nodes(file_path);
+                CREATE INDEX IF NOT EXISTS idx_nodes_parent_id ON nodes(parent_id);
+                CREATE INDEX IF NOT EXISTS idx_nodes_node_type ON nodes(node_type);
+                """,
+            )
+
             await self._migrate_routing_fields()
 
             if self._subscriptions is not None:
