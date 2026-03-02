@@ -1,20 +1,21 @@
 # CONTEXT — Launch Plan Execution
 
 ## Current State
-- **Active batch:** Batch 6.6 (Delete stdlib dataclass remnants) — pending
-- **Last completed:** Batch 6.3 (Single SQLite Database)
-- **Test suite:** 638 passed, 2 xfailed
+- **Active batch:** ALL BATCHES COMPLETE
+- **Last completed:** Batch 6.6 (Delete stdlib dataclass models)
+- **Test suite:** 653 passed, 2 xfailed
 
 ## What Just Happened
-- Completed Batch 6.3 (Single SQLite Database):
-  - EventStore.initialize() now enables WAL mode + PRAGMA synchronous=NORMAL
-  - EventStore.initialize() creates subscriptions table (shared with SubscriptionRegistry)
-  - EventStore.initialize() creates RemoraDB operational tables (edges, proposals, cursor_focus, activation_chain, command_queue)
-  - SubscriptionRegistry accepts optional `connection=` and `lock=` kwargs for shared-connection mode
-  - RemoraDB accepts optional `connection=` and `lock=` kwargs for shared-connection mode
-  - Both maintain full backward compatibility with standalone `db_path` mode
+- Completed Batch 6.6 (Delete stdlib dataclass models):
+  - Converted all 4 models in `src/remora/models/__init__.py` from stdlib `@dataclass(slots=True)` to Pydantic `BaseModel`
+  - `to_dict()` now delegates to `model_dump()` instead of `asdict(self)`
+  - Removed all `from dataclasses import asdict, dataclass` from the module
+  - 15 TDD tests in `tests/unit/test_pydantic_models.py`
+- Completed Batch 6.3 (Single SQLite Database) — commit `a89a3d2`:
+  - EventStore creates all tables + WAL mode
+  - SubscriptionRegistry and RemoraDB accept shared connection
   - 15 TDD tests in `tests/unit/test_single_db.py`
-  - 638 passed, 2 xfailed, 0 failures
+- All 75+ items from the launch plan are now complete
 
 ## Completed Batches
 - **Batch 1**: 25 quick fixes (commit `597a550`)
@@ -26,15 +27,13 @@
 - **Batch 5**: Post-Unification Cleanup (commit `9b9171a`)
 - **Batch 6.1**: Unified events → frozen Pydantic (commit `b4f54d9`)
 - **Batch 6.2**: Pydantic Config/BaseSettings (commit `b4f54d9`)
-- **Batch 6.3**: Single SQLite Database (pending commit)
+- **Batch 6.6**: Delete stdlib dataclass models (pending commit)
 - **Batch 6.4**: Typed externals / AgentContext (commit `b4f54d9`)
 - **Batch 6.5**: Kernel factory (commit `b4f54d9`)
 
 ## What Needs to Be Done Next
 
-### Batch 6.6: Delete stdlib dataclass remnants (NOW)
-- D9: Find and remove any remaining stdlib `@dataclass` models that have been replaced by Pydantic
-- This was blocked on 6.1 and 6.2 completing the Pydantic migration
+ALL BATCHES COMPLETE. The launch plan execution is finished.
 
 ## Key Context for Resumption
 - Master task list: `REMORA_LAUNCH_PLAN.md` (root)

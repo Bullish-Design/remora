@@ -2,10 +2,10 @@
 
 ## Summary
 - **Total items:** 75+
-- **Completed:** Batches 1, 2, 3, 7, 8, 4, 5, 6.1, 6.2, 6.3, 6.4, 6.5
-- **In progress:** Batch 6.6 (delete dataclass remnants)
-- **Remaining:** Batch 6.6
-- **Test suite:** 638 passed, 2 xfailed
+- **Completed:** Batches 1, 2, 3, 7, 8, 4, 5, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6 — ALL DONE
+- **In progress:** None
+- **Remaining:** None
+- **Test suite:** 653 passed, 2 xfailed
 
 ---
 
@@ -153,4 +153,4 @@
 | 6.3 | 2.4 | Single SQLite database | done |
 | 6.4 | 2.5 | Typed externals protocol (AgentContext) | done (commit `b4f54d9`) |
 | 6.5 | 2.6 | Kernel factory | done (commit `b4f54d9`) |
-| 6.6 | D9 | Delete stdlib dataclass models | pending |
+| 6.6 | D9 | Delete stdlib dataclass models | done |

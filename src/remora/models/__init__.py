@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 from typing import Any, Mapping
+
+from pydantic import BaseModel
 
 from remora.core.config import Config, serialize_config
 
@@ -12,8 +13,7 @@ def _from_mapping(data: Mapping[str, Any] | None) -> dict[str, Any]:
     return dict(data or {})
 
 
-@dataclass(slots=True)
-class SwarmEmitRequest:
+class SwarmEmitRequest(BaseModel):
     event_type: str
     data: dict[str, Any]
 
@@ -26,28 +26,25 @@ class SwarmEmitRequest:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return self.model_dump()
 
 
-@dataclass(slots=True)
-class SwarmEmitResponse:
+class SwarmEmitResponse(BaseModel):
     event_id: int
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return self.model_dump()
 
 
-@dataclass(slots=True)
-class InputResponse:
+class InputResponse(BaseModel):
     request_id: str
     status: str = "submitted"
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return self.model_dump()
 
 
-@dataclass(slots=True)
-class ConfigSnapshot:
+class ConfigSnapshot(BaseModel):
     discovery: dict[str, Any]
     bundles: dict[str, Any]
     execution: dict[str, Any]
@@ -89,7 +86,7 @@ class ConfigSnapshot:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return self.model_dump()
 
 
 __all__ = [
