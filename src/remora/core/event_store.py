@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from remora.core.event_bus import EventBus
+    from remora.core.projections import NodeProjection
     from remora.core.subscriptions import SubscriptionRegistry
 
 
@@ -30,6 +31,7 @@ class EventStore:
         db_path: PathLike,
         subscriptions: "SubscriptionRegistry | None" = None,
         event_bus: "EventBus | None" = None,
+        projection: "NodeProjection | None" = None,
     ):
         self._db_path = normalize_path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,6 +39,7 @@ class EventStore:
         self._lock = asyncio.Lock()
         self._subscriptions = subscriptions
         self._event_bus = event_bus
+        self._projection = projection
         self._trigger_queue: asyncio.Queue[tuple[str, int, RemoraEvent]] | None = None
 
     def set_subscriptions(self, subscriptions: "SubscriptionRegistry") -> None:
@@ -190,6 +193,10 @@ class EventStore:
             )
             await asyncio.to_thread(self._conn.commit)
             event_id = cursor.lastrowid or 0
+
+            # Project event into materialized views (e.g. nodes table)
+            if self._projection is not None:
+                await asyncio.to_thread(self._projection.apply, self._conn, event)
 
         if self._trigger_queue is not None and self._subscriptions is not None:
             matching_agents = await self._subscriptions.get_matching_agents(event)
