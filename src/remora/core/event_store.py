@@ -425,6 +425,65 @@ class EventStore:
         rows = await asyncio.to_thread(_fetch, self._conn)
         return [AgentNode.from_row(row) for row in rows]
 
+    async def get_node_at_position(
+        self,
+        file_path: str,
+        line: int,
+    ) -> "AgentNode | None":
+        """Get the narrowest AgentNode containing the given line in a file."""
+        from remora.core.agent_node import AgentNode
+
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        def _fetch(conn: sqlite3.Connection) -> sqlite3.Row | None:
+            cursor = conn.execute(
+                """SELECT * FROM nodes
+                   WHERE file_path = ? AND start_line <= ? AND end_line >= ?
+                   ORDER BY (end_line - start_line) ASC
+                   LIMIT 1""",
+                (file_path, line, line),
+            )
+            return cursor.fetchone()
+
+        row = await asyncio.to_thread(_fetch, self._conn)
+        if row is None:
+            return None
+        return AgentNode.from_row(row)
+
+    async def set_node_status(self, node_id: str, status: str) -> None:
+        """Update the status field of a node directly."""
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        async with self._lock:
+            await asyncio.to_thread(
+                self._conn.execute,
+                "UPDATE nodes SET status = ? WHERE node_id = ?",
+                (status, node_id),
+            )
+            await asyncio.to_thread(self._conn.commit)
+
+    async def remove_nodes_for_file(self, file_path: str) -> int:
+        """Remove all nodes for a given file path. Returns count removed."""
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        async with self._lock:
+            cursor = await asyncio.to_thread(
+                self._conn.execute,
+                "DELETE FROM nodes WHERE file_path = ?",
+                (file_path,),
+            )
+            await asyncio.to_thread(self._conn.commit)
+            return cursor.rowcount
+
     async def close(self) -> None:
         """Close the database connection."""
         if self._conn:
