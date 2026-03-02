@@ -25,7 +25,6 @@ class RemoraLanguageServer(LanguageServer):
         self,
         event_store=None,
         subscriptions=None,
-        swarm_state=None,
     ):
         super().__init__(name="remora", version="0.1.0")
         self.db = RemoraDB()
@@ -38,7 +37,6 @@ class RemoraLanguageServer(LanguageServer):
         self._correlation_counter = 0
         self._injecting: set[str] = set()
         self.subscriptions = subscriptions
-        self.swarm_state = swarm_state
 
     def generate_correlation_id(self) -> str:
         self._correlation_counter += 1

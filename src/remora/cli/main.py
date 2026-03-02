@@ -48,28 +48,27 @@ def swarm_start(
         async def _prepare_lsp():
             from remora.core.event_bus import EventBus
             from remora.core.event_store import EventStore
+            from remora.core.projections import NodeProjection
             from remora.core.reconciler import reconcile_on_startup
             from remora.core.subscriptions import SubscriptionRegistry
-            from remora.core.swarm_state import SwarmState
 
             root = Path(project_root) if project_root else Path.cwd()
             swarm_path = root / ".remora"
             event_store_path = swarm_path / "events" / "events.db"
             subscriptions_path = swarm_path / "subscriptions.db"
-            swarm_state_path = swarm_path / "swarm_state.db"
 
             event_bus = EventBus()
             subscriptions = SubscriptionRegistry(subscriptions_path)
-            swarm_state = SwarmState(swarm_state_path)
+            projection = NodeProjection()
             event_store = EventStore(
                 event_store_path,
                 subscriptions=subscriptions,
                 event_bus=event_bus,
+                projection=projection,
             )
 
             await event_store.initialize()
             await subscriptions.initialize()
-            await swarm_state.initialize()
 
             event_store.set_subscriptions(subscriptions)
             event_store.set_event_bus(event_bus)
@@ -78,7 +77,6 @@ def swarm_start(
             swarm_id = getattr(config, "swarm_id", "swarm") if hasattr(config, "__dataclass_fields__") else "swarm"
             result = await reconcile_on_startup(
                 root,
-                swarm_state,
                 subscriptions,
                 event_store=event_store,
                 swarm_id=swarm_id,
@@ -87,16 +85,15 @@ def swarm_start(
                 f"Swarm reconciled: {result['created']} new, {result['orphaned']} orphaned, {result['total']} total"
             )
 
-            return event_store, subscriptions, swarm_state
+            return event_store, subscriptions
 
-        event_store, subscriptions, swarm_state = asyncio.run(_prepare_lsp())
+        event_store, subscriptions = asyncio.run(_prepare_lsp())
 
         from remora.lsp.__main__ import main as lsp_main
 
         lsp_main(
             event_store=event_store,
             subscriptions=subscriptions,
-            swarm_state=swarm_state,
         )
         return
 
@@ -105,7 +102,7 @@ def swarm_start(
     async def _start() -> None:
         from remora.core.event_bus import EventBus
         from remora.core.event_store import EventStore
-        from remora.core.swarm_state import SwarmState
+        from remora.core.projections import NodeProjection
         from remora.core.subscriptions import SubscriptionRegistry
         from remora.core.reconciler import reconcile_on_startup
         from remora.lsp.runner import AgentRunner
@@ -113,20 +110,19 @@ def swarm_start(
         swarm_path = root / ".remora"
         event_store_path = swarm_path / "events" / "events.db"
         subscriptions_path = swarm_path / "subscriptions.db"
-        swarm_state_path = swarm_path / "swarm_state.db"
 
         event_bus = EventBus()
         subscriptions = SubscriptionRegistry(subscriptions_path)
-        swarm_state = SwarmState(swarm_state_path)
+        projection = NodeProjection()
         event_store = EventStore(
             event_store_path,
             subscriptions=subscriptions,
             event_bus=event_bus,
+            projection=projection,
         )
 
         await event_store.initialize()
         await subscriptions.initialize()
-        await swarm_state.initialize()
 
         event_store.set_subscriptions(subscriptions)
         event_store.set_event_bus(event_bus)
@@ -135,7 +131,6 @@ def swarm_start(
         swarm_id = getattr(config, "swarm_id", "swarm") if hasattr(config, "__dataclass_fields__") else "swarm"
         result = await reconcile_on_startup(
             root,
-            swarm_state,
             subscriptions,
             event_store=event_store,
             swarm_id=swarm_id,
@@ -166,7 +161,6 @@ def swarm_start(
                 await runner_task
             with contextlib.suppress(asyncio.CancelledError):
                 await bridge_task
-            await swarm_state.close()
 
     asyncio.run(_start())
 
@@ -184,32 +178,38 @@ def swarm_reconcile(project_root: str | None, config_path: str | None) -> None:
     root = Path(project_root) if project_root else Path.cwd()
 
     async def _reconcile() -> None:
-        from remora.core.swarm_state import SwarmState
         from remora.core.subscriptions import SubscriptionRegistry
         from remora.core.reconciler import reconcile_on_startup
+        from remora.core.event_store import EventStore
+        from remora.core.projections import NodeProjection
 
         swarm_path = root / ".remora"
         subscriptions_path = swarm_path / "subscriptions.db"
-        swarm_state_path = swarm_path / "swarm_state.db"
+        event_store_path = swarm_path / "events" / "events.db"
 
         subscriptions = SubscriptionRegistry(subscriptions_path)
-        swarm_state = SwarmState(swarm_state_path)
+        projection = NodeProjection()
+        event_store = EventStore(
+            event_store_path,
+            subscriptions=subscriptions,
+            projection=projection,
+        )
 
         await subscriptions.initialize()
-        await swarm_state.initialize()
+        await event_store.initialize()
 
         result = await reconcile_on_startup(
             root,
-            swarm_state,
             subscriptions,
+            event_store=event_store,
         )
         click.echo(f"Reconciliation complete:")
         click.echo(f"  Created: {result['created']}")
         click.echo(f"  Orphaned: {result['orphaned']}")
         click.echo(f"  Total: {result['total']}")
 
+        await event_store.close()
         await subscriptions.close()
-        await swarm_state.close()
 
     asyncio.run(_reconcile())
 
@@ -221,28 +221,28 @@ def swarm_list(project_root: str | None) -> None:
     root = Path(project_root) if project_root else Path.cwd()
 
     swarm_path = root / ".remora"
-    swarm_state_path = swarm_path / "swarm_state.db"
+    event_store_path = swarm_path / "events" / "events.db"
 
-    if not swarm_state_path.exists():
-        click.echo("No swarm state found. Run 'remora swarm reconcile' first.")
+    if not event_store_path.exists():
+        click.echo("No event store found. Run 'remora swarm reconcile' first.")
         return
 
-    from remora.core.swarm_state import SwarmState
+    from remora.core.event_store import EventStore
 
     async def _list() -> None:
-        swarm_state = SwarmState(swarm_state_path)
-        await swarm_state.initialize()
+        event_store = EventStore(event_store_path)
+        await event_store.initialize()
 
-        agents = await swarm_state.list_agents()
+        agents = await event_store.list_nodes()
 
         if not agents:
             click.echo("No agents found.")
         else:
             click.echo(f"Agents ({len(agents)}):")
             for agent in agents:
-                click.echo(f"  {agent.agent_id[:16]}... | {agent.node_type} | {agent.file_path} | {agent.status}")
+                click.echo(f"  {agent.node_id[:16]}... | {agent.node_type} | {agent.file_path} | {agent.status}")
 
-        await swarm_state.close()
+        await event_store.close()
 
     asyncio.run(_list())
 

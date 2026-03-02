@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +18,6 @@ from remora.utils import PathResolver
 
 if TYPE_CHECKING:
     from remora.core.subscriptions import SubscriptionRegistry
-    from remora.core.swarm_state import SwarmState
     from remora.core.cairn_bridge import CairnWorkspaceService
 
 logger = logging.getLogger(__name__)
@@ -31,7 +30,6 @@ class ServiceDeps:
     project_root: Path
     projector: UiStateProjector
     event_store: EventStore | None = None
-    swarm_state: "SwarmState | None" = None
     subscriptions: "SubscriptionRegistry | None" = None
     workspace_service: "CairnWorkspaceService | None" = None
 
@@ -97,20 +95,20 @@ async def handle_swarm_emit(request: Any, deps: ServiceDeps) -> dict[str, Any]:
 
 async def handle_swarm_list_agents(deps: ServiceDeps) -> list[dict[str, Any]]:
     """List all agents in the swarm."""
-    if deps.swarm_state is None:
-        raise ValueError("swarm state not configured")
-    agents = await deps.swarm_state.list_agents()
-    return [asdict(agent) for agent in agents]
+    if deps.event_store is None:
+        raise ValueError("event store not configured")
+    agents = await deps.event_store.list_nodes()
+    return [agent.model_dump() for agent in agents]
 
 
 async def handle_swarm_get_agent(agent_id: str, deps: ServiceDeps) -> dict[str, Any]:
     """Get a specific agent."""
-    if deps.swarm_state is None:
-        raise ValueError("swarm state not configured")
-    agent = await deps.swarm_state.get_agent(agent_id)
+    if deps.event_store is None:
+        raise ValueError("event store not configured")
+    agent = await deps.event_store.get_node(agent_id)
     if agent is None:
         raise ValueError("agent not found")
-    return asdict(agent)
+    return agent.model_dump()
 
 
 async def handle_swarm_get_subscriptions(agent_id: str, deps: ServiceDeps) -> list[dict[str, Any]]:

@@ -87,87 +87,73 @@ class TestDuplicatePromptContext:
     passed as kernel messages (requires_context=False avoids duplication)."""
 
     def test_prompt_without_context_excludes_history(self):
-        from remora.core.swarm_executor import SwarmExecutor
-        from remora.core.agent_state import AgentState
-        from remora.core.discovery import CSTNode
+        from remora.core.swarm_executor import SwarmExecutor, _agent_node_to_cst_node
+        from remora.core.agent_node import AgentNode
 
-        state = AgentState(
-            agent_id="test",
-            name="test_fn",
-            full_name="mod.test_fn",
-            file_path="test.py",
-            node_type="function",
-            chat_history=[
-                {"role": "user", "content": "old prompt"},
-                {"role": "assistant", "content": "old response"},
-            ],
-        )
-        node = CSTNode(
+        node = AgentNode(
             node_id="test",
             node_type="function",
             name="test_fn",
             full_name="mod.test_fn",
             file_path="test.py",
-            text="def test_fn(): pass",
             start_line=1,
             end_line=1,
             start_byte=0,
             end_byte=19,
+            source_code="def test_fn(): pass",
+            source_hash="abc123",
         )
+        chat_history = [
+            {"role": "user", "content": "old prompt"},
+            {"role": "assistant", "content": "old response"},
+        ]
+        cst_node = _agent_node_to_cst_node(node)
         config = Config()
         executor = SwarmExecutor(
             config=config,
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=Path("/tmp"),
         )
 
-        prompt = executor._build_prompt(state, node, {}, requires_context=False)
+        prompt = executor._build_prompt(node, cst_node, {}, chat_history=chat_history, requires_context=False)
         assert "Recent Chat History" not in prompt
 
     def test_prompt_with_context_includes_history(self):
-        from remora.core.swarm_executor import SwarmExecutor
-        from remora.core.agent_state import AgentState
-        from remora.core.discovery import CSTNode
+        from remora.core.swarm_executor import SwarmExecutor, _agent_node_to_cst_node
+        from remora.core.agent_node import AgentNode
 
-        state = AgentState(
-            agent_id="test",
-            name="test_fn",
-            full_name="mod.test_fn",
-            file_path="test.py",
-            node_type="function",
-            chat_history=[
-                {"role": "user", "content": "old prompt"},
-                {"role": "assistant", "content": "old response"},
-            ],
-        )
-        node = CSTNode(
+        node = AgentNode(
             node_id="test",
             node_type="function",
             name="test_fn",
             full_name="mod.test_fn",
             file_path="test.py",
-            text="def test_fn(): pass",
             start_line=1,
             end_line=1,
             start_byte=0,
             end_byte=19,
+            source_code="def test_fn(): pass",
+            source_hash="abc123",
         )
+        chat_history = [
+            {"role": "user", "content": "old prompt"},
+            {"role": "assistant", "content": "old response"},
+        ]
+        cst_node = _agent_node_to_cst_node(node)
         config = Config()
         executor = SwarmExecutor(
             config=config,
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=Path("/tmp"),
         )
 
-        prompt = executor._build_prompt(state, node, {}, requires_context=True)
+        prompt = executor._build_prompt(node, cst_node, {}, chat_history=chat_history, requires_context=True)
         assert "Recent Chat History" in prompt
 
 
@@ -372,7 +358,6 @@ class TestLLMClientConnectionPooling:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=Path("/tmp"),
         )
@@ -390,7 +375,6 @@ class TestLLMClientConnectionPooling:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=Path("/tmp"),
         )
@@ -614,54 +598,50 @@ class TestChatHistoryLimitConfigurable:
         assert config.chat_history_limit == 5  # sensible default
 
     def test_build_prompt_uses_config_limit(self):
-        from remora.core.swarm_executor import SwarmExecutor
-        from remora.core.agent_state import AgentState
-        from remora.core.discovery import CSTNode
+        from remora.core.swarm_executor import SwarmExecutor, _agent_node_to_cst_node
+        from remora.core.agent_node import AgentNode
 
         config = Config()
         config_custom = Config(chat_history_limit=2)
-        state = AgentState(
-            agent_id="test",
-            name="fn",
-            full_name="mod.fn",
-            file_path="test.py",
-            node_type="function",
-            chat_history=[{"role": "user", "content": f"msg{i}"} for i in range(10)],
-        )
-        node = CSTNode(
+        node = AgentNode(
             node_id="test",
             node_type="function",
             name="fn",
             full_name="mod.fn",
             file_path="test.py",
-            text="",
             start_line=1,
             end_line=1,
             start_byte=0,
             end_byte=0,
+            source_code="",
+            source_hash="abc",
         )
+        chat_history = [{"role": "user", "content": f"msg{i}"} for i in range(10)]
+        cst_node = _agent_node_to_cst_node(node)
 
         executor_default = SwarmExecutor(
             config=config,
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="t",
             project_root=Path("/tmp"),
         )
-        prompt_default = executor_default._build_prompt(state, node, {}, requires_context=True)
+        prompt_default = executor_default._build_prompt(
+            node, cst_node, {}, chat_history=chat_history, requires_context=True
+        )
 
         executor_custom = SwarmExecutor(
             config=config_custom,
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="t",
             project_root=Path("/tmp"),
         )
-        prompt_custom = executor_custom._build_prompt(state, node, {}, requires_context=True)
+        prompt_custom = executor_custom._build_prompt(
+            node, cst_node, {}, chat_history=chat_history, requires_context=True
+        )
 
         # With limit=2, only last 2 history entries should appear
         assert prompt_custom.count("msg") == 2

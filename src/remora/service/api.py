@@ -9,8 +9,8 @@ from typing import Any, AsyncIterator, TYPE_CHECKING
 from remora.core.config import Config, load_config
 from remora.core.event_bus import EventBus
 from remora.core.event_store import EventStore
+from remora.core.projections import NodeProjection
 from remora.core.subscriptions import SubscriptionRegistry
-from remora.core.swarm_state import SwarmState
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.models import ConfigSnapshot, InputResponse
 from remora.service.datastar import render_patch, render_shell
@@ -45,20 +45,22 @@ class RemoraService:
         resolved_root = normalize_path(project_root or Path.cwd()).resolve()
         event_bus = EventBus()
         event_store: EventStore | None = None
-        swarm_state: SwarmState | None = None
         subscriptions: SubscriptionRegistry | None = None
 
         swarm_root = resolved_root / ".remora"
 
+        subscriptions_path = swarm_root / "subscriptions.db"
+        subscriptions = SubscriptionRegistry(subscriptions_path)
+
         if enable_event_store:
             store_path = swarm_root / "events" / "events.db"
-            event_store = EventStore(store_path)
+            projection = NodeProjection()
+            event_store = EventStore(
+                store_path,
+                subscriptions=subscriptions,
+                projection=projection,
+            )
 
-        subscriptions_path = swarm_root / "subscriptions.db"
-        swarm_state_path = swarm_root / "swarm_state.db"
-
-        subscriptions = SubscriptionRegistry(subscriptions_path)
-        swarm_state = SwarmState(swarm_state_path)
         workspace_service = CairnWorkspaceService(
             config=resolved_config,
             swarm_root=swarm_root,
@@ -70,7 +72,6 @@ class RemoraService:
             project_root=resolved_root,
             event_bus=event_bus,
             event_store=event_store,
-            swarm_state=swarm_state,
             subscriptions=subscriptions,
             workspace_service=workspace_service,
         )
@@ -83,7 +84,6 @@ class RemoraService:
         event_bus: EventBus,
         event_store: EventStore | None = None,
         projector: UiStateProjector | None = None,
-        swarm_state: SwarmState | None = None,
         subscriptions: SubscriptionRegistry | None = None,
         workspace_service: CairnWorkspaceService | None = None,
     ) -> None:
@@ -92,7 +92,6 @@ class RemoraService:
         self._event_bus = event_bus
         self._event_store = event_store
         self._projector = projector or UiStateProjector()
-        self._swarm_state = swarm_state
         self._subscriptions = subscriptions
         self._workspace_service = workspace_service
         self._bundle_default = _resolve_bundle_default(self._config)
@@ -104,7 +103,6 @@ class RemoraService:
             project_root=self._project_root,
             projector=self._projector,
             event_store=self._event_store,
-            swarm_state=self._swarm_state,
             subscriptions=self._subscriptions,
             workspace_service=self._workspace_service,
         )
@@ -160,9 +158,6 @@ class RemoraService:
     @property
     def has_event_store(self) -> bool:
         return self._event_store is not None
-
-    def get_swarm_state(self) -> SwarmState | None:
-        return self._swarm_state
 
     @property
     def subscription_registry(self) -> SubscriptionRegistry | None:

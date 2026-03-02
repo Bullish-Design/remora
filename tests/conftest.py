@@ -7,17 +7,13 @@ and only mock the LLM layer.
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from typing import AsyncIterator
 
 import pytest
 
 from remora.core.config import Config
 from remora.core.event_store import EventStore
 from remora.core.subscriptions import SubscriptionRegistry
-from remora.core.swarm_state import AgentMetadata, SwarmState
-from remora.core.agent_state import AgentState, save as save_agent_state
 
 
 @pytest.fixture
@@ -68,48 +64,6 @@ async def subscription_registry(tmp_path: Path) -> SubscriptionRegistry:
 
 
 @pytest.fixture
-async def swarm_state(tmp_path: Path) -> AsyncIterator[SwarmState]:
-    """Create an initialized SwarmState backed by a temp database."""
-    state = SwarmState(tmp_path / "swarm.db")
-    await state.initialize()
-    try:
-        yield state
-    finally:
-        await state.close()
-
-
-@pytest.fixture
-def agent_state(tmp_path: Path) -> AgentState:
-    """Create a test agent state."""
-    return AgentState(
-        agent_id="test_agent",
-        node_type="function",
-        name="test_agent",
-        full_name="src.main.test_agent",
-        file_path="src/main.py",
-        parent_id=None,
-        range=(1, 10),
-        connections={},
-        chat_history=[],
-    )
-
-
-@pytest.fixture
-def agent_metadata() -> AgentMetadata:
-    """Create test agent metadata."""
-    return AgentMetadata(
-        agent_id="test_agent",
-        node_type="function",
-        name="test_agent",
-        full_name="src.main.test_agent",
-        file_path="src/main.py",
-        parent_id=None,
-        start_line=1,
-        end_line=10,
-    )
-
-
-@pytest.fixture
 async def configured_event_store(
     tmp_path: Path,
     subscription_registry: SubscriptionRegistry,
@@ -119,25 +73,6 @@ async def configured_event_store(
     await store.initialize()
     yield store
     await store.close()
-
-
-@pytest.fixture
-def sample_agent_state_file(tmp_path: Path) -> Path:
-    """Create a persisted agent state file for testing."""
-    state = AgentState(
-        agent_id="test_agent",
-        node_type="function",
-        name="test_agent",
-        full_name="src.main.test_agent",
-        file_path="src/main.py",
-        parent_id=None,
-        range=(1, 10),
-        connections={},
-        chat_history=[],
-    )
-    state_path = tmp_path / ".remora" / "agents" / "test_agent" / "state.jsonl"
-    save_agent_state(state_path, state)
-    return state_path
 
 
 class DummyKernel:

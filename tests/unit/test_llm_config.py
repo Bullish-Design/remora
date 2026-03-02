@@ -88,7 +88,6 @@ class TestLspMainUsesConfig:
         class FakeServer:
             event_store = None
             subscriptions = None
-            swarm_state = None
             runner = None
 
             def start_io(self):

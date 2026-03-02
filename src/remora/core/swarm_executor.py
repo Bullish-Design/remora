@@ -19,12 +19,11 @@ from structured_agents.kernel import AgentKernel
 from structured_agents.models.adapter import ModelAdapter
 from structured_agents.types import Message
 
-from remora.core.agent_state import AgentState
+from remora.core.agent_node import AgentNode
 from remora.core.discovery import CSTNode
 from remora.core.event_store import EventStore
 from remora.core.events import AgentMessageEvent
 from remora.core.subscriptions import SubscriptionRegistry
-from remora.core.swarm_state import AgentMetadata, SwarmState
 from remora.core.tools.grail import build_virtual_fs, discover_grail_tools
 from remora.core.workspace import CairnDataProvider
 from remora.core.cairn_bridge import CairnWorkspaceService
@@ -37,6 +36,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _agent_node_to_cst_node(node: AgentNode) -> CSTNode:
+    """Convert an AgentNode to a CSTNode for data_provider compatibility."""
+    return CSTNode(
+        node_id=node.node_id,
+        node_type=node.node_type,
+        name=node.name,
+        full_name=node.full_name,
+        file_path=node.file_path,
+        text=node.source_code,
+        start_line=node.start_line,
+        end_line=node.end_line,
+        start_byte=node.start_byte,
+        end_byte=node.end_byte,
+    )
+
+
 class SwarmExecutor:
     """Executor for single agent turns in reactive swarm mode."""
 
@@ -46,7 +61,6 @@ class SwarmExecutor:
         event_bus: "EventBus | None",
         event_store: EventStore,
         subscriptions: SubscriptionRegistry,
-        swarm_state: SwarmState,
         swarm_id: str,
         project_root: Path,
     ):
@@ -54,7 +68,6 @@ class SwarmExecutor:
         self._event_bus = event_bus
         self._event_store = event_store
         self._subscriptions = subscriptions
-        self._swarm_state = swarm_state
         self._swarm_id = swarm_id
         self._project_root = project_root
         self._path_resolver = PathResolver(project_root)
@@ -76,19 +89,19 @@ class SwarmExecutor:
             }
         )
 
-    async def run_agent(self, state: AgentState, trigger_event: Any = None) -> str:
+    async def run_agent(self, node: AgentNode, trigger_event: Any = None) -> str:
         """Run a single agent turn.
 
         Args:
-            state: The agent state to run
+            node: The AgentNode to run
             trigger_event: The event that triggered this agent (optional)
 
         Returns:
             The agent's response as a string
         """
-        logger.info(f"SwarmExecutor.run_agent starting for {state.agent_id}")
+        logger.info(f"SwarmExecutor.run_agent starting for {node.node_id}")
 
-        bundle_path = self._resolve_bundle_path(state)
+        bundle_path = self._resolve_bundle_path(node)
         logger.info(f"Resolved bundle path: {bundle_path}")
 
         manifest = load_manifest(bundle_path)
@@ -100,12 +113,12 @@ class SwarmExecutor:
             self._workspace_initialized = True
             logger.info("Workspace service initialized")
 
-        logger.info(f"Getting workspace for agent {state.agent_id}")
-        workspace = await self._workspace_service.get_agent_workspace(state.agent_id)
-        externals = self._workspace_service.get_externals(state.agent_id, workspace)
+        logger.info(f"Getting workspace for agent {node.node_id}")
+        workspace = await self._workspace_service.get_agent_workspace(node.node_id)
+        externals = self._workspace_service.get_externals(node.node_id, workspace)
         logger.info("Workspace and externals ready")
 
-        externals["agent_id"] = state.agent_id
+        externals["agent_id"] = node.node_id
         externals["correlation_id"] = getattr(trigger_event, "correlation_id", None) if trigger_event else None
 
         async def _emit_event(event_type: str, event_obj: Any) -> None:
@@ -125,30 +138,24 @@ class SwarmExecutor:
             """Broadcast a message to multiple agents."""
             if not _emit_event:
                 return "Error: Swarm event emitter is not configured."
-            metadata = await self._swarm_state.get_agent(state.agent_id)
-            if metadata is None:
+            current_node = await self._event_store.get_node(node.node_id)
+            if current_node is None:
                 return "Error: Agent metadata is unavailable."
 
-            agents = await self._swarm_state.list_agents()
+            agents = await self._event_store.list_nodes()
             pattern = to_pattern.lower()
 
             if pattern == "children":
-                targets = [agent.agent_id for agent in agents if agent.parent_id == state.agent_id]
+                targets = [a.node_id for a in agents if a.parent_id == node.node_id]
             elif pattern == "siblings":
-                if not metadata.parent_id:
+                if not current_node.parent_id:
                     return "Error: No parent metadata available for sibling broadcast."
                 targets = [
-                    agent.agent_id
-                    for agent in agents
-                    if agent.parent_id == metadata.parent_id and agent.agent_id != state.agent_id
+                    a.node_id for a in agents if a.parent_id == current_node.parent_id and a.node_id != node.node_id
                 ]
             elif pattern.startswith("file:"):
                 file_path = to_pattern[5:].strip()
-                targets = [
-                    agent.agent_id
-                    for agent in agents
-                    if agent.file_path == file_path or agent.file_path.endswith(file_path)
-                ]
+                targets = [a.node_id for a in agents if a.file_path == file_path or a.file_path.endswith(file_path)]
             else:
                 return f"Unknown broadcast pattern: {to_pattern}"
 
@@ -157,7 +164,7 @@ class SwarmExecutor:
 
             for target in targets:
                 event = AgentMessageEvent(
-                    from_agent=state.agent_id,
+                    from_agent=node.node_id,
                     to_agent=target,
                     content=content,
                     correlation_id=externals.get("correlation_id"),
@@ -166,9 +173,9 @@ class SwarmExecutor:
 
             return f"Broadcast sent to {len(targets)} agents via {to_pattern}."
 
-        async def _query_agents(filter_type: str | None = None) -> list[AgentMetadata]:
+        async def _query_agents(filter_type: str | None = None) -> list[AgentNode]:
             """Query agent metadata filtered by node type."""
-            agents = await self._swarm_state.list_agents()
+            agents = await self._event_store.list_nodes()
             if not filter_type:
                 return agents
             target_type = filter_type.lower()
@@ -181,19 +188,31 @@ class SwarmExecutor:
         externals["query_agents"] = _query_agents
 
         data_provider = CairnDataProvider(workspace, self._path_resolver)
-        node = _state_to_cst_node(state)
-        files = await data_provider.load_files(node)
+        cst_node = _agent_node_to_cst_node(node)
+        files = await data_provider.load_files(cst_node)
+
+        # Get chat history from EventStore recent events
+        recent_events = await self._event_store.get_recent_events(node.node_id, limit=self.config.chat_history_limit)
+        chat_history: list[dict[str, str]] = []
+        for ev in reversed(recent_events):  # reversed because get_recent_events returns newest-first
+            payload = ev.get("payload", {})
+            if ev.get("event_type") == "AgentMessageEvent":
+                if ev.get("to_agent") == node.node_id:
+                    chat_history.append({"role": "user", "content": payload.get("content", "")})
+                elif ev.get("from_agent") == node.node_id:
+                    chat_history.append({"role": "assistant", "content": payload.get("content", "")})
 
         prompt = self._build_prompt(
-            state,
             node,
+            cst_node,
             files,
+            chat_history=chat_history,
             trigger_event=trigger_event,
             requires_context=getattr(manifest, "requires_context", True),
         )
 
         async def files_provider() -> dict[str, str | bytes]:
-            current_files = await data_provider.load_files(node)
+            current_files = await data_provider.load_files(cst_node)
             fs: dict[str, str | bytes] = dict(build_virtual_fs(current_files))
             return fs
 
@@ -211,7 +230,7 @@ class SwarmExecutor:
         logger.info(f"Using model: {model_name} at {self.config.model_base_url}")
         logger.info(f"Running kernel with {len(tools)} tools, prompt length={len(prompt)}")
 
-        result = await self._run_kernel(state, manifest, prompt, tools, model_name=model_name)
+        result = await self._run_kernel(manifest, prompt, tools, chat_history=chat_history, model_name=model_name)
         logger.info(f"Kernel completed with result type: {type(result)}")
 
         # Extract actual content from RunResult
@@ -235,25 +254,15 @@ class SwarmExecutor:
         logger.info(f"Response text (first 100 chars): {response_text[:100] if response_text else 'empty'}")
         truncated_response = truncate(response_text, max_len=self.config.truncation_limit)
 
-        state.chat_history.append({"role": "user", "content": prompt})
-        state.chat_history.append({"role": "assistant", "content": truncated_response})
-        state.chat_history = state.chat_history[-10:]
-
-        # Only commit if agent made file changes (not for simple chat)
-        # TODO: Track if file changes were made and only commit then
-        # For now, skip VCS commit to avoid triggering cascades
-        # from remora.core.vcs import VCSAdapter
-        # await VCSAdapter.commit(self._project_root, f"Agent {state.agent_id} completed turn.")
-
         return truncated_response
 
-    def _resolve_bundle_path(self, state: AgentState) -> Path:
+    def _resolve_bundle_path(self, node: AgentNode) -> Path:
         bundle_root = Path(self.config.bundle_root)
         mapping = self.config.bundle_mapping
-        if state.node_type not in mapping:
-            logger.warning(f"No bundle mapping for node_type: {state.node_type}, using default")
+        if node.node_type not in mapping:
+            logger.warning(f"No bundle mapping for node_type: {node.node_type}, using default")
             return bundle_root
-        return bundle_root / mapping[state.node_type]
+        return bundle_root / mapping[node.node_type]
 
     def _resolve_model_name(self, bundle_path: Path, manifest: Any) -> str:
         path = bundle_path / "bundle.yaml" if bundle_path.is_dir() else bundle_path
@@ -271,11 +280,11 @@ class SwarmExecutor:
 
     async def _run_kernel(
         self,
-        state: AgentState,
         manifest: Any,
         prompt: str,
         tools: list[Any],
         *,
+        chat_history: list[dict[str, str]] | None = None,
         model_name: str,
     ) -> Any:
         parser = get_response_parser(model_name)
@@ -299,7 +308,7 @@ class SwarmExecutor:
                 Message(role="system", content=manifest.system_prompt),
             ]
             logger.info(f"Prepared {len(messages)} initial messages")
-            for entry in getattr(state, "chat_history", []):
+            for entry in chat_history or []:
                 role = entry.get("role")
                 content = entry.get("content")
                 if role and content:
@@ -320,21 +329,22 @@ class SwarmExecutor:
 
     def _build_prompt(
         self,
-        state: AgentState,
-        node: CSTNode,
+        node: AgentNode,
+        cst_node: CSTNode,
         files: dict[str, Any],
         *,
+        chat_history: list[dict[str, str]] | None = None,
         trigger_event: Any = None,
         requires_context: bool = True,
     ) -> str:
         sections: list[str] = []
-        sections.append(f"# Target: {state.full_name or state.agent_id}")
-        sections.append(f"File: {state.file_path}")
-        if state.range:
-            sections.append(f"Lines: {state.range[0]}-{state.range[1]}")
-        code = files.get(self._path_resolver.to_workspace_path(state.file_path)) or files.get(state.file_path)
+        sections.append(f"# Target: {node.full_name or node.node_id}")
+        sections.append(f"File: {node.file_path}")
+        if node.start_line and node.end_line:
+            sections.append(f"Lines: {node.start_line}-{node.end_line}")
+        code = files.get(self._path_resolver.to_workspace_path(node.file_path)) or files.get(node.file_path)
         if code is not None:
-            lang = _lang_tag_for(state.file_path)
+            lang = _lang_tag_for(node.file_path)
             sections.append("")
             sections.append("## Code")
             sections.append(f"```{lang}")
@@ -347,9 +357,9 @@ class SwarmExecutor:
             event_content = getattr(trigger_event, "content", str(trigger_event))
             if event_content:
                 sections.append(f"Content: {event_content}")
-        if requires_context:
+        if requires_context and chat_history:
             history_items = []
-            for entry in state.chat_history[-self.config.chat_history_limit :]:
+            for entry in chat_history[-self.config.chat_history_limit :]:
                 role = entry.get("role")
                 content = entry.get("content")
                 if role and content:
@@ -380,23 +390,6 @@ def _lang_tag_for(file_path: str) -> str:
     """Return a markdown language tag for a file path, or empty string if unknown."""
     suffix = Path(file_path).suffix.lower()
     return _LANG_TAGS.get(suffix, "")
-
-
-def _state_to_cst_node(state: AgentState) -> CSTNode:
-    start_line = state.range[0] if state.range else 1
-    end_line = state.range[1] if state.range else 1
-    return CSTNode(
-        node_id=state.agent_id,
-        node_type=state.node_type,
-        name=state.name or "",
-        full_name=state.full_name or "",
-        file_path=state.file_path,
-        text="",
-        start_line=start_line,
-        end_line=end_line,
-        start_byte=0,
-        end_byte=0,
-    )
 
 
 __all__ = ["SwarmExecutor"]

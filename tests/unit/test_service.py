@@ -185,17 +185,15 @@ class TestHandleSwarmListAgents:
     """Tests for handle_swarm_list_agents handler."""
 
     @pytest.mark.asyncio
-    async def test_no_swarm_state_raises(self, deps):
-        with pytest.raises(ValueError, match="swarm state not configured"):
+    async def test_no_event_store_raises(self, deps):
+        with pytest.raises(ValueError, match="event store not configured"):
             await handle_swarm_list_agents(deps)
 
     @pytest.mark.asyncio
     async def test_returns_agent_list(self, deps):
-        mock_agent = MagicMock()
-        mock_agent.__dataclass_fields__ = {}
-        mock_swarm = AsyncMock()
-        mock_swarm.list_agents = AsyncMock(return_value=[])
-        deps.swarm_state = mock_swarm
+        mock_store = AsyncMock()
+        mock_store.list_nodes = AsyncMock(return_value=[])
+        deps.event_store = mock_store
 
         result = await handle_swarm_list_agents(deps)
         assert result == []
@@ -208,15 +206,15 @@ class TestHandleSwarmGetAgent:
     """Tests for handle_swarm_get_agent handler."""
 
     @pytest.mark.asyncio
-    async def test_no_swarm_state_raises(self, deps):
-        with pytest.raises(ValueError, match="swarm state not configured"):
+    async def test_no_event_store_raises(self, deps):
+        with pytest.raises(ValueError, match="event store not configured"):
             await handle_swarm_get_agent("agent_1", deps)
 
     @pytest.mark.asyncio
     async def test_agent_not_found_raises(self, deps):
-        mock_swarm = AsyncMock()
-        mock_swarm.get_agent = AsyncMock(return_value=None)
-        deps.swarm_state = mock_swarm
+        mock_store = AsyncMock()
+        mock_store.get_node = AsyncMock(return_value=None)
+        deps.event_store = mock_store
 
         with pytest.raises(ValueError, match="agent not found"):
             await handle_swarm_get_agent("nonexistent", deps)

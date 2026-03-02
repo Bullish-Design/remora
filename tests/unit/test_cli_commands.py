@@ -43,24 +43,25 @@ class TestSwarmList:
     """Tests for `remora swarm list`."""
 
     def test_no_state_file(self, tmp_path: Path):
-        """When no swarm state DB exists, shows helpful message."""
+        """When no event store DB exists, shows helpful message."""
         result = _invoke("swarm", "list", "--project-root", str(tmp_path))
         assert result.exit_code == 0
-        assert "No swarm state found" in result.output
+        assert "No event store found" in result.output
 
     def test_empty_agents(self, tmp_path: Path):
-        """When state exists but no agents, shows 'No agents found'."""
-        # Create the state file so the existence check passes
+        """When event store exists but no agents, shows 'No agents found'."""
+        # Create the events.db file so the existence check passes
         remora_dir = tmp_path / ".remora"
-        remora_dir.mkdir()
-        (remora_dir / "swarm_state.db").touch()
+        events_dir = remora_dir / "events"
+        events_dir.mkdir(parents=True)
+        (events_dir / "events.db").touch()
 
-        mock_state = MagicMock()
-        mock_state.initialize = AsyncMock()
-        mock_state.list_agents = AsyncMock(return_value=[])
-        mock_state.close = AsyncMock()
+        mock_store = MagicMock()
+        mock_store.initialize = AsyncMock()
+        mock_store.list_nodes = AsyncMock(return_value=[])
+        mock_store.close = AsyncMock()
 
-        with patch("remora.core.swarm_state.SwarmState", return_value=mock_state):
+        with patch("remora.core.event_store.EventStore", return_value=mock_store):
             result = _invoke("swarm", "list", "--project-root", str(tmp_path))
 
         assert result.exit_code == 0
@@ -69,21 +70,22 @@ class TestSwarmList:
     def test_with_agents(self, tmp_path: Path):
         """When agents exist, lists them."""
         remora_dir = tmp_path / ".remora"
-        remora_dir.mkdir()
-        (remora_dir / "swarm_state.db").touch()
+        events_dir = remora_dir / "events"
+        events_dir.mkdir(parents=True)
+        (events_dir / "events.db").touch()
 
         agent = MagicMock()
-        agent.agent_id = "rm_abc123def456xyz9"
+        agent.node_id = "rm_abc123def456xyz9"
         agent.node_type = "function"
         agent.file_path = "src/mod.py"
         agent.status = "idle"
 
-        mock_state = MagicMock()
-        mock_state.initialize = AsyncMock()
-        mock_state.list_agents = AsyncMock(return_value=[agent])
-        mock_state.close = AsyncMock()
+        mock_store = MagicMock()
+        mock_store.initialize = AsyncMock()
+        mock_store.list_nodes = AsyncMock(return_value=[agent])
+        mock_store.close = AsyncMock()
 
-        with patch("remora.core.swarm_state.SwarmState", return_value=mock_state):
+        with patch("remora.core.event_store.EventStore", return_value=mock_store):
             result = _invoke("swarm", "list", "--project-root", str(tmp_path))
 
         assert result.exit_code == 0
@@ -203,20 +205,20 @@ class TestSwarmReconcile:
 
     def test_reconcile_success(self, tmp_path: Path):
         """Successful reconciliation prints stats."""
-        mock_state = MagicMock()
-        mock_state.initialize = AsyncMock()
-        mock_state.close = AsyncMock()
-
         mock_subs = MagicMock()
         mock_subs.initialize = AsyncMock()
         mock_subs.close = AsyncMock()
+
+        mock_store = MagicMock()
+        mock_store.initialize = AsyncMock()
+        mock_store.close = AsyncMock()
 
         recon_result = {"created": 5, "orphaned": 1, "total": 10}
         mock_reconcile = AsyncMock(return_value=recon_result)
 
         with (
-            patch("remora.core.swarm_state.SwarmState", return_value=mock_state),
             patch("remora.core.subscriptions.SubscriptionRegistry", return_value=mock_subs),
+            patch("remora.core.event_store.EventStore", return_value=mock_store),
             patch("remora.core.reconciler.reconcile_on_startup", mock_reconcile),
         ):
             result = _invoke(
@@ -266,10 +268,6 @@ class TestSwarmStart:
 
     def test_start_headless_reconciles(self, tmp_path: Path):
         """Headless start reconciles and creates runner."""
-        mock_state = MagicMock()
-        mock_state.initialize = AsyncMock()
-        mock_state.close = AsyncMock()
-
         mock_subs = MagicMock()
         mock_subs.initialize = AsyncMock()
 
@@ -296,7 +294,6 @@ class TestSwarmStart:
         original_event.wait = AsyncMock(side_effect=asyncio.CancelledError)
 
         with (
-            patch("remora.core.swarm_state.SwarmState", return_value=mock_state),
             patch("remora.core.subscriptions.SubscriptionRegistry", return_value=mock_subs),
             patch("remora.core.event_store.EventStore", return_value=mock_store),
             patch("remora.core.event_bus.EventBus", return_value=mock_bus),
@@ -318,10 +315,6 @@ class TestSwarmStart:
 
     def test_start_lsp_mode(self, tmp_path: Path):
         """LSP mode reconciles then delegates to lsp_main."""
-        mock_state = MagicMock()
-        mock_state.initialize = AsyncMock()
-        mock_state.close = AsyncMock()
-
         mock_subs = MagicMock()
         mock_subs.initialize = AsyncMock()
 
@@ -338,7 +331,6 @@ class TestSwarmStart:
         mock_lsp_main = MagicMock()
 
         with (
-            patch("remora.core.swarm_state.SwarmState", return_value=mock_state),
             patch("remora.core.subscriptions.SubscriptionRegistry", return_value=mock_subs),
             patch("remora.core.event_store.EventStore", return_value=mock_store),
             patch("remora.core.event_bus.EventBus", return_value=mock_bus),
@@ -360,7 +352,6 @@ class TestSwarmStart:
         call_kwargs = mock_lsp_main.call_args[1]
         assert "event_store" in call_kwargs
         assert "subscriptions" in call_kwargs
-        assert "swarm_state" in call_kwargs
 
 
 # =========================================================================

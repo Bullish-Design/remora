@@ -5,7 +5,7 @@ Tests cover:
 - Bundle path resolution (_resolve_bundle_path)
 - Model name resolution (_resolve_model_name)
 - Language tag helper (_lang_tag_for)
-- AgentState → CSTNode conversion (_state_to_cst_node)
+- AgentNode → CSTNode conversion (_agent_node_to_cst_node)
 - Connection pooling (LLM client reuse)
 - EventStore observer wiring
 """
@@ -18,9 +18,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from remora.core.agent_state import AgentState
+from remora.core.agent_node import AgentNode
 from remora.core.config import Config
-from remora.core.swarm_executor import SwarmExecutor, _lang_tag_for, _state_to_cst_node
+from remora.core.swarm_executor import SwarmExecutor, _lang_tag_for, _agent_node_to_cst_node
 
 
 # ---------------------------------------------------------------------------
@@ -48,20 +48,23 @@ def _make_config(tmp_path: Path, **overrides: Any) -> Config:
     return Config(**defaults)
 
 
-def _make_state(**overrides: Any) -> AgentState:
+def _make_node(**overrides: Any) -> AgentNode:
     defaults = {
-        "agent_id": "agent_func_1",
+        "node_id": "agent_func_1",
         "node_type": "function",
         "name": "calculate_total",
         "full_name": "billing.calculate_total",
         "file_path": "src/billing.py",
+        "start_line": 10,
+        "end_line": 25,
+        "start_byte": 0,
+        "end_byte": 0,
+        "source_code": "def calculate_total(items): return sum(items)",
+        "source_hash": "abc123",
         "parent_id": None,
-        "range": (10, 25),
-        "connections": {},
-        "chat_history": [],
     }
     defaults.update(overrides)
-    return AgentState(**defaults)
+    return AgentNode(**defaults)
 
 
 # =========================================================================
@@ -116,40 +119,34 @@ class TestLangTagFor:
 
 
 # =========================================================================
-# 2. _state_to_cst_node — conversion helper
+# 2. _agent_node_to_cst_node — conversion helper
 # =========================================================================
 
 
-class TestStateToCstNode:
-    """Verify AgentState → CSTNode conversion."""
+class TestAgentNodeToCstNode:
+    """Verify AgentNode -> CSTNode conversion."""
 
     def test_basic_conversion(self):
-        state = _make_state()
-        node = _state_to_cst_node(state)
-        assert node.node_id == "agent_func_1"
-        assert node.node_type == "function"
-        assert node.name == "calculate_total"
-        assert node.full_name == "billing.calculate_total"
-        assert node.file_path == "src/billing.py"
-        assert node.start_line == 10
-        assert node.end_line == 25
+        node = _make_node()
+        cst = _agent_node_to_cst_node(node)
+        assert cst.node_id == "agent_func_1"
+        assert cst.node_type == "function"
+        assert cst.name == "calculate_total"
+        assert cst.full_name == "billing.calculate_total"
+        assert cst.file_path == "src/billing.py"
+        assert cst.start_line == 10
+        assert cst.end_line == 25
 
-    def test_no_range_defaults_to_1(self):
-        state = _make_state(range=None)
-        node = _state_to_cst_node(state)
-        assert node.start_line == 1
-        assert node.end_line == 1
+    def test_source_code_maps_to_text(self):
+        node = _make_node(source_code="def foo(): pass")
+        cst = _agent_node_to_cst_node(node)
+        assert cst.text == "def foo(): pass"
 
-    def test_text_is_empty(self):
-        state = _make_state()
-        node = _state_to_cst_node(state)
-        assert node.text == ""
-
-    def test_byte_offsets_are_zero(self):
-        state = _make_state()
-        node = _state_to_cst_node(state)
-        assert node.start_byte == 0
-        assert node.end_byte == 0
+    def test_byte_offsets_preserved(self):
+        node = _make_node(start_byte=100, end_byte=500)
+        cst = _agent_node_to_cst_node(node)
+        assert cst.start_byte == 100
+        assert cst.end_byte == 500
 
 
 # =========================================================================
@@ -169,12 +166,11 @@ class TestResolveBundlePath:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=tmp_path,
         )
-        state = _make_state(node_type="function")
-        path = executor._resolve_bundle_path(state)
+        node = _make_node(node_type="function")
+        path = executor._resolve_bundle_path(node)
         assert path == Path(config.bundle_root) / "code"
 
     @patch("remora.core.swarm_executor.build_client")
@@ -186,12 +182,11 @@ class TestResolveBundlePath:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=tmp_path,
         )
-        state = _make_state(node_type="module")
-        path = executor._resolve_bundle_path(state)
+        node = _make_node(node_type="module")
+        path = executor._resolve_bundle_path(node)
         assert path == Path(config.bundle_root)
 
 
@@ -201,7 +196,7 @@ class TestResolveBundlePath:
 
 
 class TestBuildPrompt:
-    """Verify prompt construction from agent state and context."""
+    """Verify prompt construction from AgentNode and context."""
 
     @patch("remora.core.swarm_executor.build_client")
     def test_prompt_contains_target_info(self, mock_build_client, tmp_path):
@@ -212,26 +207,12 @@ class TestBuildPrompt:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=tmp_path,
         )
-        state = _make_state()
-        from remora.core.discovery import CSTNode
-
-        node = CSTNode(
-            node_id="agent_func_1",
-            node_type="function",
-            name="calculate_total",
-            full_name="billing.calculate_total",
-            file_path="src/billing.py",
-            text="",
-            start_line=10,
-            end_line=25,
-            start_byte=0,
-            end_byte=0,
-        )
-        prompt = executor._build_prompt(state, node, {})
+        node = _make_node()
+        cst_node = _agent_node_to_cst_node(node)
+        prompt = executor._build_prompt(node, cst_node, {})
         assert "billing.calculate_total" in prompt
         assert "src/billing.py" in prompt
         assert "Lines: 10-25" in prompt
@@ -245,27 +226,13 @@ class TestBuildPrompt:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=tmp_path,
         )
-        state = _make_state()
-        from remora.core.discovery import CSTNode
-
-        node = CSTNode(
-            node_id="agent_func_1",
-            node_type="function",
-            name="calculate_total",
-            full_name="billing.calculate_total",
-            file_path="src/billing.py",
-            text="",
-            start_line=10,
-            end_line=25,
-            start_byte=0,
-            end_byte=0,
-        )
+        node = _make_node()
+        cst_node = _agent_node_to_cst_node(node)
         files = {"src/billing.py": "def calculate_total(items): return sum(items)"}
-        prompt = executor._build_prompt(state, node, files)
+        prompt = executor._build_prompt(node, cst_node, files)
         assert "## Code" in prompt
         assert "def calculate_total" in prompt
         assert "```python" in prompt
@@ -279,30 +246,16 @@ class TestBuildPrompt:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=tmp_path,
         )
-        state = _make_state()
-        from remora.core.discovery import CSTNode
-
-        node = CSTNode(
-            node_id="agent_func_1",
-            node_type="function",
-            name="calculate_total",
-            full_name="billing.calculate_total",
-            file_path="src/billing.py",
-            text="",
-            start_line=10,
-            end_line=25,
-            start_byte=0,
-            end_byte=0,
-        )
+        node = _make_node()
+        cst_node = _agent_node_to_cst_node(node)
 
         class FakeTrigger:
             content = "file changed"
 
-        prompt = executor._build_prompt(state, node, {}, trigger_event=FakeTrigger())
+        prompt = executor._build_prompt(node, cst_node, {}, trigger_event=FakeTrigger())
         assert "## Trigger Event" in prompt
         assert "file changed" in prompt
 
@@ -315,31 +268,16 @@ class TestBuildPrompt:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=tmp_path,
         )
-        state = _make_state(
-            chat_history=[
-                {"role": "user", "content": "fix the bug"},
-                {"role": "assistant", "content": "I fixed it"},
-            ]
-        )
-        from remora.core.discovery import CSTNode
-
-        node = CSTNode(
-            node_id="agent_func_1",
-            node_type="function",
-            name="calculate_total",
-            full_name="billing.calculate_total",
-            file_path="src/billing.py",
-            text="",
-            start_line=10,
-            end_line=25,
-            start_byte=0,
-            end_byte=0,
-        )
-        prompt = executor._build_prompt(state, node, {}, requires_context=True)
+        node = _make_node()
+        cst_node = _agent_node_to_cst_node(node)
+        chat_history = [
+            {"role": "user", "content": "fix the bug"},
+            {"role": "assistant", "content": "I fixed it"},
+        ]
+        prompt = executor._build_prompt(node, cst_node, {}, chat_history=chat_history, requires_context=True)
         assert "## Recent Chat History" in prompt
         assert "fix the bug" in prompt
         assert "I fixed it" in prompt
@@ -353,26 +291,13 @@ class TestBuildPrompt:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=tmp_path,
         )
-        state = _make_state(chat_history=[{"role": "user", "content": "fix the bug"}])
-        from remora.core.discovery import CSTNode
-
-        node = CSTNode(
-            node_id="agent_func_1",
-            node_type="function",
-            name="calculate_total",
-            full_name="billing.calculate_total",
-            file_path="src/billing.py",
-            text="",
-            start_line=10,
-            end_line=25,
-            start_byte=0,
-            end_byte=0,
-        )
-        prompt = executor._build_prompt(state, node, {}, requires_context=False)
+        node = _make_node()
+        cst_node = _agent_node_to_cst_node(node)
+        chat_history = [{"role": "user", "content": "fix the bug"}]
+        prompt = executor._build_prompt(node, cst_node, {}, chat_history=chat_history, requires_context=False)
         assert "## Recent Chat History" not in prompt
 
     @patch("remora.core.swarm_executor.build_client")
@@ -384,34 +309,19 @@ class TestBuildPrompt:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=tmp_path,
         )
-        state = _make_state(
-            chat_history=[
-                {"role": "user", "content": "msg1"},
-                {"role": "assistant", "content": "resp1"},
-                {"role": "user", "content": "msg2"},
-                {"role": "assistant", "content": "resp2"},
-                {"role": "user", "content": "msg3"},
-            ]
-        )
-        from remora.core.discovery import CSTNode
-
-        node = CSTNode(
-            node_id="agent_func_1",
-            node_type="function",
-            name="calculate_total",
-            full_name="billing.calculate_total",
-            file_path="src/billing.py",
-            text="",
-            start_line=10,
-            end_line=25,
-            start_byte=0,
-            end_byte=0,
-        )
-        prompt = executor._build_prompt(state, node, {}, requires_context=True)
+        node = _make_node()
+        cst_node = _agent_node_to_cst_node(node)
+        chat_history = [
+            {"role": "user", "content": "msg1"},
+            {"role": "assistant", "content": "resp1"},
+            {"role": "user", "content": "msg2"},
+            {"role": "assistant", "content": "resp2"},
+            {"role": "user", "content": "msg3"},
+        ]
+        prompt = executor._build_prompt(node, cst_node, {}, chat_history=chat_history, requires_context=True)
         # Only the last 2 entries should be included
         assert "msg1" not in prompt
         assert "resp1" not in prompt
@@ -436,7 +346,6 @@ class TestConnectionPooling:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=tmp_path,
         )
@@ -458,7 +367,6 @@ class TestConnectionPooling:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=tmp_path,
         )
@@ -486,11 +394,10 @@ class TestResolveModelName:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=tmp_path,
         )
-        # Non-existent bundle path → falls back to config default
+        # Non-existent bundle path -> falls back to config default
         manifest = MagicMock(model="")
         model = executor._resolve_model_name(tmp_path / "nonexistent", manifest)
         assert model == "default/model"
@@ -504,7 +411,6 @@ class TestResolveModelName:
             event_bus=None,
             event_store=MagicMock(),
             subscriptions=MagicMock(),
-            swarm_state=MagicMock(),
             swarm_id="test",
             project_root=tmp_path,
         )

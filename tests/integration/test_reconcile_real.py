@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 
 from remora.core.event_store import EventStore
-from remora.core.reconciler import get_agent_state_path, reconcile_on_startup
+from remora.core.projections import NodeProjection
+from remora.core.reconciler import reconcile_on_startup
 from remora.core.subscriptions import SubscriptionRegistry
-from remora.core.swarm_state import SwarmState
 
 
 pytestmark = pytest.mark.integration
@@ -32,38 +32,40 @@ async def test_reconcile_registers_agents_and_default_subscriptions(tmp_path: Pa
     project_root, _ = _create_sample_project(tmp_path)
     swarm_root = project_root / ".remora"
 
-    swarm_state = SwarmState(swarm_root / "swarm.db")
-    await swarm_state.initialize()
     subscriptions = SubscriptionRegistry(swarm_root / "subscriptions.db")
     await subscriptions.initialize()
+
+    event_store = EventStore(
+        swarm_root / "events.db",
+        subscriptions=subscriptions,
+        projection=NodeProjection(),
+    )
+    await event_store.initialize()
 
     try:
         summary = await reconcile_on_startup(
             project_root,
-            swarm_state,
             subscriptions,
             discovery_paths=["src"],
             languages=["python"],
+            event_store=event_store,
             swarm_id="test-graph",
         )
 
         assert summary["created"] >= 1
-        agents = await swarm_state.list_agents()
-        assert agents
+        nodes = await event_store.list_nodes()
+        assert nodes
 
-        for agent in agents:
-            agent_id = agent.agent_id
-            state_path = get_agent_state_path(swarm_root, agent_id)
-            assert state_path.exists()
-
-            registered = await subscriptions.get_subscriptions(agent_id)
-            assert any(sub.pattern.to_agent == agent_id for sub in registered)
+        for node in nodes:
+            node_id = node.node_id
+            registered = await subscriptions.get_subscriptions(node_id)
+            assert any(sub.pattern.to_agent == node_id for sub in registered)
             assert any(
                 sub.pattern.event_types and "ContentChangedEvent" in sub.pattern.event_types for sub in registered
             )
     finally:
-        await swarm_state.close()
         await subscriptions.close()
+        await event_store.close()
 
 
 @pytest.mark.asyncio
@@ -71,18 +73,19 @@ async def test_reconcile_emits_content_changed_event_on_file_update(tmp_path: Pa
     project_root, target_file = _create_sample_project(tmp_path)
     swarm_root = project_root / ".remora"
 
-    swarm_state = SwarmState(swarm_root / "swarm.db")
-    await swarm_state.initialize()
     subscriptions = SubscriptionRegistry(swarm_root / "subscriptions.db")
     await subscriptions.initialize()
 
-    event_store = EventStore(swarm_root / "events.db", subscriptions=subscriptions)
+    event_store = EventStore(
+        swarm_root / "events.db",
+        subscriptions=subscriptions,
+        projection=NodeProjection(),
+    )
     await event_store.initialize()
 
     try:
         await reconcile_on_startup(
             project_root,
-            swarm_state,
             subscriptions,
             discovery_paths=["src"],
             languages=["python"],
@@ -99,7 +102,6 @@ async def test_reconcile_emits_content_changed_event_on_file_update(tmp_path: Pa
 
         await reconcile_on_startup(
             project_root,
-            swarm_state,
             subscriptions,
             discovery_paths=["src"],
             languages=["python"],
@@ -110,35 +112,33 @@ async def test_reconcile_emits_content_changed_event_on_file_update(tmp_path: Pa
         events = [event async for event in event_store.replay("swarm")]
         assert any(event["event_type"] == "ContentChangedEvent" for event in events)
     finally:
-        await swarm_state.close()
         await subscriptions.close()
         await event_store.close()
 
 
 @pytest.mark.asyncio
-async def test_reconcile_refreshes_metadata_for_common_agents(tmp_path: Path) -> None:
-    """Reconciler should upsert fresh metadata for common_ids agents (same node_id).
-
-    When a file is modified but the function stays at the same position
-    (same node_id), the reconciler must still call swarm_state.upsert()
-    to refresh ``updated_at`` and keep SwarmState metadata current.
+async def test_reconcile_refreshes_source_hash_for_common_agents(tmp_path: Path) -> None:
+    """When a file is modified but the function stays at the same position,
+    the reconciler must re-emit NodeDiscoveredEvent to update the source_hash
+    in the EventStore nodes table.
     """
     project_root, target_file = _create_sample_project(tmp_path)
     swarm_root = project_root / ".remora"
 
-    swarm_state = SwarmState(swarm_root / "swarm.db")
-    await swarm_state.initialize()
     subscriptions = SubscriptionRegistry(swarm_root / "subscriptions.db")
     await subscriptions.initialize()
 
-    event_store = EventStore(swarm_root / "events.db", subscriptions=subscriptions)
+    event_store = EventStore(
+        swarm_root / "events.db",
+        subscriptions=subscriptions,
+        projection=NodeProjection(),
+    )
     await event_store.initialize()
 
     try:
         # First reconcile — registers agents with original content
         await reconcile_on_startup(
             project_root,
-            swarm_state,
             subscriptions,
             discovery_paths=["src"],
             languages=["python"],
@@ -146,14 +146,13 @@ async def test_reconcile_refreshes_metadata_for_common_agents(tmp_path: Path) ->
             swarm_id="swarm",
         )
 
-        agents_before = await swarm_state.list_agents(status="active")
-        # Find the function-level agent (not the file-level agent)
-        func_agent = next(
-            (a for a in agents_before if a.node_type == "function"),
+        nodes_before = await event_store.list_nodes()
+        func_node = next(
+            (n for n in nodes_before if n.node_type == "function"),
             None,
         )
-        assert func_agent is not None, "Expected a function agent"
-        original_updated_at = func_agent.updated_at
+        assert func_node is not None, "Expected a function node"
+        original_hash = func_node.source_hash
 
         # Modify the file body but keep function at same position/name
         await asyncio.sleep(0.05)
@@ -166,7 +165,6 @@ async def test_reconcile_refreshes_metadata_for_common_agents(tmp_path: Path) ->
         # Second reconcile — same node_id (function didn't move), but file changed
         summary = await reconcile_on_startup(
             project_root,
-            swarm_state,
             subscriptions,
             discovery_paths=["src"],
             languages=["python"],
@@ -176,62 +174,58 @@ async def test_reconcile_refreshes_metadata_for_common_agents(tmp_path: Path) ->
 
         assert summary["updated"] >= 1, "Expected at least 1 updated agent"
 
-        agents_after = await swarm_state.list_agents(status="active")
+        nodes_after = await event_store.list_nodes()
         updated_func = next(
-            (a for a in agents_after if a.agent_id == func_agent.agent_id),
+            (n for n in nodes_after if n.node_id == func_node.node_id),
             None,
         )
-        assert updated_func is not None, f"Function agent {func_agent.agent_id} should still exist"
-        assert updated_func.updated_at is not None
-        assert original_updated_at is not None
-        assert updated_func.updated_at > original_updated_at, (
-            f"Expected updated_at to be refreshed after reconciliation, "
-            f"but got {updated_func.updated_at} (original: {original_updated_at})"
+        assert updated_func is not None, f"Function node {func_node.node_id} should still exist"
+        assert updated_func.source_hash != original_hash, (
+            f"Expected source_hash to change after file modification, "
+            f"but got {updated_func.source_hash} (original: {original_hash})"
         )
-
-        # Also verify the on-disk AgentState was updated
-        state_path = get_agent_state_path(swarm_root, func_agent.agent_id)
-        from remora.core.agent_state import load as load_agent_state
-
-        disk_state = load_agent_state(state_path)
-        assert disk_state is not None
-        assert disk_state.name == "main"
+        # Verify the source code was updated
+        assert "world" in updated_func.source_code
     finally:
-        await swarm_state.close()
         await subscriptions.close()
         await event_store.close()
 
 
 @pytest.mark.asyncio
-async def test_reconcile_orphans_old_and_creates_new_when_function_moves(
+async def test_reconcile_removes_old_and_creates_new_when_function_moves(
     tmp_path: Path,
 ) -> None:
-    """When a function moves lines, node_id changes — old agent is orphaned, new one created."""
+    """When a function moves lines, node_id changes — old node is removed, new one created."""
     project_root, target_file = _create_sample_project(tmp_path)
     swarm_root = project_root / ".remora"
 
-    swarm_state = SwarmState(swarm_root / "swarm.db")
-    await swarm_state.initialize()
     subscriptions = SubscriptionRegistry(swarm_root / "subscriptions.db")
     await subscriptions.initialize()
+
+    event_store = EventStore(
+        swarm_root / "events.db",
+        subscriptions=subscriptions,
+        projection=NodeProjection(),
+    )
+    await event_store.initialize()
 
     try:
         await reconcile_on_startup(
             project_root,
-            swarm_state,
             subscriptions,
             discovery_paths=["src"],
             languages=["python"],
+            event_store=event_store,
             swarm_id="swarm",
         )
 
-        agents_before = await swarm_state.list_agents(status="active")
+        nodes_before = await event_store.list_nodes()
         func_before = next(
-            (a for a in agents_before if a.node_type == "function"),
+            (n for n in nodes_before if n.node_type == "function"),
             None,
         )
         assert func_before is not None
-        old_id = func_before.agent_id
+        old_id = func_before.node_id
 
         # Move the function down by adding blank lines
         await asyncio.sleep(0.02)
@@ -243,30 +237,29 @@ async def test_reconcile_orphans_old_and_creates_new_when_function_moves(
 
         summary = await reconcile_on_startup(
             project_root,
-            swarm_state,
             subscriptions,
             discovery_paths=["src"],
             languages=["python"],
+            event_store=event_store,
             swarm_id="swarm",
         )
 
-        # Old function agent should be orphaned, new one created
+        # Old function node should be removed, new one created
         assert summary["created"] >= 1
         assert summary["orphaned"] >= 1
 
-        active_agents = await swarm_state.list_agents(status="active")
+        active_nodes = await event_store.list_nodes()
         new_func = next(
-            (a for a in active_agents if a.node_type == "function"),
+            (n for n in active_nodes if n.node_type == "function"),
             None,
         )
         assert new_func is not None
-        assert new_func.agent_id != old_id
+        assert new_func.node_id != old_id
         assert new_func.start_line == 6  # After 5 blank lines
 
-        # Old agent should be orphaned
-        old_agent = await swarm_state.get_agent(old_id)
-        assert old_agent is not None
-        assert old_agent.status == "orphaned"
+        # Old node should be gone from the nodes table (deleted via NodeRemovedEvent)
+        old_node = await event_store.get_node(old_id)
+        assert old_node is None, f"Old node {old_id} should have been removed from EventStore"
     finally:
-        await swarm_state.close()
         await subscriptions.close()
+        await event_store.close()

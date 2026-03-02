@@ -60,7 +60,6 @@ def _get_server():
 def main(
     event_store=None,
     subscriptions=None,
-    swarm_state=None,
 ) -> None:
     """Start the Remora LSP server with agent runner."""
     t0 = time.monotonic()
@@ -85,7 +84,6 @@ def main(
 
     server.event_store = event_store
     server.subscriptions = subscriptions
-    server.swarm_state = swarm_state
 
     log.debug("Creating LLM client ...")
     llm = LLMClient(
