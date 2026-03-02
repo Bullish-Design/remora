@@ -7,22 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from remora.core.agent_node import AgentNode
-
-
-def _make_node(**overrides) -> AgentNode:
-    defaults = dict(
-        node_id="rm_abc123",
-        name="my_func",
-        full_name="test.my_func",
-        node_type="function",
-        file_path="/tmp/test.py",
-        start_line=10,
-        end_line=20,
-        source_code="def my_func(): pass",
-        source_hash="abc123",
-    )
-    defaults.update(overrides)
-    return AgentNode(**defaults)
+from tests.unit.conftest import make_node as _make_node
 
 
 @pytest.fixture()
@@ -45,7 +30,7 @@ async def test_cursor_moved_reads_from_event_store(mock_server):
     await on_cursor_moved({"uri": "/tmp/test.py", "line": 15})
 
     mock_server.event_store.get_node_at_position.assert_awaited_once_with("/tmp/test.py", 15)
-    mock_server.db.update_cursor_focus.assert_awaited_once_with("rm_abc123", "/tmp/test.py", 15)
+    mock_server.db.update_cursor_focus.assert_awaited_once_with(node.node_id, "/tmp/test.py", 15)
     # Must NOT have called db.get_node_at_position
     mock_server.db.get_node_at_position.assert_not_awaited()
 

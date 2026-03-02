@@ -8,10 +8,11 @@ import sqlite3
 import pytest
 
 from remora.core.agent_node import AgentNode, ToolSchema
+from tests.unit.conftest import make_node
 
 
 def _make_node(**overrides) -> AgentNode:
-    """Helper to create a test AgentNode with sensible defaults."""
+    """Helper with domain-specific defaults for billing test scenarios."""
     defaults = {
         "node_id": "abc123def456",
         "node_type": "function",
@@ -24,7 +25,7 @@ def _make_node(**overrides) -> AgentNode:
         "source_hash": "aabbccdd11223344",
     }
     defaults.update(overrides)
-    return AgentNode(**defaults)
+    return make_node(**defaults)
 
 
 class TestAgentNodeCreation:

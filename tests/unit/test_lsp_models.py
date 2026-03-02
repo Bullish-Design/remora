@@ -7,21 +7,7 @@ from remora.lsp.models import (
     RewriteProposal,
 )
 
-
-def _make_node(**overrides) -> AgentNode:
-    defaults = {
-        "node_id": "rm_test123",
-        "node_type": "function",
-        "name": "test_node",
-        "full_name": "test.test_node",
-        "file_path": "file:///test.py",
-        "start_line": 1,
-        "end_line": 5,
-        "source_code": "def foo(): pass",
-        "source_hash": "hash",
-    }
-    defaults.update(overrides)
-    return AgentNode(**defaults)
+from tests.unit.conftest import make_node as _make_node
 
 
 def _make_proposal():

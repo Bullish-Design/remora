@@ -7,22 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from remora.core.agent_node import AgentNode, ToolSchema
-
-
-def _make_node(**overrides) -> AgentNode:
-    defaults = dict(
-        node_id="rm_abc123",
-        name="my_func",
-        full_name="test.my_func",
-        node_type="function",
-        file_path="/tmp/test.py",
-        start_line=10,
-        end_line=20,
-        source_code="def my_func(): pass",
-        source_hash="abc123",
-    )
-    defaults.update(overrides)
-    return AgentNode(**defaults)
+from tests.unit.conftest import make_node as _make_node
 
 
 def test_server_does_not_import_ast_agent_node():

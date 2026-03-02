@@ -733,7 +733,12 @@ class AgentRunner:
 
         await emit_event(
             AgentMessageEvent(
-                agent_id=from_id, from_agent=from_id, to_agent=to_id, message=message, correlation_id=correlation_id
+                agent_id=from_id,
+                from_agent=from_id,
+                to_agent=to_id,
+                message=message,
+                correlation_id=correlation_id,
+                timestamp=0.0,
             )
         )
         await self.trigger(to_id, correlation_id)
