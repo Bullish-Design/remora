@@ -1,32 +1,87 @@
 # CONTEXT — Demo Rebuild
 
 ## Current State
-Project planning is complete. T1, T2, T14 are already implemented. Ready to begin the Graph Viewer workstream (T15-T22).
 
-## What Just Happened
-- Previous session: Created project directory with all standard files, explored the full codebase
-- This session: Reconciled PROGRESS.md with actual codebase state — T1 (configlib project files), T2 (extension configs), and T14 (MockLLMClient) are all implemented and present in the repo
-- Confirmed web/graph/ stubs are all empty (just docstrings) — T15-T20 are truly pending
-- No archiving of remora_demo/ was needed — the current structure already matches the plan
+**PROJECT COMPLETE.** All tasks T1-T22 are implemented and tested. 130 tests pass, 2 skipped (Stario-dependent, Python 3.14 only).
 
-## What's Next
-1. **T15** — Implement ForceLayout in `remora_demo/web/graph/layout.py` (server-side force-directed graph layout)
-2. **T16** — SVG element builders in `remora_demo/web/graph/svg.py`
-3. **T17** — CSS theme in `remora_demo/web/graph/css.py` (Catppuccin dark + CSS transitions)
-4. **T18** — DB->Relay bridge in `remora_demo/web/graph/bridge.py` (polls SQLite, publishes to Relay)
-5. **T20** — View functions (shell.py, graph.py, sidebar.py, event_stream.py)
-6. **T19** — Stario app factory + route wiring
-7. **T21** — Entry points + launcher
-8. **T22** — Integration test
+## What Was Done
 
-## Key Decision Pending
-- Need to verify Stario is available as a dependency (check pyproject.toml or devenv.nix)
-- Path convention: plan says `remora_demo/graph/` but code uses `remora_demo/web/graph/` — using web/graph/ since that's what exists
+### Previous sessions
+- T1: configlib demo project files
+- T2: Extension configs + remora.yaml
+- T14: Enhanced MockLLMClient
 
-## Key Files
-- `EVENT_BASED_DEMO_PLAN.md` — Full implementation plan, Sections 7-11 cover graph viewer
-- `docs/EventBased_Concept.md` — Authoritative architecture
-- `src/remora/core/event_store.py` — EventStore API (get_node_at_position, list_nodes, etc.)
-- `src/remora/core/agent_node.py` — AgentNode model
-- `remora_demo/neovim/mock_llm.py` — Completed MockLLMClient
-- `remora_demo/project/` — Completed configlib demo files
+### This session (all complete with passing tests)
+
+**Foundations (T15-T18):**
+- T15: ForceLayout — server-side force-directed graph layout (`layout.py`, 17 tests)
+- T16: SVG builders — f-string-based SVG rendering (`svg.py`, 28 tests)
+- T17: CSS theme — Catppuccin Mocha dark theme with transitions (`css.py`, 13 tests)
+- T18: DB Bridge + GraphState — polls SQLite, publishes to Relay (`bridge.py`, `state.py`, 13 tests)
+
+**Views (T20):**
+- `views/graph.py` — render_graph() wrapper around SVG builders
+- `views/shell.py` — Full HTML document with Datastar CDN, CSS, graph, sidebar, zoom/pan JS
+- `views/sidebar.py` — Sidebar detail panel with tabs (Log/Source/Connections/Actions)
+- `views/event_stream.py` — Global event stream with colored badges
+- 24 tests passing
+
+**App factory (T19):**
+- `app.py` — Stario app with closure-based DI handlers
+- Routes: GET /, GET /subscribe (SSE), GET /agent/* (sidebar), GET /events, POST /command
+- Views return plain strings; wrapped in SafeString for w.patch()
+- DB reads offloaded via asyncio.to_thread()
+- 8 structural tests pass, 2 Stario-dependent tests skipped
+
+**Entry points (T21):**
+- `__main__.py` — argparse CLI with --port/--host/--db/--poll-interval/--verbose
+- `launch.sh` — convenience launcher script
+- Stario import deferred to async _serve() to keep module importable in Python 3.13
+- 11 tests passing
+
+**Integration test (T22):**
+- Full pipeline test: creates SQLite DB with demo data, verifies entire chain
+- Tests DB reads, layout, rendering, bridge fingerprinting, change detection
+- 16 tests passing
+
+## Key Design Decisions
+
+1. **All views return plain strings** — no Stario dependency in views/SVG/CSS
+2. **SVG as f-strings** wrapped in SafeString — Stario has no SVG elements
+3. **RelayProtocol** — Protocol class for testability without Stario
+4. **Catch-all routes** — `/agent/*` with `c.req.tail` (Stario has no `{param}` syntax)
+5. **create_app returns (app, bridge)** — caller starts bridge task before app.serve()
+6. **Deferred Stario import** — __main__.py importable in Python 3.13
+
+## File Inventory
+
+```
+remora_demo/web/graph/
+  __init__.py        (stub)
+  __main__.py        Entry point with argparse CLI
+  app.py             Stario app factory + handlers
+  bridge.py          DB->Relay polling bridge
+  layout.py          Server-side force-directed layout
+  svg.py             SVG element builders
+  css.py             Catppuccin Mocha CSS theme
+  state.py           GraphState + GraphSnapshot
+  views/
+    __init__.py      (stub)
+    graph.py         render_graph()
+    shell.py         render_shell()
+    sidebar.py       render_sidebar_content()
+    event_stream.py  render_event_list()
+
+remora_demo/launch.sh  Convenience launcher
+
+tests/
+  test_layout.py           17 passed
+  test_svg.py              28 passed
+  test_css.py              13 passed
+  test_bridge.py           13 passed
+  test_views.py            24 passed
+  test_app.py              8 passed, 2 skipped
+  test_entry_points.py     11 passed
+  test_integration_graph.py 16 passed
+  TOTAL: 130 passed, 2 skipped
+```
