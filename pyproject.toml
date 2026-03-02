@@ -34,6 +34,7 @@ dependencies = [
   "fastapi>=0.133.1",
   "pygls",
   "lsprotocol",
+  "rustworkx>=0.17.1",
 ]
 
 [project.optional-dependencies]
