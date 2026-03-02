@@ -34,7 +34,7 @@ def test_parse_preserves_ids():
     watcher = ASTWatcher()
     text = "def foo(): pass\n"
     nodes1 = watcher.parse_and_inject_ids("file:///t.py", text)
-    old_nodes = [{"name": n["name"], "node_type": n["node_type"], "id": n["node_id"]} for n in nodes1]
+    old_nodes = [{"name": n["name"], "node_type": n["node_type"], "node_id": n["node_id"]} for n in nodes1]
     nodes2 = watcher.parse_and_inject_ids("file:///t.py", text, old_nodes)
     assert nodes1[0]["node_id"] == nodes2[0]["node_id"]
 

@@ -241,7 +241,7 @@ class RemoraDB:
         cursor = self.conn.cursor()
         for node in nodes:
             parent_id = node.get("parent_id")
-            node_id = node.get("node_id") or node.get("remora_id") or node.get("id")
+            node_id = node["node_id"]
             if parent_id:
                 cursor.execute(
                     """

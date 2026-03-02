@@ -161,7 +161,7 @@ def main(
                     existing = await server.event_store.list_nodes(file_path=uri)
                     old_nodes = [
                         {
-                            "remora_id": n.node_id,
+                            "node_id": n.node_id,
                             "name": n.name,
                             "node_type": n.node_type,
                             "start_line": n.start_line,
@@ -175,7 +175,7 @@ def main(
                 if server.event_store:
                     from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
 
-                    old_ids = {n["remora_id"] for n in old_nodes}
+                    old_ids = {n["node_id"] for n in old_nodes}
                     new_ids = {n["node_id"] for n in nodes}
                     for node_dict in nodes:
                         await server.event_store.append(
@@ -220,7 +220,7 @@ def main(
                 all_agents = await server.event_store.list_nodes()
                 agent_list = [
                     {
-                        "remora_id": a.node_id,
+                        "node_id": a.node_id,
                         "name": a.name,
                         "status": a.status,
                         "node_type": a.node_type,

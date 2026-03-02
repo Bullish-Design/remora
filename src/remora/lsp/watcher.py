@@ -55,7 +55,7 @@ class ASTWatcher:
 
         key = (stem, "file")
         if key in old_by_key:
-            file_id = old_by_key[key].get("node_id") or old_by_key[key].get("remora_id") or old_by_key[key].get("id")
+            file_id = old_by_key[key]["node_id"]
         else:
             file_id = generate_id()
 
@@ -110,9 +110,7 @@ class ASTWatcher:
                 key = (name, node_type)
 
                 if key in old_by_key:
-                    node_id = (
-                        old_by_key[key].get("node_id") or old_by_key[key].get("remora_id") or old_by_key[key].get("id")
-                    )
+                    node_id = old_by_key[key]["node_id"]
                     del old_by_key[key]
                 else:
                     node_id = generate_id()
@@ -146,9 +144,7 @@ class ASTWatcher:
                 key = (name, "class")
 
                 if key in old_by_key:
-                    node_id = (
-                        old_by_key[key].get("node_id") or old_by_key[key].get("remora_id") or old_by_key[key].get("id")
-                    )
+                    node_id = old_by_key[key]["node_id"]
                     del old_by_key[key]
                 else:
                     node_id = generate_id()
@@ -191,7 +187,7 @@ class ASTWatcher:
 
         key = (stem, "file")
         if key in old_by_key:
-            file_id = old_by_key[key].get("node_id") or old_by_key[key].get("remora_id") or old_by_key[key].get("id")
+            file_id = old_by_key[key]["node_id"]
         else:
             file_id = generate_id()
 
@@ -236,9 +232,7 @@ class ASTWatcher:
 
             key = (name, node_type)
             if key in old_by_key:
-                node_id = (
-                    old_by_key[key].get("node_id") or old_by_key[key].get("remora_id") or old_by_key[key].get("id")
-                )
+                node_id = old_by_key[key]["node_id"]
                 del old_by_key[key]
             else:
                 node_id = generate_id()
