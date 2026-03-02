@@ -10,22 +10,44 @@ from lsprotocol import types as lsp
 
 
 def _setup_logging() -> logging.Logger:
-    """Configure logging to stderr (stdout is reserved for LSP protocol)."""
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(
+    """Configure logging to stderr AND a timestamped file in .remora/logs/."""
+    from pathlib import Path
+    from datetime import datetime
+
+    # Stderr handler (stdout is reserved for LSP protocol)
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setFormatter(
         logging.Formatter(
             "[%(asctime)s] %(levelname)s %(name)s: %(message)s",
             datefmt="%H:%M:%S",
         )
     )
+
+    # File handler — new log file per session
+    log_dir = Path(".remora/logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    log_file = log_dir / f"server-{stamp}.log"
+    file_handler = logging.FileHandler(str(log_file), mode="w", encoding="utf-8")
+    file_handler.setFormatter(
+        logging.Formatter(
+            "[%(asctime)s.%(msecs)03d] %(levelname)-5s %(name)s (%(filename)s:%(lineno)d): %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
+    file_handler.setLevel(logging.DEBUG)
+
     root = logging.getLogger("remora")
-    root.addHandler(handler)
+    root.addHandler(stderr_handler)
+    root.addHandler(file_handler)
     root.setLevel(logging.DEBUG)
 
     # Quiet down pygls internals unless needed
     logging.getLogger("pygls").setLevel(logging.WARNING)
 
-    return logging.getLogger("remora.lsp.startup")
+    startup_log = logging.getLogger("remora.lsp.startup")
+    startup_log.info("=== Remora LSP session started — logging to %s ===", log_file)
+    return startup_log
 
 
 def main(
@@ -66,10 +88,14 @@ def main(
     @server.feature(lsp.INITIALIZED)
     async def _on_initialized(params: lsp.InitializedParams) -> None:
         log.info(
-            "Client initialized — starting agent runner loop (startup took %.0fms)",
+            "=== INITIALIZED received — startup took %.0fms ===",
             (time.monotonic() - t0) * 1000,
         )
+        log.info("Workspace root_uri: %s", getattr(server.workspace, "root_uri", "NOT SET"))
+        log.info("Workspace root_path: %s", getattr(server.workspace, "root_path", "NOT SET"))
+        log.info("Starting agent runner loop...")
         asyncio.ensure_future(runner.run_forever())
+        log.info("Starting background workspace scan...")
         asyncio.ensure_future(_background_scan())
 
     async def _background_scan() -> None:
@@ -77,21 +103,53 @@ def main(
         from pathlib import Path
         from pygls.uris import from_fs_path
 
+        log.info("_background_scan: starting")
         root = server.workspace.root_path
+        log.info("_background_scan: root_path = %r", root)
         if not root:
-            log.warning("No workspace root — skipping background scan")
+            log.warning("_background_scan: No workspace root — skipping")
             return
 
         root_path = Path(root)
-        py_files = sorted(root_path.rglob("*.py"))
-        log.info("Background scan: found %d .py files in %s", len(py_files), root)
+        if not root_path.exists():
+            log.error("_background_scan: root_path %s does not exist!", root_path)
+            return
+
+        _SKIP_DIRS = frozenset(
+            {
+                "__pycache__",
+                "node_modules",
+                ".venv",
+                "venv",
+                ".devenv",
+                ".git",
+                ".tox",
+                ".mypy_cache",
+                ".pytest_cache",
+                ".ruff_cache",
+                ".nox",
+                "dist",
+                "build",
+                ".eggs",
+            }
+        )
+
+        def _iter_py_files(root: Path):
+            """Walk root, pruning skip-dirs early to avoid descending into venvs."""
+            for entry in sorted(root.iterdir()):
+                if entry.is_dir():
+                    if entry.name in _SKIP_DIRS or entry.name.startswith("."):
+                        continue
+                    yield from _iter_py_files(entry)
+                elif entry.is_file() and entry.suffix == ".py":
+                    yield entry
+
+        py_files = list(_iter_py_files(root_path))
+        log.info("_background_scan: found %d .py files in %s (skip-dirs pruned)", len(py_files), root)
 
         count = 0
+        parsed = 0
         for fpath in py_files:
-            # Skip common non-project directories
-            parts = fpath.relative_to(root_path).parts
-            if any(p.startswith(".") or p in ("__pycache__", "node_modules", ".venv", "venv") for p in parts):
-                continue
             try:
                 text = fpath.read_text(encoding="utf-8", errors="replace")
                 uri = from_fs_path(str(fpath))
@@ -99,19 +157,27 @@ def main(
                 await server.db.upsert_nodes(nodes)
                 await server.db.update_edges(nodes)
                 count += len(nodes)
+                parsed += 1
+                log.debug("_background_scan: parsed %s -> %d nodes", fpath.relative_to(root_path), len(nodes))
             except Exception:
-                log.debug("Background scan: failed to parse %s", fpath, exc_info=True)
+                log.warning("_background_scan: failed to parse %s", fpath, exc_info=True)
 
-        log.info("Background scan complete: %d agent nodes from %d files", count, len(py_files))
+        log.info(
+            "_background_scan: COMPLETE — %d nodes from %d parsed files (%d total)",
+            count,
+            parsed,
+            len(py_files),
+        )
         await _notify_agents_updated()
 
     async def _notify_agents_updated() -> None:
         """Send $/remora/agentsUpdated with all active nodes to the client."""
         try:
             all_nodes = await server.db.get_all_nodes()
+            log.info("_notify_agents_updated: DB has %d total nodes", len(all_nodes))
             agent_list = [
                 {
-                    "remora_id": n["id"],
+                    "remora_id": n["remora_id"],
                     "name": n["name"],
                     "status": n.get("status", "active"),
                     "node_type": n.get("node_type", ""),
@@ -120,10 +186,13 @@ def main(
                 }
                 for n in all_nodes
             ]
+            log.info("_notify_agents_updated: sending %d agents to client via $/remora/agentsUpdated", len(agent_list))
+            if agent_list:
+                log.debug("_notify_agents_updated: first 3 agents: %s", agent_list[:3])
             server.protocol.notify("$/remora/agentsUpdated", agent_list)
-            log.debug("Notified client: %d agents", len(agent_list))
+            log.info("_notify_agents_updated: notification sent successfully")
         except Exception:
-            log.exception("Failed to send $/remora/agentsUpdated")
+            log.exception("_notify_agents_updated: FAILED")
 
     # Attach the notifier to the server so handlers can call it
     server._notify_agents_updated = _notify_agents_updated

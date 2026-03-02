@@ -69,11 +69,21 @@ class LLMClient:
 
     async def chat(self, messages: list[dict], tools: list[dict]) -> LLMResponse:
         """Send a chat completion and return a normalized LLMResponse."""
-        response = await self._client.chat_completion(
-            messages=messages,
-            tools=tools or None,
-            tool_choice="auto" if tools else "none",
-        )
+        logger.info("LLMClient.chat: sending %d messages, %d tools to %s", len(messages), len(tools), self.model)
+        try:
+            response = await self._client.chat_completion(
+                messages=messages,
+                tools=tools or None,
+                tool_choice="auto" if tools else "none",
+            )
+            logger.info(
+                "LLMClient.chat: got response content=%r tool_calls=%d",
+                (response.content or "")[:100],
+                len(response.tool_calls or []),
+            )
+        except Exception:
+            logger.exception("LLMClient.chat: FAILED to call LLM")
+            raise
 
         tool_calls: list[ToolCall] = []
         if response.tool_calls:
@@ -127,24 +137,32 @@ class AgentRunner:
 
     async def run_forever(self) -> None:
         self._running = True
+        logger.info("AgentRunner.run_forever: started, waiting for triggers")
         while self._running:
             trigger = await self.queue.get()
+            logger.info(
+                "AgentRunner.run_forever: dequeued trigger agent=%s corr=%s", trigger.agent_id, trigger.correlation_id
+            )
             await self.execute_turn(trigger)
 
     def stop(self) -> None:
         self._running = False
 
     async def trigger(self, agent_id: str, correlation_id: str, context: dict | None = None) -> None:
+        logger.info("AgentRunner.trigger: agent=%s corr=%s context=%r", agent_id, correlation_id, context)
         chain = await self.server.db.get_activation_chain(correlation_id)
 
         if len(chain) >= MAX_CHAIN_DEPTH:
+            logger.error("AgentRunner.trigger: max chain depth exceeded for %s", agent_id)
             await self.emit_error(agent_id, "Max activation depth exceeded", correlation_id)
             return
 
         if agent_id in chain:
+            logger.error("AgentRunner.trigger: cycle detected for %s in chain %r", agent_id, chain)
             await self.emit_error(agent_id, "Cycle detected in activation chain", correlation_id)
             return
 
+        logger.info("AgentRunner.trigger: enqueuing trigger for %s", agent_id)
         await self.queue.put(Trigger(agent_id=agent_id, correlation_id=correlation_id, context=context or {}))
 
     async def emit_error(self, agent_id: str, error: str, correlation_id: str) -> None:
@@ -157,6 +175,7 @@ class AgentRunner:
 
         agent_id = trigger.agent_id
         correlation_id = trigger.correlation_id
+        logger.info("execute_turn: START agent=%s corr=%s", agent_id, correlation_id)
 
         await self.server.db.set_status(agent_id, "running")
         await refresh_code_lenses()
@@ -164,8 +183,13 @@ class AgentRunner:
 
         node = await self.server.db.get_node(agent_id)
         if not node:
+            logger.error("execute_turn: node %s not found in DB!", agent_id)
             await self.emit_error(agent_id, "Node not found", correlation_id)
             return
+
+        logger.info(
+            "execute_turn: node found: %s (%s) file=%s", node["name"], node["node_type"], node.get("file_path", "?")
+        )
 
         try:
             if self.executor:
@@ -182,6 +206,7 @@ class AgentRunner:
                 ]
 
                 events = await self.server.db.get_events_for_correlation(correlation_id)
+                logger.info("execute_turn: %d events for correlation %s", len(events), correlation_id)
                 for event in events:
                     if event.event_type == "HumanChatEvent" and event.payload.get("to_agent") == agent_id:
                         messages.append({"role": "user", "content": event.payload.get("message", "")})
@@ -200,9 +225,16 @@ class AgentRunner:
                     )
 
                 tools = self.get_agent_tools(agent)
+                logger.info("execute_turn: %d messages, %d tools — calling LLM", len(messages), len(tools))
+                logger.debug("execute_turn: messages=%r", [(m["role"], m["content"][:100]) for m in messages])
 
                 if self.llm:
                     response = await self.llm.chat(messages, tools)
+                    logger.info(
+                        "execute_turn: LLM response: content=%r tool_calls=%d",
+                        (response.content or "")[:200],
+                        len(response.tool_calls),
+                    )
                     await self.handle_response(agent, response, correlation_id)
                 else:
                     await self.emit_error(agent_id, "No LLM client configured", correlation_id)

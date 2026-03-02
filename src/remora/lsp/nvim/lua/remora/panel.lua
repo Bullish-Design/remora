@@ -2,6 +2,7 @@ local n = require("nui-components")
 local Line = require("nui.line")
 local Renderer = require("nui-components.renderer")
 local Signal = require("nui-components.signal")
+local log = require("remora.log")
 
 local M = {}
 
@@ -79,6 +80,12 @@ end
 -- Line builders  (return tables of NuiLine for n.paragraph)
 -- ---------------------------------------------------------------------------
 
+--- Sanitize a string so it never contains newlines (NuiLine crashes on them).
+local function sanitize(s)
+    if not s then return "" end
+    return (tostring(s):gsub("\n", " "):gsub("\r", ""))
+end
+
 --- Build lines for the collapsed agent-icon sidebar.
 local function build_agent_icon_lines()
     local agents = M.state.agents:get_value()
@@ -88,7 +95,7 @@ local function build_agent_icon_lines()
         local hl = status_hls[agent.status] or "Normal"
         local line = Line()
         line:append(icon, hl)
-        line:append(" " .. (agent.name or agent.id), hl)
+        line:append(" " .. sanitize(agent.name or agent.id), hl)
         table.insert(lines, line)
     end
     if #lines == 0 then
@@ -111,18 +118,18 @@ local function build_header_lines()
     end
 
     local title = Line()
-    title:append(agent.name or agent.id, "Title")
+    title:append(sanitize(agent.name or agent.id), "Title")
     table.insert(lines, title)
 
     local status_line = Line()
     local hl = status_hls[agent.status] or "Normal"
     local icon = status_icons[agent.status] or "?"
-    status_line:append(icon .. " " .. (agent.status or "unknown"), hl)
-    status_line:append("  ID: " .. agent.id, "Comment")
+    status_line:append(icon .. " " .. sanitize(agent.status or "unknown"), hl)
+    status_line:append("  ID: " .. sanitize(agent.id), "Comment")
     table.insert(lines, status_line)
 
     local parent_line = Line()
-    parent_line:append("Parent: " .. (agent.parent_id or "none"), "Comment")
+    parent_line:append("Parent: " .. sanitize(agent.parent_id or "none"), "Comment")
     table.insert(lines, parent_line)
 
     return lines
@@ -318,7 +325,11 @@ function M.create_panel()
             -- Help line
             n.paragraph({
                 id = "help_line",
-                lines = "[Esc] close  [Tab] navigate  [1] state  [2] events  [3] chat",
+                lines = (function()
+                    local hl = Line()
+                    hl:append("[Esc] close  [Tab] navigate  [1] state  [2] events  [3] chat", "Comment")
+                    return { hl }
+                end)(),
                 size = 1,
             })
         )
@@ -330,11 +341,18 @@ end
 -- ---------------------------------------------------------------------------
 
 local function update_paragraphs()
-    if not M.renderer then return end
+    if not M.renderer then
+        log.debug("update_paragraphs: no renderer, skipping")
+        return
+    end
+    log.debug("update_paragraphs: refreshing all paragraph components")
 
     local function update_component(id, lines)
         local comp = M.renderer:get_component_by_id(id)
-        if not comp then return end
+        if not comp then
+            log.debug("update_paragraphs: component %s not found", id)
+            return
+        end
         -- Props are read-only via metatable; use rawset to bypass.
         pcall(function()
             rawset(comp._private.props, "lines", lines)
@@ -354,7 +372,9 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.open()
+    log.info("panel.open: called, renderer=%s", tostring(M.renderer ~= nil))
     if M.renderer then
+        log.info("panel.open: already open, returning")
         return
     end
 
@@ -429,7 +449,9 @@ function M.open()
 end
 
 function M.close()
+    log.info("panel.close: called")
     if not M.renderer then
+        log.info("panel.close: not open, returning")
         return
     end
     M.renderer:close()
@@ -454,26 +476,51 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.add_event(event)
+    log.info("panel.add_event: event_type=%s", tostring(event and event.event_type or "nil"))
+    log.dump("DEBUG", "panel.add_event event", event)
     local events = vim.deepcopy(M.state.events:get_value())
     table.insert(events, 1, event)
     if #events > 50 then
         table.remove(events)
     end
     M.state.events = events
+    log.info("panel.add_event: now %d events total", #events)
     update_paragraphs()
 end
 
 function M.select_agent(agent_id)
+    log.info("panel.select_agent: agent_id=%s", tostring(agent_id))
     local agents = M.state.agents:get_value()
     if agents[agent_id] then
         M.state.selected_agent = agent_id
         M.state.expanded = true
+        log.info("panel.select_agent: selected and expanded")
         update_paragraphs()
+    else
+        log.warn("panel.select_agent: agent %s NOT found in state.agents", tostring(agent_id))
     end
 end
 
 function M.update_agents(agent_list)
+    log.info("panel.update_agents: called with %s (type=%s)",
+        tostring(agent_list), type(agent_list))
+    if type(agent_list) == "table" then
+        log.info("panel.update_agents: agent_list has %d entries", #agent_list)
+        for i, agent in ipairs(agent_list) do
+            if i <= 5 then
+                log.info("panel.update_agents: [%d] remora_id=%s name=%s status=%s",
+                    i,
+                    tostring(agent.remora_id),
+                    tostring(agent.name),
+                    tostring(agent.status))
+            end
+        end
+    else
+        log.warn("panel.update_agents: agent_list is NOT a table!")
+    end
+
     local mapping = {}
+    local count = 0
     for _, agent in ipairs(agent_list or {}) do
         mapping[agent.remora_id] = {
             id = agent.remora_id,
@@ -481,9 +528,18 @@ function M.update_agents(agent_list)
             status = agent.status,
             parent_id = agent.parent_id,
         }
+        count = count + 1
     end
+    log.info("panel.update_agents: built mapping with %d agents", count)
+
     M.state.agents = mapping
-    update_paragraphs()
+    log.info("panel.update_agents: state.agents assigned, calling update_paragraphs")
+    local ok, err = pcall(update_paragraphs)
+    if not ok then
+        log.error("panel.update_agents: update_paragraphs FAILED: %s", tostring(err))
+    else
+        log.info("panel.update_agents: update_paragraphs succeeded")
+    end
 end
 
 return M

@@ -8,26 +8,32 @@ from remora.lsp.server import emit_event, logger, server
 
 async def _resolve_agent(ls, args) -> str | None:
     """Resolve an agent_id from cursor context {uri, line} passed as args[0]."""
+    logger.info("_resolve_agent: args=%r", args)
     ctx = args[0] if args else None
     if not ctx or not isinstance(ctx, dict):
+        logger.warning("_resolve_agent: no valid cursor context in args")
         return None
     uri = ctx.get("uri")
     line = ctx.get("line")
     if not uri or line is None:
+        logger.warning("_resolve_agent: missing uri=%r or line=%r", uri, line)
         return None
+    logger.info("_resolve_agent: querying DB for node at %s:%s", uri, line)
     node = await ls.db.get_node_at_position(uri, line, 0)
     if node:
-        logger.info("Resolved agent %s (%s) at %s:%s", node["remora_id"], node["name"], uri, line)
+        logger.info("_resolve_agent: FOUND agent %s (%s) at %s:%s", node["remora_id"], node["name"], uri, line)
         return node["remora_id"]
-    logger.warning("No agent found at %s:%s", uri, line)
+    logger.warning("_resolve_agent: NO agent found at %s:%s", uri, line)
     return None
 
 
 @server.command("remora.chat")
 async def cmd_chat(ls, *args) -> None:
     try:
+        logger.info("cmd_chat: called with args=%r", args)
         agent_id = await _resolve_agent(ls, args)
         if not agent_id:
+            logger.warning("cmd_chat: no agent resolved — showing warning to user")
             ls.window_show_message(
                 lsp.ShowMessageParams(
                     type=lsp.MessageType.Warning,
@@ -35,10 +41,12 @@ async def cmd_chat(ls, *args) -> None:
                 )
             )
             return
+        logger.info("cmd_chat: sending requestInput for agent=%s", agent_id)
         ls.protocol.notify(
             "$/remora/requestInput",
             {"agent_id": agent_id, "prompt": "Message to agent:"},
         )
+        logger.info("cmd_chat: requestInput sent")
     except Exception:
         logger.exception("Error in remora.chat")
 
