@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from lsprotocol import types as lsp
 
-from remora.lsp.models import ASTAgentNode, RewriteProposal
+from remora.lsp.models import RewriteProposal
 from remora.lsp.server import logger, server
 
 
@@ -11,18 +11,19 @@ async def code_action(params: lsp.CodeActionParams) -> list[lsp.CodeAction]:
     try:
         uri = params.text_document.uri
         range_ = params.range
-
-        node = await server.db.get_node_at_position(uri, range_.start.line + 1, range_.start.character)
-        if not node:
+        if not server.event_store:
             return []
 
-        agent = ASTAgentNode(**node)
+        agent = await server.event_store.get_node_at_position(uri, range_.start.line + 1)
+        if not agent:
+            return []
+
         actions = agent.to_code_actions()
 
-        if agent.pending_proposal_id:
-            proposal = server.proposals.get(agent.pending_proposal_id)
-            if proposal:
-                actions.extend(proposal.to_code_actions())
+        # Check for pending proposals via RemoraDB proposals table
+        proposals_for_agent = [p for p in server.proposals.values() if p.agent_id == agent.node_id]
+        for proposal in proposals_for_agent:
+            actions.extend(proposal.to_code_actions())
 
         return actions
     except Exception:

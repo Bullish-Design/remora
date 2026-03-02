@@ -4,6 +4,7 @@ from pathlib import Path
 
 from lsprotocol import types as lsp
 
+from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
 from remora.lsp.models import RewriteProposal
 from remora.lsp.server import logger, publish_diagnostics, refresh_code_lenses, server, uri_to_path
 from remora.lsp.watcher import inject_ids
@@ -16,15 +17,37 @@ async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         text = params.text_document.text
         logger.info("did_open: uri=%s text_len=%d", uri, len(text))
 
-        old_nodes = await server.db.get_nodes_for_file(uri)
-        nodes = server.watcher.parse_and_inject_ids(uri, text, old_nodes)
-        logger.info("did_open: parsed %d nodes from %s (%d old)", len(nodes), uri, len(old_nodes))
-        for nd in nodes:
-            logger.debug("did_open:   node: %s (%s) lines %d-%d", nd.name, nd.node_type, nd.start_line, nd.end_line)
+        # Get existing nodes from EventStore as dicts for watcher
+        old_agents = await server.event_store.list_nodes(file_path=uri) if server.event_store else []
+        old_dicts = [{"name": a.name, "node_type": a.node_type, "node_id": a.node_id} for a in old_agents]
 
-        await server.db.upsert_nodes(nodes)
-        await server.db.update_edges(nodes)
-        logger.debug("did_open: upserted nodes + edges")
+        new_dicts = server.watcher.parse_and_inject_ids(uri, text, old_dicts)
+        logger.info("did_open: parsed %d nodes from %s (%d old)", len(new_dicts), uri, len(old_dicts))
+        for nd in new_dicts:
+            logger.debug(
+                "did_open:   node: %s (%s) lines %d-%d", nd["name"], nd["node_type"], nd["start_line"], nd["end_line"]
+            )
+
+        # Emit NodeDiscoveredEvent for each node → EventStore projection handles upsert
+        if server.event_store:
+            for nd in new_dicts:
+                event = NodeDiscoveredEvent(
+                    node_id=nd["node_id"],
+                    node_type=nd["node_type"],
+                    name=nd["name"],
+                    full_name=nd["full_name"],
+                    file_path=nd["file_path"],
+                    start_line=nd["start_line"],
+                    end_line=nd["end_line"],
+                    source_code=nd["source_code"],
+                    source_hash=nd["source_hash"],
+                    parent_id=nd["parent_id"],
+                )
+                await server.event_store.append("nodes", event)
+
+        # Update edges in RemoraDB (edges stay in RemoraDB for now)
+        await server.db.update_edges(new_dicts)
+        logger.debug("did_open: emitted node events + updated edges")
 
         await refresh_code_lenses()
 
@@ -47,9 +70,12 @@ async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         file_proposals = [p for p in server.proposals.values() if p.file_path == uri]
         await publish_diagnostics(uri, file_proposals)
 
-        for node in nodes:
-            tools = await server.discover_tools_for_agent(node)
-            node.extra_tools = tools
+        # Discover tools for each agent node from EventStore
+        if server.event_store:
+            agents = await server.event_store.list_nodes(file_path=uri)
+            for agent in agents:
+                tools = await server.discover_tools_for_agent(agent)
+                # TODO: persist extra_tools on agent node if needed
 
         # Notify client of updated agent list
         if hasattr(server, "_notify_agents_updated"):
@@ -75,31 +101,49 @@ async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
         text = Path(uri_to_path(uri)).read_text()
         logger.debug("did_save: read %d chars from %s", len(text), uri)
 
-        old_nodes = await server.db.get_nodes_for_file(uri)
-        new_nodes = server.watcher.parse_and_inject_ids(uri, text, old_nodes)
-        logger.info("did_save: %d old nodes, %d new nodes for %s", len(old_nodes), len(new_nodes), uri)
+        # Get existing nodes from EventStore
+        old_agents = await server.event_store.list_nodes(file_path=uri) if server.event_store else []
+        old_dicts = [{"name": a.name, "node_type": a.node_type, "node_id": a.node_id} for a in old_agents]
 
-        old_by_key = {(n["name"], n["node_type"]): n for n in old_nodes}
-        for node in new_nodes:
-            key = (node.name, node.node_type)
-            if key in old_by_key:
-                node.remora_id = old_by_key[key].get("remora_id") or old_by_key[key].get("id")
-                del old_by_key[key]
+        new_dicts = server.watcher.parse_and_inject_ids(uri, text, old_dicts)
+        logger.info("did_save: %d old nodes, %d new nodes for %s", len(old_dicts), len(new_dicts), uri)
 
-        for orphan in old_by_key.values():
-            orphan_id = orphan.get("remora_id") or orphan.get("id")
-            logger.debug("did_save: orphaning %s", orphan_id)
-            await server.db.set_status(orphan_id, "orphaned")
+        # Detect orphans: old node IDs not present in new parse
+        new_ids = {nd["node_id"] for nd in new_dicts}
+        old_ids = {a.node_id for a in old_agents}
 
-        await server.db.upsert_nodes(new_nodes)
-        await server.db.update_edges(new_nodes)
+        if server.event_store:
+            # Emit NodeRemovedEvent for orphaned nodes
+            for orphan_id in old_ids - new_ids:
+                logger.debug("did_save: removing orphan %s", orphan_id)
+                event = NodeRemovedEvent(node_id=orphan_id)
+                await server.event_store.append("nodes", event)
+
+            # Emit NodeDiscoveredEvent for each new/updated node
+            for nd in new_dicts:
+                event = NodeDiscoveredEvent(
+                    node_id=nd["node_id"],
+                    node_type=nd["node_type"],
+                    name=nd["name"],
+                    full_name=nd["full_name"],
+                    file_path=nd["file_path"],
+                    start_line=nd["start_line"],
+                    end_line=nd["end_line"],
+                    source_code=nd["source_code"],
+                    source_hash=nd["source_hash"],
+                    parent_id=nd["parent_id"],
+                )
+                await server.event_store.append("nodes", event)
+
+        # Update edges in RemoraDB
+        await server.db.update_edges(new_dicts)
 
         server.graph.invalidate(uri)
 
         file_path = Path(uri_to_path(uri))
         if file_path.exists() and file_path.suffix == ".py":
             server._injecting.add(uri)
-            inject_ids(file_path, new_nodes)
+            inject_ids(file_path, new_dicts)
 
         await refresh_code_lenses()
 

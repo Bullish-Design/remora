@@ -325,24 +325,26 @@ class RemoraDB:
         return [row["agent_id"] for row in cursor.fetchall()]
 
     @async_db
-    def update_edges(self, nodes: list[ASTAgentNode]) -> None:
+    def update_edges(self, nodes: list[dict]) -> None:
         cursor = self.conn.cursor()
         for node in nodes:
-            if node.parent_id:
+            parent_id = node.get("parent_id")
+            node_id = node.get("node_id") or node.get("remora_id") or node.get("id")
+            if parent_id:
                 cursor.execute(
                     """
                     INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
                     VALUES (?, ?, 'parent_of')
                 """,
-                    (node.parent_id, node.remora_id),
+                    (parent_id, node_id),
                 )
-            for callee in node.callee_ids:
+            for callee in node.get("callee_ids", []):
                 cursor.execute(
                     """
                     INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
                     VALUES (?, ?, 'calls')
                 """,
-                    (node.remora_id, callee),
+                    (node_id, callee),
                 )
         self.conn.commit()
 

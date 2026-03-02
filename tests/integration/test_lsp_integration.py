@@ -15,6 +15,8 @@ from remora.lsp.server import server
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
 from remora.lsp.watcher import ASTWatcher
+from remora.core.event_store import EventStore
+from remora.core.projections import NodeProjection
 
 pytestmark = pytest.mark.integration
 
@@ -26,7 +28,7 @@ def _cli_env(repo_root: Path) -> dict[str, str]:
 
 
 @pytest.fixture
-def isolated_lsp_server(tmp_path: Path) -> None:
+async def isolated_lsp_server(tmp_path: Path) -> None:
     """Rebuild the shared LSP server to operate inside a scratch directory."""
 
     server.shutdown()
@@ -35,6 +37,15 @@ def isolated_lsp_server(tmp_path: Path) -> None:
     server.proposals.clear()
     server.watcher = ASTWatcher()
     server._injecting.clear()
+
+    # Set up EventStore with NodeProjection
+    event_store = EventStore(
+        tmp_path / "events.db",
+        projection=NodeProjection(),
+    )
+    await event_store.initialize()
+    server.event_store = event_store
+
     original_discover = server.discover_tools_for_agent
 
     async def _stub_discover(_: object) -> list[object]:
@@ -45,6 +56,7 @@ def isolated_lsp_server(tmp_path: Path) -> None:
     yield
 
     server.shutdown()
+    await event_store.close()
     server.discover_tools_for_agent = original_discover
 
 
@@ -100,8 +112,10 @@ async def test_document_handlers_populate_db_and_code_lenses(tmp_path: Path, iso
     )
 
     await documents.did_open(params)
-    nodes = await server.db.get_nodes_for_file(uri)
-    assert any(node["node_type"] == "function" for node in nodes)
+
+    # Nodes now live in EventStore, not RemoraDB
+    nodes = await server.event_store.list_nodes(file_path=uri)
+    assert any(node.node_type == "function" for node in nodes)
 
     lens_params = lsp.CodeLensParams(text_document=lsp.TextDocumentIdentifier(uri=uri))
     code_lenses = await lens.code_lens(lens_params)
@@ -154,9 +168,7 @@ def test_swarm_start_lsp_smoke(tmp_path: Path) -> None:
         while time.time() < deadline:
             if proc.poll() is not None:
                 stdout, stderr = proc.communicate(timeout=1)
-                raise AssertionError(
-                    f"CLI exited early (code={proc.returncode})\nstdout={stdout}\nstderr={stderr}"
-                )
+                raise AssertionError(f"CLI exited early (code={proc.returncode})\nstdout={stdout}\nstderr={stderr}")
             if events_db.exists():
                 break
             time.sleep(0.2)
