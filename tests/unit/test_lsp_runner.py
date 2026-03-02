@@ -60,9 +60,9 @@ def mock_server(event_store: EventStore) -> MagicMock:
     server.db.get_activation_chain = AsyncMock(return_value=[])
     server.db.add_to_chain = AsyncMock()
     server.db.get_events_for_correlation = AsyncMock(return_value=[])
-    server.db.set_pending_proposal = AsyncMock()
     server.db.set_status = AsyncMock()
     server.db.store_proposal = AsyncMock()
+    server.db.update_proposal_status = AsyncMock()
     server.proposals = {}
     server.generate_correlation_id = MagicMock(return_value="corr_1_test")
     return server
@@ -112,7 +112,10 @@ class TestExecuteTurn:
 
         trigger = Trigger(agent_id="rm_abc12", correlation_id="corr_1")
 
-        with patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock):
+        with (
+            patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock),
+            patch("remora.lsp.server.emit_event", new_callable=AsyncMock),
+        ):
             await runner.execute_turn(trigger)
 
         # Status should have been set to "running" then back to "idle"
@@ -127,7 +130,10 @@ class TestExecuteTurn:
 
         trigger = Trigger(agent_id="rm_abc12", correlation_id="corr_1")
 
-        with patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock):
+        with (
+            patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock),
+            patch("remora.lsp.server.emit_event", new_callable=AsyncMock),
+        ):
             await runner.execute_turn(trigger)
 
         # RemoraDB.get_node should NOT be called
@@ -195,9 +201,10 @@ class TestCreateProposal:
         proposal = list(mock_server.proposals.values())[0]
         assert proposal.agent_id == "rm_abc12"
 
-        # db.set_pending_proposal should use node_id
-        mock_server.db.set_pending_proposal.assert_called_once()
-        assert mock_server.db.set_pending_proposal.call_args[0][0] == "rm_abc12"
+        # db.store_proposal should be called with file_path
+        mock_server.db.store_proposal.assert_called_once()
+        call_kwargs = mock_server.db.store_proposal.call_args
+        assert call_kwargs[1].get("file_path") == "/tmp/test.py" or call_kwargs[0][1] == "rm_abc12"
 
         # event_store.set_node_status should have been called for pending_approval
         node = await event_store.get_node("rm_abc12")

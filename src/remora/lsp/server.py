@@ -29,13 +29,14 @@ class RemoraLanguageServer(LanguageServer):
     ):
         super().__init__(name="remora", version="0.1.0")
         self.db = RemoraDB()
-        self.graph = LazyGraph(self.db)
+        self.event_store = event_store
+        es_db_path = str(event_store._db_path) if event_store else None
+        self.graph = LazyGraph(self.db, event_store_db_path=es_db_path)
         self.watcher = ASTWatcher()
         self.proposals: dict[str, RewriteProposal] = {}
         self.runner: "AgentRunner | None" = None
         self._correlation_counter = 0
         self._injecting: set[str] = set()
-        self.event_store = event_store
         self.subscriptions = subscriptions
         self.swarm_state = swarm_state
 

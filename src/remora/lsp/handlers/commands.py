@@ -156,7 +156,7 @@ async def cmd_accept_proposal(ls, proposal_id: str) -> None:
         del ls.proposals[proposal_id]
         if ls.event_store:
             await ls.event_store.set_node_status(proposal.agent_id, "idle")
-        await ls.db.clear_pending_proposal(proposal.agent_id)
+        await ls.db.update_proposal_status(proposal_id, "accepted")
 
         await emit_event(
             RewriteAppliedEvent(

@@ -555,9 +555,10 @@ class AgentRunner:
         )
 
         self.server.proposals[proposal_id] = proposal
-        await self.server.db.set_pending_proposal(agent.node_id, proposal_id)
         await self.server.event_store.set_node_status(agent.node_id, "pending_approval")
-        await self.server.db.store_proposal(proposal_id, agent.node_id, agent.source_code, new_source, proposal.diff)
+        await self.server.db.store_proposal(
+            proposal_id, agent.node_id, agent.source_code, new_source, proposal.diff, file_path=agent.file_path
+        )
 
         await publish_diagnostics(agent.file_path, [proposal])
         await refresh_code_lenses()

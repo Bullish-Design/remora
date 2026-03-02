@@ -230,18 +230,7 @@ def main(
                     for a in all_agents
                 ]
             else:
-                all_nodes = await server.db.get_all_nodes()
-                agent_list = [
-                    {
-                        "remora_id": n["remora_id"],
-                        "name": n["name"],
-                        "status": n.get("status", "active"),
-                        "node_type": n.get("node_type", ""),
-                        "file_path": n.get("file_path", ""),
-                        "parent_id": n.get("parent_id", ""),
-                    }
-                    for n in all_nodes
-                ]
+                agent_list = []
             log.info("_notify_agents_updated: sending %d agents to client via $/remora/agentsUpdated", len(agent_list))
             if agent_list:
                 log.debug("_notify_agents_updated: first 3 agents: %s", agent_list[:3])

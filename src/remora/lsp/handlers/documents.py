@@ -57,7 +57,7 @@ async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
             proposal = RewriteProposal(
                 proposal_id=p["proposal_id"],
                 agent_id=p["agent_id"],
-                file_path=p["node_file_path"],
+                file_path=p["file_path"],
                 old_source=p["old_source"],
                 new_source=p["new_source"],
                 start_line=1,

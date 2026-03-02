@@ -33,7 +33,6 @@ async def isolated_lsp_server(tmp_path: Path) -> None:
 
     server.shutdown()
     server.db = RemoraDB(str(tmp_path / "indexer.db"))
-    server.graph = LazyGraph(server.db)
     server.proposals.clear()
     server.watcher = ASTWatcher()
     server._injecting.clear()
@@ -45,6 +44,7 @@ async def isolated_lsp_server(tmp_path: Path) -> None:
     )
     await event_store.initialize()
     server.event_store = event_store
+    server.graph = LazyGraph(server.db, event_store_db_path=str(tmp_path / "events.db"))
 
     original_discover = server.discover_tools_for_agent
 
