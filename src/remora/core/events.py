@@ -132,6 +132,36 @@ class ManualTriggerEvent:
 
 
 # ============================================================================
+# Node Lifecycle Events (for EventLog projection -> nodes table)
+# ============================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class NodeDiscoveredEvent:
+    """Emitted when a code node is discovered or re-discovered."""
+
+    node_id: str
+    node_type: str
+    name: str
+    full_name: str
+    file_path: str
+    start_line: int
+    end_line: int
+    source_code: str
+    source_hash: str
+    parent_id: str | None = None
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass(frozen=True, slots=True)
+class NodeRemovedEvent:
+    """Emitted when a code node is no longer found in source."""
+
+    node_id: str
+    timestamp: float = field(default_factory=time.time)
+
+
+# ============================================================================
 # Union Type for Pattern Matching
 # ============================================================================
 
@@ -150,6 +180,10 @@ RemoraEvent = (
     | FileSavedEvent
     | ContentChangedEvent
     | ManualTriggerEvent
+    |
+    # Node lifecycle events
+    NodeDiscoveredEvent
+    | NodeRemovedEvent
     |
     # Re-exported structured-agents events
     KernelStartEvent
@@ -173,6 +207,9 @@ __all__ = [
     "FileSavedEvent",
     "ContentChangedEvent",
     "ManualTriggerEvent",
+    # Node lifecycle events
+    "NodeDiscoveredEvent",
+    "NodeRemovedEvent",
     # Re-exports
     "KernelStartEvent",
     "KernelEndEvent",
