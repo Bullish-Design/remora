@@ -57,10 +57,31 @@ class ChatConfig:
     workspace_path: str
     system_prompt: str
     tool_presets: list[str] = field(default_factory=lambda: ["file_ops"])
-    model_name: str = "Qwen/Qwen3-4B-Instruct-2507-FP8"
-    model_base_url: str = "http://remora-server:8000/v1"
-    model_api_key: str = "EMPTY"
+    model_name: str = "Qwen/Qwen3-4B"
+    model_base_url: str = "http://localhost:8000/v1"
+    model_api_key: str = ""
     max_turns: int = 10
+
+    @classmethod
+    def from_config(
+        cls,
+        config: Config,
+        *,
+        workspace_path: str,
+        system_prompt: str,
+        tool_presets: list[str] | None = None,
+        max_turns: int = 10,
+    ) -> "ChatConfig":
+        """Create a ChatConfig from the canonical Config object."""
+        return cls(
+            workspace_path=workspace_path,
+            system_prompt=system_prompt,
+            tool_presets=tool_presets or ["file_ops"],
+            model_name=config.model_default,
+            model_base_url=config.model_base_url,
+            model_api_key=config.model_api_key,
+            max_turns=max_turns,
+        )
 
 
 @dataclass

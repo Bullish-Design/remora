@@ -50,6 +50,13 @@ def _setup_logging() -> logging.Logger:
     return startup_log
 
 
+def _get_server():
+    """Import and return the LSP server singleton (extracted for testability)."""
+    from remora.lsp.server import server
+
+    return server
+
+
 def main(
     event_store=None,
     subscriptions=None,
@@ -60,8 +67,14 @@ def main(
     log = _setup_logging()
     log.info("remora-lsp starting (pid=%d)", __import__("os").getpid())
 
+    log.debug("Loading configuration ...")
+    from remora.core.config import load_config
+
+    config = load_config()
+    log.info("Config loaded: model=%s base_url=%s", config.model_default, config.model_base_url)
+
     log.debug("Importing remora.lsp.server ...")
-    from remora.lsp.server import server
+    server = _get_server()
 
     log.debug("Server module loaded (handlers registered) in %.1fms", (time.monotonic() - t0) * 1000)
 
@@ -76,8 +89,9 @@ def main(
 
     log.debug("Creating LLM client ...")
     llm = LLMClient(
-        base_url="http://remora-server:8000/v1",
-        model="Qwen/Qwen3-4B-Instruct-2507-FP8",
+        base_url=config.model_base_url,
+        model=config.model_default,
+        api_key=config.model_api_key or "EMPTY",
     )
 
     log.debug("Creating AgentRunner ...")

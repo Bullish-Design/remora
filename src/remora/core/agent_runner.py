@@ -89,7 +89,7 @@ class AgentRunner:
         """Main loop - process triggers from EventStore."""
         self._running = True
         logger.info("AgentRunner started")
-        
+
         cleanup_task = asyncio.create_task(self._cleanup_loop())
 
         try:
@@ -124,10 +124,7 @@ class AgentRunner:
             await asyncio.sleep(60)
             now = time.time()
             # TTL of 300 seconds (5 minutes)
-            stale_keys = [
-                k for k, v in self._correlation_depth.items()
-                if now - v[1] > 300
-            ]
+            stale_keys = [k for k, v in self._correlation_depth.items() if now - v[1] > 300]
             for k in stale_keys:
                 self._correlation_depth.pop(k, None)
 
@@ -148,11 +145,7 @@ class AgentRunner:
 
     def _normalize_correlation_id(self, event: RemoraEvent) -> str:
         """Ensure every event has a correlation identifier."""
-        return (
-            getattr(event, "correlation_id", None)
-            or getattr(event, "id", None)
-            or "base"
-        )
+        return getattr(event, "correlation_id", None) or getattr(event, "id", None) or "base"
 
     async def _process_trigger(
         self,
@@ -219,6 +212,7 @@ class AgentRunner:
                     graph_id=self._swarm_id,
                     agent_id=agent_id,
                     node_name=state.node_type,
+                    trigger_event_type=type(trigger_event).__name__,
                 )
             )
 

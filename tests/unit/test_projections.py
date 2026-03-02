@@ -156,6 +156,39 @@ class TestProjectStatusUpdates:
         assert row["status"] == "running"
 
     @pytest.mark.asyncio
+    async def test_agent_start_populates_last_trigger_event(self, store: EventStore, projection: NodeProjection):
+        """AgentStartEvent should write trigger_event_type into last_trigger_event."""
+        projection.apply(store._conn, _discovered_event())
+
+        start = AgentStartEvent(
+            graph_id="swarm",
+            agent_id="abc123",
+            node_name="calculate_total",
+            trigger_event_type="ContentChangedEvent",
+        )
+        projection.apply(store._conn, start)
+
+        row = store._conn.execute(
+            "SELECT last_trigger_event FROM nodes WHERE node_id = ?",
+            ("abc123",),
+        ).fetchone()
+        assert row["last_trigger_event"] == "ContentChangedEvent"
+
+    @pytest.mark.asyncio
+    async def test_agent_start_default_trigger_event_type(self, store: EventStore, projection: NodeProjection):
+        """When trigger_event_type is empty, last_trigger_event should be empty."""
+        projection.apply(store._conn, _discovered_event())
+
+        start = AgentStartEvent(graph_id="swarm", agent_id="abc123", node_name="calculate_total")
+        projection.apply(store._conn, start)
+
+        row = store._conn.execute(
+            "SELECT last_trigger_event FROM nodes WHERE node_id = ?",
+            ("abc123",),
+        ).fetchone()
+        assert row["last_trigger_event"] == ""
+
+    @pytest.mark.asyncio
     async def test_agent_complete_sets_idle(self, store: EventStore, projection: NodeProjection):
         projection.apply(store._conn, _discovered_event())
         projection.apply(

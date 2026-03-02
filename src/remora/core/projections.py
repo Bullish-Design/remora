@@ -119,8 +119,8 @@ class NodeProjection:
 
     def _project_agent_start(self, conn: sqlite3.Connection, event: AgentStartEvent) -> None:
         conn.execute(
-            "UPDATE nodes SET status = 'running' WHERE node_id = ?",
-            (event.agent_id,),
+            "UPDATE nodes SET status = 'running', last_trigger_event = ? WHERE node_id = ?",
+            (event.trigger_event_type, event.agent_id),
         )
 
     def _project_agent_complete(self, conn: sqlite3.Connection, event: AgentCompleteEvent) -> None:

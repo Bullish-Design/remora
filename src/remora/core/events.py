@@ -38,6 +38,7 @@ class AgentStartEvent:
     graph_id: str
     agent_id: str
     node_name: str
+    trigger_event_type: str = ""
     timestamp: float = field(default_factory=time.time)
 
 
