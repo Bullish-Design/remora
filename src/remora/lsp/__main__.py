@@ -227,33 +227,11 @@ def main(
             parsed,
             len(py_files),
         )
-        await _notify_agents_updated()
+        await server.notify_agents_updated()
 
     async def _notify_agents_updated() -> None:
-        """Send $/remora/agentsUpdated with all active nodes to the client."""
-        try:
-            if server.event_store:
-                all_agents = await server.event_store.list_nodes()
-                agent_list = [
-                    {
-                        "node_id": a.node_id,
-                        "name": a.name,
-                        "status": a.status,
-                        "node_type": a.node_type,
-                        "file_path": a.file_path,
-                        "parent_id": a.parent_id or "",
-                    }
-                    for a in all_agents
-                ]
-            else:
-                agent_list = []
-            log.info("_notify_agents_updated: sending %d agents to client via $/remora/agentsUpdated", len(agent_list))
-            if agent_list:
-                log.debug("_notify_agents_updated: first 3 agents: %s", agent_list[:3])
-            server.protocol.notify("$/remora/agentsUpdated", agent_list)
-            log.info("_notify_agents_updated: notification sent successfully")
-        except Exception:
-            log.exception("_notify_agents_updated: FAILED")
+        """Delegate to the proper method on the server."""
+        await server.notify_agents_updated()
 
     # Attach the notifier to the server so handlers can call it
     server._notify_agents_updated = _notify_agents_updated

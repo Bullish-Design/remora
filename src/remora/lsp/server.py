@@ -102,8 +102,50 @@ class RemoraLanguageServer(LanguageServer):
             logger.exception("Error discovering tools for agent")
             return []
 
+    async def notify_agents_updated(self) -> None:
+        """Send $/remora/agentsUpdated with all active nodes to the client."""
+        try:
+            if self.event_store:
+                all_agents = await self.event_store.list_nodes()
+                agent_list = [
+                    {
+                        "node_id": a.node_id,
+                        "name": a.name,
+                        "status": a.status,
+                        "node_type": a.node_type,
+                        "file_path": a.file_path,
+                        "parent_id": a.parent_id or "",
+                    }
+                    for a in all_agents
+                ]
+            else:
+                agent_list = []
+            logger.info("notify_agents_updated: sending %d agents to client", len(agent_list))
+            self.protocol.notify("$/remora/agentsUpdated", agent_list)
+        except Exception:
+            logger.exception("notify_agents_updated: FAILED")
 
-server = RemoraLanguageServer()
+
+_server: RemoraLanguageServer | None = None
+
+
+def get_server() -> RemoraLanguageServer:
+    """Return the global RemoraLanguageServer singleton, creating it lazily."""
+    global _server
+    if _server is None:
+        _server = RemoraLanguageServer()
+        atexit.register(_server.shutdown)
+    return _server
+
+
+def register_handlers() -> None:
+    """Force import of handler modules so they register on the server singleton."""
+    from remora.lsp.handlers import actions, capabilities, commands, documents, hover, lens  # noqa: F401
+    from remora.lsp import notifications  # noqa: F401
+
+
+# Backward-compatible eager singleton — handler decorators need this at import time.
+server = get_server()
 
 
 def uri_to_path(uri: str) -> str:
@@ -125,12 +167,4 @@ async def emit_event(event) -> Any:
     return await server.emit_event(event)
 
 
-def register_handlers() -> None:
-    # Force import order so that handlers register on `server`
-    from remora.lsp.handlers import actions, capabilities, commands, documents, hover, lens  # noqa: F401
-    from remora.lsp import notifications  # noqa: F401
-
-
 register_handlers()
-
-atexit.register(server.shutdown)

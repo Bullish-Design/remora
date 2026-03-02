@@ -55,6 +55,7 @@ class CairnWorkspaceService:
         self._stable_lock = asyncio.Lock()
         self._ignore_patterns: set[str] = set(config.workspace_ignore_patterns or DEFAULT_IGNORE_PATTERNS)
         self._ignore_dotfiles: bool = config.workspace_ignore_dotfiles
+        self._file_mtimes: dict[str, float] = {}
 
     @property
     def project_root(self) -> Path:
@@ -136,7 +137,7 @@ class CairnWorkspaceService:
         self._stable_workspace = None
 
     async def _sync_project_to_workspace(self) -> None:
-        """Sync project files into the stable workspace."""
+        """Sync project files into the stable workspace, skipping unchanged files."""
         if self._stable_workspace is None:
             return
 
@@ -148,7 +149,15 @@ class CairnWorkspaceService:
 
             if not self._resolver.is_within_project(path):
                 continue
+
+            # Incremental sync: skip files whose mtime hasn't changed
+            try:
+                current_mtime = path.stat().st_mtime
+            except OSError:
+                continue
             rel_path = self._resolver.to_workspace_path(path)
+            if self._file_mtimes.get(rel_path) == current_mtime:
+                continue
 
             try:
                 payload = path.read_bytes()
@@ -158,11 +167,32 @@ class CairnWorkspaceService:
 
             try:
                 await self._stable_workspace.files.write(rel_path, payload, mode="binary")
+                self._file_mtimes[rel_path] = current_mtime
             except Exception as exc:
                 logger.debug("Failed to write %s to stable workspace: %s", rel_path, exc)
 
     async def ensure_file_synced(self, rel_path: str) -> bool:
-        """Ensure a specific file is synced to workspace."""
+        """Ensure a specific file is synced to the stable workspace.
+
+        Reads the file from the project root and writes it into the stable
+        workspace.  Returns ``False`` when the source file does not exist.
+        """
+        source = self._project_root / rel_path
+        if not source.exists():
+            return False
+
+        try:
+            payload = source.read_bytes()
+        except OSError as exc:
+            logger.debug("ensure_file_synced: failed to read %s: %s", source, exc)
+            return False
+
+        try:
+            await self._stable_workspace.files.write(rel_path, payload, mode="binary")
+        except Exception as exc:
+            logger.debug("ensure_file_synced: failed to write %s: %s", rel_path, exc)
+            return False
+
         return True
 
     def _should_ignore(self, path: Path) -> bool:

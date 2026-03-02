@@ -66,6 +66,16 @@ class SwarmExecutor:
         )
         self._workspace_initialized = False
 
+        # Connection pooling: create the LLM client once and reuse it
+        self._client = build_client(
+            {
+                "base_url": config.model_base_url,
+                "api_key": config.model_api_key or "EMPTY",
+                "model": config.model_default,
+                "timeout": config.timeout_s,
+            }
+        )
+
     async def run_agent(self, state: AgentState, trigger_event: Any = None) -> str:
         """Run a single agent turn.
 
@@ -184,7 +194,8 @@ class SwarmExecutor:
 
         async def files_provider() -> dict[str, str | bytes]:
             current_files = await data_provider.load_files(node)
-            return dict(build_virtual_fs(current_files))
+            fs: dict[str, str | bytes] = dict(build_virtual_fs(current_files))
+            return fs
 
         # Only discover tools if agents_dir is set (chat bundles have no tools)
         tools = []
@@ -270,14 +281,6 @@ class SwarmExecutor:
         parser = get_response_parser(model_name)
         pipeline = ConstraintPipeline(manifest.grammar_config) if manifest.grammar_config else None
         adapter = ModelAdapter(name=model_name, response_parser=parser, constraint_pipeline=pipeline)
-        client = build_client(
-            {
-                "base_url": self.config.model_base_url,
-                "api_key": self.config.model_api_key or "EMPTY",
-                "model": model_name,
-                "timeout": self.config.timeout_s,
-            }
-        )
 
         class _EventStoreObserver:
             def __init__(self, store: EventStore, swarm_id: str):
@@ -288,7 +291,7 @@ class SwarmExecutor:
                 await self.store.append(self.swarm_id, event)
 
         observer = _EventStoreObserver(self._event_store, self._swarm_id)
-        kernel = AgentKernel(client=client, adapter=adapter, tools=tools, observer=observer)
+        kernel = AgentKernel(client=self._client, adapter=adapter, tools=tools, observer=observer)
         logger.info(f"Created kernel with client pointing to {self.config.model_base_url}")
 
         try:
@@ -346,7 +349,7 @@ class SwarmExecutor:
                 sections.append(f"Content: {event_content}")
         if requires_context:
             history_items = []
-            for entry in state.chat_history[-5:]:
+            for entry in state.chat_history[-self.config.chat_history_limit :]:
                 role = entry.get("role")
                 content = entry.get("content")
                 if role and content:

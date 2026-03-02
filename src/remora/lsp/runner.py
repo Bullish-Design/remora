@@ -280,7 +280,7 @@ class AgentRunner:
         async for agent_id, event_id, event in event_store.get_triggers():
             if not self._running:
                 break
-            correlation_id = getattr(event, "correlation_id", None) or "base"
+            correlation_id = getattr(event, "correlation_id", None) or self.server.generate_correlation_id()
             await self.trigger(agent_id, correlation_id)
 
     async def poll_command_queue(self) -> None:

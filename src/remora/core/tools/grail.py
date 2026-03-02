@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping
 
 import grail
 from structured_agents.types import ToolCall, ToolSchema, ToolResult
@@ -95,7 +95,7 @@ class RemoraGrailTool:
             )
 
 
-def build_virtual_fs(files: dict[str, str | bytes]) -> dict[str, str | bytes]:
+def build_virtual_fs(files: Mapping[str, str | bytes]) -> dict[str, str | bytes]:
     """Normalize file paths for Grail virtual filesystem."""
     virtual_fs: dict[str, str | bytes] = {}
     for path, content in files.items():

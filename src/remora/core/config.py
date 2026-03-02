@@ -60,6 +60,7 @@ class Config:
     timeout_s: float = 300.0
     max_trigger_depth: int = 5
     trigger_cooldown_ms: int = 1000
+    chat_history_limit: int = 5
 
     workspace_ignore_patterns: tuple[str, ...] = DEFAULT_IGNORE_PATTERNS
     workspace_ignore_dotfiles: bool = True
@@ -151,6 +152,7 @@ def serialize_config(config: Config) -> dict[str, Any]:
         "timeout_s": config.timeout_s,
         "max_trigger_depth": config.max_trigger_depth,
         "trigger_cooldown_ms": config.trigger_cooldown_ms,
+        "chat_history_limit": config.chat_history_limit,
         "workspace_ignore_patterns": normalize(config.workspace_ignore_patterns),
         "workspace_ignore_dotfiles": config.workspace_ignore_dotfiles,
         "nvim_enabled": config.nvim_enabled,

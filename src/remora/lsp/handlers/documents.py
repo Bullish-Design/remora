@@ -80,11 +80,7 @@ async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
                 # TODO: persist extra_tools on agent node if needed
 
         # Notify client of updated agent list
-        if hasattr(server, "_notify_agents_updated"):
-            logger.info("did_open: calling _notify_agents_updated")
-            await server._notify_agents_updated()
-        else:
-            logger.warning("did_open: server has no _notify_agents_updated attribute!")
+        await server.notify_agents_updated()
     except Exception:
         logger.exception("Error in did_open handler")
 
@@ -100,7 +96,8 @@ async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
             logger.debug("did_save: skipping %s (was injecting)", uri)
             return
 
-        text = Path(uri_to_path(uri)).read_text()
+        # Prefer LSP-provided text to avoid disk read race
+        text = params.text if params.text is not None else Path(uri_to_path(uri)).read_text()
         logger.debug("did_save: read %d chars from %s", len(text), uri)
 
         # Get existing nodes from EventStore
@@ -152,11 +149,7 @@ async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
         await refresh_code_lenses()
 
         # Notify client of updated agent list
-        if hasattr(server, "_notify_agents_updated"):
-            logger.info("did_save: calling _notify_agents_updated")
-            await server._notify_agents_updated()
-        else:
-            logger.warning("did_save: server has no _notify_agents_updated attribute!")
+        await server.notify_agents_updated()
     except Exception:
         logger.exception("Error in did_save handler")
 

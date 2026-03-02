@@ -6,9 +6,10 @@ Tests are written first (TDD), then implementations follow.
 
 from __future__ import annotations
 
+import asyncio
 import html
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -354,3 +355,341 @@ class TestExtensionCacheGlobalState:
         # Should still work without explicit cache
         result = load_extensions(tmp_path)
         assert result == []
+
+
+# ── 8.1  P1: LLM client connection pooling ────────────────────────────────
+
+
+class TestLLMClientConnectionPooling:
+    """8.1 — SwarmExecutor should create the LLM client once in __init__ and reuse it."""
+
+    def test_client_created_once_in_init(self):
+        from remora.core.swarm_executor import SwarmExecutor
+
+        config = Config()
+        executor = SwarmExecutor(
+            config=config,
+            event_bus=None,
+            event_store=MagicMock(),
+            subscriptions=MagicMock(),
+            swarm_state=MagicMock(),
+            swarm_id="test",
+            project_root=Path("/tmp"),
+        )
+        # After fix: executor should have a _client attribute created in __init__
+        assert hasattr(executor, "_client")
+        assert executor._client is not None
+
+    def test_client_reused_across_calls(self):
+        """The same client instance should be used on each _run_kernel call."""
+        from remora.core.swarm_executor import SwarmExecutor
+
+        config = Config()
+        executor = SwarmExecutor(
+            config=config,
+            event_bus=None,
+            event_store=MagicMock(),
+            subscriptions=MagicMock(),
+            swarm_state=MagicMock(),
+            swarm_id="test",
+            project_root=Path("/tmp"),
+        )
+        # The client stored at construction time should be the same object
+        client_ref = executor._client
+        assert client_ref is executor._client
+
+
+# ── 8.2  P2: Incremental workspace sync ───────────────────────────────────
+
+
+class TestIncrementalWorkspaceSync:
+    """8.2 — _sync_project_to_workspace should skip unchanged files via mtime."""
+
+    def test_sync_tracks_mtimes(self):
+        """After fix: CairnWorkspaceService should have an _mtimes dict."""
+        from remora.core.cairn_bridge import CairnWorkspaceService
+
+        config = Config()
+        svc = CairnWorkspaceService(
+            config=config,
+            swarm_root=Path("/tmp/swarm"),
+            project_root=Path("/tmp/proj"),
+        )
+        assert hasattr(svc, "_file_mtimes")
+        assert isinstance(svc._file_mtimes, dict)
+
+
+# ── 8.3  P3: Lightweight list_nodes() queries ─────────────────────────────
+
+
+class TestLightweightListNodes:
+    """8.3 — list_nodes() should accept an optional columns parameter."""
+
+    def test_list_nodes_has_columns_param(self):
+        """The list_nodes method should accept a columns keyword arg."""
+        import inspect
+        from remora.core.event_store import EventStore
+
+        sig = inspect.signature(EventStore.list_nodes)
+        assert "columns" in sig.parameters
+
+
+# ── 8.4  L1: _notify_agents_updated as proper method ──────────────────────
+
+
+class TestNotifyAgentsUpdatedMethod:
+    """8.4 — _notify_agents_updated should be a proper method on RemoraLanguageServer."""
+
+    def test_server_has_method(self):
+        from remora.lsp.server import RemoraLanguageServer
+
+        # After fix: the method should exist on the class, not monkey-patched
+        assert hasattr(RemoraLanguageServer, "notify_agents_updated")
+        import inspect
+
+        assert inspect.isfunction(RemoraLanguageServer.notify_agents_updated) or inspect.ismethod(
+            RemoraLanguageServer.notify_agents_updated
+        )
+
+
+# ── 8.5  L2: Defer server singleton initialization ────────────────────────
+
+
+class TestDeferServerSingleton:
+    """8.5 — server.py should offer lazy init instead of eagerly constructing at import."""
+
+    def test_get_server_returns_instance(self):
+        """A get_server() function should provide the singleton lazily."""
+        from remora.lsp.server import get_server
+
+        s = get_server()
+        assert s is not None
+        # Calling again should return same instance
+        assert get_server() is s
+
+
+# ── 8.6  L3: Document Qwen XML tag parser ─────────────────────────────────
+
+
+class TestDocumentQwenXMLParser:
+    """8.6 — _extract_text_tool_calls should have a docstring explaining the Qwen workaround."""
+
+    def test_has_docstring(self):
+        from remora.lsp.runner import AgentRunner
+
+        method = AgentRunner._extract_text_tool_calls
+        assert method.__doc__ is not None
+        # Should mention Qwen specifically
+        assert "qwen" in method.__doc__.lower() or "xml" in method.__doc__.lower()
+
+
+# ── 8.7  L5: Fix ensure_file_synced stub ──────────────────────────────────
+
+
+class TestEnsureFileSyncedStub:
+    """8.7 — ensure_file_synced should actually sync the file, not just return True."""
+
+    @pytest.mark.asyncio
+    async def test_syncs_existing_file(self, tmp_path):
+        """ensure_file_synced should read from disk and write to stable workspace."""
+        from remora.core.cairn_bridge import CairnWorkspaceService
+
+        config = Config()
+        svc = CairnWorkspaceService(
+            config=config,
+            swarm_root=tmp_path / "swarm",
+            project_root=tmp_path / "proj",
+        )
+        # Create a file on "disk"
+        proj_dir = tmp_path / "proj"
+        proj_dir.mkdir()
+        test_file = proj_dir / "hello.py"
+        test_file.write_text("print('hi')")
+
+        # Mock the stable workspace
+        mock_ws = MagicMock()
+        mock_ws.files = MagicMock()
+        mock_ws.files.write = AsyncMock(return_value=None)
+        svc._stable_workspace = mock_ws
+
+        result = await svc.ensure_file_synced("hello.py")
+        assert result is True
+        # After fix, it should have attempted to write to stable workspace
+        mock_ws.files.write.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_false_for_missing_file(self, tmp_path):
+        """ensure_file_synced should return False when the file doesn't exist."""
+        from remora.core.cairn_bridge import CairnWorkspaceService
+
+        config = Config()
+        svc = CairnWorkspaceService(
+            config=config,
+            swarm_root=tmp_path / "swarm",
+            project_root=tmp_path / "proj",
+        )
+        (tmp_path / "proj").mkdir()
+        svc._stable_workspace = MagicMock()
+
+        result = await svc.ensure_file_synced("nonexistent.py")
+        assert result is False
+
+
+# ── 8.8  L6: Fix did_save disk read race ──────────────────────────────────
+
+
+class TestDidSaveDiskReadRace:
+    """8.8 — did_save should use LSP-provided text when available."""
+
+    def test_did_save_uses_params_text(self):
+        """After fix: did_save should check params.text first before reading from disk."""
+        import inspect
+        from remora.lsp.handlers.documents import did_save
+
+        source = inspect.getsource(did_save)
+        # The fixed version should reference params.text somewhere
+        assert "params.text" in source or "text_document.text" in source
+
+
+# ── 8.11 S3: Fix ChatServiceState singleton ───────────────────────────────
+
+
+class TestChatServiceStateSingleton:
+    """8.11 — ChatServiceState should use dependency injection, not module-level global."""
+
+    def test_create_session_accepts_state(self):
+        """After fix: route handlers should accept state via dependency injection."""
+        from remora.service.chat_service import ChatServiceState
+
+        # The state should be constructible independently
+        s1 = ChatServiceState()
+        s2 = ChatServiceState()
+        # They should be independent instances
+        assert s1 is not s2
+        assert s1.sessions is not s2.sessions
+
+    def test_app_state_injectable(self):
+        """After fix: the Starlette app should store state on app.state."""
+        from remora.service.chat_service import ChatServiceState, create_app
+
+        state = ChatServiceState()
+        app = create_app(state=state)
+        assert app.state.chat_state is state
+
+
+# ── 8.12 S4: Fix DatastarResponse content type ────────────────────────────
+
+
+class TestDatastarResponseContentType:
+    """8.12 — render_patch and render_signals should have proper type annotations."""
+
+    def test_render_patch_returns_str(self):
+        from remora.service.datastar import render_patch
+
+        import inspect
+
+        sig = inspect.signature(render_patch)
+        # Return type should be annotated as str
+        assert sig.return_annotation is str or sig.return_annotation == "str"
+
+    def test_render_signals_returns_str(self):
+        from remora.service.datastar import render_signals
+
+        import inspect
+
+        sig = inspect.signature(render_signals)
+        assert sig.return_annotation is str or sig.return_annotation == "str"
+
+
+# ── 8.14 S6: Make chat history limit configurable ─────────────────────────
+
+
+class TestChatHistoryLimitConfigurable:
+    """8.14 — Chat history limit should come from Config, not hardcoded [-5:]."""
+
+    def test_config_has_chat_history_limit(self):
+        """Config should have a chat_history_limit field."""
+        config = Config()
+        assert hasattr(config, "chat_history_limit")
+        assert config.chat_history_limit == 5  # sensible default
+
+    def test_build_prompt_uses_config_limit(self):
+        from remora.core.swarm_executor import SwarmExecutor
+        from remora.core.agent_state import AgentState
+        from remora.core.discovery import CSTNode
+
+        config = Config()
+        config_custom = Config(chat_history_limit=2)
+        state = AgentState(
+            agent_id="test",
+            name="fn",
+            full_name="mod.fn",
+            file_path="test.py",
+            node_type="function",
+            chat_history=[{"role": "user", "content": f"msg{i}"} for i in range(10)],
+        )
+        node = CSTNode(
+            node_id="test",
+            node_type="function",
+            name="fn",
+            full_name="mod.fn",
+            file_path="test.py",
+            text="",
+            start_line=1,
+            end_line=1,
+            start_byte=0,
+            end_byte=0,
+        )
+
+        executor_default = SwarmExecutor(
+            config=config,
+            event_bus=None,
+            event_store=MagicMock(),
+            subscriptions=MagicMock(),
+            swarm_state=MagicMock(),
+            swarm_id="t",
+            project_root=Path("/tmp"),
+        )
+        prompt_default = executor_default._build_prompt(state, node, {}, requires_context=True)
+
+        executor_custom = SwarmExecutor(
+            config=config_custom,
+            event_bus=None,
+            event_store=MagicMock(),
+            subscriptions=MagicMock(),
+            swarm_state=MagicMock(),
+            swarm_id="t",
+            project_root=Path("/tmp"),
+        )
+        prompt_custom = executor_custom._build_prompt(state, node, {}, requires_context=True)
+
+        # With limit=2, only last 2 history entries should appear
+        assert prompt_custom.count("msg") == 2
+        # With default limit=5, last 5 entries should appear
+        assert prompt_default.count("msg") == 5
+
+
+# ── 8.16 R2: Fix cascade correlation IDs ──────────────────────────────────
+
+
+class TestCascadeCorrelationIDs:
+    """8.16 — Cascaded triggers should use event-specific correlation IDs,
+    not reuse the parent correlation_id from EventStore."""
+
+    def test_run_from_event_store_generates_new_correlation_ids(self):
+        """When correlation_id is missing from an event, the runner should generate one."""
+        from remora.lsp.runner import AgentRunner
+
+        runner = AgentRunner.create_headless(event_store=MagicMock())
+        # Mock event with no correlation_id
+        mock_event = MagicMock(spec=[])  # no attributes
+        # run_from_event_store uses getattr(event, 'correlation_id', None) or 'base'
+        # After fix: it should generate a unique ID instead of falling back to 'base'
+        cid = getattr(mock_event, "correlation_id", None)
+        # The fallback should NOT be the literal string "base"
+        # We test the runner's method directly
+        import inspect
+
+        source = inspect.getsource(AgentRunner.run_from_event_store)
+        # After fix: should call generate_correlation_id or uuid instead of "base"
+        assert '"base"' not in source

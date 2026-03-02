@@ -474,8 +474,18 @@ class EventStore:
         *,
         file_path: str | None = None,
         node_type: str | None = None,
+        columns: list[str] | None = None,
     ) -> "list[AgentNode]":
-        """List AgentNodes with optional filters."""
+        """List AgentNodes with optional filters.
+
+        Args:
+            file_path: Filter by file path.
+            node_type: Filter by node type.
+            columns: If provided, only SELECT these columns (optimization to
+                     avoid fetching large source_code blobs).  When *columns*
+                     is ``None`` (the default), ``SELECT *`` is used and full
+                     ``AgentNode`` objects are returned.
+        """
         from remora.core.agent_node import AgentNode
 
         if self._conn is None:
@@ -483,7 +493,8 @@ class EventStore:
         if self._conn is None:
             raise RuntimeError("EventStore not initialized")
 
-        query = "SELECT * FROM nodes"
+        col_clause = ", ".join(columns) if columns else "*"
+        query = f"SELECT {col_clause} FROM nodes"
         params: list[str] = []
         conditions: list[str] = []
 
