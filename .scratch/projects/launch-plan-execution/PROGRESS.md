@@ -2,7 +2,7 @@
 
 ## Summary
 - **Total items:** 75+
-- **Completed:** 34 (Batch 1 + items 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9)
+- **Completed:** 37 (Batch 1 + Batch 2 complete)
 - **In progress:** 0
 - **Blocked:** ~8 (waiting on critical path)
 
@@ -53,9 +53,9 @@
 | 2.7 | 2.8 | Add `start_byte`/`end_byte` to NodeDiscoveredEvent | done |
 | 2.8 | 2.10 | Parameterize language in system prompt | done |
 | 2.9 | 2.11 | Subscription index for O(1) lookup | done |
-| 2.10 | 4.2 | Write ChatSession tests | pending |
-| 2.11 | 4.4 | Write service/ package tests | pending |
-| 2.12 | 4.6 | Phase 1 testing gaps T1-T7 | pending |
+| 2.10 | 4.2 | Write ChatSession tests | done |
+| 2.11 | 4.4 | Write service/ package tests | done |
+| 2.12 | 4.6 | Phase 1 testing gaps T1-T7 | done |
 
 ---
 
