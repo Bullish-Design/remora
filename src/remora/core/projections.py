@@ -19,6 +19,7 @@ from remora.core.events import (
     NodeRemovedEvent,
     RemoraEvent,
 )
+from remora.extensions import extension_matches
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,13 @@ class NodeProjection:
 
         # Match extension configs (first match wins)
         for ext in self._extension_configs:
-            if ext.matches(row["node_type"], row["name"]):
+            if extension_matches(
+                ext,
+                row["node_type"],
+                row["name"],
+                file_path=row["file_path"],
+                source_code=row["source_code"],
+            ):
                 ext_data = ext.get_extension_data()
                 for key, value in ext_data.items():
                     if key in row:

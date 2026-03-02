@@ -2,9 +2,11 @@
 
 import pytest
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from remora.core.events import AgentMessageEvent, ContentChangedEvent
 from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
+from remora.core.tools.swarm import SubscribeTool
 
 
 @pytest.fixture
@@ -141,3 +143,73 @@ async def test_pattern_matching_tags() -> None:
         content="test",
     )
     assert not pattern.matches(event_no_tags)
+
+
+class TestSubscribeToolPattern:
+    """Verify SubscribeTool does not self-reference the subscribing agent."""
+
+    @pytest.mark.asyncio
+    async def test_subscribe_tool_does_not_set_to_agent(self) -> None:
+        """SubscribeTool should NOT set to_agent=agent_id (the subscriber).
+
+        The to_agent field filters events by their *destination*. Setting it
+        to the subscribing agent's own ID would make the subscription only
+        match events explicitly addressed to that agent — which is already
+        covered by the default direct-message subscription.
+        """
+        captured_patterns: list[SubscriptionPattern] = []
+
+        async def fake_register(agent_id: str, pattern: SubscriptionPattern) -> None:
+            captured_patterns.append(pattern)
+
+        tool = SubscribeTool(
+            externals={
+                "agent_id": "my-agent",
+                "register_subscription": fake_register,
+            }
+        )
+
+        from structured_agents.types import ToolCall
+
+        ctx = ToolCall(id="call-1", name="subscribe", arguments={})
+        result = await tool.execute(
+            {"event_types": ["ContentChangedEvent"], "from_agents": ["other-agent"]},
+            ctx,
+        )
+
+        assert not result.is_error
+        assert len(captured_patterns) == 1
+        pattern = captured_patterns[0]
+        # to_agent must be None — not the subscribing agent's own ID
+        assert pattern.to_agent is None, (
+            f"SubscribeTool set to_agent={pattern.to_agent!r}, but should leave it None to avoid self-referencing"
+        )
+        assert pattern.event_types == ["ContentChangedEvent"]
+        assert pattern.from_agents == ["other-agent"]
+
+    @pytest.mark.asyncio
+    async def test_subscribe_tool_pattern_matches_external_events(self) -> None:
+        """A subscription from SubscribeTool should match events NOT addressed to the subscriber."""
+        captured_patterns: list[SubscriptionPattern] = []
+
+        async def fake_register(agent_id: str, pattern: SubscriptionPattern) -> None:
+            captured_patterns.append(pattern)
+
+        tool = SubscribeTool(
+            externals={
+                "agent_id": "watcher-agent",
+                "register_subscription": fake_register,
+            }
+        )
+
+        from structured_agents.types import ToolCall
+
+        ctx = ToolCall(id="call-2", name="subscribe", arguments={})
+        await tool.execute({"event_types": ["AgentMessageEvent"]}, ctx)
+
+        pattern = captured_patterns[0]
+        # An event sent from agent-A to agent-B should match (watcher subscribes to all AgentMessageEvents)
+        event = AgentMessageEvent(from_agent="agent-A", to_agent="agent-B", content="hi")
+        assert pattern.matches(event), (
+            "Subscription pattern from SubscribeTool should match events not addressed to the subscribing agent"
+        )

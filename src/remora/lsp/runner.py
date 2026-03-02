@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field, ConfigDict
 
 from remora.core.agent_node import AgentNode
-from remora.extensions import load_extensions
+from remora.extensions import extension_matches, load_extensions
 from remora.lsp.models import (
     AgentErrorEvent,
     AgentEvent,
@@ -649,7 +649,13 @@ class AgentRunner:
         extensions = load_extensions(Path(".remora/models"))
 
         for ext_cls in extensions:
-            if ext_cls.matches(agent.node_type, agent.name):
+            if extension_matches(
+                ext_cls,
+                agent.node_type,
+                agent.name,
+                file_path=agent.file_path,
+                source_code=agent.source_code,
+            ):
                 data = ext_cls.get_extension_data()
                 for key, value in data.items():
                     if hasattr(agent, key):

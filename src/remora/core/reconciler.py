@@ -152,9 +152,27 @@ async def reconcile_on_startup(
                     )
                     await event_store.append(swarm_id, event)
 
-                updated += 1
+                # Refresh SwarmState metadata from latest discovery
+                metadata = AgentMetadata(
+                    agent_id=node.node_id,
+                    node_type=node.node_type,
+                    name=getattr(node, "name", ""),
+                    full_name=getattr(node, "full_name", ""),
+                    file_path=node.file_path,
+                    parent_id=None,
+                    start_line=node.start_line,
+                    end_line=node.end_line,
+                )
+                await swarm_state.upsert(metadata)
+
+                # Update on-disk AgentState
+                state.name = getattr(node, "name", state.name)
+                state.full_name = getattr(node, "full_name", state.full_name)
+                state.range = (node.start_line, node.end_line)
                 state.last_updated = time.time()
                 save_agent_state(state_path, state)
+
+                updated += 1
 
         except Exception as exc:
             logger.warning("Failed to reconcile state for %s: %s", node_id, exc)

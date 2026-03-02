@@ -8,6 +8,7 @@ First match wins. File-alphabetical order controls priority.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import logging
 from pathlib import Path
 from typing import Type
@@ -19,12 +20,12 @@ class AgentExtension:
     """Base class for agent extension configs.
 
     Subclass this in `.remora/models/*.py` files. Override:
-    - matches(node_type, name) -> bool
+    - matches(node_type, name, *, file_path="", source_code="") -> bool
     - get_extension_data() -> dict of AgentNode field overrides
     """
 
     @staticmethod
-    def matches(node_type: str, name: str) -> bool:
+    def matches(node_type: str, name: str, *, file_path: str = "", source_code: str = "") -> bool:
         """Return True if this extension applies to the given node."""
         return False
 
@@ -32,6 +33,30 @@ class AgentExtension:
     def get_extension_data() -> dict:
         """Return field overrides for the AgentNode."""
         return {}
+
+
+def extension_matches(
+    ext: Type[AgentExtension],
+    node_type: str,
+    name: str,
+    *,
+    file_path: str = "",
+    source_code: str = "",
+) -> bool:
+    """Call ext.matches() with the widened API, falling back to 2-arg call.
+
+    Extensions using the old (node_type, name) signature will still work
+    but will not receive file_path/source_code context.
+    """
+    try:
+        return ext.matches(node_type, name, file_path=file_path, source_code=source_code)
+    except TypeError:
+        logger.warning(
+            "Extension %s.matches() does not accept file_path/source_code kwargs. "
+            "Update its signature to matches(node_type, name, *, file_path='', source_code='').",
+            ext.__name__,
+        )
+        return ext.matches(node_type, name)
 
 
 # Module-level cache: {dir_path: (mtimes_dict, extensions_list)}

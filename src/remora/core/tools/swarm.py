@@ -137,7 +137,6 @@ class SubscribeTool(SwarmTool):
             pattern = SubscriptionPattern(
                 event_types=arguments.get("event_types"),
                 from_agents=arguments.get("from_agents"),
-                to_agent=agent_id,
                 path_glob=arguments.get("path_glob"),
             )
             await register_subscription(agent_id, pattern)
