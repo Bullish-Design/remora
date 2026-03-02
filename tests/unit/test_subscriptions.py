@@ -213,3 +213,119 @@ class TestSubscribeToolPattern:
         assert pattern.matches(event), (
             "Subscription pattern from SubscribeTool should match events not addressed to the subscribing agent"
         )
+
+
+class TestSubscriptionCache:
+    """Verify in-memory subscription cache for O(1) lookup."""
+
+    @pytest.mark.asyncio
+    async def test_cache_avoids_repeated_db_reads(self, temp_db: Path) -> None:
+        """After first get_matching_agents call, subsequent calls use cache (no DB read)."""
+        registry = SubscriptionRegistry(temp_db)
+        await registry.initialize()
+
+        await registry.register("agent-1", SubscriptionPattern(event_types=["ContentChangedEvent"]))
+        event = ContentChangedEvent(path="src/main.py")
+
+        # First call populates the cache
+        result1 = await registry.get_matching_agents(event)
+        assert "agent-1" in result1
+
+        # Second call should use cache — verify by checking _cache is populated
+        assert registry._cache is not None, "Cache should be populated after get_matching_agents"
+
+        # Cache should still return correct results
+        result2 = await registry.get_matching_agents(event)
+        assert result1 == result2
+
+        await registry.close()
+
+    @pytest.mark.asyncio
+    async def test_cache_invalidated_on_register(self, temp_db: Path) -> None:
+        """Registering a new subscription invalidates the cache."""
+        registry = SubscriptionRegistry(temp_db)
+        await registry.initialize()
+
+        await registry.register("agent-1", SubscriptionPattern(event_types=["ContentChangedEvent"]))
+        event = ContentChangedEvent(path="src/main.py")
+
+        # Populate cache
+        result1 = await registry.get_matching_agents(event)
+        assert "agent-1" in result1
+
+        # Register a new subscription — should invalidate cache
+        await registry.register("agent-2", SubscriptionPattern(event_types=["ContentChangedEvent"]))
+        assert registry._cache is None, "Cache should be invalidated after register"
+
+        # Next call re-populates cache with updated data
+        result2 = await registry.get_matching_agents(event)
+        assert "agent-1" in result2
+        assert "agent-2" in result2
+
+        await registry.close()
+
+    @pytest.mark.asyncio
+    async def test_cache_invalidated_on_unregister(self, temp_db: Path) -> None:
+        """Unregistering a subscription invalidates the cache."""
+        registry = SubscriptionRegistry(temp_db)
+        await registry.initialize()
+
+        sub = await registry.register("agent-1", SubscriptionPattern(event_types=["ContentChangedEvent"]))
+        event = ContentChangedEvent(path="src/main.py")
+
+        result1 = await registry.get_matching_agents(event)
+        assert "agent-1" in result1
+
+        await registry.unregister(sub.id)
+        assert registry._cache is None, "Cache should be invalidated after unregister"
+
+        result2 = await registry.get_matching_agents(event)
+        assert "agent-1" not in result2
+
+        await registry.close()
+
+    @pytest.mark.asyncio
+    async def test_cache_invalidated_on_unregister_all(self, temp_db: Path) -> None:
+        """unregister_all invalidates the cache."""
+        registry = SubscriptionRegistry(temp_db)
+        await registry.initialize()
+
+        await registry.register("agent-1", SubscriptionPattern(event_types=["ContentChangedEvent"]))
+        event = ContentChangedEvent(path="src/main.py")
+
+        await registry.get_matching_agents(event)  # Populate cache
+        assert registry._cache is not None
+
+        await registry.unregister_all("agent-1")
+        assert registry._cache is None, "Cache should be invalidated after unregister_all"
+
+        result = await registry.get_matching_agents(event)
+        assert "agent-1" not in result
+
+        await registry.close()
+
+    @pytest.mark.asyncio
+    async def test_cache_indexes_by_event_type(self, temp_db: Path) -> None:
+        """Cache should index subscriptions by event_type for efficient lookup."""
+        registry = SubscriptionRegistry(temp_db)
+        await registry.initialize()
+
+        # Register subscriptions for different event types
+        await registry.register("agent-1", SubscriptionPattern(event_types=["ContentChangedEvent"]))
+        await registry.register("agent-2", SubscriptionPattern(event_types=["AgentMessageEvent"]))
+        await registry.register("agent-3", SubscriptionPattern())  # wildcard — matches all
+
+        content_event = ContentChangedEvent(path="src/main.py")
+        msg_event = AgentMessageEvent(from_agent="a", to_agent="b", content="hi")
+
+        content_matches = await registry.get_matching_agents(content_event)
+        assert "agent-1" in content_matches
+        assert "agent-2" not in content_matches
+        assert "agent-3" in content_matches  # wildcard matches
+
+        msg_matches = await registry.get_matching_agents(msg_event)
+        assert "agent-1" not in msg_matches
+        assert "agent-2" in msg_matches
+        assert "agent-3" in msg_matches  # wildcard matches
+
+        await registry.close()

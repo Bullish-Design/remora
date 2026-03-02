@@ -2,7 +2,7 @@
 
 ## Summary
 - **Total items:** 75+
-- **Completed:** 29 (Batch 1 + items 2.3, 2.6, 2.7, 2.8)
+- **Completed:** 33 (Batch 1 + items 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9)
 - **In progress:** 0
 - **Blocked:** ~8 (waiting on critical path)
 
@@ -45,14 +45,14 @@
 | # | Ref | Description | Status |
 |---|-----|-------------|--------|
 | 2.1 | 1.4 | RemoraDB dual-write elimination | pending |
-| 2.2 | 1.6 | SubscribeTool self-referencing bug | pending |
+| 2.2 | 1.6 | SubscribeTool self-referencing bug | done |
 | 2.3 | 1.7 | Hardcoded LLM configs — short-term fix | done |
-| 2.4 | 1.8 | Reconciler stale metadata bug | pending |
-| 2.5 | 2.2 | Widen `AgentExtension.matches()` API | pending |
+| 2.4 | 1.8 | Reconciler stale metadata bug | done |
+| 2.5 | 2.2 | Widen `AgentExtension.matches()` API | done |
 | 2.6 | 2.7 | Populate/remove `last_trigger_event` | done |
 | 2.7 | 2.8 | Add `start_byte`/`end_byte` to NodeDiscoveredEvent | done |
 | 2.8 | 2.10 | Parameterize language in system prompt | done |
-| 2.9 | 2.11 | Subscription index for O(1) lookup | pending |
+| 2.9 | 2.11 | Subscription index for O(1) lookup | done |
 | 2.10 | 4.2 | Write ChatSession tests | pending |
 | 2.11 | 4.4 | Write service/ package tests | pending |
 | 2.12 | 4.6 | Phase 1 testing gaps T1-T7 | pending |
