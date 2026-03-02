@@ -43,7 +43,7 @@ from remora.core.events import (
     TurnCompleteEvent,
 )
 from remora.core.agent_state import AgentState
-from remora.core.agent_runner import AgentRunner, ExecutionContext
+from remora.lsp.runner import AgentRunner
 from remora.core.swarm_executor import SwarmExecutor
 from remora.core.subscriptions import Subscription, SubscriptionPattern, SubscriptionRegistry
 from remora.core.swarm_state import AgentMetadata, SwarmState
@@ -87,7 +87,6 @@ __all__ = [
     "EventStore",
     "AgentState",
     "AgentRunner",
-    "ExecutionContext",
     "SwarmExecutor",
     "CSTNode",
     "LANGUAGE_EXTENSIONS",

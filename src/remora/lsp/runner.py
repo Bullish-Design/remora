@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -127,15 +129,97 @@ class Trigger(BaseModel):
     context: dict = Field(default_factory=dict)
 
 
-class AgentRunner:
-    """Asynchronous agent execution coordinator for the Remora LSP server."""
+class _HeadlessDB:
+    """Minimal DB stub for headless (CLI) mode — no real persistence."""
 
-    def __init__(self, server: "RemoraLanguageServer", llm: LLMClient | None = None) -> None:
+    async def get_activation_chain(self, correlation_id: str) -> list[str]:
+        return []
+
+    async def add_to_chain(self, correlation_id: str, agent_id: str) -> None:
+        pass
+
+    async def store_proposal(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    async def poll_commands(self, limit: int) -> list[dict]:
+        return []
+
+    async def mark_command_done(self, cmd_id: str) -> None:
+        pass
+
+
+class _HeadlessServer:
+    """Lightweight adapter that satisfies ``AgentRunner``'s ``server`` duck-type
+    without requiring a full LSP ``RemoraLanguageServer``.
+
+    Used by ``AgentRunner.create_headless()`` for CLI / headless operation.
+    """
+
+    def __init__(self, event_store: Any) -> None:
+        self.event_store = event_store
+        self.db = _HeadlessDB()
+        self.proposals: dict[str, Any] = {}
+
+    def generate_correlation_id(self) -> str:
+        return uuid.uuid4().hex[:12]
+
+
+class AgentRunner:
+    """Unified asynchronous agent execution coordinator.
+
+    Merges LSP runner (tool loop, AgentNode, proposals) with core runner
+    cascade-safety features (depth tracking, cooldown, concurrency semaphore).
+    Usable from both the LSP server and the CLI swarm entrypoint.
+    """
+
+    def __init__(
+        self,
+        server: "RemoraLanguageServer",
+        llm: LLMClient | None = None,
+        *,
+        max_trigger_depth: int | None = None,
+        trigger_cooldown_ms: int | None = None,
+        max_concurrency: int = 4,
+    ) -> None:
         self.server = server
         self.llm = llm
         self.executor: "SwarmExecutor | None" = None
         self.queue: asyncio.Queue[Trigger] = asyncio.Queue()
         self._running = False
+
+        # Cascade prevention — ported from core/agent_runner.py
+        self._max_trigger_depth = max_trigger_depth if max_trigger_depth is not None else MAX_CHAIN_DEPTH
+        self._trigger_cooldown_ms = trigger_cooldown_ms if trigger_cooldown_ms is not None else 1000
+        self._max_concurrency = max_concurrency
+
+        self._correlation_depth: dict[str, tuple[int, float]] = {}
+        self._last_trigger_time: dict[str, float] = {}
+        self._semaphore = asyncio.Semaphore(self._max_concurrency)
+
+    @classmethod
+    def create_headless(
+        cls,
+        event_store: Any,
+        llm: LLMClient | None = None,
+        *,
+        max_trigger_depth: int | None = None,
+        trigger_cooldown_ms: int | None = None,
+        max_concurrency: int = 4,
+    ) -> "AgentRunner":
+        """Create a runner for CLI / headless mode without a full LSP server.
+
+        Constructs a lightweight ``_HeadlessServer`` adapter around the given
+        *event_store* so the runner can operate identically to the LSP-backed
+        variant but without requiring Neovim or any editor connection.
+        """
+        server = _HeadlessServer(event_store)
+        return cls(
+            server,  # type: ignore[arg-type]
+            llm=llm,
+            max_trigger_depth=max_trigger_depth,
+            trigger_cooldown_ms=trigger_cooldown_ms,
+            max_concurrency=max_concurrency,
+        )
 
     async def run_forever(self) -> None:
         self._running = True
@@ -156,6 +240,48 @@ class AgentRunner:
 
     def stop(self) -> None:
         self._running = False
+
+    # ------------------------------------------------------------------
+    # Cascade prevention — ported from core/agent_runner.py
+    # ------------------------------------------------------------------
+
+    def _check_depth_limit(self, agent_id: str, correlation_id: str) -> bool:
+        """Return True if the cascade depth limit has NOT been reached."""
+        key = f"{agent_id}:{correlation_id}"
+        depth, _ = self._correlation_depth.get(key, (0, 0.0))
+        return depth < self._max_trigger_depth
+
+    def _check_cooldown(self, agent_id: str) -> bool:
+        """Return True if the agent is NOT within cooldown period."""
+        now = time.time() * 1000  # milliseconds
+        last_time = self._last_trigger_time.get(agent_id, 0)
+        if now - last_time < self._trigger_cooldown_ms:
+            return False
+        self._last_trigger_time[agent_id] = now
+        return True
+
+    def _cleanup_stale_depths(self, ttl: float = 300.0) -> None:
+        """Remove correlation depth entries older than *ttl* seconds."""
+        now = time.time()
+        stale = [k for k, (_, ts) in self._correlation_depth.items() if now - ts > ttl]
+        for k in stale:
+            self._correlation_depth.pop(k, None)
+
+    # ------------------------------------------------------------------
+    # EventStore trigger bridge — for CLI / headless mode
+    # ------------------------------------------------------------------
+
+    async def run_from_event_store(self, event_store: Any) -> None:
+        """Bridge EventStore.get_triggers() into the runner queue.
+
+        This allows the CLI ``swarm run`` command to feed subscription-matched
+        triggers into the same unified runner without the LSP server.
+        """
+        async for agent_id, event_id, event in event_store.get_triggers():
+            if not self._running:
+                break
+            correlation_id = getattr(event, "correlation_id", None) or "base"
+            await self.trigger(agent_id, correlation_id)
 
     async def poll_command_queue(self) -> None:
         """Poll the command_queue table and dispatch commands."""
@@ -234,6 +360,19 @@ class AgentRunner:
 
     async def trigger(self, agent_id: str, correlation_id: str, context: dict | None = None) -> None:
         logger.info("AgentRunner.trigger: agent=%s corr=%s context=%r", agent_id, correlation_id, context)
+
+        # In-memory cooldown check (ported from core runner)
+        if not self._check_cooldown(agent_id):
+            logger.debug("AgentRunner.trigger: cooldown active for %s — skipping", agent_id)
+            return
+
+        # In-memory depth check (ported from core runner)
+        if not self._check_depth_limit(agent_id, correlation_id):
+            logger.warning("AgentRunner.trigger: in-memory depth limit for %s — skipping", agent_id)
+            await self.emit_error(agent_id, "Cascade depth limit exceeded", correlation_id)
+            return
+
+        # DB-backed chain depth check (existing LSP runner logic)
         chain = await self.server.db.get_activation_chain(correlation_id)
 
         if len(chain) >= MAX_CHAIN_DEPTH:
@@ -261,95 +400,109 @@ class AgentRunner:
         correlation_id = trigger.correlation_id
         logger.info("execute_turn: START agent=%s corr=%s", agent_id, correlation_id)
 
-        await self.server.event_store.set_node_status(agent_id, "running")
-        await refresh_code_lenses()
-        await self.server.db.add_to_chain(correlation_id, agent_id)
+        # Track cascade depth (ported from core runner)
+        depth_key = f"{agent_id}:{correlation_id}"
+        current_depth, _ = self._correlation_depth.get(depth_key, (0, 0.0))
+        self._correlation_depth[depth_key] = (current_depth + 1, time.time())
 
-        agent = await self.server.event_store.get_node(agent_id)
-        if not agent:
-            logger.error("execute_turn: node %s not found in EventStore!", agent_id)
-            await self.emit_error(agent_id, "Node not found", correlation_id)
-            return
-
-        logger.info("execute_turn: node found: %s (%s) file=%s", agent.name, agent.node_type, agent.file_path)
-
-        try:
-            if self.executor:
-                state = await self._load_agent_state(agent_id)
-                if state:
-                    trigger_event = await self._build_trigger_event(trigger)
-                    await self.executor.run_agent(state, trigger_event)
-            else:
-                agent = self.apply_extensions(agent)
-
-                messages = [
-                    {"role": "system", "content": agent.to_system_prompt()},
-                ]
-
-                events = await self.server.event_store.get_events_for_correlation(correlation_id)
-                logger.info("execute_turn: %d events for correlation %s", len(events), correlation_id)
-                for event in events:
-                    event_type = event["event_type"]
-                    payload = event.get("payload", {})
-                    if event_type == "HumanChatEvent" and payload.get("to_agent") == agent_id:
-                        messages.append({"role": "user", "content": payload.get("message", "")})
-                    elif event_type == "AgentMessageEvent" and payload.get("to_agent") == agent_id:
-                        from_agent = payload.get("from_agent", "unknown")
-                        messages.append(
-                            {"role": "user", "content": f"[From {from_agent}]: {payload.get('message', '')}"}
-                        )
-
-                if trigger.context.get("rejection_feedback"):
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": f"[Feedback on rejected proposal]: {trigger.context['rejection_feedback']}",
-                        }
-                    )
-
-                tools = self.get_agent_tools(agent)
-                logger.info("execute_turn: %d messages, %d tools — calling LLM", len(messages), len(tools))
-                logger.debug("execute_turn: messages=%r", [(m["role"], m["content"][:100]) for m in messages])
-
-                if not self.llm:
-                    await self.emit_error(agent_id, "No LLM client configured", correlation_id)
-                else:
-                    # Tool call loop: LLM → tool calls → results → LLM → ... → text response
-                    for round_num in range(MAX_TOOL_ROUNDS):
-                        logger.info("execute_turn: round %d/%d", round_num + 1, MAX_TOOL_ROUNDS)
-                        response = await self.llm.chat(messages, tools)
-                        logger.info(
-                            "execute_turn: LLM response: content=%r tool_calls=%d",
-                            (response.content or "")[:200],
-                            len(response.tool_calls),
-                        )
-
-                        tool_results = await self.handle_response(agent, response, correlation_id)
-                        if not tool_results:
-                            # No tool calls or only side-effect tools — turn is done
-                            break
-
-                        # Append assistant message + tool results for next round
-                        assistant_msg: dict[str, Any] = {"role": "assistant", "content": response.content or ""}
-                        messages.append(assistant_msg)
-
-                        for tr in tool_results:
-                            messages.append(
-                                {
-                                    "role": "user",
-                                    "content": f"[Tool result for {tr['tool']}]:\n{tr['result']}",
-                                }
-                            )
-                        logger.info("execute_turn: appended %d tool results, continuing loop", len(tool_results))
-                    else:
-                        logger.warning(
-                            "execute_turn: max tool rounds (%d) reached for agent %s", MAX_TOOL_ROUNDS, agent_id
-                        )
-        except Exception as e:
-            await self.emit_error(agent_id, str(e), correlation_id)
-        finally:
-            await self.server.event_store.set_node_status(agent_id, "idle")
+        async with self._semaphore:
+            await self.server.event_store.set_node_status(agent_id, "running")
             await refresh_code_lenses()
+            await self.server.db.add_to_chain(correlation_id, agent_id)
+
+            agent = await self.server.event_store.get_node(agent_id)
+            if not agent:
+                logger.error("execute_turn: node %s not found in EventStore!", agent_id)
+                await self.emit_error(agent_id, "Node not found", correlation_id)
+                return
+
+            logger.info("execute_turn: node found: %s (%s) file=%s", agent.name, agent.node_type, agent.file_path)
+
+            try:
+                if self.executor:
+                    state = await self._load_agent_state(agent_id)
+                    if state:
+                        trigger_event = await self._build_trigger_event(trigger)
+                        await self.executor.run_agent(state, trigger_event)
+                else:
+                    agent = self.apply_extensions(agent)
+
+                    messages = [
+                        {"role": "system", "content": agent.to_system_prompt()},
+                    ]
+
+                    events = await self.server.event_store.get_events_for_correlation(correlation_id)
+                    logger.info("execute_turn: %d events for correlation %s", len(events), correlation_id)
+                    for event in events:
+                        event_type = event["event_type"]
+                        payload = event.get("payload", {})
+                        if event_type == "HumanChatEvent" and payload.get("to_agent") == agent_id:
+                            messages.append({"role": "user", "content": payload.get("message", "")})
+                        elif event_type == "AgentMessageEvent" and payload.get("to_agent") == agent_id:
+                            from_agent = payload.get("from_agent", "unknown")
+                            messages.append(
+                                {"role": "user", "content": f"[From {from_agent}]: {payload.get('message', '')}"}
+                            )
+
+                    if trigger.context.get("rejection_feedback"):
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": f"[Feedback on rejected proposal]: {trigger.context['rejection_feedback']}",
+                            }
+                        )
+
+                    tools = self.get_agent_tools(agent)
+                    logger.info("execute_turn: %d messages, %d tools — calling LLM", len(messages), len(tools))
+                    logger.debug("execute_turn: messages=%r", [(m["role"], m["content"][:100]) for m in messages])
+
+                    if not self.llm:
+                        await self.emit_error(agent_id, "No LLM client configured", correlation_id)
+                    else:
+                        # Tool call loop: LLM → tool calls → results → LLM → ... → text response
+                        for round_num in range(MAX_TOOL_ROUNDS):
+                            logger.info("execute_turn: round %d/%d", round_num + 1, MAX_TOOL_ROUNDS)
+                            response = await self.llm.chat(messages, tools)
+                            logger.info(
+                                "execute_turn: LLM response: content=%r tool_calls=%d",
+                                (response.content or "")[:200],
+                                len(response.tool_calls),
+                            )
+
+                            tool_results = await self.handle_response(agent, response, correlation_id)
+                            if not tool_results:
+                                # No tool calls or only side-effect tools — turn is done
+                                break
+
+                            # Append assistant message + tool results for next round
+                            assistant_msg: dict[str, Any] = {"role": "assistant", "content": response.content or ""}
+                            messages.append(assistant_msg)
+
+                            for tr in tool_results:
+                                messages.append(
+                                    {
+                                        "role": "user",
+                                        "content": f"[Tool result for {tr['tool']}]:\n{tr['result']}",
+                                    }
+                                )
+                            logger.info("execute_turn: appended %d tool results, continuing loop", len(tool_results))
+                        else:
+                            logger.warning(
+                                "execute_turn: max tool rounds (%d) reached for agent %s", MAX_TOOL_ROUNDS, agent_id
+                            )
+            except Exception as e:
+                await self.emit_error(agent_id, str(e), correlation_id)
+            finally:
+                # Decrement depth tracking
+                depth, ts = self._correlation_depth.get(depth_key, (1, time.time()))
+                remaining = depth - 1
+                if remaining <= 0:
+                    self._correlation_depth.pop(depth_key, None)
+                else:
+                    self._correlation_depth[depth_key] = (remaining, ts)
+
+                await self.server.event_store.set_node_status(agent_id, "idle")
+                await refresh_code_lenses()
 
     async def _load_agent_state(self, agent_id: str) -> Any:
         return None

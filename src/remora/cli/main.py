@@ -108,7 +108,7 @@ def swarm_start(
         from remora.core.swarm_state import SwarmState
         from remora.core.subscriptions import SubscriptionRegistry
         from remora.core.reconciler import reconcile_on_startup
-        from remora.core.agent_runner import AgentRunner
+        from remora.lsp.runner import AgentRunner
 
         swarm_path = root / ".remora"
         event_store_path = swarm_path / "events" / "events.db"
@@ -142,15 +142,15 @@ def swarm_start(
         )
         click.echo(f"Swarm reconciled: {result['created']} new, {result['orphaned']} orphaned, {result['total']} total")
 
-        runner = AgentRunner(
+        runner = AgentRunner.create_headless(
             event_store=event_store,
-            subscriptions=subscriptions,
-            swarm_state=swarm_state,
-            config=config,
-            event_bus=event_bus,
-            project_root=root,
+            max_trigger_depth=getattr(config, "max_trigger_depth", None),
+            trigger_cooldown_ms=getattr(config, "trigger_cooldown_ms", None),
+            max_concurrency=getattr(config, "max_concurrency", 4),
         )
+        runner._running = True
         runner_task = asyncio.create_task(runner.run_forever())
+        bridge_task = asyncio.create_task(runner.run_from_event_store(event_store))
 
         click.echo("Swarm started. Press Ctrl+C to stop.")
 
@@ -159,10 +159,13 @@ def swarm_start(
         except asyncio.CancelledError:
             pass
         finally:
+            runner.stop()
             runner_task.cancel()
+            bridge_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await runner_task
-            await runner.stop()
+            with contextlib.suppress(asyncio.CancelledError):
+                await bridge_task
             await swarm_state.close()
 
     asyncio.run(_start())

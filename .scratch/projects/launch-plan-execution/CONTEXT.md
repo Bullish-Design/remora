@@ -1,37 +1,49 @@
 # CONTEXT — Launch Plan Execution
 
 ## Current State
-- **Active batch:** Batch 2 (Track B Medium Items) — COMPLETE (12/12 items done)
-- **Next action:** Batch 3 (Critical Path — Runner Merge, item 1.2)
+- **Active batch:** Batch 3 (Runner Merge) — COMPLETE
+- **Next action:** Batch 4 (Identity Unification) or continue with unblocked items
 
 ## What Just Happened
-- Committed items 2.10 (ChatSession tests) and 2.11 (service tests) as `3c009c3`
-- Completed item 2.12: Phase 1 testing gaps T1-T7
-  - T1: 6 tests for `ToolSchema.to_llm_tool()` — validates OpenAI function-calling format, nested params, empty params, JSON serializability
-  - T2: 7 tests for extension complex fields through projection round-trip — extra_tools, extra_subscriptions, mounted_workspaces survive EventStore→DB→from_row cycle
-  - T3: 8 tests for `from_row()` error paths — malformed JSON raises JSONDecodeError, wrong structure raises TypeError, null fields default to empty lists
-  - T4: 3 concurrency tests for `append()` — 50 concurrent appends same graph, 20 concurrent upserts same node_id with projection, 30 appends across 3 graphs
-  - T5: Skipped — CSTNode→NodeDiscoveredEvent conversion path not built yet
-  - T6: 5 tests for `extension_matches()` error isolation — ValueError propagates, old-API TypeError fallback works, old-API non-TypeError propagates, projection with first-match-wins skips broken extensions
-  - T7: 5 tests for shared fixtures `make_agent_node()` and `make_discovered_event()` — defaults, overrides, round-trip
-  - Total: 34 new tests, all passing
-  - Full suite passes (only failure: test_real_vllm — infrastructure dependency)
+- Completed Batch 3: Unified AgentRunner merge
+  - Steps 3.1-3.4: Read both runners, wrote 27 failing tests, ported cascade safety + EventStore bridge into `lsp/runner.py`
+  - Step 3.5: Implemented `_HeadlessServer` adapter and `AgentRunner.create_headless()` classmethod — all 27 tests pass
+  - Step 3.6: Updated CLI (`src/remora/cli/main.py`) to use `AgentRunner.create_headless()` + `run_from_event_store()`
+  - Step 3.7: Deleted `src/remora/core/agent_runner.py`
+  - Step 3.8: Updated `src/remora/__init__.py` and `src/remora/core/__init__.py` to re-export `AgentRunner` from `remora.lsp.runner` (dropped `ExecutionContext`)
+  - Step 3.9: Rewrote `tests/integration/test_agent_runner.py` to use unified runner via `create_headless()`
+  - Step 3.10: Full test suite passes (only `test_real_vllm` fails — infrastructure dependency)
 
 ## Completed Batches
 - **Batch 1**: 25 quick fixes (committed `597a550`)
-- **Batch 2**: 12 medium items (committed across `a69957c`, `6e85a43`, `97ab627`, `56a92be`, `6e9eadb`, `3c009c3`, + pending 2.12 commit)
+- **Batch 2**: 12 medium items (committed across `a69957c`, `6e85a43`, `97ab627`, `56a92be`, `6e9eadb`, `3c009c3`, `4eceb4c`)
+- **Batch 3**: Runner merge — COMPLETE (pending commit)
 
-## Next Steps — Batch 3: Critical Path — Runner Merge
-Steps 3.1–3.9 in PROGRESS.md. This is the highest-priority architectural change:
-1. Read and understand both runners (`core/agent_runner.py` + `lsp/runner.py`)
-2. Write failing integration test
-3. Start with LSP runner as base
-4. Port cascade safety from core runner
-5. Add pluggable tool registry
-6. Make unified runner callable from LSP + swarm
-7. Delete `core/agent_runner.py`
-8. Refactor `swarm_executor.py` into tool provider
-9. Verify all tests pass
+## Architecture After Batch 3
+- **Single runner**: `src/remora/lsp/runner.py::AgentRunner` — handles both LSP and CLI modes
+- **LSP mode**: Constructed with a `RemoraLanguageServer` instance
+- **CLI/headless mode**: Constructed via `AgentRunner.create_headless(event_store=...)` using `_HeadlessServer` adapter
+- **Cascade safety**: depth tracking, cooldown, concurrency semaphore (ported from deleted core runner)
+- **EventStore bridge**: `run_from_event_store()` feeds `get_triggers()` into the runner queue
+- **Deleted**: `src/remora/core/agent_runner.py` and `ExecutionContext` dataclass
+- **Re-exports**: `AgentRunner` now comes from `remora.lsp.runner` in both `remora.__init__` and `remora.core.__init__`
+
+## Key Files Modified in Batch 3
+| File | Change |
+|------|--------|
+| `src/remora/lsp/runner.py` | Added cascade safety, `_HeadlessServer`, `_HeadlessDB`, `create_headless()` |
+| `tests/unit/test_unified_runner.py` | 27 tests for unified runner |
+| `src/remora/cli/main.py` | Switched from core runner to `create_headless()` |
+| `src/remora/core/agent_runner.py` | DELETED |
+| `src/remora/__init__.py` | Updated re-export |
+| `src/remora/core/__init__.py` | Updated re-export |
+| `tests/integration/test_agent_runner.py` | Rewritten for unified runner |
+
+## Next Steps
+- Batch 4: Identity Unification (1.1) — now unblocked by Batch 3
+- Batch 5: Post-Unification Cleanup — blocked on Batch 4
+- Batch 7: Testing items 7.1, 7.2 — now unblocked by Batch 3
+- Batch 8: Quality & Polish — independent items can proceed
 
 ## Key Context for Resumption
 - Master task list: `REMORA_LAUNCH_PLAN.md` (root)
@@ -47,10 +59,13 @@ Steps 3.1–3.9 in PROGRESS.md. This is the highest-priority architectural chang
 3. Runner dict access — `event["event_type"]` for EventStore query results
 4. `build_chat_tools` is broken — `Tool.from_function()` doesn't exist (documented with xfail)
 5. `get_subscriptions` name collision — async method shadows property getter in RemoraService (documented with test)
+6. LSP runner is the base for unification — it has the modern AgentNode-based approach, tool loop, proposals
+7. `_HeadlessServer` + `_HeadlessDB` stubs provide minimal server duck-type for CLI mode
+8. `ExecutionContext` dropped — only used internally by the now-deleted core runner
 
 ## How to Resume
 1. Read `.scratch/CRITICAL_RULES.md`
 2. Read `.scratch/REPO_RULES.md`
 3. Read this file
-4. Commit item 2.12 if not yet committed
-5. Start Batch 3 step 3.1 — read both runners
+4. Check PROGRESS.md for next batch
+5. Start next pending batch

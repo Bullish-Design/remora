@@ -2,8 +2,8 @@
 
 ## Summary
 - **Total items:** 75+
-- **Completed:** 37 (Batch 1 + Batch 2 complete)
-- **In progress:** 0
+- **Completed:** 37 (Batch 1 + Batch 2) + Batch 3 in progress
+- **In progress:** Batch 3 (Runner Merge) — COMPLETE
 - **Blocked:** ~8 (waiting on critical path)
 
 ---
@@ -63,15 +63,16 @@
 
 | Step | Description | Status |
 |------|-------------|--------|
-| 3.1 | Read and understand both runners | pending |
-| 3.2 | Write failing integration test | pending |
-| 3.3 | Start with LSP runner as base | pending |
-| 3.4 | Port cascade safety from core runner | pending |
-| 3.5 | Add pluggable tool registry | pending |
-| 3.6 | Make unified runner callable from LSP + swarm | pending |
-| 3.7 | Delete `core/agent_runner.py` | pending |
-| 3.8 | Refactor `swarm_executor.py` into tool provider | pending |
-| 3.9 | Verify all tests pass | pending |
+| 3.1 | Read and understand both runners | done |
+| 3.2 | Write failing tests (27 tests) | done |
+| 3.3 | Port cascade safety from core runner | done |
+| 3.4 | Port EventStore bridge | done |
+| 3.5 | Implement create_headless() factory | done |
+| 3.6 | Update CLI to use unified runner | done |
+| 3.7 | Delete `core/agent_runner.py` | done |
+| 3.8 | Update `__init__.py` re-exports | done |
+| 3.9 | Update integration tests | done |
+| 3.10 | Verify all tests pass | done |
 
 ---
 
