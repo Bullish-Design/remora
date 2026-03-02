@@ -139,15 +139,100 @@ class AgentRunner:
     async def run_forever(self) -> None:
         self._running = True
         logger.info("AgentRunner.run_forever: started, waiting for triggers")
-        while self._running:
-            trigger = await self.queue.get()
-            logger.info(
-                "AgentRunner.run_forever: dequeued trigger agent=%s corr=%s", trigger.agent_id, trigger.correlation_id
-            )
-            await self.execute_turn(trigger)
+        # Start command queue polling as a background task
+        poll_task = asyncio.create_task(self.poll_command_queue())
+        try:
+            while self._running:
+                trigger = await self.queue.get()
+                logger.info(
+                    "AgentRunner.run_forever: dequeued trigger agent=%s corr=%s",
+                    trigger.agent_id,
+                    trigger.correlation_id,
+                )
+                await self.execute_turn(trigger)
+        finally:
+            poll_task.cancel()
 
     def stop(self) -> None:
         self._running = False
+
+    async def poll_command_queue(self) -> None:
+        """Poll the command_queue table and dispatch commands."""
+        while self._running:
+            try:
+                commands = await asyncio.to_thread(self.server.db.poll_commands, 10)
+                for cmd in commands:
+                    await self._dispatch_command(cmd)
+                    await asyncio.to_thread(self.server.db.mark_command_done, cmd["id"])
+            except Exception:
+                logger.debug("Command queue poll error", exc_info=True)
+            await asyncio.sleep(1.0)
+
+    async def _dispatch_command(self, cmd: dict) -> None:
+        """Dispatch a single command from the queue."""
+        from remora.lsp.server import emit_event
+
+        cmd_type = cmd["command_type"]
+        agent_id = cmd.get("agent_id")
+        payload = json.loads(cmd["payload"]) if isinstance(cmd["payload"], str) else cmd["payload"]
+
+        logger.info("Dispatching command: type=%s agent=%s", cmd_type, agent_id)
+
+        if cmd_type == "chat" and agent_id:
+            correlation_id = self.server.generate_correlation_id()
+            from remora.lsp.models import HumanChatEvent
+
+            await emit_event(
+                HumanChatEvent(
+                    agent_id=agent_id,
+                    to_agent=agent_id,
+                    message=payload.get("message", ""),
+                    correlation_id=correlation_id,
+                    timestamp=0.0,
+                )
+            )
+            await self.trigger(agent_id, correlation_id)
+
+        elif cmd_type == "approve_proposal":
+            proposal_id = payload.get("proposal_id", "")
+            if proposal_id and proposal_id in self.server.proposals:
+                from remora.lsp.handlers.commands import cmd_accept_proposal
+
+                await cmd_accept_proposal(self.server, proposal_id)
+
+        elif cmd_type == "reject_proposal":
+            proposal_id = payload.get("proposal_id", "")
+            feedback = payload.get("feedback", "")
+            proposal = self.server.proposals.get(proposal_id)
+            if proposal:
+                from remora.lsp.models import RewriteRejectedEvent
+
+                await emit_event(
+                    RewriteRejectedEvent(
+                        agent_id=proposal.agent_id,
+                        proposal_id=proposal_id,
+                        feedback=feedback,
+                        correlation_id=proposal.correlation_id or "",
+                        timestamp=0.0,
+                    )
+                )
+                await self.trigger(
+                    proposal.agent_id,
+                    proposal.correlation_id,
+                    context={"rejection_feedback": feedback},
+                )
+
+        elif cmd_type == "execute_tool" and agent_id:
+            tool_name = payload.get("tool_name", "")
+            tool_params = payload.get("params", {})
+            node = await self.server.db.get_node(agent_id)
+            if node and tool_name:
+                from remora.lsp.models import ASTAgentNode
+
+                agent = ASTAgentNode(**node)
+                await self.execute_extension_tool(agent, tool_name, tool_params, self.server.generate_correlation_id())
+        else:
+            logger.warning("Unknown command type: %s", cmd_type)
 
     async def trigger(self, agent_id: str, correlation_id: str, context: dict | None = None) -> None:
         logger.info("AgentRunner.trigger: agent=%s corr=%s context=%r", agent_id, correlation_id, context)

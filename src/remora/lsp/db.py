@@ -103,6 +103,16 @@ class RemoraDB:
                 timestamp REAL
             );
 
+            CREATE TABLE IF NOT EXISTS command_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                command_type TEXT NOT NULL,
+                agent_id TEXT,
+                payload JSON NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at REAL NOT NULL,
+                processed_at REAL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_nodes_file ON nodes(file_path);
             CREATE INDEX IF NOT EXISTS idx_events_correlation ON events(correlation_id);
             CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id);
@@ -415,6 +425,37 @@ class RemoraDB:
         cursor.execute("SELECT * FROM proposals WHERE proposal_id = ?", (proposal_id,))
         row = cursor.fetchone()
         return dict(row) if row else None
+
+    def push_command(self, command_type: str, agent_id: str | None, payload: dict) -> int:
+        """Insert a command into the queue. Returns the command id."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO command_queue (command_type, agent_id, payload, status, created_at)
+            VALUES (?, ?, ?, 'pending', ?)
+            """,
+            (command_type, agent_id, json.dumps(payload), time.time()),
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def poll_commands(self, limit: int = 10) -> list[dict]:
+        """Read pending commands in FIFO order."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM command_queue WHERE status = 'pending' ORDER BY id ASC LIMIT ?",
+            (limit,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def mark_command_done(self, command_id: int) -> None:
+        """Mark a command as processed."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE command_queue SET status = 'done', processed_at = ? WHERE id = ?",
+            (time.time(), command_id),
+        )
+        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
