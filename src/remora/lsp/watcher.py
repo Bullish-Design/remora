@@ -15,7 +15,7 @@ except ImportError:
 
 import logging
 
-from remora.lsp.models import ASTAgentNode, generate_id
+from remora.lsp.models import generate_id
 
 logger = logging.getLogger("remora.lsp.watcher")
 
@@ -33,7 +33,7 @@ class ASTWatcher:
     # All supported suffixes (non-Python get file-level nodes only)
     _SUPPORTED_SUFFIXES = frozenset({".py", ".md", ".toml"})
 
-    def parse_and_inject_ids(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[ASTAgentNode]:
+    def parse_and_inject_ids(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[dict]:
         suffix = Path(uri).suffix.lower() if "." in Path(uri).name else ""
 
         # Non-Python files: create a file-level node only (no AST decomposition)
@@ -46,31 +46,36 @@ class ASTWatcher:
         text_bytes = text.encode("utf-8")
         tree = self.parser.parse(text_bytes)
 
-        nodes: list[ASTAgentNode] = []
+        nodes: list[dict] = []
         old_by_key = {(n["name"], n["node_type"]): n for n in (old_nodes or [])}
+        stem = Path(uri).stem
 
         file_source = text[:200]
         file_hash = hashlib.md5(text_bytes).hexdigest()
 
-        key = (Path(uri).stem, "file")
+        key = (stem, "file")
         if key in old_by_key:
-            file_id = old_by_key[key].get("remora_id") or old_by_key[key].get("id")
+            file_id = old_by_key[key].get("node_id") or old_by_key[key].get("remora_id") or old_by_key[key].get("id")
         else:
             file_id = generate_id()
 
-        file_node = ASTAgentNode(
-            remora_id=file_id,
-            node_type="file",
-            name=Path(uri).stem,
-            file_path=uri,
-            start_line=1,
-            end_line=len(text.splitlines()),
-            source_code=file_source,
-            source_hash=file_hash,
-        )
+        file_node = {
+            "node_id": file_id,
+            "node_type": "file",
+            "name": stem,
+            "full_name": stem,
+            "file_path": uri,
+            "start_line": 1,
+            "end_line": len(text.splitlines()),
+            "source_code": file_source,
+            "source_hash": file_hash,
+            "parent_id": None,
+        }
         nodes.append(file_node)
 
-        self._find_definitions(tree.root_node, text_bytes, uri, nodes, old_by_key, parent_id=file_id)
+        self._find_definitions(
+            tree.root_node, text_bytes, uri, nodes, old_by_key, parent_id=file_id, parent_full_name=stem
+        )
 
         return nodes
 
@@ -79,10 +84,13 @@ class ASTWatcher:
         node,
         text_bytes: bytes,
         uri: str,
-        nodes: list[ASTAgentNode],
+        nodes: list[dict],
         old_by_key: dict,
         parent_id: str | None = None,
+        parent_full_name: str = "",
     ) -> None:
+        stem = Path(uri).stem
+
         if node.type == "function_definition":
             name_node = node.child_by_field_name("name")
             if name_node:
@@ -102,23 +110,28 @@ class ASTWatcher:
                 key = (name, node_type)
 
                 if key in old_by_key:
-                    remora_id = old_by_key[key].get("remora_id") or old_by_key[key].get("id")
+                    node_id = (
+                        old_by_key[key].get("node_id") or old_by_key[key].get("remora_id") or old_by_key[key].get("id")
+                    )
                     del old_by_key[key]
                 else:
-                    remora_id = generate_id()
+                    node_id = generate_id()
+
+                full_name = f"{parent_full_name}.{name}"
 
                 nodes.append(
-                    ASTAgentNode(
-                        remora_id=remora_id,
-                        node_type=node_type,
-                        name=name,
-                        file_path=uri,
-                        start_line=start_line,
-                        end_line=end_line,
-                        source_code=source,
-                        source_hash=source_hash,
-                        parent_id=parent_id,
-                    )
+                    {
+                        "node_id": node_id,
+                        "node_type": node_type,
+                        "name": name,
+                        "full_name": full_name,
+                        "file_path": uri,
+                        "start_line": start_line,
+                        "end_line": end_line,
+                        "source_code": source,
+                        "source_hash": source_hash,
+                        "parent_id": parent_id,
+                    }
                 )
 
         elif node.type == "class_definition":
@@ -133,66 +146,80 @@ class ASTWatcher:
                 key = (name, "class")
 
                 if key in old_by_key:
-                    remora_id = old_by_key[key].get("remora_id") or old_by_key[key].get("id")
+                    node_id = (
+                        old_by_key[key].get("node_id") or old_by_key[key].get("remora_id") or old_by_key[key].get("id")
+                    )
                     del old_by_key[key]
                 else:
-                    remora_id = generate_id()
+                    node_id = generate_id()
+
+                full_name = f"{parent_full_name}.{name}"
 
                 nodes.append(
-                    ASTAgentNode(
-                        remora_id=remora_id,
-                        node_type="class",
-                        name=name,
-                        file_path=uri,
-                        start_line=start_line,
-                        end_line=end_line,
-                        source_code=source,
-                        source_hash=source_hash,
-                        parent_id=parent_id,
-                    )
+                    {
+                        "node_id": node_id,
+                        "node_type": "class",
+                        "name": name,
+                        "full_name": full_name,
+                        "file_path": uri,
+                        "start_line": start_line,
+                        "end_line": end_line,
+                        "source_code": source,
+                        "source_hash": source_hash,
+                        "parent_id": parent_id,
+                    }
                 )
 
                 # Methods inside this class get the class as their parent
                 for child in node.children:
-                    self._find_definitions(child, text_bytes, uri, nodes, old_by_key, parent_id=remora_id)
+                    self._find_definitions(
+                        child, text_bytes, uri, nodes, old_by_key, parent_id=node_id, parent_full_name=full_name
+                    )
                 return  # Already recursed into children
 
         for child in node.children:
-            self._find_definitions(child, text_bytes, uri, nodes, old_by_key, parent_id=parent_id)
+            self._find_definitions(
+                child, text_bytes, uri, nodes, old_by_key, parent_id=parent_id, parent_full_name=parent_full_name
+            )
 
-    def _parse_file_only(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[ASTAgentNode]:
+    def _parse_file_only(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[dict]:
         """Create a single file-level agent node for non-Python files (markdown, toml, etc.)."""
         old_by_key = {(n["name"], n["node_type"]): n for n in (old_nodes or [])}
         text_bytes = text.encode("utf-8")
         file_hash = hashlib.md5(text_bytes).hexdigest()
+        stem = Path(uri).stem
 
-        key = (Path(uri).stem, "file")
+        key = (stem, "file")
         if key in old_by_key:
-            file_id = old_by_key[key].get("remora_id") or old_by_key[key].get("id")
+            file_id = old_by_key[key].get("node_id") or old_by_key[key].get("remora_id") or old_by_key[key].get("id")
         else:
             file_id = generate_id()
 
-        file_node = ASTAgentNode(
-            remora_id=file_id,
-            node_type="file",
-            name=Path(uri).stem,
-            file_path=uri,
-            start_line=1,
-            end_line=len(text.splitlines()),
-            source_code=text[:200],
-            source_hash=file_hash,
-        )
-        return [file_node]
+        return [
+            {
+                "node_id": file_id,
+                "node_type": "file",
+                "name": stem,
+                "full_name": stem,
+                "file_path": uri,
+                "start_line": 1,
+                "end_line": len(text.splitlines()),
+                "source_code": text[:200],
+                "source_hash": file_hash,
+                "parent_id": None,
+            }
+        ]
 
-    def _parse_fallback(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[ASTAgentNode]:
+    def _parse_fallback(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[dict]:
         if not self._fallback_warned:
             logger.warning("tree-sitter not available; using fallback parser with approximate ranges")
             self._fallback_warned = True
 
-        nodes: list[ASTAgentNode] = []
+        nodes: list[dict] = []
         old_by_key = {(n["name"], n["node_type"]): n for n in (old_nodes or [])}
         lines = text.split("\n")
         total_lines = len(lines)
+        stem = Path(uri).stem
 
         for match in re.finditer(r"^(\s*)(def|class)\s+(\w+)", text, re.MULTILINE):
             indent = match.group(1)
@@ -209,45 +236,52 @@ class ASTWatcher:
 
             key = (name, node_type)
             if key in old_by_key:
-                remora_id = old_by_key[key]["id"]
+                node_id = (
+                    old_by_key[key].get("node_id") or old_by_key[key].get("remora_id") or old_by_key[key].get("id")
+                )
                 del old_by_key[key]
             else:
-                remora_id = generate_id()
+                node_id = generate_id()
 
             start_line = line_num
             end_line = total_lines
             source = "\n".join(lines[start_line - 1 : end_line])
 
+            # Fallback: approximate full_name (no class context tracking)
+            full_name = f"{stem}.{name}"
+
             nodes.append(
-                ASTAgentNode(
-                    remora_id=remora_id,
-                    node_type=node_type,
-                    name=name,
-                    file_path=uri,
-                    start_line=start_line,
-                    end_line=end_line,
-                    source_code=source,
-                    source_hash=hashlib.md5(source.encode()).hexdigest(),
-                )
+                {
+                    "node_id": node_id,
+                    "node_type": node_type,
+                    "name": name,
+                    "full_name": full_name,
+                    "file_path": uri,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "source_code": source,
+                    "source_hash": hashlib.md5(source.encode()).hexdigest(),
+                    "parent_id": None,
+                }
             )
 
         return nodes
 
 
-def inject_ids(file_path: Path, nodes: list[ASTAgentNode]) -> str:
+def inject_ids(file_path: Path, nodes: list[dict]) -> str:
     lines = file_path.read_text().splitlines()
 
-    nodes_sorted = sorted(nodes, key=lambda n: n.start_line, reverse=True)
+    nodes_sorted = sorted(nodes, key=lambda n: n["start_line"], reverse=True)
 
     for node in nodes_sorted:
-        line_idx = node.start_line - 1
+        line_idx = node["start_line"] - 1
         if line_idx >= len(lines):
             continue
         line = lines[line_idx]
 
         line = re.sub(r"\s*# rm_[a-z0-9]{8}\s*$", "", line)
 
-        lines[line_idx] = f"{line}  # {node.remora_id}"
+        lines[line_idx] = f"{line}  # {node['node_id']}"
 
     new_content = "\n".join(lines) + "\n"
     file_path.write_text(new_content)
