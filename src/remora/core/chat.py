@@ -10,13 +10,10 @@ from remora.core.discovery import discover
 from remora.core.event_bus import EventBus
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.config import Config
+from remora.core.kernel_factory import create_kernel
 from remora.core.workspace import AgentWorkspace
 from structured_agents import Tool
 
-from structured_agents.agent import get_response_parser
-from structured_agents.client import build_client
-from structured_agents.kernel import AgentKernel
-from structured_agents.models.adapter import ModelAdapter
 from structured_agents.types import Message as KernelMessage
 
 
@@ -168,22 +165,10 @@ class ChatSession:
         tool_schemas = [tool.schema for tool in self._tools]
 
         # Run agent
-        parser = get_response_parser(self.config.model_name)
-        adapter = ModelAdapter(
-            name=self.config.model_name,
-            response_parser=parser,
-        )
-        client = build_client(
-            {
-                "base_url": self.config.model_base_url,
-                "api_key": self.config.model_api_key or "EMPTY",
-                "model": self.config.model_name,
-            }
-        )
-
-        kernel = AgentKernel(
-            client=client,
-            adapter=adapter,
+        kernel = create_kernel(
+            model_name=self.config.model_name,
+            base_url=self.config.model_base_url,
+            api_key=self.config.model_api_key or "EMPTY",
             tools=self._tools,
             observer=self.event_bus,
         )

@@ -2,13 +2,14 @@
 
 ## Summary
 - **Total items:** 75+
-- **Completed:** 37 (Batch 1 + Batch 2) + Batch 3 in progress
-- **In progress:** Batch 3 (Runner Merge) — COMPLETE
-- **Blocked:** ~8 (waiting on critical path)
+- **Completed:** Batch 1 (25) + Batch 2 (12) + Batch 3 (10) + Batch 7 (4) + Batch 8 (22) + Batch 4 (9) = 82
+- **In progress:** Batch 5 (Post-Unification Cleanup) — next
+- **Remaining:** Batch 5, 6
+- **Test suite:** 502 passed, 2 xfailed
 
 ---
 
-## Batch 1: Track A Quick Fixes
+## Batch 1: Track A Quick Fixes — COMPLETE (commit `597a550`)
 
 | # | Ref | Description | Status |
 |---|-----|-------------|--------|
@@ -40,7 +41,7 @@
 
 ---
 
-## Batch 2: Track B Medium Items
+## Batch 2: Track B Medium Items — COMPLETE (commits `a69957c` through `4eceb4c`)
 
 | # | Ref | Description | Status |
 |---|-----|-------------|--------|
@@ -59,7 +60,7 @@
 
 ---
 
-## Batch 3: Critical Path — Runner Merge (1.2)
+## Batch 3: Critical Path — Runner Merge (1.2) — COMPLETE (commit `59cb192`)
 
 | Step | Description | Status |
 |------|-------------|--------|
@@ -76,16 +77,59 @@
 
 ---
 
-## Batch 4: Critical Path — Identity Unification (1.1)
+## Batch 7: Testing — COMPLETE (commit `81f851e`)
+
+| # | Ref | Description | Status |
+|---|-----|-------------|--------|
+| 7.1 | 4.1 | SwarmExecutor / unified executor tests (30 tests) | done |
+| 7.2 | 4.3 | Unified runner loop tests (39 tests) | done |
+| 7.3 | 4.5 | CLI command tests (18 tests) | done |
+| 7.4 | Q2 | Extract shared `_make_node()` to conftest | done |
+
+---
+
+## Batch 8: Quality & Polish — COMPLETE (commits `4038a02`, `595ceb9`)
+
+| # | Ref | Description | Status |
+|---|-----|-------------|--------|
+| 8.1 | P1 | LLM client connection pooling | done |
+| 8.2 | P2 | Incremental workspace sync | done |
+| 8.3 | P3 | Lightweight `list_nodes()` queries | done |
+| 8.4 | L1 | Fix monkey-patched `_notify_agents_updated` | done |
+| 8.5 | L2 | Fix module-level server singleton | done |
+| 8.6 | L3 | Document Qwen XML tag parser | done |
+| 8.7 | L5 | Fix `ensure_file_synced` stub | done |
+| 8.8 | L6 | Fix `did_save` disk read race | done |
+| 8.9 | S1 | Fix `get_subscriptions` name collision | done |
+| 8.10 | S2 | Fix `total_agents` counter bug | done |
+| 8.11 | S3 | Fix ChatServiceState singleton | done |
+| 8.12 | S4 | Fix DatastarResponse content type | done |
+| 8.13 | S5 | Fix duplicate prompt context | done |
+| 8.14 | S6 | Make chat history limit configurable | done |
+| 8.15 | R1 | Deduplicate ignore patterns | done |
+| 8.16 | R2 | Fix cascade correlation IDs | done |
+| 8.17 | R3 | Configurable event bus error policy | done |
+| 8.18 | R4 | Fix `build_virtual_fs` duplicates | done |
+| 8.19 | R5 | Fix `_find_config_file` sentinel | done |
+| 8.20 | R6 | Fix `_to_jsonable` type mismatch | done |
+| 8.21 | R7 | Fix XSS in `BlockedAgentCard` | done |
+| 8.22 | R8 | Fix extension cache global state | done |
+
+---
+
+## Batch 4: Identity Unification — COMPLETE (commit `e546588`)
 
 | Step | Description | Status |
 |------|-------------|--------|
-| 4.1 | Eliminate AgentState JSONL persistence | blocked (Batch 3) |
-| 4.2 | Eliminate SwarmState `agents` table | blocked (Batch 3) |
-| 4.3 | Update all consumers to use EventStore | blocked (Batch 3) |
-| 4.4 | Delete `agent_state.py` | blocked (Batch 3) |
-| 4.5 | Write tests for unified identity | blocked (Batch 3) |
-| 4.6 | Verify all tests pass | blocked (Batch 3) |
+| 4.1 | TDD tests for identity unification (19 tests) | done |
+| 4.2 | Reconciler rewrite → NodeDiscoveredEvent/NodeRemovedEvent | done |
+| 4.3 | SwarmExecutor rewrite → AgentNode, no swarm_state | done |
+| 4.4 | CLI update → EventStore/NodeProjection, no SwarmState | done |
+| 4.5 | Service handlers/API/LSP server → no SwarmState | done |
+| 4.6 | Update all existing tests (7 test files) | done |
+| 4.7 | Remove AgentState/AgentMetadata/SwarmState from re-exports | done |
+| 4.8 | Full test suite green (502 passed, 2 xfailed) | done |
+| 4.9 | Commit | done |
 
 ---
 
@@ -93,10 +137,10 @@
 
 | # | Ref | Description | Status |
 |---|-----|-------------|--------|
-| 5.1 | D1 | Delete `agent_state.py` | blocked (Batch 4) |
-| 5.2 | D2 | Remove SwarmState `agents` table | blocked (Batch 4) |
-| 5.3 | D13 | Clean `remora/__init__.py` re-exports | blocked (Batch 4) |
-| 5.4 | D14 | Clean `core/__init__.py` re-exports | blocked (Batch 4) |
+| 5.1 | D1 | Delete `agent_state.py` | pending |
+| 5.2 | D2 | Remove SwarmState `agents` table | pending |
+| 5.3 | D13 | Clean `remora/__init__.py` re-exports | done (completed in Batch 4) |
+| 5.4 | D14 | Clean `core/__init__.py` re-exports | done (completed in Batch 4) |
 
 ---
 
@@ -106,47 +150,7 @@
 |---|-----|-------------|--------|
 | 6.1 | 2.1 | Unify event models → frozen Pydantic | pending |
 | 6.2 | 2.3 | Pydantic Config (BaseSettings) | pending |
-| 6.3 | 2.4 | Single SQLite database | blocked (1.1, 1.4) |
-| 6.4 | 2.5 | Typed externals protocol | blocked (2.3) |
-| 6.5 | 2.6 | Kernel factory | blocked (2.3) |
-| 6.6 | D9 | Delete stdlib dataclass models | blocked (2.3) |
-
----
-
-## Batch 7: Testing
-
-| # | Ref | Description | Status |
-|---|-----|-------------|--------|
-| 7.1 | 4.1 | SwarmExecutor / unified executor tests | blocked (Batch 3) |
-| 7.2 | 4.3 | Unified runner loop tests | blocked (Batch 3) |
-| 7.3 | 4.5 | CLI command tests | pending |
-| 7.4 | Q2 | Extract shared `_make_node()` to conftest | pending |
-
----
-
-## Batch 8: Quality & Polish
-
-| # | Ref | Description | Status |
-|---|-----|-------------|--------|
-| 8.1 | P1 | LLM client connection pooling | pending |
-| 8.2 | P2 | Incremental workspace sync | pending |
-| 8.3 | P3 | Lightweight `list_nodes()` queries | pending |
-| 8.4 | L1 | Fix monkey-patched `_notify_agents_updated` | pending |
-| 8.5 | L2 | Fix module-level server singleton | pending |
-| 8.6 | L3 | Document Qwen XML tag parser | pending |
-| 8.7 | L5 | Fix `ensure_file_synced` stub | pending |
-| 8.8 | L6 | Fix `did_save` disk read race | pending |
-| 8.9 | S1 | Fix `get_subscriptions` name collision | pending |
-| 8.10 | S2 | Fix `total_agents` counter bug | pending |
-| 8.11 | S3 | Fix ChatServiceState singleton | pending |
-| 8.12 | S4 | Fix DatastarResponse content type | pending |
-| 8.13 | S5 | Fix duplicate prompt context | pending |
-| 8.14 | S6 | Make chat history limit configurable | pending |
-| 8.15 | R1 | Deduplicate ignore patterns | pending |
-| 8.16 | R2 | Fix cascade correlation IDs | pending |
-| 8.17 | R3 | Configurable event bus error policy | pending |
-| 8.18 | R4 | Fix `build_virtual_fs` duplicates | pending |
-| 8.19 | R5 | Fix `_find_config_file` sentinel | pending |
-| 8.20 | R6 | Fix `_to_jsonable` type mismatch | pending |
-| 8.21 | R7 | Fix XSS in `BlockedAgentCard` | pending |
-| 8.22 | R8 | Fix extension cache global state | pending |
+| 6.3 | 2.4 | Single SQLite database | pending |
+| 6.4 | 2.5 | Typed externals protocol | pending |
+| 6.5 | 2.6 | Kernel factory | pending |
+| 6.6 | D9 | Delete stdlib dataclass models | pending |

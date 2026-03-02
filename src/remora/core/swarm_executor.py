@@ -12,14 +12,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
-from structured_agents.agent import get_response_parser, load_manifest
+from structured_agents.agent import load_manifest
 from structured_agents.client import build_client
-from structured_agents.grammar.pipeline import ConstraintPipeline
-from structured_agents.kernel import AgentKernel
-from structured_agents.models.adapter import ModelAdapter
 from structured_agents.types import Message
 
+from remora.core.kernel_factory import create_kernel
+
 from remora.core.agent_node import AgentNode
+from remora.core.agent_context import AgentContext
 from remora.core.discovery import CSTNode
 from remora.core.event_store import EventStore
 from remora.core.events import AgentMessageEvent
@@ -115,11 +115,10 @@ class SwarmExecutor:
 
         logger.info(f"Getting workspace for agent {node.node_id}")
         workspace = await self._workspace_service.get_agent_workspace(node.node_id)
-        externals = self._workspace_service.get_externals(node.node_id, workspace)
+        cairn_externals = self._workspace_service.get_externals(node.node_id, workspace)
         logger.info("Workspace and externals ready")
 
-        externals["agent_id"] = node.node_id
-        externals["correlation_id"] = getattr(trigger_event, "correlation_id", None) if trigger_event else None
+        correlation_id = getattr(trigger_event, "correlation_id", None) if trigger_event else None
 
         async def _emit_event(event_type: str, event_obj: Any) -> None:
             await self._event_store.append(self._swarm_id, event_obj)
@@ -167,7 +166,7 @@ class SwarmExecutor:
                     from_agent=node.node_id,
                     to_agent=target,
                     content=content,
-                    correlation_id=externals.get("correlation_id"),
+                    correlation_id=correlation_id,
                 )
                 await _emit_event("AgentMessageEvent", event)
 
@@ -181,11 +180,16 @@ class SwarmExecutor:
             target_type = filter_type.lower()
             return [agent for agent in agents if agent.node_type.lower() == target_type]
 
-        externals["emit_event"] = _emit_event
-        externals["register_subscription"] = _register_sub
-        externals["unsubscribe_subscription"] = _unsubscribe_subscription
-        externals["broadcast"] = _broadcast
-        externals["query_agents"] = _query_agents
+        agent_context = AgentContext(
+            agent_id=node.node_id,
+            correlation_id=correlation_id,
+            emit_event=_emit_event,
+            register_subscription=_register_sub,
+            unsubscribe_subscription=_unsubscribe_subscription,
+            broadcast=_broadcast,
+            query_agents=_query_agents,
+            cairn_externals=cairn_externals,
+        )
 
         data_provider = CairnDataProvider(workspace, self._path_resolver)
         cst_node = _agent_node_to_cst_node(node)
@@ -221,7 +225,7 @@ class SwarmExecutor:
         if manifest.agents_dir:
             tools = discover_grail_tools(
                 manifest.agents_dir,
-                externals=externals,
+                context=agent_context,
                 files_provider=files_provider,
             )
         logger.info(f"Discovered {len(tools)} tools (agents_dir={manifest.agents_dir})")
@@ -287,10 +291,6 @@ class SwarmExecutor:
         chat_history: list[dict[str, str]] | None = None,
         model_name: str,
     ) -> Any:
-        parser = get_response_parser(model_name)
-        pipeline = ConstraintPipeline(manifest.grammar_config) if manifest.grammar_config else None
-        adapter = ModelAdapter(name=model_name, response_parser=parser, constraint_pipeline=pipeline)
-
         class _EventStoreObserver:
             def __init__(self, store: EventStore, swarm_id: str):
                 self.store = store
@@ -300,7 +300,16 @@ class SwarmExecutor:
                 await self.store.append(self.swarm_id, event)
 
         observer = _EventStoreObserver(self._event_store, self._swarm_id)
-        kernel = AgentKernel(client=self._client, adapter=adapter, tools=tools, observer=observer)
+        kernel = create_kernel(
+            model_name=model_name,
+            base_url=self.config.model_base_url,
+            api_key=self.config.model_api_key or "EMPTY",
+            timeout=self.config.timeout_s,
+            tools=tools,
+            observer=observer,
+            grammar_config=manifest.grammar_config if manifest.grammar_config else None,
+            client=self._client,
+        )
         logger.info(f"Created kernel with client pointing to {self.config.model_base_url}")
 
         try:

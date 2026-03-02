@@ -1,8 +1,10 @@
 """Core Remora runtime (framework-agnostic)."""
 
+from remora.core.agent_context import AgentContext
 from remora.core.agent_node import AgentNode, ToolSchema as AgentToolSchema
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.cairn_externals import CairnExternals
+from remora.core.kernel_factory import create_kernel
 from remora.core.config import (
     Config,
     ConfigError,
@@ -57,6 +59,7 @@ from remora.core.workspace import AgentWorkspace, CairnDataProvider
 
 __all__ = [
     "AgentCompleteEvent",
+    "AgentContext",
     "AgentErrorEvent",
     "AgentMessageEvent",
     "AgentNode",
@@ -68,6 +71,7 @@ __all__ = [
     "CairnDataProvider",
     "CairnExternals",
     "ContentChangedEvent",
+    "create_kernel",
     "DiscoveryError",
     "EventBus",
     "EventHandler",

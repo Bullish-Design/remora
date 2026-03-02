@@ -1,8 +1,8 @@
 """Tests for ChatSession — conversation management and tool dispatch.
 
 Covers Message, ChatConfig, ChatSession lifecycle (create, send, reset, close),
-and build_chat_tools. External dependencies (CairnWorkspaceService, AgentKernel,
-build_client) are mocked.
+and build_chat_tools. External dependencies (CairnWorkspaceService, create_kernel)
+are mocked.
 """
 
 from __future__ import annotations
@@ -224,15 +224,10 @@ class TestChatSessionSend:
     async def test_send_adds_user_and_assistant_to_history(self, session):
         mock_result = self._mock_kernel_result(content="Hi there!")
 
-        with (
-            patch("remora.core.chat.build_client") as mock_build_client,
-            patch("remora.core.chat.get_response_parser") as mock_parser,
-            patch("remora.core.chat.AgentKernel") as MockKernel,
-        ):
-            kernel_instance = AsyncMock()
-            kernel_instance.run = AsyncMock(return_value=mock_result)
-            MockKernel.return_value = kernel_instance
+        kernel_instance = AsyncMock()
+        kernel_instance.run = AsyncMock(return_value=mock_result)
 
+        with patch("remora.core.chat.create_kernel", return_value=kernel_instance):
             response = await session.send("Hello")
 
         assert len(session.history) == 2
@@ -245,15 +240,10 @@ class TestChatSessionSend:
     async def test_send_returns_agent_response(self, session):
         mock_result = self._mock_kernel_result(content="Response", tool_calls=[])
 
-        with (
-            patch("remora.core.chat.build_client"),
-            patch("remora.core.chat.get_response_parser"),
-            patch("remora.core.chat.AgentKernel") as MockKernel,
-        ):
-            kernel_instance = AsyncMock()
-            kernel_instance.run = AsyncMock(return_value=mock_result)
-            MockKernel.return_value = kernel_instance
+        kernel_instance = AsyncMock()
+        kernel_instance.run = AsyncMock(return_value=mock_result)
 
+        with patch("remora.core.chat.create_kernel", return_value=kernel_instance):
             response = await session.send("Test")
 
         assert isinstance(response, AgentResponse)
@@ -269,15 +259,10 @@ class TestChatSessionSend:
         tc.arguments = '{"path": "a.py"}'
         mock_result = self._mock_kernel_result(content="", tool_calls=[tc])
 
-        with (
-            patch("remora.core.chat.build_client"),
-            patch("remora.core.chat.get_response_parser"),
-            patch("remora.core.chat.AgentKernel") as MockKernel,
-        ):
-            kernel_instance = AsyncMock()
-            kernel_instance.run = AsyncMock(return_value=mock_result)
-            MockKernel.return_value = kernel_instance
+        kernel_instance = AsyncMock()
+        kernel_instance.run = AsyncMock(return_value=mock_result)
 
+        with patch("remora.core.chat.create_kernel", return_value=kernel_instance):
             response = await session.send("Do something")
 
         assert len(response.message.tool_calls) == 1
@@ -287,30 +272,20 @@ class TestChatSessionSend:
     async def test_send_closes_kernel_after_run(self, session):
         mock_result = self._mock_kernel_result()
 
-        with (
-            patch("remora.core.chat.build_client"),
-            patch("remora.core.chat.get_response_parser"),
-            patch("remora.core.chat.AgentKernel") as MockKernel,
-        ):
-            kernel_instance = AsyncMock()
-            kernel_instance.run = AsyncMock(return_value=mock_result)
-            MockKernel.return_value = kernel_instance
+        kernel_instance = AsyncMock()
+        kernel_instance.run = AsyncMock(return_value=mock_result)
 
+        with patch("remora.core.chat.create_kernel", return_value=kernel_instance):
             await session.send("Test")
 
         kernel_instance.close.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_send_closes_kernel_on_error(self, session):
-        with (
-            patch("remora.core.chat.build_client"),
-            patch("remora.core.chat.get_response_parser"),
-            patch("remora.core.chat.AgentKernel") as MockKernel,
-        ):
-            kernel_instance = AsyncMock()
-            kernel_instance.run = AsyncMock(side_effect=RuntimeError("LLM failed"))
-            MockKernel.return_value = kernel_instance
+        kernel_instance = AsyncMock()
+        kernel_instance.run = AsyncMock(side_effect=RuntimeError("LLM failed"))
 
+        with patch("remora.core.chat.create_kernel", return_value=kernel_instance):
             with pytest.raises(RuntimeError, match="LLM failed"):
                 await session.send("Test")
 
@@ -321,15 +296,10 @@ class TestChatSessionSend:
         """Multiple send() calls accumulate conversation history."""
         for i in range(3):
             mock_result = self._mock_kernel_result(content=f"Reply {i}")
-            with (
-                patch("remora.core.chat.build_client"),
-                patch("remora.core.chat.get_response_parser"),
-                patch("remora.core.chat.AgentKernel") as MockKernel,
-            ):
-                kernel_instance = AsyncMock()
-                kernel_instance.run = AsyncMock(return_value=mock_result)
-                MockKernel.return_value = kernel_instance
+            kernel_instance = AsyncMock()
+            kernel_instance.run = AsyncMock(return_value=mock_result)
 
+            with patch("remora.core.chat.create_kernel", return_value=kernel_instance):
                 await session.send(f"Message {i}")
 
         assert len(session.history) == 6  # 3 user + 3 assistant
@@ -338,15 +308,10 @@ class TestChatSessionSend:
     async def test_send_passes_system_prompt(self, session):
         mock_result = self._mock_kernel_result()
 
-        with (
-            patch("remora.core.chat.build_client"),
-            patch("remora.core.chat.get_response_parser"),
-            patch("remora.core.chat.AgentKernel") as MockKernel,
-        ):
-            kernel_instance = AsyncMock()
-            kernel_instance.run = AsyncMock(return_value=mock_result)
-            MockKernel.return_value = kernel_instance
+        kernel_instance = AsyncMock()
+        kernel_instance.run = AsyncMock(return_value=mock_result)
 
+        with patch("remora.core.chat.create_kernel", return_value=kernel_instance):
             await session.send("Hello")
 
             # Verify messages passed to kernel.run start with system prompt

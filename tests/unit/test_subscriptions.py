@@ -162,19 +162,25 @@ class TestSubscribeToolPattern:
         async def fake_register(agent_id: str, pattern: SubscriptionPattern) -> None:
             captured_patterns.append(pattern)
 
-        tool = SubscribeTool(
-            externals={
-                "agent_id": "my-agent",
-                "register_subscription": fake_register,
-            }
+        from remora.core.agent_context import AgentContext
+        from unittest.mock import AsyncMock
+
+        ctx = AgentContext(
+            agent_id="my-agent",
+            emit_event=AsyncMock(),
+            register_subscription=fake_register,
+            unsubscribe_subscription=AsyncMock(),
+            broadcast=AsyncMock(),
+            query_agents=AsyncMock(),
         )
+        tool = SubscribeTool(ctx)
 
         from structured_agents.types import ToolCall
 
-        ctx = ToolCall(id="call-1", name="subscribe", arguments={})
+        ctx_call = ToolCall(id="call-1", name="subscribe", arguments={})
         result = await tool.execute(
             {"event_types": ["ContentChangedEvent"], "from_agents": ["other-agent"]},
-            ctx,
+            ctx_call,
         )
 
         assert not result.is_error
@@ -195,17 +201,23 @@ class TestSubscribeToolPattern:
         async def fake_register(agent_id: str, pattern: SubscriptionPattern) -> None:
             captured_patterns.append(pattern)
 
-        tool = SubscribeTool(
-            externals={
-                "agent_id": "watcher-agent",
-                "register_subscription": fake_register,
-            }
+        from remora.core.agent_context import AgentContext
+        from unittest.mock import AsyncMock
+
+        ctx = AgentContext(
+            agent_id="watcher-agent",
+            emit_event=AsyncMock(),
+            register_subscription=fake_register,
+            unsubscribe_subscription=AsyncMock(),
+            broadcast=AsyncMock(),
+            query_agents=AsyncMock(),
         )
+        tool = SubscribeTool(ctx)
 
         from structured_agents.types import ToolCall
 
-        ctx = ToolCall(id="call-2", name="subscribe", arguments={})
-        await tool.execute({"event_types": ["AgentMessageEvent"]}, ctx)
+        ctx_call = ToolCall(id="call-2", name="subscribe", arguments={})
+        await tool.execute({"event_types": ["AgentMessageEvent"]}, ctx_call)
 
         pattern = captured_patterns[0]
         # An event sent from agent-A to agent-B should match (watcher subscribes to all AgentMessageEvents)

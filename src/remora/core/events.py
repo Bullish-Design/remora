@@ -1,14 +1,15 @@
 """Unified event types for Remora.
 
-All events are frozen dataclasses that can be pattern-matched.
+All events are frozen Pydantic models that can be pattern-matched.
 Re-exports structured-agents events for unified event handling.
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict, Field
 
 # Re-export structured-agents events
 from structured_agents.events import (
@@ -27,40 +28,48 @@ if TYPE_CHECKING:
 
 
 # ============================================================================
+# Base
+# ============================================================================
+
+
+class _FrozenEvent(BaseModel):
+    """Common base with frozen config for all Remora events."""
+
+    model_config = ConfigDict(frozen=True)
+
+
+# ============================================================================
 # Agent-Level Events
 # ============================================================================
 
 
-@dataclass(frozen=True, slots=True)
-class AgentStartEvent:
+class AgentStartEvent(_FrozenEvent):
     """Emitted when an agent begins execution."""
 
     graph_id: str
     agent_id: str
     node_name: str
     trigger_event_type: str = ""
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class AgentCompleteEvent:
+class AgentCompleteEvent(_FrozenEvent):
     """Emitted when an agent completes successfully."""
 
     graph_id: str
     agent_id: str
     result_summary: str
     response: str = ""  # Full response content for display
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class AgentErrorEvent:
+class AgentErrorEvent(_FrozenEvent):
     """Emitted when an agent fails."""
 
     graph_id: str
     agent_id: str
     error: str
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
 # ============================================================================
@@ -68,8 +77,7 @@ class AgentErrorEvent:
 # ============================================================================
 
 
-@dataclass(frozen=True, slots=True)
-class HumanInputRequestEvent:
+class HumanInputRequestEvent(_FrozenEvent):
     """Agent is blocked waiting for human input."""
 
     graph_id: str
@@ -77,16 +85,15 @@ class HumanInputRequestEvent:
     request_id: str
     question: str
     options: tuple[str, ...] | None = None
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class HumanInputResponseEvent:
+class HumanInputResponseEvent(_FrozenEvent):
     """Human has responded to an input request."""
 
     request_id: str
     response: str
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
 # ============================================================================
@@ -94,42 +101,38 @@ class HumanInputResponseEvent:
 # ============================================================================
 
 
-@dataclass(frozen=True, slots=True)
-class AgentMessageEvent:
+class AgentMessageEvent(_FrozenEvent):
     """Message sent between agents."""
 
     from_agent: str
     to_agent: str
     content: str
-    tags: tuple[str, ...] = field(default_factory=tuple)
+    tags: tuple[str, ...] = ()
     correlation_id: str | None = None
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class FileSavedEvent:
+class FileSavedEvent(_FrozenEvent):
     """A file was saved to disk."""
 
     path: str
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class ContentChangedEvent:
+class ContentChangedEvent(_FrozenEvent):
     """File content was modified."""
 
     path: str
     diff: str | None = None
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class ManualTriggerEvent:
+class ManualTriggerEvent(_FrozenEvent):
     """Manual trigger to start an agent."""
 
     to_agent: str
     reason: str
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
 # ============================================================================
@@ -137,8 +140,7 @@ class ManualTriggerEvent:
 # ============================================================================
 
 
-@dataclass(frozen=True, slots=True)
-class NodeDiscoveredEvent:
+class NodeDiscoveredEvent(_FrozenEvent):
     """Emitted when a code node is discovered or re-discovered."""
 
     node_id: str
@@ -153,15 +155,14 @@ class NodeDiscoveredEvent:
     parent_id: str | None = None
     start_byte: int = 0
     end_byte: int = 0
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class NodeRemovedEvent:
+class NodeRemovedEvent(_FrozenEvent):
     """Emitted when a code node is no longer found in source."""
 
     node_id: str
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
 # ============================================================================

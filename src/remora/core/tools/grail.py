@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable, Mapping
 import grail
 from structured_agents.types import ToolCall, ToolSchema, ToolResult
 
+from remora.core.agent_context import AgentContext
 from remora.core.tools.swarm import SwarmTool, build_swarm_tools
 
 logger = logging.getLogger(__name__)
@@ -107,13 +108,19 @@ def build_virtual_fs(files: Mapping[str, str | bytes]) -> dict[str, str | bytes]
 def discover_grail_tools(
     agents_dir: Path,
     *,
-    externals: dict[str, Any],
+    context: AgentContext,
     files_provider: FilesProvider,
     limits: grail.Limits | None = None,
     grail_dir: str | Path | None = None,
 ) -> list[RemoraGrailTool | SwarmTool]:
-    """Discover and load .pym tools from a directory."""
-    tools: list[RemoraGrailTool] = []
+    """Discover and load .pym tools from a directory.
+
+    Grail scripts receive the flat externals dict (via ``context.as_externals()``)
+    because the Grail runtime expects ``dict[str, Any]``. Swarm tools receive the
+    typed ``AgentContext`` directly.
+    """
+    externals_dict = context.as_externals()
+    tools: list[RemoraGrailTool | SwarmTool] = []
     if not agents_dir.exists():
         logger.warning("Agents directory does not exist: %s", agents_dir)
         return tools
@@ -123,7 +130,7 @@ def discover_grail_tools(
             tools.append(
                 RemoraGrailTool(
                     pym_file,
-                    externals=externals,
+                    externals=externals_dict,
                     files_provider=files_provider,
                     limits=limits,
                     grail_dir=grail_dir,
@@ -134,8 +141,7 @@ def discover_grail_tools(
             logger.warning("Failed to load %s: %s", pym_file, exc)
             continue
 
-    if externals:
-        tools.extend(build_swarm_tools(externals))
+    tools.extend(build_swarm_tools(context))
 
     return tools
 

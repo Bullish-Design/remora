@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from typing import Any
 
 from structured_agents.types import ToolCall, ToolResult, ToolSchema
 
+from remora.core.agent_context import AgentContext
 from remora.core.events import AgentMessageEvent
 from remora.core.subscriptions import SubscriptionPattern
 
@@ -33,7 +33,7 @@ class SwarmTool:
 class SendMessageTool(SwarmTool):
     """Send a direct message from this agent to another."""
 
-    def __init__(self, externals: dict[str, Any]):
+    def __init__(self, ctx: AgentContext):
         super().__init__(
             name="send_message",
             description="Send a direct message from this agent to another agent in the swarm.",
@@ -52,15 +52,12 @@ class SendMessageTool(SwarmTool):
                 "required": ["to_agent", "content"],
             },
         )
-        self._externals = externals
+        self._context = ctx
 
     async def execute(self, arguments: dict[str, Any], context: ToolCall | None) -> ToolResult:
         call_id = context.id if context else "unknown"
-        emit_event = self._externals.get("emit_event")
-        agent_id = self._externals.get("agent_id")
-        correlation_id = self._externals.get("correlation_id")
 
-        if not emit_event or not agent_id:
+        if not self._context.emit_event or not self._context.agent_id:
             return ToolResult(
                 call_id=call_id,
                 name=self._schema.name,
@@ -70,12 +67,12 @@ class SendMessageTool(SwarmTool):
 
         try:
             event = AgentMessageEvent(
-                from_agent=agent_id,
+                from_agent=self._context.agent_id,
                 to_agent=arguments["to_agent"],
                 content=arguments["content"],
-                correlation_id=correlation_id,
+                correlation_id=self._context.correlation_id,
             )
-            await emit_event("AgentMessageEvent", event)
+            await self._context.emit_event("AgentMessageEvent", event)
             return ToolResult(
                 call_id=call_id,
                 name=self._schema.name,
@@ -94,7 +91,7 @@ class SendMessageTool(SwarmTool):
 class SubscribeTool(SwarmTool):
     """Dynamically subscribe this agent to additional events."""
 
-    def __init__(self, externals: dict[str, Any]):
+    def __init__(self, ctx: AgentContext):
         super().__init__(
             name="subscribe",
             description="Subscribe this agent to additional event patterns.",
@@ -118,14 +115,12 @@ class SubscribeTool(SwarmTool):
                 },
             },
         )
-        self._externals = externals
+        self._context = ctx
 
     async def execute(self, arguments: dict[str, Any], context: ToolCall | None) -> ToolResult:
         call_id = context.id if context else "unknown"
-        register_subscription = self._externals.get("register_subscription")
-        agent_id = self._externals.get("agent_id")
 
-        if not register_subscription or not agent_id:
+        if not self._context.register_subscription or not self._context.agent_id:
             return ToolResult(
                 call_id=call_id,
                 name=self._schema.name,
@@ -139,7 +134,7 @@ class SubscribeTool(SwarmTool):
                 from_agents=arguments.get("from_agents"),
                 path_glob=arguments.get("path_glob"),
             )
-            await register_subscription(agent_id, pattern)
+            await self._context.register_subscription(self._context.agent_id, pattern)
             return ToolResult(
                 call_id=call_id,
                 name=self._schema.name,
@@ -158,7 +153,7 @@ class SubscribeTool(SwarmTool):
 class UnsubscribeTool(SwarmTool):
     """Remove a subscription from the registry."""
 
-    def __init__(self, externals: dict[str, Any]):
+    def __init__(self, ctx: AgentContext):
         super().__init__(
             name="unsubscribe",
             description="Remove a subscription by its ID.",
@@ -173,13 +168,12 @@ class UnsubscribeTool(SwarmTool):
                 "required": ["subscription_id"],
             },
         )
-        self._externals = externals
+        self._context = ctx
 
     async def execute(self, arguments: dict[str, Any], context: ToolCall | None) -> ToolResult:
         call_id = context.id if context else "unknown"
-        action = self._externals.get("unsubscribe_subscription")
 
-        if not action:
+        if not self._context.unsubscribe_subscription:
             return ToolResult(
                 call_id=call_id,
                 name=self._schema.name,
@@ -188,7 +182,7 @@ class UnsubscribeTool(SwarmTool):
             )
 
         try:
-            result = await action(arguments["subscription_id"])
+            result = await self._context.unsubscribe_subscription(arguments["subscription_id"])
             return ToolResult(
                 call_id=call_id,
                 name=self._schema.name,
@@ -207,7 +201,7 @@ class UnsubscribeTool(SwarmTool):
 class BroadcastTool(SwarmTool):
     """Broadcast a message to multiple agents via a pattern."""
 
-    def __init__(self, externals: dict[str, Any]):
+    def __init__(self, ctx: AgentContext):
         super().__init__(
             name="broadcast",
             description="Broadcast a message to multiple agents using a pattern (children, siblings, or file:path).",
@@ -226,13 +220,12 @@ class BroadcastTool(SwarmTool):
                 "required": ["to_pattern", "content"],
             },
         )
-        self._externals = externals
+        self._context = ctx
 
     async def execute(self, arguments: dict[str, Any], context: ToolCall | None) -> ToolResult:
         call_id = context.id if context else "unknown"
-        action = self._externals.get("broadcast")
 
-        if not action:
+        if not self._context.broadcast:
             return ToolResult(
                 call_id=call_id,
                 name=self._schema.name,
@@ -241,7 +234,7 @@ class BroadcastTool(SwarmTool):
             )
 
         try:
-            result = await action(arguments["to_pattern"], arguments["content"])
+            result = await self._context.broadcast(arguments["to_pattern"], arguments["content"])
             return ToolResult(
                 call_id=call_id,
                 name=self._schema.name,
@@ -260,7 +253,7 @@ class BroadcastTool(SwarmTool):
 class QueryAgentsTool(SwarmTool):
     """List agent metadata filtered by node type."""
 
-    def __init__(self, externals: dict[str, Any]):
+    def __init__(self, ctx: AgentContext):
         super().__init__(
             name="query_agents",
             description="Query and list agents in the swarm, optionally filtered by node type.",
@@ -274,13 +267,12 @@ class QueryAgentsTool(SwarmTool):
                 },
             },
         )
-        self._externals = externals
+        self._context = ctx
 
     async def execute(self, arguments: dict[str, Any], context: ToolCall | None) -> ToolResult:
         call_id = context.id if context else "unknown"
-        query = self._externals.get("query_agents")
 
-        if not query:
+        if not self._context.query_agents:
             return ToolResult(
                 call_id=call_id,
                 name=self._schema.name,
@@ -289,13 +281,14 @@ class QueryAgentsTool(SwarmTool):
             )
 
         try:
-            agents = await query(arguments.get("filter_type"))
+            agents = await self._context.query_agents(arguments.get("filter_type"))
             if not agents:
-                result = []
+                result: list[Any] = []
             elif isinstance(agents[0], dict):
                 result = agents
             else:
-                result = [asdict(agent) for agent in agents]
+                # AgentNode is a Pydantic model — use model_dump()
+                result = [agent.model_dump() if hasattr(agent, "model_dump") else vars(agent) for agent in agents]
             return ToolResult(
                 call_id=call_id,
                 name=self._schema.name,
@@ -311,12 +304,12 @@ class QueryAgentsTool(SwarmTool):
             )
 
 
-def build_swarm_tools(externals: dict[str, Any]) -> list[SwarmTool]:
-    """Build tools for swarm messaging when externals are provided."""
+def build_swarm_tools(ctx: AgentContext) -> list[SwarmTool]:
+    """Build tools for swarm messaging when an AgentContext is provided."""
     return [
-        SendMessageTool(externals),
-        SubscribeTool(externals),
-        UnsubscribeTool(externals),
-        BroadcastTool(externals),
-        QueryAgentsTool(externals),
+        SendMessageTool(ctx),
+        SubscribeTool(ctx),
+        UnsubscribeTool(ctx),
+        BroadcastTool(ctx),
+        QueryAgentsTool(ctx),
     ]
