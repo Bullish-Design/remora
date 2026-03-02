@@ -333,12 +333,12 @@ class TestRemoraService:
         )
         assert svc.has_event_store is True
 
-    def test_get_subscriptions_name_collision(self):
-        """Verify that get_subscriptions(agent_id) shadows the no-arg getter.
+    def test_get_subscriptions_name_collision_fixed(self):
+        """Verify the S1 name collision is resolved.
 
-        This is a known bug (S1) — the method at line 186 of api.py
-        shadows the property-like getter at line 167. The agent_id
-        overload replaces the registry getter. Test documents the bug.
+        The old get_subscriptions() no-arg getter is now the
+        ``subscription_registry`` property, and the async per-agent
+        lookup is ``get_agent_subscriptions(agent_id)``.
         """
         from remora.service.api import RemoraService
 
@@ -350,10 +350,10 @@ class TestRemoraService:
             subscriptions=mock_registry,
         )
 
-        # The no-arg getter is shadowed by the async method that takes agent_id.
-        # Calling get_subscriptions() without args raises TypeError.
-        with pytest.raises(TypeError):
-            svc.get_subscriptions()
+        # No-arg registry access is now a property — no TypeError.
+        assert svc.subscription_registry is mock_registry
+        # The async per-agent method exists under its new name.
+        assert hasattr(svc, "get_agent_subscriptions")
 
     def test_config_snapshot(self):
         from remora.service.api import RemoraService

@@ -73,6 +73,10 @@ def load_config(path: PathLike | None = None) -> Config:
     if path is None:
         path = _find_config_file()
 
+    if path is None:
+        logger.info("No config file found, using defaults")
+        return Config()
+
     config_path = normalize_path(path)
 
     if not config_path.exists():
@@ -88,8 +92,11 @@ def load_config(path: PathLike | None = None) -> Config:
     return _build_config(data)
 
 
-def _find_config_file() -> Path:
-    """Search for remora.yaml in current and parent directories."""
+def _find_config_file() -> Path | None:
+    """Search for remora.yaml in current and parent directories.
+
+    Returns None if no config file is found.
+    """
     current = Path.cwd()
 
     for directory in [current] + list(current.parents):
@@ -99,7 +106,7 @@ def _find_config_file() -> Path:
         if (directory / "pyproject.toml").exists():
             break
 
-    return current / "remora.yaml"
+    return None
 
 
 def _build_config(data: dict[str, Any]) -> Config:

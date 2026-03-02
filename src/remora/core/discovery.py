@@ -301,9 +301,14 @@ def _detect_language(file_path: Path) -> str | None:
     return LANGUAGE_EXTENSIONS.get(file_path.suffix.lower())
 
 
-def _walk_directory(directory: Path) -> Iterator[Path]:
+def _walk_directory(
+    directory: Path,
+    *,
+    ignore_patterns: set[str] | None = None,
+) -> Iterator[Path]:
     """Recursively walk directory, skipping hidden and common ignore patterns."""
-    ignore_patterns = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox"}
+    if ignore_patterns is None:
+        ignore_patterns = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox"}
 
     for item in directory.iterdir():
         if item.name.startswith(".") or item.name in ignore_patterns:
@@ -311,7 +316,7 @@ def _walk_directory(directory: Path) -> Iterator[Path]:
         if item.is_file():
             yield item
         elif item.is_dir():
-            yield from _walk_directory(item)
+            yield from _walk_directory(item, ignore_patterns=ignore_patterns)
 
 
 def parse_file(file_path: PathLike) -> list[CSTNode]:

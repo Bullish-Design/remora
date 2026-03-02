@@ -29,9 +29,10 @@ class EventBus:
     Provides type-based subscription and async streaming.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, error_policy: str = "log") -> None:
         self._handlers: dict[type[Any], list[EventHandler]] = {}
         self._all_handlers: list[EventHandler] = []
+        self._error_policy = error_policy
 
     async def emit(self, event: StructuredEvent | RemoraEvent) -> None:
         event_type = type(event)
@@ -54,6 +55,8 @@ class EventBus:
                 if asyncio.iscoroutine(result):
                     await result
             except Exception as exc:
+                if self._error_policy == "propagate":
+                    raise
                 logger.warning("Event handler error: %s", exc)
 
     def subscribe(self, event_type: type[Any], handler: EventHandler) -> None:
@@ -127,6 +130,7 @@ class EventBus:
     def clear(self) -> None:
         self._handlers.clear()
         self._all_handlers.clear()
+
 
 __all__ = [
     "EventBus",

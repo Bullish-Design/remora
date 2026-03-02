@@ -164,9 +164,11 @@ class RemoraService:
     def get_swarm_state(self) -> SwarmState | None:
         return self._swarm_state
 
-    def get_subscriptions(self) -> SubscriptionRegistry | None:
+    @property
+    def subscription_registry(self) -> SubscriptionRegistry | None:
+        """Return the raw SubscriptionRegistry instance."""
         return self._subscriptions
-        
+
     def get_workspace_service(self) -> CairnWorkspaceService | None:
         return self._workspace_service
 
@@ -183,7 +185,7 @@ class RemoraService:
         """Get a specific agent."""
         return await handle_swarm_get_agent(agent_id, self._deps)
 
-    async def get_subscriptions(self, agent_id: str) -> list[dict[str, Any]]:
+    async def get_agent_subscriptions(self, agent_id: str) -> list[dict[str, Any]]:
         """Get subscriptions for an agent."""
         return await handle_swarm_get_subscriptions(agent_id, self._deps)
 

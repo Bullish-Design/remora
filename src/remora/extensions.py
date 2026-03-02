@@ -63,19 +63,30 @@ def extension_matches(
 _cache: dict[str, tuple[dict[Path, float], list[Type[AgentExtension]]]] = {}
 
 
-def load_extensions(models_dir: Path) -> list[Type[AgentExtension]]:
+def load_extensions(
+    models_dir: Path,
+    *,
+    cache: dict[str, tuple[dict[Path, float], list[Type[AgentExtension]]]] | None = None,
+) -> list[Type[AgentExtension]]:
     """Load extension configs from a directory with mtime-based caching.
 
     Returns extensions sorted by filename (alphabetical).
     First match wins, so developers control priority via naming
     (e.g., 00_specific.py before 50_generic.py).
-    """
-    global _cache
 
-    if not models_dir.exists():
-        return []
+    Args:
+        models_dir: Directory containing extension .py files.
+        cache: Optional external cache dict. Defaults to the module-level
+               ``_cache`` when *None*.
+    """
+    if cache is None:
+        cache = _cache
 
     cache_key = str(models_dir)
+
+    if not models_dir.exists():
+        cache[cache_key] = ({}, [])
+        return []
 
     # Collect current mtimes
     current_mtimes: dict[Path, float] = {}
@@ -86,8 +97,8 @@ def load_extensions(models_dir: Path) -> list[Type[AgentExtension]]:
             pass
 
     # Check cache
-    if cache_key in _cache:
-        cached_mtimes, cached_extensions = _cache[cache_key]
+    if cache_key in cache:
+        cached_mtimes, cached_extensions = cache[cache_key]
         if current_mtimes == cached_mtimes and cached_mtimes:
             return cached_extensions
 
@@ -109,5 +120,5 @@ def load_extensions(models_dir: Path) -> list[Type[AgentExtension]]:
             logger.warning("Failed to load extension from %s: %s", py_file, e)
             continue
 
-    _cache[cache_key] = (current_mtimes, extensions)
+    cache[cache_key] = (current_mtimes, extensions)
     return extensions

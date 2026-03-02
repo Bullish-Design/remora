@@ -101,7 +101,6 @@ def build_virtual_fs(files: dict[str, str | bytes]) -> dict[str, str | bytes]:
     for path, content in files.items():
         normalized = path.replace("\\", "/").lstrip("/")
         virtual_fs[normalized] = content
-        virtual_fs[f"/{normalized}"] = content
     return virtual_fs
 
 
