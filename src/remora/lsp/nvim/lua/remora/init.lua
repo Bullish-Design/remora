@@ -37,85 +37,15 @@ function M.setup(opts)
     log.info("M.setup: vim.lsp.enable('remora') called")
 
     local function setup_highlights()
-        vim.api.nvim_set_hl(
-            0, "RemoraActive", { fg = "#a6e3a1" }
-        )
-        vim.api.nvim_set_hl(
-            0, "RemoraRunning", { fg = "#89b4fa" }
-        )
-        vim.api.nvim_set_hl(
-            0, "RemoraPending", { fg = "#f9e2af" }
-        )
-        vim.api.nvim_set_hl(
-            0, "RemoraOrphaned", { fg = "#6c7086" }
-        )
-        vim.api.nvim_set_hl(
-            0, "RemoraBorder",
-            { fg = "#89b4fa", bg = "NONE" }
-        )
+        vim.api.nvim_set_hl(0, "RemoraActive", { fg = "#a6e3a1" })
+        vim.api.nvim_set_hl(0, "RemoraRunning", { fg = "#89b4fa" })
+        vim.api.nvim_set_hl(0, "RemoraPending", { fg = "#f9e2af" })
+        vim.api.nvim_set_hl(0, "RemoraOrphaned", { fg = "#6c7086" })
+        vim.api.nvim_set_hl(0, "RemoraBorder", { fg = "#89b4fa", bg = "NONE" })
     end
 
     setup_highlights()
     log.info("M.setup: highlights configured")
-
-    -- -----------------------------------------------------------------------
-    -- LSP notification handlers
-    -- -----------------------------------------------------------------------
-
-    vim.lsp.handlers["$/remora/event"] = function(_, result)
-        log.info("HANDLER $/remora/event: event_type=%s", tostring(result and result.event_type or "nil"))
-        log.dump("DEBUG", "$/remora/event result", result)
-        local ok, err = pcall(panel.add_event, result)
-        if not ok then
-            log.error("HANDLER $/remora/event: panel.add_event FAILED: %s", tostring(err))
-        end
-    end
-
-    vim.lsp.handlers["$/remora/requestInput"] = function(_, result)
-        log.info("HANDLER $/remora/requestInput: result=%s", vim.inspect(result))
-        local prompt = result.prompt or "Input:"
-        vim.ui.input({ prompt = prompt }, function(input)
-            log.info("HANDLER $/remora/requestInput: user input=%s", vim.inspect(input))
-            if input then
-                local params = { input = input }
-                if result.agent_id then
-                    params.agent_id = result.agent_id
-                end
-                if result.proposal_id then
-                    params.proposal_id = result.proposal_id
-                end
-                log.info("HANDLER $/remora/requestInput: sending $/remora/submitInput params=%s", vim.inspect(params))
-                vim.lsp.buf_notify(
-                    0, "$/remora/submitInput", params
-                )
-                log.info("HANDLER $/remora/requestInput: buf_notify sent")
-            else
-                log.info("HANDLER $/remora/requestInput: user cancelled input")
-            end
-        end)
-    end
-
-    vim.lsp.handlers["$/remora/agentSelected"] = function(_, result)
-        log.info("HANDLER $/remora/agentSelected: agent_id=%s", tostring(result and result.agent_id or "nil"))
-        local ok, err = pcall(panel.select_agent, result.agent_id)
-        if not ok then
-            log.error("HANDLER $/remora/agentSelected: FAILED: %s", tostring(err))
-        end
-    end
-
-    vim.lsp.handlers["$/remora/agentsUpdated"] = function(_, result)
-        local count = type(result) == "table" and #result or 0
-        log.info("HANDLER $/remora/agentsUpdated: received %d agents", count)
-        if count > 0 then
-            log.dump("DEBUG", "$/remora/agentsUpdated first 3", { result[1], result[2], result[3] })
-        end
-        local ok, err = pcall(panel.update_agents, result)
-        if not ok then
-            log.error("HANDLER $/remora/agentsUpdated: panel.update_agents FAILED: %s", tostring(err))
-        else
-            log.info("HANDLER $/remora/agentsUpdated: panel.update_agents succeeded")
-        end
-    end
 
     -- -----------------------------------------------------------------------
     -- Client helpers
@@ -123,7 +53,6 @@ function M.setup(opts)
 
     --- Get the first active remora LSP client, or nil.
     local function get_client()
-        -- Try buffer-attached clients first, then fall back to all clients.
         local clients = vim.lsp.get_clients({ name = "remora", bufnr = 0 })
         log.debug("get_client: buffer-attached clients=%d", #clients)
         if #clients == 0 then
@@ -166,7 +95,6 @@ function M.setup(opts)
     end
 
     --- Try to apply a code action matching `command_name`.
-    --- Shows a friendly message instead of the cryptic default error.
     local function apply_code_action(command_name, not_found_msg)
         log.info("apply_code_action: command=%s", command_name)
         local client = get_client()
@@ -185,9 +113,75 @@ function M.setup(opts)
         local buf = vim.api.nvim_get_current_buf()
         local uri = vim.uri_from_bufnr(buf)
         local row, _col = unpack(vim.api.nvim_win_get_cursor(0))
-        -- row is already 1-based from nvim_win_get_cursor, matching our DB storage
         log.info("cursor_context: buf=%d uri=%s row=%d", buf, uri, row)
         return { uri = uri, line = row }
+    end
+
+    -- -----------------------------------------------------------------------
+    -- Configure panel with callbacks
+    -- -----------------------------------------------------------------------
+
+    panel.configure({
+        exec_command = exec_command,
+        cursor_context = cursor_context,
+        get_client = get_client,
+    })
+    log.info("M.setup: panel configured with callbacks")
+
+    -- -----------------------------------------------------------------------
+    -- LSP notification handlers
+    -- -----------------------------------------------------------------------
+
+    vim.lsp.handlers["$/remora/event"] = function(_, result)
+        log.info("HANDLER $/remora/event: event_type=%s agent=%s",
+            tostring(result and result.event_type or "nil"),
+            tostring(result and result.agent_id or "nil"))
+        log.dump("DEBUG", "$/remora/event result", result)
+        if panel.is_open() then
+            local ok, err = pcall(panel.on_event, result)
+            if not ok then
+                log.error("HANDLER $/remora/event: panel.on_event FAILED: %s", tostring(err))
+            end
+        end
+    end
+
+    vim.lsp.handlers["$/remora/requestInput"] = function(_, result)
+        log.info("HANDLER $/remora/requestInput: result=%s", vim.inspect(result))
+
+        -- If the panel is open and showing this agent, route to panel input
+        if panel.is_open() and panel._agent
+            and result.agent_id and result.agent_id == panel._agent.id then
+            log.info("HANDLER $/remora/requestInput: panel is open for this agent, focusing input")
+            if panel._input_win and vim.api.nvim_win_is_valid(panel._input_win) then
+                vim.api.nvim_set_current_win(panel._input_win)
+                vim.cmd("startinsert")
+            end
+            return
+        end
+
+        -- Fallback: use vim.ui.input
+        local prompt = result.prompt or "Input:"
+        vim.ui.input({ prompt = prompt }, function(input)
+            log.info("HANDLER $/remora/requestInput: user input=%s", vim.inspect(input))
+            if input then
+                local params = { input = input }
+                if result.agent_id then
+                    params.agent_id = result.agent_id
+                end
+                if result.proposal_id then
+                    params.proposal_id = result.proposal_id
+                end
+                log.info("HANDLER $/remora/requestInput: sending $/remora/submitInput params=%s", vim.inspect(params))
+                vim.lsp.buf_notify(0, "$/remora/submitInput", params)
+                log.info("HANDLER $/remora/requestInput: buf_notify sent")
+            else
+                log.info("HANDLER $/remora/requestInput: user cancelled input")
+            end
+        end)
+    end
+
+    vim.lsp.handlers["$/remora/agentSelected"] = function(_, result)
+        log.info("HANDLER $/remora/agentSelected: agent_id=%s", tostring(result and result.agent_id or "nil"))
     end
 
     -- -----------------------------------------------------------------------

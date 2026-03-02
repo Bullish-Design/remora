@@ -27,6 +27,65 @@ async def _resolve_agent(ls, args) -> str | None:
     return None
 
 
+@server.command("remora.getAgentPanel")
+async def cmd_get_agent_panel(ls, *args) -> dict | None:
+    """Return agent info + tools + recent events for the agent at cursor."""
+    try:
+        logger.info("cmd_get_agent_panel: args=%r", args)
+        ctx = args[0] if args else None
+        if not ctx or not isinstance(ctx, dict):
+            logger.warning("cmd_get_agent_panel: no valid cursor context")
+            return None
+        uri = ctx.get("uri")
+        line = ctx.get("line")
+        if not uri or line is None:
+            logger.warning("cmd_get_agent_panel: missing uri=%r or line=%r", uri, line)
+            return None
+
+        node = await ls.db.get_node_at_position(uri, line, 0)
+        if not node:
+            logger.info("cmd_get_agent_panel: no agent at %s:%s", uri, line)
+            return None
+
+        agent_id = node["remora_id"]
+        logger.info("cmd_get_agent_panel: found agent %s (%s)", agent_id, node["name"])
+
+        # Get tools
+        tools = []
+        if ls.runner:
+            agent_obj = ASTAgentNode(**node)
+            agent_obj = ls.runner.apply_extensions(agent_obj)
+            raw_tools = ls.runner.get_agent_tools(agent_obj)
+            tools = [
+                {"name": t["function"]["name"], "description": t["function"].get("description", "")} for t in raw_tools
+            ]
+
+        # Get recent events (newest first from DB, reverse for chronological display)
+        events = await ls.db.get_recent_events(agent_id, limit=50)
+        event_dicts = [e.model_dump() for e in reversed(events)]
+
+        result = {
+            "agent": {
+                "id": agent_id,
+                "name": node["name"],
+                "node_type": node["node_type"],
+                "status": node["status"],
+                "start_line": node["start_line"],
+                "end_line": node["end_line"],
+                "file_path": node.get("file_path", ""),
+            },
+            "tools": tools,
+            "events": event_dicts,
+        }
+        logger.info(
+            "cmd_get_agent_panel: returning agent=%s tools=%d events=%d", agent_id, len(tools), len(event_dicts)
+        )
+        return result
+    except Exception:
+        logger.exception("Error in remora.getAgentPanel")
+        return None
+
+
 @server.command("remora.chat")
 async def cmd_chat(ls, *args) -> None:
     try:
