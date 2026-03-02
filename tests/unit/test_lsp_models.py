@@ -1,27 +1,27 @@
 # tests/unit/test_lsp_models.py
 from __future__ import annotations
 
+from remora.core.agent_node import AgentNode, ToolSchema
 from remora.lsp.models import (
-    ASTAgentNode,
     HumanChatEvent,
-    ToolSchema,
     RewriteProposal,
 )
 
 
-def _make_node(**overrides):
-    data = {
-        "remora_id": "rm_test123",
+def _make_node(**overrides) -> AgentNode:
+    defaults = {
+        "node_id": "rm_test123",
         "node_type": "function",
         "name": "test_node",
+        "full_name": "test.test_node",
         "file_path": "file:///test.py",
         "start_line": 1,
         "end_line": 5,
         "source_code": "def foo(): pass",
         "source_hash": "hash",
     }
-    data.update(overrides)
-    return ASTAgentNode(**data)
+    defaults.update(overrides)
+    return AgentNode(**defaults)
 
 
 def _make_proposal():
@@ -68,20 +68,20 @@ def test_rewrite_proposal_diff():
     assert ws_edit.changes
 
 
-def test_ast_agent_node_to_code_lens():
+def test_agent_node_to_code_lens():
     node = _make_node()
     lens = node.to_code_lens()
     assert lens.command.command == "remora.selectAgent"
-    assert node.remora_id in lens.command.title
+    assert node.node_id in lens.command.title
 
 
-def test_ast_agent_node_to_hover():
+def test_agent_node_to_hover():
     node = _make_node()
     hover = node.to_hover()
-    assert node.remora_id in hover.contents.value
+    assert node.node_id in hover.contents.value
 
 
-def test_ast_agent_node_to_code_actions():
+def test_agent_node_to_code_actions():
     node = _make_node()
     actions = node.to_code_actions()
     commands = {action.command.command for action in actions if action.command}

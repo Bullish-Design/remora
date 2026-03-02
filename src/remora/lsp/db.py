@@ -11,7 +11,7 @@ from typing import ParamSpec, TypeVar
 
 import sqlite3
 
-from remora.lsp.models import ASTAgentNode, AgentEvent
+from remora.lsp.models import AgentEvent
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -125,35 +125,6 @@ class RemoraDB:
         if "id" in data:
             data["remora_id"] = data.pop("id")
         return data
-
-    @async_db
-    def upsert_nodes(self, nodes: list[ASTAgentNode]) -> None:
-        cursor = self.conn.cursor()
-        for node in nodes:
-            cursor.execute(
-                """
-                INSERT OR REPLACE INTO nodes 
-                (id, node_type, name, file_path, start_line, end_line, start_col, end_col,
-                 source_code, source_hash, status, pending_proposal_id, parent_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    node.remora_id,
-                    node.node_type,
-                    node.name,
-                    node.file_path,
-                    node.start_line,
-                    node.end_line,
-                    node.start_col,
-                    node.end_col,
-                    node.source_code,
-                    node.source_hash,
-                    node.status,
-                    node.pending_proposal_id,
-                    node.parent_id,
-                ),
-            )
-        self.conn.commit()
 
     @async_db
     def get_node(self, node_id: str) -> dict | None:

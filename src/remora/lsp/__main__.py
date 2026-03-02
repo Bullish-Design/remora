@@ -155,9 +155,49 @@ def main(
             try:
                 text = fpath.read_text(encoding="utf-8", errors="replace")
                 uri = from_fs_path(str(fpath))
-                old_nodes = await server.db.get_nodes_for_file(uri)
+                # Get existing nodes from EventStore to preserve IDs
+                old_nodes = []
+                if server.event_store:
+                    existing = await server.event_store.list_nodes(file_path=uri)
+                    old_nodes = [
+                        {
+                            "remora_id": n.node_id,
+                            "name": n.name,
+                            "node_type": n.node_type,
+                            "start_line": n.start_line,
+                            "end_line": n.end_line,
+                            "source_hash": n.source_hash,
+                        }
+                        for n in existing
+                    ]
                 nodes = server.watcher.parse_and_inject_ids(uri, text, old_nodes)
-                await server.db.upsert_nodes(nodes)
+                # Emit events to EventStore
+                if server.event_store:
+                    from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
+
+                    old_ids = {n["remora_id"] for n in old_nodes}
+                    new_ids = {n["node_id"] for n in nodes}
+                    for node_dict in nodes:
+                        await server.event_store.append(
+                            "lsp",
+                            NodeDiscoveredEvent(
+                                node_id=node_dict["node_id"],
+                                node_type=node_dict["node_type"],
+                                name=node_dict["name"],
+                                full_name=node_dict.get("full_name", node_dict["name"]),
+                                file_path=node_dict["file_path"],
+                                start_line=node_dict["start_line"],
+                                end_line=node_dict["end_line"],
+                                source_code=node_dict["source_code"],
+                                source_hash=node_dict["source_hash"],
+                                parent_id=node_dict.get("parent_id"),
+                            ),
+                        )
+                    for removed_id in old_ids - new_ids:
+                        await server.event_store.append(
+                            "lsp",
+                            NodeRemovedEvent(node_id=removed_id, file_path=uri),
+                        )
                 await server.db.update_edges(nodes)
                 count += len(nodes)
                 parsed += 1
@@ -176,19 +216,32 @@ def main(
     async def _notify_agents_updated() -> None:
         """Send $/remora/agentsUpdated with all active nodes to the client."""
         try:
-            all_nodes = await server.db.get_all_nodes()
-            log.info("_notify_agents_updated: DB has %d total nodes", len(all_nodes))
-            agent_list = [
-                {
-                    "remora_id": n["remora_id"],
-                    "name": n["name"],
-                    "status": n.get("status", "active"),
-                    "node_type": n.get("node_type", ""),
-                    "file_path": n.get("file_path", ""),
-                    "parent_id": n.get("parent_id", ""),
-                }
-                for n in all_nodes
-            ]
+            if server.event_store:
+                all_agents = await server.event_store.list_nodes()
+                agent_list = [
+                    {
+                        "remora_id": a.node_id,
+                        "name": a.name,
+                        "status": a.status,
+                        "node_type": a.node_type,
+                        "file_path": a.file_path,
+                        "parent_id": a.parent_id or "",
+                    }
+                    for a in all_agents
+                ]
+            else:
+                all_nodes = await server.db.get_all_nodes()
+                agent_list = [
+                    {
+                        "remora_id": n["remora_id"],
+                        "name": n["name"],
+                        "status": n.get("status", "active"),
+                        "node_type": n.get("node_type", ""),
+                        "file_path": n.get("file_path", ""),
+                        "parent_id": n.get("parent_id", ""),
+                    }
+                    for n in all_nodes
+                ]
             log.info("_notify_agents_updated: sending %d agents to client via $/remora/agentsUpdated", len(agent_list))
             if agent_list:
                 log.debug("_notify_agents_updated: first 3 agents: %s", agent_list[:3])

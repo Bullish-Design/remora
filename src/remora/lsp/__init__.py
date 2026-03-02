@@ -1,9 +1,8 @@
 # src/remora/lsp/__init__.py
 from __future__ import annotations
 
+from remora.core.agent_node import AgentNode, ToolSchema
 from remora.lsp.models import (
-    ASTAgentNode,
-    ToolSchema,
     RewriteProposal,
     AgentEvent,
     HumanChatEvent,
@@ -28,7 +27,7 @@ def main() -> None:
 
 
 __all__ = [
-    "ASTAgentNode",
+    "AgentNode",
     "ToolSchema",
     "RewriteProposal",
     "AgentEvent",
