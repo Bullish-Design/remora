@@ -192,12 +192,14 @@ class EventStore:
                 """,
                 (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json),
             )
-            await asyncio.to_thread(self._conn.commit)
             event_id = cursor.lastrowid or 0
 
             # Project event into materialized views (e.g. nodes table)
+            # within the SAME transaction as the event INSERT
             if self._projection is not None:
                 await asyncio.to_thread(self._projection.apply, self._conn, event)
+
+            await asyncio.to_thread(self._conn.commit)
 
         if self._trigger_queue is not None and self._subscriptions is not None:
             matching_agents = await self._subscriptions.get_matching_agents(event)

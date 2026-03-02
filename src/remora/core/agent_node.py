@@ -6,10 +6,9 @@ and LSP protocol response. No subclasses. Specialization is data.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -92,9 +91,9 @@ class AgentNode(BaseModel):
         data = self.model_dump()
         data["caller_ids"] = json.dumps(data["caller_ids"])
         data["callee_ids"] = json.dumps(data["callee_ids"])
-        data["extra_tools"] = json.dumps([t.__dict__ if isinstance(t, ToolSchema) else t for t in self.extra_tools])
+        data["extra_tools"] = json.dumps([asdict(t) if is_dataclass(t) else t for t in self.extra_tools])
         data["extra_subscriptions"] = json.dumps(
-            [s.__dict__ if hasattr(s, "__dict__") else s for s in self.extra_subscriptions]
+            [asdict(s) if is_dataclass(s) else s for s in self.extra_subscriptions]
         )
         data["mounted_workspaces"] = json.dumps(data["mounted_workspaces"])
         return data

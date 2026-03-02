@@ -13,8 +13,6 @@ from remora.core.config import (
 from remora.core.discovery import (
     CSTNode,
     LANGUAGE_EXTENSIONS,
-    NodeType,
-    TreeSitterDiscoverer,
     compute_node_id,
     discover,
 )
@@ -93,7 +91,6 @@ __all__ = [
     "NodeDiscoveredEvent",
     "NodeProjection",
     "NodeRemovedEvent",
-    "NodeType",
     "RemoraError",
     "RemoraEvent",
     "RemoraGrailTool",
@@ -104,7 +101,6 @@ __all__ = [
     "SubscriptionRegistry",
     "ToolCallEvent",
     "ToolResultEvent",
-    "TreeSitterDiscoverer",
     "TurnCompleteEvent",
     "WorkspaceError",
     "build_virtual_fs",

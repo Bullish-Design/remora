@@ -113,7 +113,7 @@ class SwarmExecutor:
 
         async def _broadcast(to_pattern: str, content: str) -> str:
             """Broadcast a message to multiple agents."""
-            if not emit_event:
+            if not _emit_event:
                 return "Error: Swarm event emitter is not configured."
             metadata = await self._swarm_state.get_agent(state.agent_id)
             if metadata is None:
@@ -152,7 +152,7 @@ class SwarmExecutor:
                     content=content,
                     correlation_id=externals.get("correlation_id"),
                 )
-                await emit_event("AgentMessageEvent", event)
+                await _emit_event("AgentMessageEvent", event)
 
             return f"Broadcast sent to {len(targets)} agents via {to_pattern}."
 
@@ -267,9 +267,9 @@ class SwarmExecutor:
         *,
         model_name: str,
     ) -> Any:
-        parser = get_response_parser(manifest.model)
+        parser = get_response_parser(model_name)
         pipeline = ConstraintPipeline(manifest.grammar_config) if manifest.grammar_config else None
-        adapter = ModelAdapter(name=manifest.model, response_parser=parser, constraint_pipeline=pipeline)
+        adapter = ModelAdapter(name=model_name, response_parser=parser, constraint_pipeline=pipeline)
         client = build_client(
             {
                 "base_url": self.config.model_base_url,
@@ -278,14 +278,15 @@ class SwarmExecutor:
                 "timeout": self.config.timeout_s,
             }
         )
+
         class _EventStoreObserver:
             def __init__(self, store: EventStore, swarm_id: str):
                 self.store = store
                 self.swarm_id = swarm_id
-            
+
             async def emit(self, event: Any) -> None:
                 await self.store.append(self.swarm_id, event)
-                
+
         observer = _EventStoreObserver(self._event_store, self._swarm_id)
         kernel = AgentKernel(client=client, adapter=adapter, tools=tools, observer=observer)
         logger.info(f"Created kernel with client pointing to {self.config.model_base_url}")
@@ -305,7 +306,9 @@ class SwarmExecutor:
             if manifest.grammar_config and not manifest.grammar_config.send_tools_to_api:
                 tool_schemas = []
             max_turns = getattr(manifest, "max_turns", None) or self.config.max_turns
-            logger.info(f"Calling kernel.run with {len(messages)} messages, {len(tool_schemas)} tools, max_turns={max_turns}")
+            logger.info(
+                f"Calling kernel.run with {len(messages)} messages, {len(tool_schemas)} tools, max_turns={max_turns}"
+            )
             result = await kernel.run(messages, tool_schemas, max_turns=max_turns)
             logger.info("kernel.run completed successfully")
             return result
@@ -328,9 +331,10 @@ class SwarmExecutor:
             sections.append(f"Lines: {state.range[0]}-{state.range[1]}")
         code = files.get(self._path_resolver.to_workspace_path(state.file_path)) or files.get(state.file_path)
         if code is not None:
+            lang = _lang_tag_for(state.file_path)
             sections.append("")
             sections.append("## Code")
-            sections.append("```")
+            sections.append(f"```{lang}")
             sections.append(code.decode() if isinstance(code, bytes) else code)
             sections.append("```")
         if trigger_event is not None:
@@ -352,6 +356,27 @@ class SwarmExecutor:
                 sections.append("## Recent Chat History")
                 sections.extend(history_items)
         return "\n".join(sections)
+
+
+_LANG_TAGS: dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript",
+    ".ts": "typescript",
+    ".md": "markdown",
+    ".toml": "toml",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".json": "json",
+    ".sh": "bash",
+    ".rs": "rust",
+    ".go": "go",
+}
+
+
+def _lang_tag_for(file_path: str) -> str:
+    """Return a markdown language tag for a file path, or empty string if unknown."""
+    suffix = Path(file_path).suffix.lower()
+    return _LANG_TAGS.get(suffix, "")
 
 
 def _state_to_cst_node(state: AgentState) -> CSTNode:

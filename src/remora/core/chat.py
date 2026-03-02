@@ -206,7 +206,7 @@ class ChatSession:
     async def close(self) -> None:
         """Clean up resources."""
         if self._workspace:
-            await self._workspace.cleanup()
+            await self._workspace.close()
 
 
 def build_chat_tools(agent_workspace: AgentWorkspace, project_root: Path) -> list[Tool]:

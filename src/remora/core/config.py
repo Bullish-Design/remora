@@ -15,6 +15,7 @@ from typing import Any
 import yaml
 
 from remora.utils import PathLike, normalize_path
+from remora.core.errors import ConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +83,6 @@ def load_config(path: PathLike | None = None) -> Config:
         with open(config_path) as f:
             data = yaml.safe_load(f) or {}
     except yaml.YAMLError as e:
-        from remora.core.errors import ConfigError
-
         raise ConfigError(f"Invalid YAML in {config_path}: {e}")
 
     return _build_config(data)
@@ -151,9 +150,6 @@ def serialize_config(config: Config) -> dict[str, Any]:
         "nvim_socket": config.nvim_socket,
     }
     return data
-
-
-from remora.core.errors import ConfigError
 
 
 __all__ = [

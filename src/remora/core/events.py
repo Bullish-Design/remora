@@ -100,7 +100,7 @@ class AgentMessageEvent:
     from_agent: str
     to_agent: str
     content: str
-    tags: list[str] = field(default_factory=list)
+    tags: tuple[str, ...] = field(default_factory=tuple)
     correlation_id: str | None = None
     timestamp: float = field(default_factory=time.time)
 

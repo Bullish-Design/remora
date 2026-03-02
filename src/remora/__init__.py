@@ -12,8 +12,6 @@ from remora.core.config import (
 from remora.core.discovery import (
     CSTNode,
     LANGUAGE_EXTENSIONS,
-    NodeType,
-    TreeSitterDiscoverer,
     compute_node_id,
     discover,
 )
@@ -93,8 +91,6 @@ __all__ = [
     "SwarmExecutor",
     "CSTNode",
     "LANGUAGE_EXTENSIONS",
-    "NodeType",
-    "TreeSitterDiscoverer",
     "compute_node_id",
     "discover",
     "AgentWorkspace",

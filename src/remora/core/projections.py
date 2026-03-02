@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from dataclasses import asdict, is_dataclass
 from typing import Any, Type
 
 from remora.core.events import (
@@ -20,6 +21,13 @@ from remora.core.events import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _dataclass_default(obj: Any) -> Any:
+    """JSON serialization fallback for dataclass instances."""
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return asdict(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 class NodeProjection:
@@ -73,7 +81,7 @@ class NodeProjection:
                     if key in row:
                         # Serialize lists/dicts to JSON strings for DB
                         if isinstance(value, (list, dict)):
-                            row[key] = json.dumps(value, default=lambda o: o.__dict__)
+                            row[key] = json.dumps(value, default=_dataclass_default)
                         else:
                             row[key] = value
                 break
@@ -101,29 +109,24 @@ class NodeProjection:
             """,
             list(row.values()),
         )
-        conn.commit()
 
     def _project_node_removed(self, conn: sqlite3.Connection, event: NodeRemovedEvent) -> None:
         conn.execute("DELETE FROM nodes WHERE node_id = ?", (event.node_id,))
-        conn.commit()
 
     def _project_agent_start(self, conn: sqlite3.Connection, event: AgentStartEvent) -> None:
         conn.execute(
             "UPDATE nodes SET status = 'running' WHERE node_id = ?",
             (event.agent_id,),
         )
-        conn.commit()
 
     def _project_agent_complete(self, conn: sqlite3.Connection, event: AgentCompleteEvent) -> None:
         conn.execute(
             "UPDATE nodes SET status = 'idle', last_completed_at = ? WHERE node_id = ?",
             (event.timestamp, event.agent_id),
         )
-        conn.commit()
 
     def _project_agent_error(self, conn: sqlite3.Connection, event: AgentErrorEvent) -> None:
         conn.execute(
             "UPDATE nodes SET status = 'error' WHERE node_id = ?",
             (event.agent_id,),
         )
-        conn.commit()

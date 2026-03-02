@@ -27,7 +27,6 @@ def swarm() -> None:
 @swarm.command("start")
 @click.option("--project-root", type=click.Path(file_okay=False, resolve_path=True))
 @click.option("--config", "config_path", type=click.Path(dir_okay=False, resolve_path=True))
-@click.option("--nvim", is_flag=True, help="Start JSON-RPC NvimServer")
 @click.option(
     "--lsp",
     is_flag=True,
@@ -36,7 +35,6 @@ def swarm() -> None:
 def swarm_start(
     project_root: str | None,
     config_path: str | None,
-    nvim: bool,
     lsp: bool,
 ) -> None:
     """Start the reactive swarm (reconciler + runner)."""
@@ -46,6 +44,7 @@ def swarm_start(
         raise click.ClickException(str(exc)) from exc
 
     if lsp:
+
         async def _prepare_lsp():
             from remora.core.event_bus import EventBus
             from remora.core.event_store import EventStore
@@ -76,9 +75,7 @@ def swarm_start(
             event_store.set_event_bus(event_bus)
 
             click.echo("Reconciling swarm...")
-            swarm_id = (
-                getattr(config, "swarm_id", "swarm") if hasattr(config, "__dataclass_fields__") else "swarm"
-            )
+            swarm_id = getattr(config, "swarm_id", "swarm") if hasattr(config, "__dataclass_fields__") else "swarm"
             result = await reconcile_on_startup(
                 root,
                 swarm_state,
@@ -86,7 +83,9 @@ def swarm_start(
                 event_store=event_store,
                 swarm_id=swarm_id,
             )
-            click.echo(f"Swarm reconciled: {result['created']} new, {result['orphaned']} orphaned, {result['total']} total")
+            click.echo(
+                f"Swarm reconciled: {result['created']} new, {result['orphaned']} orphaned, {result['total']} total"
+            )
 
             return event_store, subscriptions, swarm_state
 
@@ -153,22 +152,6 @@ def swarm_start(
         )
         runner_task = asyncio.create_task(runner.run_forever())
 
-        nvim_server = None
-        if nvim:
-            from remora.nvim.server import NvimServer
-
-            nvim_socket = swarm_path / "nvim.sock"
-            nvim_server = NvimServer(
-                nvim_socket,
-                event_store=event_store,
-                subscriptions=subscriptions,
-                event_bus=event_bus,
-                project_root=root,
-                swarm_id=swarm_id,
-            )
-            await nvim_server.start()
-            click.echo(f"Neovim server started on {nvim_socket}")
-
         click.echo("Swarm started. Press Ctrl+C to stop.")
 
         try:
@@ -180,8 +163,6 @@ def swarm_start(
             with contextlib.suppress(asyncio.CancelledError):
                 await runner_task
             await runner.stop()
-            if nvim_server:
-                await nvim_server.stop()
             await swarm_state.close()
 
     asyncio.run(_start())
@@ -295,7 +276,7 @@ def swarm_emit(event_type: str, data: str | None, project_root: str | None) -> N
                 from_agent=event_data.get("from_agent", "cli"),
                 to_agent=event_data.get("to_agent", ""),
                 content=event_data.get("content", ""),
-                tags=event_data.get("tags", []),
+                tags=tuple(event_data.get("tags", ())),
             )
         elif event_type == "ContentChangedEvent":
             event = ContentChangedEvent(

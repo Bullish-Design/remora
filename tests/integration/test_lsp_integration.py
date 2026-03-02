@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from lsprotocol import types as lsp
 
-from remora.lsp.handlers import actions, documents, lens
+from remora.lsp.handlers import actions, capabilities, commands, documents, lens
 from remora.lsp.server import server
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
@@ -62,8 +62,9 @@ async def isolated_lsp_server(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_lsp_handlers_register_and_advertise_capabilities(isolated_lsp_server) -> None:
-    feature_names = set(server.protocol.fm.features.keys())
-    expected = {
+    fm = server.protocol.fm
+    feature_names = set(fm.features.keys())
+    expected_features = {
         "textDocument/didOpen",
         "textDocument/didSave",
         "textDocument/didClose",
@@ -71,31 +72,22 @@ async def test_lsp_handlers_register_and_advertise_capabilities(isolated_lsp_ser
         "textDocument/codeLens",
         "textDocument/codeAction",
         "textDocument/documentSymbol",
-        "workspace/executeCommand",
         "initialize",
         "$/remora/submitInput",
     }
-    missing = expected - feature_names
+    missing = expected_features - feature_names
     assert not missing, f"Expected features missing: {sorted(missing)}"
 
-    if not hasattr(server.protocol, "server_capabilities"):
-        import types
-
-        server.protocol.server_capabilities = types.SimpleNamespace()
-
-    init_handler = server.protocol.fm.features["initialize"]
-    await init_handler(
-        lsp.InitializeParams(
-            process_id=None,
-            root_uri=None,
-            capabilities=lsp.ClientCapabilities(),
-        )
+    # workspace/executeCommand is a pygls builtin, registered automatically
+    # when @server.command() decorators are used
+    assert "workspace/executeCommand" in fm.builtin_features, (
+        "workspace/executeCommand not in builtin_features — commands module not imported?"
     )
 
-    commands = server.protocol.server_capabilities.execute_command_provider
-    assert commands is not None
-    assert "remora.chat" in commands.commands
-    assert "remora.acceptProposal" in commands.commands
+    # Verify that the key commands are registered in the feature manager
+    registered_commands = set(fm.commands.keys())
+    assert "remora.chat" in registered_commands
+    assert "remora.acceptProposal" in registered_commands
 
 
 @pytest.mark.asyncio

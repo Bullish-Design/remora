@@ -81,7 +81,7 @@ async def handle_swarm_emit(request: Any, deps: ServiceDeps) -> dict[str, Any]:
             from_agent=data.get("from_agent", "api"),
             to_agent=data.get("to_agent", ""),
             content=data.get("content", ""),
-            tags=data.get("tags", []),
+            tags=tuple(data.get("tags", ())),
         )
     elif event_type == "ContentChangedEvent":
         from remora.utils import to_project_relative

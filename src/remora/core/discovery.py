@@ -11,7 +11,6 @@ import importlib.resources
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Iterator
 
@@ -326,48 +325,10 @@ def parse_file(file_path: PathLike) -> list[CSTNode]:
     return _parse_file(path_obj, language)
 
 
-class NodeType(str, Enum):
-    FILE = "file"
-    CLASS = "class"
-    FUNCTION = "function"
-    METHOD = "method"
-    SECTION = "section"
-    TABLE = "table"
-
-
-class TreeSitterDiscoverer:
-    """Compatibility wrapper that exposes the old API."""
-
-    def __init__(
-        self,
-        root_dirs: list[PathLike],
-        language: str | None = None,
-        query_pack: str = "remora_core",
-        node_types: list[NodeType | str] | None = None,
-        max_workers: int = 4,
-    ) -> None:
-        self._paths = [normalize_path(p) for p in root_dirs]
-        self._language = language
-        self._query_pack = query_pack
-        self._node_types = [nt.value if isinstance(nt, NodeType) else nt for nt in node_types] if node_types else None
-        self._max_workers = max_workers
-
-    def discover(self) -> list[CSTNode]:
-        languages: list[str] | None = [self._language] if self._language else None
-        return discover(
-            paths=self._paths,
-            languages=languages,
-            node_types=self._node_types,
-            max_workers=self._max_workers,
-        )
-
-
 __all__ = [
     "CSTNode",
     "compute_node_id",
     "discover",
     "LANGUAGE_EXTENSIONS",
-    "NodeType",
-    "TreeSitterDiscoverer",
     "parse_file",
 ]
