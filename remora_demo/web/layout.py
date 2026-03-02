@@ -153,6 +153,23 @@ def _count_dir_contents(
 
 
 # ---------------------------------------------------------------------------
+# Path normalisation
+# ---------------------------------------------------------------------------
+
+
+def _normalize_path(p: str) -> str:
+    """Strip ``file://`` URI scheme to a plain filesystem path.
+
+    Handles both ``file:///absolute/path`` and plain ``/absolute/path``.
+    """
+    if p.startswith("file:///"):
+        return p[len("file://") :]  # keep the leading /
+    if p.startswith("file://"):
+        return p[len("file://") :]
+    return p
+
+
+# ---------------------------------------------------------------------------
 # Visibility classification
 # ---------------------------------------------------------------------------
 
@@ -459,12 +476,12 @@ def compute_layout(
         if pid and pid in by_id:
             children_map[pid].append(n)
 
-    # Group nodes by file path
+    # Group nodes by file path (normalised to plain paths)
     file_nodes: dict[str, dict] = {}
     file_members: dict[str, list[dict]] = {}
     all_file_paths: set[str] = set()
     for n in nodes:
-        fp = n.get("file_path", "")
+        fp = _normalize_path(n.get("file_path", ""))
         nt = n.get("node_type", "")
         all_file_paths.add(fp)
         if nt == "file":
@@ -479,9 +496,10 @@ def compute_layout(
         # Try to resolve focus via agent_id -> file_path, or direct file_path
         agent_id = cursor_focus.get("agent_id")
         if agent_id and agent_id in by_id:
-            focused_file = by_id[agent_id].get("file_path")
+            focused_file = _normalize_path(by_id[agent_id].get("file_path", ""))
         if not focused_file:
-            focused_file = cursor_focus.get("file_path")
+            raw = cursor_focus.get("file_path", "")
+            focused_file = _normalize_path(raw) if raw else None
         if focused_file:
             focused_dir = _get_dir_of_file(focused_file)
 

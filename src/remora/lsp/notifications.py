@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from remora.lsp.models import AgentMessageEvent, HumanChatEvent, RewriteRejectedEvent
-from remora.lsp.server import emit_event, logger, server, uri_to_path
+from remora.lsp.server import emit_event, logger, server
 
 
 @server.feature("$/remora/cursorMoved")
@@ -17,10 +17,11 @@ async def on_cursor_moved(params: dict) -> None:
         line = params.get("line")
         if not uri or line is None:
             return
-        file_path = uri_to_path(uri)
-        node = await server.db.get_node_at_position(file_path, line, 0)
+        # DB stores file_path as the original URI, so query and store with URI
+        node = await server.db.get_node_at_position(uri, line, 0)
         agent_id = node["remora_id"] if node else None
-        await server.db.update_cursor_focus(agent_id, file_path, line)
+        # Store the URI (not the converted path) so it matches node file_paths
+        await server.db.update_cursor_focus(agent_id, uri, line)
     except Exception:
         logger.debug("Error in on_cursor_moved handler", exc_info=True)
 

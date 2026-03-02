@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("remora.lsp.runner")
 
 MAX_CHAIN_DEPTH = 10
+MAX_TOOL_ROUNDS = 5  # max LLM↔tool round-trips per turn
 
 
 # ---------------------------------------------------------------------------
@@ -228,16 +229,40 @@ class AgentRunner:
                 logger.info("execute_turn: %d messages, %d tools — calling LLM", len(messages), len(tools))
                 logger.debug("execute_turn: messages=%r", [(m["role"], m["content"][:100]) for m in messages])
 
-                if self.llm:
-                    response = await self.llm.chat(messages, tools)
-                    logger.info(
-                        "execute_turn: LLM response: content=%r tool_calls=%d",
-                        (response.content or "")[:200],
-                        len(response.tool_calls),
-                    )
-                    await self.handle_response(agent, response, correlation_id)
-                else:
+                if not self.llm:
                     await self.emit_error(agent_id, "No LLM client configured", correlation_id)
+                else:
+                    # Tool call loop: LLM → tool calls → results → LLM → ... → text response
+                    for round_num in range(MAX_TOOL_ROUNDS):
+                        logger.info("execute_turn: round %d/%d", round_num + 1, MAX_TOOL_ROUNDS)
+                        response = await self.llm.chat(messages, tools)
+                        logger.info(
+                            "execute_turn: LLM response: content=%r tool_calls=%d",
+                            (response.content or "")[:200],
+                            len(response.tool_calls),
+                        )
+
+                        tool_results = await self.handle_response(agent, response, correlation_id)
+                        if not tool_results:
+                            # No tool calls or only side-effect tools — turn is done
+                            break
+
+                        # Append assistant message + tool results for next round
+                        assistant_msg: dict[str, Any] = {"role": "assistant", "content": response.content or ""}
+                        messages.append(assistant_msg)
+
+                        for tr in tool_results:
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": f"[Tool result for {tr['tool']}]:\n{tr['result']}",
+                                }
+                            )
+                        logger.info("execute_turn: appended %d tool results, continuing loop", len(tool_results))
+                    else:
+                        logger.warning(
+                            "execute_turn: max tool rounds (%d) reached for agent %s", MAX_TOOL_ROUNDS, agent_id
+                        )
         except Exception as e:
             await self.emit_error(agent_id, str(e), correlation_id)
         finally:
@@ -280,7 +305,13 @@ class AgentRunner:
                 logger.warning("_extract_text_tool_calls: failed to parse: %s", m.group(1)[:200])
         return calls
 
-    async def handle_response(self, agent: ASTAgentNode, response: LLMResponse, correlation_id: str) -> None:
+    async def handle_response(self, agent: ASTAgentNode, response: LLMResponse, correlation_id: str) -> list[dict]:
+        """Process an LLM response, executing any tool calls.
+
+        Returns a list of tool result dicts ``[{"tool": name, "result": text}, ...]``
+        that should be fed back to the LLM in the next round.  An empty list means the
+        turn is complete (text-only response or only side-effect tools).
+        """
         from remora.lsp.server import emit_event
 
         tool_calls = response.tool_calls
@@ -310,13 +341,15 @@ class AgentRunner:
                         payload={"content": response.content},
                     )
                 )
-            return
+            return []
 
+        tool_results: list[dict] = []
         for tool_call in tool_calls:
             match tool_call.name:
                 case "rewrite_self":
                     new_source = tool_call.arguments.get("new_source", "")
                     await self.create_proposal(agent, new_source, correlation_id)
+                    # Side-effect only — no result to feed back
 
                 case "message_node":
                     target_id = tool_call.arguments.get("target_id", "")
@@ -338,23 +371,34 @@ class AgentRunner:
                         )
                     else:
                         await self.message_node(agent.remora_id, target_id, message, correlation_id)
+                    # Side-effect only — no result to feed back
 
                 case "read_node":
                     target_id = tool_call.arguments.get("target_id", "")
                     if target_id == "parent" and agent.parent_id:
+                        logger.info("read_node: resolved 'parent' -> %s for agent %s", agent.parent_id, agent.remora_id)
                         target_id = agent.parent_id
                     target = await self.server.db.get_node(target_id)
                     if target:
-                        tool_result = {
-                            "name": target["name"],
-                            "type": target["node_type"],
-                            "source": target.get("source_code", ""),
-                            "file": target.get("file_path", ""),
-                        }
-                        # Currently not used, but left for future integrations.
+                        result_text = json.dumps(
+                            {
+                                "name": target["name"],
+                                "type": target["node_type"],
+                                "source": target.get("source_code", ""),
+                                "file": target.get("file_path", ""),
+                            },
+                            indent=2,
+                        )
+                        logger.info("read_node: returning %d chars for node %s", len(result_text), target_id)
+                        tool_results.append({"tool": "read_node", "result": result_text})
+                    else:
+                        logger.warning("read_node: node %s not found", target_id)
+                        tool_results.append({"tool": "read_node", "result": f"Error: node {target_id!r} not found"})
 
                 case _:
                     await self.execute_extension_tool(agent, tool_call.name, tool_call.arguments, correlation_id)
+
+        return tool_results
 
     async def create_proposal(self, agent: ASTAgentNode, new_source: str, correlation_id: str) -> None:
         from remora.lsp.server import emit_event, publish_diagnostics, refresh_code_lenses
