@@ -62,16 +62,16 @@ local event_icons = {
 }
 
 local event_hls = {
-    AgentTextResponse = "String",
+    AgentTextResponse = "RemoraAgent",
     AgentStartEvent = "DiagnosticInfo",
     AgentCompleteEvent = "DiagnosticOk",
     AgentErrorEvent = "DiagnosticError",
     RewriteProposalEvent = "DiagnosticWarn",
     RewriteAppliedEvent = "DiagnosticOk",
     RewriteRejectedEvent = "DiagnosticError",
-    HumanChatEvent = "Title",
+    HumanChatEvent = "RemoraUser",
     AgentMessageEvent = "Comment",
-    ToolResultEvent = "DiagnosticInfo",
+    ToolResultEvent = "RemoraToolCall",
 }
 
 -- ---------------------------------------------------------------------------
@@ -196,7 +196,7 @@ local function build_lines()
                 -- User message
                 local header = Line()
                 header:append(icon, hl)
-                header:append("You", "Title")
+                header:append("You", "RemoraUser")
                 local ts = format_time(ev.timestamp)
                 if ts ~= "" then
                     header:append("  " .. ts, "Comment")
@@ -208,7 +208,7 @@ local function build_lines()
                     or ev.summary or ""
                 for _, text_line in ipairs(vim.split(msg, "\n")) do
                     local ml = Line()
-                    ml:append("  " .. text_line)
+                    ml:append("  " .. text_line, "RemoraUserText")
                     table.insert(lines, ml)
                 end
                 table.insert(lines, Line())
@@ -217,7 +217,7 @@ local function build_lines()
                 -- LLM response
                 local header = Line()
                 header:append(icon, hl)
-                header:append("Agent", "String")
+                header:append("Agent", "RemoraAgent")
                 local ts = format_time(ev.timestamp)
                 if ts ~= "" then
                     header:append("  " .. ts, "Comment")
@@ -227,7 +227,7 @@ local function build_lines()
                 local content = (ev.payload and ev.payload.content) or ev.summary or ""
                 for _, text_line in ipairs(vim.split(content, "\n")) do
                     local ml = Line()
-                    ml:append("  " .. text_line, "String")
+                    ml:append("  " .. text_line, "RemoraAgentText")
                     table.insert(lines, ml)
                 end
                 table.insert(lines, Line())
@@ -293,6 +293,31 @@ local function build_lines()
                     table.insert(lines, ml)
                 end
                 table.insert(lines, Line())
+
+            elseif etype == "ToolResultEvent" then
+                -- Tool call result — compact, greyed out
+                local tool_name = (ev.payload and ev.payload.tool_name) or "tool"
+                local target = (ev.payload and ev.payload.target_id) or ""
+                local ts = format_time(ev.timestamp)
+
+                local tl = Line()
+                tl:append("  " .. icon, "RemoraToolCall")
+                tl:append(sanitize(tool_name), "RemoraToolCall")
+                if target ~= "" then
+                    tl:append("(" .. sanitize(target) .. ")", "RemoraToolCall")
+                end
+                if ts ~= "" then
+                    tl:append("  " .. ts, "RemoraToolCall")
+                end
+                table.insert(lines, tl)
+
+                -- Show result summary on next line if available
+                local result_text = (ev.payload and ev.payload.result_summary) or ""
+                if result_text ~= "" then
+                    local rl = Line()
+                    rl:append("    -> " .. sanitize(result_text), "RemoraToolCall")
+                    table.insert(lines, rl)
+                end
 
             else
                 -- Generic event

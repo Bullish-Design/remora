@@ -77,6 +77,16 @@ class CollapsedDir:
 
 
 @dataclass
+class FocusBBox:
+    """Bounding box around the focused node and its edge-connected neighbors."""
+
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+@dataclass
 class LayoutResult:
     """Complete layout computation result."""
 
@@ -84,6 +94,7 @@ class LayoutResult:
     groups: list[GroupBox] = field(default_factory=list)
     dir_groups: list[DirGroupBox] = field(default_factory=list)
     collapsed_dirs: list[CollapsedDir] = field(default_factory=list)
+    focus_bbox: FocusBBox | None = None
     total_width: float = 0.0
     total_height: float = 0.0
 
@@ -527,6 +538,48 @@ def compute_layout(
 
     result.total_width = start_x + total_w + 40
     result.total_height = start_y + total_h + 40
+
+    # Compute focus bounding box (focused node + edge-connected neighbors)
+    if focused_file and result.positions:
+        focus_node_ids: set[str] = set()
+        # Add the focused agent if positioned
+        if cursor_focus:
+            aid = cursor_focus.get("agent_id")
+            if aid and aid in result.positions:
+                focus_node_ids.add(aid)
+        # Add all positioned nodes in the focused file
+        for n in nodes:
+            nid = n.get("remora_id") or n.get("id", "")
+            fp = _normalize_path(n.get("file_path", ""))
+            if fp == focused_file and nid in result.positions:
+                focus_node_ids.add(nid)
+        # Add edge-connected neighbors (1 hop)
+        neighbor_ids: set[str] = set()
+        for edge in edges:
+            fid = edge.get("from_id", "")
+            tid = edge.get("to_id", "")
+            if fid in focus_node_ids and tid in result.positions:
+                neighbor_ids.add(tid)
+            if tid in focus_node_ids and fid in result.positions:
+                neighbor_ids.add(fid)
+        focus_node_ids |= neighbor_ids
+        # Compute bounding box
+        if focus_node_ids:
+            min_x = min_y = float("inf")
+            max_x = max_y = float("-inf")
+            for nid in focus_node_ids:
+                pos = result.positions[nid]
+                min_x = min(min_x, pos.x)
+                min_y = min(min_y, pos.y)
+                max_x = max(max_x, pos.x + pos.w)
+                max_y = max(max_y, pos.y + pos.h)
+            bbox_pad = 40.0
+            result.focus_bbox = FocusBBox(
+                x=min_x - bbox_pad,
+                y=min_y - bbox_pad,
+                w=(max_x - min_x) + bbox_pad * 2,
+                h=(max_y - min_y) + bbox_pad * 2,
+            )
 
     return result
 

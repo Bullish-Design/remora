@@ -15,6 +15,7 @@ from datastar_py import attribute_generator as data
 from remora_demo.web.layout import (
     CollapsedDir,
     DirGroupBox,
+    FocusBBox,
     GroupBox,
     LayoutResult,
     NodePosition,
@@ -56,7 +57,8 @@ def render_shell() -> str:
         <header class="header">
             <div class="header-title">Remora Graph View</div>
             <div class="header-controls">
-                <button class="fit-btn" id="fit-all-btn" title="Fit all nodes in view">Fit All</button>
+                <button class="header-btn" id="fit-all-btn" title="Fit all nodes in view">Fit All</button>
+                <button class="header-btn follow-btn" id="follow-btn" title="Toggle follow cursor mode">Follow Cursor</button>
                 <div class="header-status" id="connection-status">connecting...</div>
             </div>
         </header>
@@ -90,9 +92,17 @@ def render_graph(snapshot: GraphSnapshot) -> str:
 
     focused_id = snapshot.cursor_focus.get("agent_id") if snapshot.cursor_focus else None
 
+    # Build data attributes for focus bbox (used by client zoom-to-cursor)
+    focus_attrs = ""
+    if layout.focus_bbox:
+        fb = layout.focus_bbox
+        focus_attrs = (
+            f' data-focus-x="{fb.x:.1f}" data-focus-y="{fb.y:.1f}" data-focus-w="{fb.w:.1f}" data-focus-h="{fb.h:.1f}"'
+        )
+
     parts = [
         f'<div id="graph-content" style="position:relative;'
-        f'width:{layout.total_width + 100}px;height:{layout.total_height + 100}px;">'
+        f'width:{layout.total_width + 100}px;height:{layout.total_height + 100}px;"{focus_attrs}>'
     ]
 
     # Render directory group boxes (outermost first for z-order)
@@ -334,7 +344,7 @@ body {
     gap: 10px;
 }
 
-.fit-btn {
+.header-btn {
     font-family: inherit;
     font-size: 11px;
     padding: 3px 10px;
@@ -344,10 +354,21 @@ body {
     color: var(--text);
     cursor: pointer;
     letter-spacing: 0.3px;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
-.fit-btn:hover {
+.header-btn:hover {
     background: var(--overlay);
+}
+
+.follow-btn.active {
+    background: var(--blue);
+    color: var(--bg);
+    border-color: var(--blue);
+}
+
+.follow-btn.active:hover {
+    background: #7ba4e8;
 }
 
 .header-status, #connection-status {
@@ -584,18 +605,25 @@ body {
 
 
 def _js() -> str:
-    """JS for zoom/pan/fit on the graph viewport."""
+    """JS for zoom/pan/fit/follow on the graph viewport."""
     return """
 (function() {
     let scale = 1;
     let translateX = 0;
     let translateY = 0;
+    let followMode = false;
     const viewport = document.getElementById('graph-viewport');
     const container = document.getElementById('graph-container');
+    const followBtn = document.getElementById('follow-btn');
 
     if (!viewport || !container) return;
 
-    function applyTransform() {
+    function applyTransform(animate) {
+        if (animate) {
+            container.style.transition = 'transform 0.3s ease';
+        } else {
+            container.style.transition = 'none';
+        }
         container.style.transform =
             'translate(' + translateX + 'px, ' + translateY + 'px) scale(' + scale + ')';
     }
@@ -617,50 +645,100 @@ def _js() -> str:
 
         translateX = (vw - cw * scale) / 2;
         translateY = (vh - ch * scale) / 2;
-        applyTransform();
+        applyTransform(true);
     }
 
-    // Fit on first content render (observe graph-content changes)
+    function zoomToFocus() {
+        if (!followMode) return;
+        const content = document.getElementById('graph-content');
+        if (!content) return;
+        const fx = parseFloat(content.dataset.focusX);
+        const fy = parseFloat(content.dataset.focusY);
+        const fw = parseFloat(content.dataset.focusW);
+        const fh = parseFloat(content.dataset.focusH);
+        if (isNaN(fx) || isNaN(fy) || isNaN(fw) || isNaN(fh)) return;
+        if (fw <= 0 || fh <= 0) return;
+
+        const vw = viewport.clientWidth;
+        const vh = viewport.clientHeight;
+        const pad = 60;
+
+        const sx = (vw - pad * 2) / fw;
+        const sy = (vh - pad * 2) / fh;
+        scale = Math.min(sx, sy, 2.0);
+        scale = Math.max(scale, 0.2);
+
+        // Center the focus bbox in the viewport
+        var centerX = fx + fw / 2;
+        var centerY = fy + fh / 2;
+        translateX = vw / 2 - centerX * scale;
+        translateY = vh / 2 - centerY * scale;
+
+        applyTransform(true);
+    }
+
+    // Toggle follow mode
+    if (followBtn) {
+        followBtn.addEventListener('click', function() {
+            followMode = !followMode;
+            followBtn.classList.toggle('active', followMode);
+            if (followMode) {
+                zoomToFocus();
+            }
+        });
+    }
+
+    // Observe graph-content for SSE patches
     let fitted = false;
     const observer = new MutationObserver(function() {
-        if (!fitted) {
+        if (followMode) {
+            zoomToFocus();
+        } else if (!fitted) {
             fitted = true;
             setTimeout(fitAll, 50);
         }
     });
-    observer.observe(container, { childList: true, subtree: true });
+    observer.observe(container, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-focus-x', 'data-focus-y', 'data-focus-w', 'data-focus-h']
+    });
 
-    // Fit All button
+    // Fit All button — also disables follow mode
     const fitBtn = document.getElementById('fit-all-btn');
-    if (fitBtn) fitBtn.addEventListener('click', fitAll);
+    if (fitBtn) {
+        fitBtn.addEventListener('click', function() {
+            followMode = false;
+            if (followBtn) followBtn.classList.remove('active');
+            fitAll();
+        });
+    }
 
     // Zoom via scroll wheel
     viewport.addEventListener('wheel', function(e) {
         e.preventDefault();
-        const delta = e.deltaY > 0 ? 0.9 : 1.1;
-        const newScale = Math.max(0.05, Math.min(4, scale * delta));
+        var delta = e.deltaY > 0 ? 0.9 : 1.1;
+        var newScale = Math.max(0.05, Math.min(4, scale * delta));
 
-        const rect = viewport.getBoundingClientRect();
-        const mx = e.clientX - rect.left;
-        const my = e.clientY - rect.top;
+        var rect = viewport.getBoundingClientRect();
+        var mx = e.clientX - rect.left;
+        var my = e.clientY - rect.top;
 
         translateX = mx - (mx - translateX) * (newScale / scale);
         translateY = my - (my - translateY) * (newScale / scale);
         scale = newScale;
-        applyTransform();
+        applyTransform(false);
     }, { passive: false });
 
     // Pan via left-click drag on background
     let isPanning = false;
     let startX, startY;
-    let didDrag = false;
 
     viewport.addEventListener('mousedown', function(e) {
         if (e.button !== 0) return;
-        // Don't start pan if clicking directly on a node (let click handler fire)
         if (e.target.closest('.graph-node')) return;
         isPanning = true;
-        didDrag = false;
         startX = e.clientX - translateX;
         startY = e.clientY - translateY;
         e.preventDefault();
@@ -668,10 +746,9 @@ def _js() -> str:
 
     window.addEventListener('mousemove', function(e) {
         if (!isPanning) return;
-        didDrag = true;
         translateX = e.clientX - startX;
         translateY = e.clientY - startY;
-        applyTransform();
+        applyTransform(false);
     });
 
     window.addEventListener('mouseup', function() {

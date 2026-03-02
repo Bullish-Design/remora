@@ -37,11 +37,18 @@ function M.setup(opts)
     log.info("M.setup: vim.lsp.enable('remora') called")
 
     local function setup_highlights()
+        -- Status highlights
         vim.api.nvim_set_hl(0, "RemoraActive", { fg = "#a6e3a1" })
         vim.api.nvim_set_hl(0, "RemoraRunning", { fg = "#89b4fa" })
         vim.api.nvim_set_hl(0, "RemoraPending", { fg = "#f9e2af" })
         vim.api.nvim_set_hl(0, "RemoraOrphaned", { fg = "#6c7086" })
         vim.api.nvim_set_hl(0, "RemoraBorder", { fg = "#89b4fa", bg = "NONE" })
+        -- Chat panel highlights
+        vim.api.nvim_set_hl(0, "RemoraUser", { fg = "#89b4fa", bold = true })      -- blue, user name
+        vim.api.nvim_set_hl(0, "RemoraUserText", { fg = "#cdd6f4" })               -- light text, user body
+        vim.api.nvim_set_hl(0, "RemoraAgent", { fg = "#a6e3a1", bold = true })     -- green, agent name
+        vim.api.nvim_set_hl(0, "RemoraAgentText", { fg = "#a6e3a1" })             -- green, agent body
+        vim.api.nvim_set_hl(0, "RemoraToolCall", { fg = "#6c7086", italic = true }) -- muted grey, tool calls
     end
 
     setup_highlights()

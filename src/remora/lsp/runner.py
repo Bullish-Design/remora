@@ -349,6 +349,21 @@ class AgentRunner:
                 case "rewrite_self":
                     new_source = tool_call.arguments.get("new_source", "")
                     await self.create_proposal(agent, new_source, correlation_id)
+                    # Emit event so the panel can show the tool call
+                    await emit_event(
+                        AgentEvent(
+                            event_type="ToolResultEvent",
+                            agent_id=agent.remora_id,
+                            correlation_id=correlation_id,
+                            summary="rewrite_self",
+                            timestamp=0.0,
+                            payload={
+                                "tool_name": "rewrite_self",
+                                "target_id": agent.remora_id,
+                                "result_summary": f"proposal created — {len(new_source)} chars",
+                            },
+                        )
+                    )
                     # Side-effect only — no result to feed back
 
                 case "message_node":
@@ -371,6 +386,21 @@ class AgentRunner:
                         )
                     else:
                         await self.message_node(agent.remora_id, target_id, message, correlation_id)
+                        # Emit event so the panel can show the tool call
+                        await emit_event(
+                            AgentEvent(
+                                event_type="ToolResultEvent",
+                                agent_id=agent.remora_id,
+                                correlation_id=correlation_id,
+                                summary=f"message_node({target_id})",
+                                timestamp=0.0,
+                                payload={
+                                    "tool_name": "message_node",
+                                    "target_id": target_id,
+                                    "result_summary": f"sent — {len(message)} chars",
+                                },
+                            )
+                        )
                     # Side-effect only — no result to feed back
 
                 case "read_node":
@@ -391,9 +421,38 @@ class AgentRunner:
                         )
                         logger.info("read_node: returning %d chars for node %s", len(result_text), target_id)
                         tool_results.append({"tool": "read_node", "result": result_text})
+                        # Emit event so the panel can show tool usage
+                        await emit_event(
+                            AgentEvent(
+                                event_type="ToolResultEvent",
+                                agent_id=agent.remora_id,
+                                correlation_id=correlation_id,
+                                summary=f"read_node({target_id})",
+                                timestamp=0.0,
+                                payload={
+                                    "tool_name": "read_node",
+                                    "target_id": target_id,
+                                    "result_summary": f"{target['name']} ({target['node_type']}) — {len(target.get('source_code', ''))} chars",
+                                },
+                            )
+                        )
                     else:
                         logger.warning("read_node: node %s not found", target_id)
                         tool_results.append({"tool": "read_node", "result": f"Error: node {target_id!r} not found"})
+                        await emit_event(
+                            AgentEvent(
+                                event_type="ToolResultEvent",
+                                agent_id=agent.remora_id,
+                                correlation_id=correlation_id,
+                                summary=f"read_node({target_id}) — not found",
+                                timestamp=0.0,
+                                payload={
+                                    "tool_name": "read_node",
+                                    "target_id": target_id,
+                                    "result_summary": "not found",
+                                },
+                            )
+                        )
 
                 case _:
                     await self.execute_extension_tool(agent, tool_call.name, tool_call.arguments, correlation_id)
