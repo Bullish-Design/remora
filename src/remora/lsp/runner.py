@@ -24,7 +24,6 @@ from remora.lsp.models import (
 )
 
 if TYPE_CHECKING:
-    from remora.core.swarm_executor import SwarmExecutor
     from remora.lsp.server import RemoraLanguageServer
 
 logger = logging.getLogger("remora.lsp.runner")
@@ -183,7 +182,6 @@ class AgentRunner:
     ) -> None:
         self.server = server
         self.llm = llm
-        self.executor: "SwarmExecutor | None" = None
         self.queue: asyncio.Queue[Trigger] = asyncio.Queue()
         self._running = False
 
@@ -419,77 +417,71 @@ class AgentRunner:
             logger.info("execute_turn: node found: %s (%s) file=%s", agent.name, agent.node_type, agent.file_path)
 
             try:
-                if self.executor:
-                    state = await self._load_agent_state(agent_id)
-                    if state:
-                        trigger_event = await self._build_trigger_event(trigger)
-                        await self.executor.run_agent(state, trigger_event)
-                else:
-                    agent = self.apply_extensions(agent)
+                agent = self.apply_extensions(agent)
 
-                    messages = [
-                        {"role": "system", "content": agent.to_system_prompt()},
-                    ]
+                messages = [
+                    {"role": "system", "content": agent.to_system_prompt()},
+                ]
 
-                    events = await self.server.event_store.get_events_for_correlation(correlation_id)
-                    logger.info("execute_turn: %d events for correlation %s", len(events), correlation_id)
-                    for event in events:
-                        event_type = event["event_type"]
-                        payload = event.get("payload", {})
-                        if event_type == "HumanChatEvent" and payload.get("to_agent") == agent_id:
-                            messages.append({"role": "user", "content": payload.get("message", "")})
-                        elif event_type == "AgentMessageEvent" and payload.get("to_agent") == agent_id:
-                            from_agent = payload.get("from_agent", "unknown")
-                            messages.append(
-                                {"role": "user", "content": f"[From {from_agent}]: {payload.get('message', '')}"}
-                            )
-
-                    if trigger.context.get("rejection_feedback"):
+                events = await self.server.event_store.get_events_for_correlation(correlation_id)
+                logger.info("execute_turn: %d events for correlation %s", len(events), correlation_id)
+                for event in events:
+                    event_type = event["event_type"]
+                    payload = event.get("payload", {})
+                    if event_type == "HumanChatEvent" and payload.get("to_agent") == agent_id:
+                        messages.append({"role": "user", "content": payload.get("message", "")})
+                    elif event_type == "AgentMessageEvent" and payload.get("to_agent") == agent_id:
+                        from_agent = payload.get("from_agent", "unknown")
                         messages.append(
-                            {
-                                "role": "user",
-                                "content": f"[Feedback on rejected proposal]: {trigger.context['rejection_feedback']}",
-                            }
+                            {"role": "user", "content": f"[From {from_agent}]: {payload.get('message', '')}"}
                         )
 
-                    tools = self.get_agent_tools(agent)
-                    logger.info("execute_turn: %d messages, %d tools — calling LLM", len(messages), len(tools))
-                    logger.debug("execute_turn: messages=%r", [(m["role"], m["content"][:100]) for m in messages])
+                if trigger.context.get("rejection_feedback"):
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": f"[Feedback on rejected proposal]: {trigger.context['rejection_feedback']}",
+                        }
+                    )
 
-                    if not self.llm:
-                        await self.emit_error(agent_id, "No LLM client configured", correlation_id)
+                tools = self.get_agent_tools(agent)
+                logger.info("execute_turn: %d messages, %d tools — calling LLM", len(messages), len(tools))
+                logger.debug("execute_turn: messages=%r", [(m["role"], m["content"][:100]) for m in messages])
+
+                if not self.llm:
+                    await self.emit_error(agent_id, "No LLM client configured", correlation_id)
+                else:
+                    # Tool call loop: LLM → tool calls → results → LLM → ... → text response
+                    for round_num in range(MAX_TOOL_ROUNDS):
+                        logger.info("execute_turn: round %d/%d", round_num + 1, MAX_TOOL_ROUNDS)
+                        response = await self.llm.chat(messages, tools)
+                        logger.info(
+                            "execute_turn: LLM response: content=%r tool_calls=%d",
+                            (response.content or "")[:200],
+                            len(response.tool_calls),
+                        )
+
+                        tool_results = await self.handle_response(agent, response, correlation_id)
+                        if not tool_results:
+                            # No tool calls or only side-effect tools — turn is done
+                            break
+
+                        # Append assistant message + tool results for next round
+                        assistant_msg: dict[str, Any] = {"role": "assistant", "content": response.content or ""}
+                        messages.append(assistant_msg)
+
+                        for tr in tool_results:
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": f"[Tool result for {tr['tool']}]:\n{tr['result']}",
+                                }
+                            )
+                        logger.info("execute_turn: appended %d tool results, continuing loop", len(tool_results))
                     else:
-                        # Tool call loop: LLM → tool calls → results → LLM → ... → text response
-                        for round_num in range(MAX_TOOL_ROUNDS):
-                            logger.info("execute_turn: round %d/%d", round_num + 1, MAX_TOOL_ROUNDS)
-                            response = await self.llm.chat(messages, tools)
-                            logger.info(
-                                "execute_turn: LLM response: content=%r tool_calls=%d",
-                                (response.content or "")[:200],
-                                len(response.tool_calls),
-                            )
-
-                            tool_results = await self.handle_response(agent, response, correlation_id)
-                            if not tool_results:
-                                # No tool calls or only side-effect tools — turn is done
-                                break
-
-                            # Append assistant message + tool results for next round
-                            assistant_msg: dict[str, Any] = {"role": "assistant", "content": response.content or ""}
-                            messages.append(assistant_msg)
-
-                            for tr in tool_results:
-                                messages.append(
-                                    {
-                                        "role": "user",
-                                        "content": f"[Tool result for {tr['tool']}]:\n{tr['result']}",
-                                    }
-                                )
-                            logger.info("execute_turn: appended %d tool results, continuing loop", len(tool_results))
-                        else:
-                            logger.warning(
-                                "execute_turn: max tool rounds (%d) reached for agent %s", MAX_TOOL_ROUNDS, agent_id
-                            )
+                        logger.warning(
+                            "execute_turn: max tool rounds (%d) reached for agent %s", MAX_TOOL_ROUNDS, agent_id
+                        )
             except Exception as e:
                 await self.emit_error(agent_id, str(e), correlation_id)
             finally:
@@ -503,19 +495,6 @@ class AgentRunner:
 
                 await self.server.event_store.set_node_status(agent_id, "idle")
                 await refresh_code_lenses()
-
-    async def _load_agent_state(self, agent_id: str) -> Any:
-        return None
-
-    async def _build_trigger_event(self, trigger: Trigger) -> AgentEvent:
-        return AgentEvent(
-            event_type="TriggerEvent",
-            timestamp=0.0,
-            correlation_id=trigger.correlation_id,
-            agent_id=trigger.agent_id,
-            summary=f"Triggered agent {trigger.agent_id}",
-            payload=trigger.context,
-        )
 
     @staticmethod
     def _extract_text_tool_calls(content: str) -> list[ToolCall]:

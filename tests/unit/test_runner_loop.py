@@ -574,23 +574,11 @@ class TestExecuteTurn:
         ]
         assert len(feedback_msgs) >= 1
 
-    @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
-    async def test_turn_executor_path(self, mock_emit, mock_refresh):
-        """When executor is set, execute_turn delegates to executor.run_agent."""
+    def test_no_executor_attribute(self):
+        """After cleanup, AgentRunner should not have an executor attribute."""
         server = _make_mock_server()
         runner = AgentRunner(server, llm=None)
-        mock_executor = MagicMock()
-        mock_executor.run_agent = AsyncMock()
-        runner.executor = mock_executor
-
-        trigger = Trigger(agent_id="rm_test1", correlation_id="corr_1")
-        await runner.execute_turn(trigger)
-
-        # _load_agent_state returns None by default, so run_agent won't be called
-        # (because the `if state:` check fails)
-        mock_executor.run_agent.assert_not_called()
+        assert not hasattr(runner, "executor"), "Dead executor path should be removed"
 
 
 # =========================================================================

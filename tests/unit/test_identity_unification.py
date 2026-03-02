@@ -537,3 +537,64 @@ class TestAgentNodeSufficiency:
         )
         assert cst.node_id == node.node_id
         assert cst.text == node.source_code
+
+
+# =========================================================================
+# 6. Post-unification cleanup: agent_state.py deleted
+# =========================================================================
+
+
+class TestAgentStateModuleDeleted:
+    """After identity unification, agent_state.py should not exist."""
+
+    def test_agent_state_module_file_deleted(self):
+        """The agent_state.py source file should no longer exist."""
+        module_path = Path(__file__).resolve().parents[2] / "src" / "remora" / "core" / "agent_state.py"
+        assert not module_path.exists(), f"agent_state.py should be deleted: {module_path}"
+
+    def test_agent_state_not_importable(self):
+        """Importing agent_state should fail — module is gone."""
+        import importlib
+
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("remora.core.agent_state")
+
+    def test_no_agent_state_in_core_init(self):
+        """core/__init__.py should not re-export AgentState."""
+        import remora.core as core
+
+        assert not hasattr(core, "AgentState"), "AgentState should not be in core.__init__"
+
+    def test_no_agent_state_in_remora_init(self):
+        """remora/__init__.py should not re-export AgentState."""
+        import remora
+
+        assert not hasattr(remora, "AgentState"), "AgentState should not be in remora.__init__"
+
+
+class TestSwarmStateModuleDeleted:
+    """After post-unification cleanup, swarm_state.py should not exist."""
+
+    def test_swarm_state_module_file_deleted(self):
+        """The swarm_state.py source file should no longer exist."""
+        module_path = Path(__file__).resolve().parents[2] / "src" / "remora" / "core" / "swarm_state.py"
+        assert not module_path.exists(), f"swarm_state.py should be deleted: {module_path}"
+
+    def test_swarm_state_not_importable(self):
+        """Importing swarm_state should fail — module is gone."""
+        import importlib
+
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("remora.core.swarm_state")
+
+    def test_no_swarm_state_in_core_init(self):
+        """core/__init__.py should not re-export SwarmState."""
+        import remora.core as core
+
+        assert not hasattr(core, "SwarmState"), "SwarmState should not be in core.__init__"
+
+    def test_no_swarm_state_in_remora_init(self):
+        """remora/__init__.py should not re-export SwarmState."""
+        import remora
+
+        assert not hasattr(remora, "SwarmState"), "SwarmState should not be in remora.__init__"
