@@ -65,6 +65,10 @@ class EventStore:
             )
             self._conn.row_factory = sqlite3.Row
 
+            # Enable WAL mode for better concurrent read/write performance
+            await asyncio.to_thread(self._conn.execute, "PRAGMA journal_mode=WAL")
+            await asyncio.to_thread(self._conn.execute, "PRAGMA synchronous=NORMAL")
+
             await asyncio.to_thread(
                 self._conn.executescript,
                 """
@@ -126,6 +130,80 @@ class EventStore:
                 CREATE INDEX IF NOT EXISTS idx_nodes_file_path ON nodes(file_path);
                 CREATE INDEX IF NOT EXISTS idx_nodes_parent_id ON nodes(parent_id);
                 CREATE INDEX IF NOT EXISTS idx_nodes_node_type ON nodes(node_type);
+                """,
+            )
+
+            # Subscriptions table (shared with SubscriptionRegistry)
+            await asyncio.to_thread(
+                self._conn.executescript,
+                """
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT NOT NULL,
+                    pattern_json TEXT NOT NULL,
+                    is_default INTEGER NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_agent_id
+                ON subscriptions(agent_id);
+
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_is_default
+                ON subscriptions(is_default);
+                """,
+            )
+
+            # RemoraDB operational tables (shared with RemoraDB)
+            await asyncio.to_thread(
+                self._conn.executescript,
+                """
+                CREATE TABLE IF NOT EXISTS edges (
+                    from_id TEXT NOT NULL,
+                    to_id TEXT NOT NULL,
+                    edge_type TEXT NOT NULL,
+                    PRIMARY KEY (from_id, to_id, edge_type)
+                );
+
+                CREATE TABLE IF NOT EXISTS activation_chain (
+                    correlation_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    depth INTEGER NOT NULL,
+                    timestamp REAL NOT NULL,
+                    PRIMARY KEY (correlation_id, agent_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS proposals (
+                    proposal_id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    old_source TEXT NOT NULL,
+                    new_source TEXT NOT NULL,
+                    diff TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at REAL NOT NULL,
+                    file_path TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS cursor_focus (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    agent_id TEXT,
+                    file_path TEXT,
+                    line INTEGER,
+                    timestamp REAL
+                );
+
+                CREATE TABLE IF NOT EXISTS command_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    command_type TEXT NOT NULL,
+                    agent_id TEXT,
+                    payload JSON NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at REAL NOT NULL,
+                    processed_at REAL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_chain_correlation
+                ON activation_chain(correlation_id);
                 """,
             )
 

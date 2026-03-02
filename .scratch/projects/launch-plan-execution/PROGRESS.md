@@ -2,10 +2,10 @@
 
 ## Summary
 - **Total items:** 75+
-- **Completed:** Batch 1 (25) + Batch 2 (12) + Batch 3 (10) + Batch 7 (4) + Batch 8 (22) + Batch 4 (9) = 82
-- **In progress:** Batch 5 (Post-Unification Cleanup) — next
-- **Remaining:** Batch 5, 6
-- **Test suite:** 502 passed, 2 xfailed
+- **Completed:** Batches 1, 2, 3, 7, 8, 4, 5, 6.1, 6.2, 6.3, 6.4, 6.5
+- **In progress:** Batch 6.6 (delete dataclass remnants)
+- **Remaining:** Batch 6.6
+- **Test suite:** 638 passed, 2 xfailed
 
 ---
 
@@ -133,12 +133,12 @@
 
 ---
 
-## Batch 5: Post-Unification Cleanup
+## Batch 5: Post-Unification Cleanup — COMPLETE (commit `9b9171a`)
 
 | # | Ref | Description | Status |
 |---|-----|-------------|--------|
-| 5.1 | D1 | Delete `agent_state.py` | pending |
-| 5.2 | D2 | Remove SwarmState `agents` table | pending |
+| 5.1 | D1 | Delete `agent_state.py` | done |
+| 5.2 | D2 | Remove SwarmState `agents` table | done |
 | 5.3 | D13 | Clean `remora/__init__.py` re-exports | done (completed in Batch 4) |
 | 5.4 | D14 | Clean `core/__init__.py` re-exports | done (completed in Batch 4) |
 
@@ -148,9 +148,9 @@
 
 | # | Ref | Description | Status |
 |---|-----|-------------|--------|
-| 6.1 | 2.1 | Unify event models → frozen Pydantic | pending |
-| 6.2 | 2.3 | Pydantic Config (BaseSettings) | pending |
-| 6.3 | 2.4 | Single SQLite database | pending |
-| 6.4 | 2.5 | Typed externals protocol | pending |
-| 6.5 | 2.6 | Kernel factory | pending |
+| 6.1 | 2.1 | Unify event models → frozen Pydantic | done (commit `b4f54d9`) |
+| 6.2 | 2.3 | Pydantic Config (BaseSettings) | done (commit `b4f54d9`) |
+| 6.3 | 2.4 | Single SQLite database | done |
+| 6.4 | 2.5 | Typed externals protocol (AgentContext) | done (commit `b4f54d9`) |
+| 6.5 | 2.6 | Kernel factory | done (commit `b4f54d9`) |
 | 6.6 | D9 | Delete stdlib dataclass models | pending |

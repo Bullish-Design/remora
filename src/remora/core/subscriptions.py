@@ -91,19 +91,51 @@ class SubscriptionRegistry:
 
     Manages persistent subscriptions in SQLite and provides
     pattern matching for event routing.
+
+    Can operate in two modes:
+    - **Standalone**: pass ``db_path`` and the registry opens its own SQLite
+      connection and creates the subscriptions table.
+    - **Shared**: pass ``connection`` and ``lock`` from an ``EventStore``
+      instance.  The subscriptions table is assumed to already exist
+      (created by ``EventStore.initialize()``).
     """
 
-    def __init__(self, db_path: PathLike):
-        self._db_path = normalize_path(db_path)
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Any = None
-        self._lock = asyncio.Lock()
+    def __init__(
+        self,
+        db_path: PathLike | None = None,
+        *,
+        connection: Any = None,
+        lock: asyncio.Lock | None = None,
+    ):
+        # Shared-connection mode
+        if connection is not None:
+            self._db_path: Path | None = None
+            self._conn = connection
+            self._lock = lock or asyncio.Lock()
+            self._shared = True
+        else:
+            # Standalone mode (backward compat)
+            if db_path is None:
+                raise TypeError("Either db_path or connection must be provided")
+            self._db_path = normalize_path(db_path)
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn: Any = None
+            self._lock = asyncio.Lock()
+            self._shared = False
+
         # In-memory cache: maps event_type -> list of (agent_id, SubscriptionPattern)
         # None means cache is invalidated and must be rebuilt from DB.
         self._cache: dict[str, list[tuple[str, SubscriptionPattern]]] | None = None
 
     async def initialize(self) -> None:
-        """Initialize the database and create tables."""
+        """Initialize the database and create tables.
+
+        No-op when using a shared connection (tables created by EventStore).
+        """
+        if self._shared:
+            # Tables already created by EventStore.initialize()
+            return
+
         async with self._lock:
             if self._conn is not None:
                 return
@@ -309,8 +341,14 @@ class SubscriptionRegistry:
         self._cache = cache
 
     async def close(self) -> None:
-        """Close the database connection."""
+        """Close the database connection.
+
+        Skips closing when using a shared connection (owned by EventStore).
+        """
         self._cache = None
+        if self._shared:
+            # Don't close shared connection — it's owned by EventStore
+            return
         if self._conn:
             self._conn.close()
             self._conn = None

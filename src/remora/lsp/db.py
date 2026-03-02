@@ -35,17 +35,40 @@ class RemoraDB:
     Node state lives in EventStore (core). Event storage also lives in EventStore.
     This DB holds LSP-specific operational state that doesn't belong in the
     event-sourced core.
+
+    Can operate in two modes:
+    - **Standalone**: pass ``db_path`` and the DB opens its own SQLite
+      connection and creates tables.
+    - **Shared**: pass ``connection`` and ``lock`` from an ``EventStore``
+      instance.  Tables are assumed to already exist (created by
+      ``EventStore.initialize()``).
     """
 
-    def __init__(self, db_path: str = ".remora/indexer.db"):
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA synchronous=NORMAL")
-        self.conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
-        self._init_schema()
+    def __init__(
+        self,
+        db_path: str = ".remora/indexer.db",
+        *,
+        connection: sqlite3.Connection | None = None,
+        lock: object | None = None,
+    ):
+        if connection is not None:
+            # Shared-connection mode — tables already created by EventStore
+            self.db_path: Path | None = None
+            self.conn = connection
+            self.conn.row_factory = sqlite3.Row
+            self._lock = threading.Lock() if lock is None else threading.Lock()
+            self._shared = True
+        else:
+            # Standalone mode (backward compat)
+            self.db_path = Path(db_path)
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA synchronous=NORMAL")
+            self.conn.row_factory = sqlite3.Row
+            self._lock = threading.Lock()
+            self._shared = False
+            self._init_schema()
 
     def _init_schema(self):
         cursor = self.conn.cursor()
@@ -253,4 +276,7 @@ class RemoraDB:
         self.conn.commit()
 
     def close(self) -> None:
+        if self._shared:
+            # Don't close shared connection — it's owned by EventStore
+            return
         self.conn.close()
