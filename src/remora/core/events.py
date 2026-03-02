@@ -150,6 +150,8 @@ class NodeDiscoveredEvent:
     source_code: str
     source_hash: str
     parent_id: str | None = None
+    start_byte: int = 0
+    end_byte: int = 0
     timestamp: float = field(default_factory=time.time)
 
 

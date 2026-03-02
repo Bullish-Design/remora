@@ -106,6 +106,8 @@ class EventStore:
                     file_path       TEXT NOT NULL,
                     start_line      INTEGER NOT NULL,
                     end_line        INTEGER NOT NULL,
+                    start_byte      INTEGER NOT NULL DEFAULT 0,
+                    end_byte        INTEGER NOT NULL DEFAULT 0,
                     source_code     TEXT NOT NULL,
                     source_hash     TEXT NOT NULL,
                     parent_id       TEXT,
@@ -159,6 +161,24 @@ class EventStore:
             await asyncio.to_thread(
                 self._conn.execute,
                 "ALTER TABLE events ADD COLUMN tags TEXT",
+            )
+
+        # Migrate nodes table: add start_byte/end_byte for existing DBs
+        cursor = await asyncio.to_thread(
+            self._conn.execute,
+            "PRAGMA table_info(nodes)",
+        )
+        node_columns = {row["name"] for row in cursor.fetchall()}
+
+        if "start_byte" not in node_columns:
+            await asyncio.to_thread(
+                self._conn.execute,
+                "ALTER TABLE nodes ADD COLUMN start_byte INTEGER NOT NULL DEFAULT 0",
+            )
+        if "end_byte" not in node_columns:
+            await asyncio.to_thread(
+                self._conn.execute,
+                "ALTER TABLE nodes ADD COLUMN end_byte INTEGER NOT NULL DEFAULT 0",
             )
 
     async def append(

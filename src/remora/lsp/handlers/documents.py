@@ -42,6 +42,8 @@ async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
                     source_code=nd["source_code"],
                     source_hash=nd["source_hash"],
                     parent_id=nd["parent_id"],
+                    start_byte=nd.get("start_byte", 0),
+                    end_byte=nd.get("end_byte", 0),
                 )
                 await server.event_store.append("nodes", event)
 
@@ -132,6 +134,8 @@ async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
                     source_code=nd["source_code"],
                     source_hash=nd["source_hash"],
                     parent_id=nd["parent_id"],
+                    start_byte=nd.get("start_byte", 0),
+                    end_byte=nd.get("end_byte", 0),
                 )
                 await server.event_store.append("nodes", event)
 

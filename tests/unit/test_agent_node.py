@@ -142,6 +142,32 @@ class TestAgentNodeToSystemPrompt:
         assert "/src/billing.py" in prompt
         assert "def calculate_total" in prompt
 
+    def test_prompt_language_from_python_file(self):
+        node = _make_node(file_path="/src/billing.py")
+        prompt = node.to_system_prompt()
+        assert "Python" in prompt
+        assert "```python" in prompt
+
+    def test_prompt_language_from_typescript_file(self):
+        node = _make_node(file_path="/src/billing.ts")
+        prompt = node.to_system_prompt()
+        assert "TypeScript" in prompt
+        assert "```typescript" in prompt
+
+    def test_prompt_language_from_markdown_file(self):
+        node = _make_node(file_path="/docs/README.md")
+        prompt = node.to_system_prompt()
+        assert "Markdown" in prompt
+        assert "```markdown" in prompt
+
+    def test_prompt_language_unknown_extension(self):
+        node = _make_node(file_path="/src/data.xyz")
+        prompt = node.to_system_prompt()
+        # Should not say "Python" for unknown extensions
+        assert "Python" not in prompt
+        # Should still mention the node type without a language prefix
+        assert "a function" in prompt
+
     def test_prompt_with_extension(self):
         node = _make_node(
             extension_name="TestAgent",

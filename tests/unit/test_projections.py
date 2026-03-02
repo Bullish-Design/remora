@@ -112,6 +112,37 @@ class TestProjectNodeDiscovered:
         assert node.node_id == "abc123"
         assert node.name == "calculate_total"
 
+    @pytest.mark.asyncio
+    async def test_byte_offsets_projected(self, store: EventStore, projection: NodeProjection):
+        """start_byte and end_byte should be stored in the nodes table."""
+        event = _discovered_event(start_byte=100, end_byte=450)
+        projection.apply(store._conn, event)
+
+        row = store._conn.execute("SELECT * FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
+        assert row["start_byte"] == 100
+        assert row["end_byte"] == 450
+
+    @pytest.mark.asyncio
+    async def test_byte_offsets_hydrate_to_agent_node(self, store: EventStore, projection: NodeProjection):
+        """start_byte and end_byte should round-trip through AgentNode.from_row."""
+        event = _discovered_event(start_byte=100, end_byte=450)
+        projection.apply(store._conn, event)
+
+        row = store._conn.execute("SELECT * FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
+        node = AgentNode.from_row(row)
+        assert node.start_byte == 100
+        assert node.end_byte == 450
+
+    @pytest.mark.asyncio
+    async def test_byte_offsets_default_zero(self, store: EventStore, projection: NodeProjection):
+        """When not specified, start_byte and end_byte should default to 0."""
+        event = _discovered_event()
+        projection.apply(store._conn, event)
+
+        row = store._conn.execute("SELECT * FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
+        assert row["start_byte"] == 0
+        assert row["end_byte"] == 0
+
 
 class TestProjectStatusUpdates:
     @pytest.mark.asyncio

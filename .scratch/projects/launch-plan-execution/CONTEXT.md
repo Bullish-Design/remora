@@ -1,15 +1,20 @@
 # CONTEXT — Launch Plan Execution
 
 ## Current State
-- **Active batch:** Batch 1 COMPLETE — ready to commit and start Batch 2
-- **Next action:** Commit Batch 1, then begin Batch 2 (Track B Medium Items), item 2.1
+- **Active batch:** Batch 2 (Track B Medium Items) — item 2.7 COMPLETE, moving to 2.8
+- **Next action:** Item 2.8 (Parameterize language in system prompt)
 
 ## What Just Happened
-- Completed all 25 Batch 1 items (Track A Quick Fixes)
-- Fixed remaining items 1.24 (watcher double-parse — confirmed false positive) and 1.25 (code fence language tags)
-- Fixed LSP test `test_lsp_handlers_register_and_advertise_capabilities` — `workspace/executeCommand` is a pygls builtin_feature, not a user feature; also removed broken `server_capabilities` monkey-patch test
-- Full test suite passes (only failure: `test_real_vllm_grail_tool_execution` — needs running vLLM server, infrastructure only)
-- PROGRESS.md updated with all Batch 1 items marked done
+- Completed item 2.7: Added `start_byte`/`end_byte` to `NodeDiscoveredEvent`
+  - Added fields with default=0 to `NodeDiscoveredEvent` (events.py)
+  - Added columns to nodes table schema (event_store.py)
+  - Added migration for existing DBs in `_migrate_routing_fields()`
+  - Updated `NodeProjection` row dict + ON CONFLICT upsert clause
+  - Added `start_byte`/`end_byte` to `AgentNode` Pydantic model
+  - Updated watcher to emit byte offsets (tree-sitter nodes provide them; fallback uses 0)
+  - Updated all 3 LSP handler call sites to pass `nd.get("start_byte", 0)`
+  - Wrote TDD tests in test_node_events.py and test_projections.py
+  - Full test suite passes (only failure: `test_real_vllm_grail_tool_execution` — needs running vLLM server)
 
 ## Key Context for Resumption
 - Master task list: `REMORA_LAUNCH_PLAN.md` (root)
@@ -19,49 +24,19 @@
 - All work is in `src/remora/` — `remora_demo/` is out of scope
 - Tests in `tests/unit/test_graph_*.py` and `tests/unit/test_web_layout.py` depend on `remora_demo` — ignore them
 
-## All Batch 1 Changes (uncommitted)
-
-**Source files modified:**
-- `src/remora/core/swarm_executor.py` — fixes 1.1 (emit_event), 1.2 (model_name), 1.25 (code fence lang tags + `_lang_tag_for` helper + `_LANG_TAGS` dict)
-- `src/remora/core/chat.py` — fix 1.3 (.close() not .cleanup())
-- `src/remora/core/projections.py` — fixes 1.4 (`_dataclass_default`), 1.5 (removed conn.commit())
-- `src/remora/core/agent_node.py` — fixes 1.4 (asdict), 1.22 (removed hashlib)
-- `src/remora/core/event_store.py` — fix 1.5 (single txn commit after projection)
-- `src/remora/core/discovery.py` — fixes 1.10 (TreeSitterDiscoverer), 1.11 (NodeType, Enum import)
-- `src/remora/core/config.py` — fix 1.16 (consolidated ConfigError import)
-- `src/remora/core/events.py` — fix 1.23 (tags → tuple[str, ...])
-- `src/remora/cli/main.py` — fixes 1.6 (nvim removal), 1.23 (tags tuple)
-- `src/remora/ui/view.py` — fix 1.14 (removed render_tag)
-- `src/remora/ui/__init__.py` — fix 1.14 (removed render_tag export)
-- `src/remora/core/__init__.py` — fixes 1.10, 1.11 (removed exports)
-- `src/remora/__init__.py` — fixes 1.10, 1.11 (removed exports)
-- `src/remora/service/handlers.py` — fix 1.23 (tags tuple)
-
-**Test files modified:**
-- `tests/integration/test_lsp_integration.py` — fix 1.17 (imports + corrected capability assertions)
-- `tests/roundtrip/run_harness.py` — fix 1.11 (NodeType → string list)
-
-**Deleted files:**
-- `src/remora/nvim/` (entire package)
-- `src/remora/core/vcs.py`
-- `plugin/remora_nvim.lua` + `plugin/` directory
-- `load.vim`
-- `tests/helpers.py`
-- `tests/fixtures/mock_llm.py`
-
-## Key Decisions
-- `NodeType` enum → plain string list `["file", "class", "function", "method", "section", "table"]`
-- Projection `conn.commit()` removed — EventStore owns the single commit
-- `_dataclass_default` helper for recursive dataclass→JSON serialization
-- `AgentMessageEvent.tags` → immutable `tuple[str, ...]`
-- LSP `__init__.py` exports verified correct — no changes needed
-- Neovim Lua files (N1-N4) already deleted — N/A
-- Watcher double-parse (L4) — false positive, single parse at line 47
-- LSP test: `workspace/executeCommand` is a pygls builtin, not user feature; test updated to check `fm.builtin_features` and `fm.commands`
+## Batch 2 Remaining Items (suggested order)
+- **2.8**: Parameterize language in system prompt (`agent_node.py:128` hardcodes "Python")
+- **2.3**: Hardcoded LLM configs — short-term fix (make `lsp/__main__.py` read from Config)
+- **2.6**: Populate or remove `last_trigger_event` dead schema
+- **2.2**: SubscribeTool self-referencing bug (needs design decision)
+- **2.5**: Widen `AgentExtension.matches()` API
+- **2.4**: Reconciler stale metadata bug
+- **2.9**: Subscription index for O(1) lookup
+- **2.1**: RemoraDB dual-write elimination (largest item, ~1 day)
+- **2.10–2.12**: Test writing (ChatSession, service/, Phase 1 gaps)
 
 ## How to Resume
 1. Read `.scratch/CRITICAL_RULES.md`
 2. Read `.scratch/REPO_RULES.md`
 3. Read this file
-4. Commit Batch 1 changes
-5. Begin Batch 2 item 2.1 (RemoraDB dual-write elimination)
+4. Continue with next Batch 2 item (2.8)

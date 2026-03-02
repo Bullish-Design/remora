@@ -9,11 +9,26 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import asdict, dataclass, is_dataclass
+from pathlib import PurePosixPath
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from remora.core.subscriptions import SubscriptionPattern
+
+# Maps file extensions to (display name, code fence language)
+_LANG_BY_EXT: dict[str, tuple[str, str]] = {
+    ".py": ("Python", "python"),
+    ".js": ("JavaScript", "javascript"),
+    ".ts": ("TypeScript", "typescript"),
+    ".go": ("Go", "go"),
+    ".rs": ("Rust", "rust"),
+    ".md": ("Markdown", "markdown"),
+    ".toml": ("TOML", "toml"),
+    ".yaml": ("YAML", "yaml"),
+    ".yml": ("YAML", "yaml"),
+    ".json": ("JSON", "json"),
+}
 
 
 @dataclass
@@ -64,6 +79,8 @@ class AgentNode(BaseModel):
     file_path: str
     start_line: int
     end_line: int
+    start_byte: int = 0
+    end_byte: int = 0
     source_code: str
     source_hash: str
 
@@ -125,7 +142,10 @@ class AgentNode(BaseModel):
 
     def to_system_prompt(self) -> str:
         """Generate the LLM system prompt from all fields."""
-        prompt = f"""You are an autonomous AI agent embodying a Python {self.node_type}: `{self.name}`
+        ext = PurePosixPath(self.file_path).suffix.lower()
+        lang_display, lang_fence = _LANG_BY_EXT.get(ext, ("", ""))
+        lang_prefix = f"{lang_display} " if lang_display else ""
+        prompt = f"""You are an autonomous AI agent embodying a {lang_prefix}{self.node_type}: `{self.name}`
 
 # Identity
 - Node ID: {self.node_id}
@@ -133,7 +153,7 @@ class AgentNode(BaseModel):
 - Parent: {self.parent_id or "None (top-level)"}
 
 # Your Source Code
-```python
+```{lang_fence}
 {self.source_code}
 ```
 

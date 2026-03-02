@@ -191,6 +191,8 @@ def main(
                                 source_code=node_dict["source_code"],
                                 source_hash=node_dict["source_hash"],
                                 parent_id=node_dict.get("parent_id"),
+                                start_byte=node_dict.get("start_byte", 0),
+                                end_byte=node_dict.get("end_byte", 0),
                             ),
                         )
                     for removed_id in old_ids - new_ids:

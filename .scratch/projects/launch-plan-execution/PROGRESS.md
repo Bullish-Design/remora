@@ -50,8 +50,8 @@
 | 2.4 | 1.8 | Reconciler stale metadata bug | pending |
 | 2.5 | 2.2 | Widen `AgentExtension.matches()` API | pending |
 | 2.6 | 2.7 | Populate/remove `last_trigger_event` | pending |
-| 2.7 | 2.8 | Add `start_byte`/`end_byte` to NodeDiscoveredEvent | pending |
-| 2.8 | 2.10 | Parameterize language in system prompt | pending |
+| 2.7 | 2.8 | Add `start_byte`/`end_byte` to NodeDiscoveredEvent | done |
+| 2.8 | 2.10 | Parameterize language in system prompt | done |
 | 2.9 | 2.11 | Subscription index for O(1) lookup | pending |
 | 2.10 | 4.2 | Write ChatSession tests | pending |
 | 2.11 | 4.4 | Write service/ package tests | pending |
