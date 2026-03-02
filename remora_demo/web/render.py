@@ -85,7 +85,7 @@ def render_graph(snapshot: GraphSnapshot) -> str:
     if not snapshot.nodes:
         return '<div id="graph-content"><div class="empty-state">No nodes indexed yet</div></div>'
 
-    layout = compute_layout(snapshot.nodes, snapshot.edges)
+    layout = compute_layout(snapshot.nodes, snapshot.edges, snapshot.cursor_focus)
     edge_paths = compute_edge_paths(layout.positions, snapshot.edges)
 
     focused_id = snapshot.cursor_focus.get("agent_id") if snapshot.cursor_focus else None
@@ -113,6 +113,10 @@ def render_graph(snapshot: GraphSnapshot) -> str:
         if pos:
             is_focused = nid == focused_id
             parts.append(_render_node(node, pos, is_focused))
+
+    # Render collapsed directory summaries
+    for collapsed in layout.collapsed_dirs:
+        parts.append(_render_collapsed_dir(collapsed))
 
     parts.append("</div>")
 
@@ -215,6 +219,24 @@ def _render_dir_group_box(group: DirGroupBox) -> str:
         f'style="left:{group.x}px;top:{group.y}px;'
         f'width:{group.w}px;height:{group.h}px;">'
         f'<div class="dir-group-label">{label}</div>'
+        f"</div>"
+    )
+
+
+def _render_collapsed_dir(collapsed: CollapsedDir) -> str:
+    label = html.escape(collapsed.label)
+    file_s = "file" if collapsed.file_count == 1 else "files"
+    node_s = "node" if collapsed.node_count == 1 else "nodes"
+    subtitle = f"{collapsed.file_count} {file_s}, {collapsed.node_count} {node_s}"
+    return (
+        f'<div class="collapsed-dir" '
+        f'style="left:{collapsed.x}px;top:{collapsed.y}px;'
+        f'width:{collapsed.w}px;height:{collapsed.h}px;">'
+        f'<span class="collapsed-dir-icon">&#128193;</span>'
+        f'<div class="collapsed-dir-text">'
+        f'<span class="collapsed-dir-name">{label}</span>'
+        f'<span class="collapsed-dir-count">{subtitle}</span>'
+        f"</div>"
         f"</div>"
     )
 
@@ -518,6 +540,46 @@ body {
 }
 
 .edge-layer { position: absolute; top: 0; left: 0; pointer-events: none; }
+
+.collapsed-dir {
+    position: absolute;
+    background: var(--surface);
+    border: 1px dashed var(--surface2);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    cursor: default;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+}
+
+.collapsed-dir:hover { opacity: 0.85; }
+
+.collapsed-dir-icon { font-size: 16px; flex-shrink: 0; }
+
+.collapsed-dir-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    overflow: hidden;
+}
+
+.collapsed-dir-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--subtext);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.collapsed-dir-count {
+    font-size: 9px;
+    color: var(--gray);
+    white-space: nowrap;
+}
 """
 
 
