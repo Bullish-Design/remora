@@ -4,16 +4,17 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, ConfigDict
 
-from remora.lsp.extensions import load_extensions_from_disk
+from remora.core.agent_node import AgentNode
+from remora.extensions import load_extensions
 from remora.lsp.models import (
     AgentErrorEvent,
     AgentEvent,
     AgentMessageEvent,
-    ASTAgentNode,
     HumanChatEvent,
     RewriteProposal,
     RewriteProposalEvent,
@@ -225,11 +226,8 @@ class AgentRunner:
         elif cmd_type == "execute_tool" and agent_id:
             tool_name = payload.get("tool_name", "")
             tool_params = payload.get("params", {})
-            node = await self.server.db.get_node(agent_id)
-            if node and tool_name:
-                from remora.lsp.models import ASTAgentNode
-
-                agent = ASTAgentNode(**node)
+            agent = await self.server.event_store.get_node(agent_id)
+            if agent and tool_name:
                 await self.execute_extension_tool(agent, tool_name, tool_params, self.server.generate_correlation_id())
         else:
             logger.warning("Unknown command type: %s", cmd_type)
@@ -263,19 +261,17 @@ class AgentRunner:
         correlation_id = trigger.correlation_id
         logger.info("execute_turn: START agent=%s corr=%s", agent_id, correlation_id)
 
-        await self.server.db.set_status(agent_id, "running")
+        await self.server.event_store.set_node_status(agent_id, "running")
         await refresh_code_lenses()
         await self.server.db.add_to_chain(correlation_id, agent_id)
 
-        node = await self.server.db.get_node(agent_id)
-        if not node:
-            logger.error("execute_turn: node %s not found in DB!", agent_id)
+        agent = await self.server.event_store.get_node(agent_id)
+        if not agent:
+            logger.error("execute_turn: node %s not found in EventStore!", agent_id)
             await self.emit_error(agent_id, "Node not found", correlation_id)
             return
 
-        logger.info(
-            "execute_turn: node found: %s (%s) file=%s", node["name"], node["node_type"], node.get("file_path", "?")
-        )
+        logger.info("execute_turn: node found: %s (%s) file=%s", agent.name, agent.node_type, agent.file_path)
 
         try:
             if self.executor:
@@ -284,7 +280,6 @@ class AgentRunner:
                     trigger_event = await self._build_trigger_event(trigger)
                     await self.executor.run_agent(state, trigger_event)
             else:
-                agent = ASTAgentNode(**node)
                 agent = self.apply_extensions(agent)
 
                 messages = [
@@ -351,7 +346,7 @@ class AgentRunner:
         except Exception as e:
             await self.emit_error(agent_id, str(e), correlation_id)
         finally:
-            await self.server.db.set_status(agent_id, "active")
+            await self.server.event_store.set_node_status(agent_id, "idle")
             await refresh_code_lenses()
 
     async def _load_agent_state(self, agent_id: str) -> Any:
@@ -390,7 +385,7 @@ class AgentRunner:
                 logger.warning("_extract_text_tool_calls: failed to parse: %s", m.group(1)[:200])
         return calls
 
-    async def handle_response(self, agent: ASTAgentNode, response: LLMResponse, correlation_id: str) -> list[dict]:
+    async def handle_response(self, agent: AgentNode, response: LLMResponse, correlation_id: str) -> list[dict]:
         """Process an LLM response, executing any tool calls.
 
         Returns a list of tool result dicts ``[{"tool": name, "result": text}, ...]``
@@ -409,17 +404,17 @@ class AgentRunner:
                 logger.info(
                     "handle_response: extracted %d tool call(s) from text content for agent %s",
                     len(tool_calls),
-                    agent.remora_id,
+                    agent.node_id,
                 )
 
         if not tool_calls:
             # Text-only response — emit as an event so the UI can show it
             if response.content:
-                logger.info("Agent %s responded with text: %s", agent.remora_id, response.content[:200])
+                logger.info("Agent %s responded with text: %s", agent.node_id, response.content[:200])
                 await emit_event(
                     AgentEvent(
                         event_type="AgentTextResponse",
-                        agent_id=agent.remora_id,
+                        agent_id=agent.node_id,
                         correlation_id=correlation_id,
                         summary=response.content[:200],
                         timestamp=0.0,
@@ -438,13 +433,13 @@ class AgentRunner:
                     await emit_event(
                         AgentEvent(
                             event_type="ToolResultEvent",
-                            agent_id=agent.remora_id,
+                            agent_id=agent.node_id,
                             correlation_id=correlation_id,
                             summary="rewrite_self",
                             timestamp=0.0,
                             payload={
                                 "tool_name": "rewrite_self",
-                                "target_id": agent.remora_id,
+                                "target_id": agent.node_id,
                                 "result_summary": f"proposal created — {len(new_source)} chars",
                             },
                         )
@@ -456,7 +451,7 @@ class AgentRunner:
                     # Resolve symbolic target names
                     if target_id == "parent" and agent.parent_id:
                         logger.info(
-                            "message_node: resolved 'parent' -> %s for agent %s", agent.parent_id, agent.remora_id
+                            "message_node: resolved 'parent' -> %s for agent %s", agent.parent_id, agent.node_id
                         )
                         target_id = agent.parent_id
                     message = tool_call.arguments.get("message", "")
@@ -464,18 +459,18 @@ class AgentRunner:
                         logger.warning(
                             "message_node: unresolved target_id=%r for agent %s (no parent?)",
                             target_id,
-                            agent.remora_id,
+                            agent.node_id,
                         )
                         await self.emit_error(
-                            agent.remora_id, f"Cannot resolve message target: {target_id!r}", correlation_id
+                            agent.node_id, f"Cannot resolve message target: {target_id!r}", correlation_id
                         )
                     else:
-                        await self.message_node(agent.remora_id, target_id, message, correlation_id)
+                        await self.message_node(agent.node_id, target_id, message, correlation_id)
                         # Emit event so the panel can show the tool call
                         await emit_event(
                             AgentEvent(
                                 event_type="ToolResultEvent",
-                                agent_id=agent.remora_id,
+                                agent_id=agent.node_id,
                                 correlation_id=correlation_id,
                                 summary=f"message_node({target_id})",
                                 timestamp=0.0,
@@ -491,16 +486,16 @@ class AgentRunner:
                 case "read_node":
                     target_id = tool_call.arguments.get("target_id", "")
                     if target_id == "parent" and agent.parent_id:
-                        logger.info("read_node: resolved 'parent' -> %s for agent %s", agent.parent_id, agent.remora_id)
+                        logger.info("read_node: resolved 'parent' -> %s for agent %s", agent.parent_id, agent.node_id)
                         target_id = agent.parent_id
-                    target = await self.server.db.get_node(target_id)
+                    target = await self.server.event_store.get_node(target_id)
                     if target:
                         result_text = json.dumps(
                             {
-                                "name": target["name"],
-                                "type": target["node_type"],
-                                "source": target.get("source_code", ""),
-                                "file": target.get("file_path", ""),
+                                "name": target.name,
+                                "type": target.node_type,
+                                "source": target.source_code,
+                                "file": target.file_path,
                             },
                             indent=2,
                         )
@@ -510,14 +505,14 @@ class AgentRunner:
                         await emit_event(
                             AgentEvent(
                                 event_type="ToolResultEvent",
-                                agent_id=agent.remora_id,
+                                agent_id=agent.node_id,
                                 correlation_id=correlation_id,
                                 summary=f"read_node({target_id})",
                                 timestamp=0.0,
                                 payload={
                                     "tool_name": "read_node",
                                     "target_id": target_id,
-                                    "result_summary": f"{target['name']} ({target['node_type']}) — {len(target.get('source_code', ''))} chars",
+                                    "result_summary": f"{target.name} ({target.node_type}) — {len(target.source_code)} chars",
                                 },
                             )
                         )
@@ -527,7 +522,7 @@ class AgentRunner:
                         await emit_event(
                             AgentEvent(
                                 event_type="ToolResultEvent",
-                                agent_id=agent.remora_id,
+                                agent_id=agent.node_id,
                                 correlation_id=correlation_id,
                                 summary=f"read_node({target_id}) — not found",
                                 timestamp=0.0,
@@ -544,13 +539,13 @@ class AgentRunner:
 
         return tool_results
 
-    async def create_proposal(self, agent: ASTAgentNode, new_source: str, correlation_id: str) -> None:
+    async def create_proposal(self, agent: AgentNode, new_source: str, correlation_id: str) -> None:
         from remora.lsp.server import emit_event, publish_diagnostics, refresh_code_lenses
 
         proposal_id = generate_id()
         proposal = RewriteProposal(
             proposal_id=proposal_id,
-            agent_id=agent.remora_id,
+            agent_id=agent.node_id,
             file_path=agent.file_path,
             old_source=agent.source_code,
             new_source=new_source,
@@ -560,19 +555,20 @@ class AgentRunner:
         )
 
         self.server.proposals[proposal_id] = proposal
-        await self.server.db.set_pending_proposal(agent.remora_id, proposal_id)
-        await self.server.db.set_status(agent.remora_id, "pending_approval")
-        await self.server.db.store_proposal(proposal_id, agent.remora_id, agent.source_code, new_source, proposal.diff)
+        await self.server.db.set_pending_proposal(agent.node_id, proposal_id)
+        await self.server.event_store.set_node_status(agent.node_id, "pending_approval")
+        await self.server.db.store_proposal(proposal_id, agent.node_id, agent.source_code, new_source, proposal.diff)
 
         await publish_diagnostics(agent.file_path, [proposal])
         await refresh_code_lenses()
 
         await emit_event(
             RewriteProposalEvent(
-                agent_id=agent.remora_id,
+                agent_id=agent.node_id,
                 proposal_id=proposal_id,
                 diff=proposal.diff,
                 correlation_id=correlation_id,
+                timestamp=0.0,
             )
         )
 
@@ -589,11 +585,11 @@ class AgentRunner:
     async def refresh_code_lens(self, agent_id: str) -> None:
         from remora.lsp.server import refresh_code_lenses
 
-        node = await self.server.db.get_node(agent_id)
+        node = await self.server.event_store.get_node(agent_id)
         if node:
             await refresh_code_lenses()
 
-    def get_agent_tools(self, agent: ASTAgentNode) -> list[dict]:
+    def get_agent_tools(self, agent: AgentNode) -> list[dict]:
         tools = [
             {
                 "type": "function",
@@ -620,7 +616,7 @@ class AgentRunner:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "target_id": {"type": "string", "description": "The remora_id of the target agent"},
+                            "target_id": {"type": "string", "description": "The node_id of the target agent"},
                             "message": {"type": "string", "description": "Message to send to the target agent"},
                         },
                         "required": ["target_id", "message"],
@@ -635,7 +631,7 @@ class AgentRunner:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "target_id": {"type": "string", "description": "The remora_id of the target agent"}
+                            "target_id": {"type": "string", "description": "The node_id of the target agent"}
                         },
                         "required": ["target_id"],
                     },
@@ -648,28 +644,26 @@ class AgentRunner:
 
         return tools
 
-    def apply_extensions(self, agent: ASTAgentNode) -> ASTAgentNode:
-        extensions = load_extensions_from_disk()
+    def apply_extensions(self, agent: AgentNode) -> AgentNode:
+        extensions = load_extensions(Path(".remora/models"))
 
         for ext_cls in extensions:
             if ext_cls.matches(agent.node_type, agent.name):
-                ext = ext_cls()
-                agent.custom_system_prompt = ext.system_prompt
-                agent.mounted_workspaces = ext.get_workspaces()
-                agent.extra_tools = ext.get_tool_schemas()
+                data = ext_cls.get_extension_data()
+                for key, value in data.items():
+                    if hasattr(agent, key):
+                        setattr(agent, key, value)
                 break
 
         return agent
 
-    async def execute_extension_tool(
-        self, agent: ASTAgentNode, tool_name: str, params: dict, correlation_id: str
-    ) -> None:
+    async def execute_extension_tool(self, agent: AgentNode, tool_name: str, params: dict, correlation_id: str) -> None:
         from remora.lsp.server import emit_event
 
         await emit_event(
             AgentEvent(
                 event_type="ToolResultEvent",
-                agent_id=agent.remora_id,
+                agent_id=agent.node_id,
                 correlation_id=correlation_id,
                 summary=f"Tool {tool_name} executed",
                 timestamp=0.0,
