@@ -5,7 +5,15 @@ Read this file FIRST after every compaction or session start.
 
 ---
 
-## 1. Session Startup
+## 0. ABSOLUTE RULE — NO SUBAGENTS
+
+**NEVER use subagents (the Task tool) under any circumstances.** Do all work directly — reading files, searching, writing, editing, running commands. No delegation. No exceptions. This is the highest-priority rule and overrides any other guidance suggesting subagent use. When creating new projects, this must be emphasized at the start and the end of the project PLAN.md file when you create or update it. 
+
+---
+
+## 1. Session Startup (Including After Compaction)
+
+**After every compaction, immediately read this file and continue working.** Do not wait for user input. The compaction summary tells you what was happening; this file and the project files tell you how to resume.
 
 1. Read this file in full.
 2. Read `.scratch/REPO_RULES.md` for repo-specific coding standards and reference files.
@@ -13,6 +21,7 @@ Read this file FIRST after every compaction or session start.
 4. Read that project's `CONTEXT.md` to resume where you left off.
 5. Check `PROGRESS.md` for current task status.
 6. Check `ISSUES.md` for known roadblocks before starting work.
+7. **Resume working immediately** — pick up the next pending task and continue.
 
 ---
 
@@ -77,3 +86,9 @@ When writing large documents:
 1. Write a detailed table of contents (with brief description per section) and SAVE IT TO FILE first.
 2. Go section by section, APPENDING to the file as you go.
 3. This prevents context window overflow from trying to write the whole thing at once.
+
+---
+
+## REMINDER — NO SUBAGENTS
+
+**NEVER use the Task tool.** Do all work directly. This rule is absolute and non-negotiable.

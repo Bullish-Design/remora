@@ -1,5 +1,8 @@
 # Phase 2 Code Review — Assumptions
 
+## ABSOLUTE RULE — NO SUBAGENTS
+**NEVER use the Task tool.** Do all work directly — read files, search, write, edit, run commands yourself. No delegation. No exceptions.
+
 ## Purpose
 Comprehensive code review of the entire Remora codebase (excluding remora_demo/) after
 the Option A LSP→EventStore unification. Verify architectural alignment with the
@@ -23,3 +26,8 @@ EventBased_Concept.md vision, code quality, integration completeness, and test c
 3. **Integration** — do modules work together coherently?
 4. **Dead code** — stale imports, unused functions, orphaned modules
 5. **Test coverage** — gaps, quality of assertions, missing edge cases
+
+---
+
+## REMINDER — NO SUBAGENTS
+**NEVER use the Task tool.** This rule is absolute and non-negotiable.

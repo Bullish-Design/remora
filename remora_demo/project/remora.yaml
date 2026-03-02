@@ -1,0 +1,19 @@
+discovery_paths:
+  - src/
+  - tests/
+
+bundle_root: agents
+bundle_mapping:
+  function: python_function
+  method: python_function
+  class: python_class
+  file: python_file
+
+model_base_url: ${REMORA_LLM_URL:-http://localhost:8000/v1}
+model_default: ${REMORA_MODEL:-mock}
+
+swarm_root: .remora
+max_concurrency: 2
+max_turns: 5
+max_trigger_depth: 6
+trigger_cooldown_ms: 500
