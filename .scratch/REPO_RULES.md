@@ -1,13 +1,12 @@
 # REPO RULES — Remora
 
-Repo-specific coding standards and conventions. Loaded after `CRITICAL_RULES.md`.
+Repo-specific standards and conventions. Loaded after `CRITICAL_RULES.md`.
+These are **in addition to** the universal coding standards in CRITICAL_RULES.
 
 ---
 
-## Coding Standards
+## Coding Standards (repo-specific)
 
-- **TDD**: Write a failing test first, implement, verify the test passes.
-- **DRY/YAGNI**: No duplication. No speculative features.
 - **No isinstance in business logic**: Projection dispatch (internal) is the exception.
 - **AgentNode**: Single Pydantic BaseModel. No subclasses anywhere.
 

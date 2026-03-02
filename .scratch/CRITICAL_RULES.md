@@ -61,7 +61,16 @@ ALL scratch notes, working files, ad-hoc explorations, and temporary analysis fo
 
 ---
 
-## 4. Large Documents
+## 4. Coding Standards
+
+- **TDD**: Write a failing test first, implement, verify the test passes.
+- **DRY/YAGNI**: No duplication. No speculative features.
+
+`REPO_RULES.md` may add repo-specific standards on top of these.
+
+---
+
+## 5. Large Documents
 
 When writing large documents:
 
