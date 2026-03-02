@@ -11,9 +11,10 @@ from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
 from pygls.uris import to_fs_path
 
+from remora.core.agent_node import AgentNode, ToolSchema
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
-from remora.lsp.models import ASTAgentNode, RewriteProposal, ToolSchema
+from remora.lsp.models import RewriteProposal
 from remora.lsp.watcher import ASTWatcher
 
 logger = logging.getLogger("remora.lsp")
@@ -80,7 +81,7 @@ class RemoraLanguageServer(LanguageServer):
         except Exception:
             logger.warning("Failed to close LazyGraph", exc_info=True)
 
-    async def discover_tools_for_agent(self, agent: ASTAgentNode) -> list[ToolSchema]:
+    async def discover_tools_for_agent(self, agent: AgentNode) -> list[ToolSchema]:
         try:
             from remora.core.config import load_config
             from remora.core.tools.grail import discover_grail_tools
