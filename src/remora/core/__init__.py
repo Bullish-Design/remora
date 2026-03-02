@@ -1,5 +1,6 @@
 """Core Remora runtime (framework-agnostic)."""
 
+from remora.core.agent_node import AgentNode, ToolSchema as AgentToolSchema
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.cairn_externals import CairnExternals
 from remora.core.config import (
@@ -37,11 +38,14 @@ from remora.core.events import (
     KernelStartEvent,
     ModelRequestEvent,
     ModelResponseEvent,
+    NodeDiscoveredEvent,
+    NodeRemovedEvent,
     RemoraEvent,
     ToolCallEvent,
     ToolResultEvent,
     TurnCompleteEvent,
 )
+from remora.core.projections import NodeProjection
 from remora.core.reconciler import (
     get_agent_dir,
     get_agent_state_path,
@@ -60,9 +64,11 @@ __all__ = [
     "AgentCompleteEvent",
     "AgentErrorEvent",
     "AgentMessageEvent",
+    "AgentNode",
     "AgentStartEvent",
     "AgentState",
     "AgentRunner",
+    "AgentToolSchema",
     "AgentWorkspace",
     "AgentMetadata",
     "CSTNode",
@@ -84,6 +90,9 @@ __all__ = [
     "ConfigError",
     "ModelRequestEvent",
     "ModelResponseEvent",
+    "NodeDiscoveredEvent",
+    "NodeProjection",
+    "NodeRemovedEvent",
     "NodeType",
     "RemoraError",
     "RemoraEvent",
