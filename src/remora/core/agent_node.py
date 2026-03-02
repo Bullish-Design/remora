@@ -210,7 +210,13 @@ class AgentNode(BaseModel):
         if recent_events:
             lines.extend(["", "---", "", "### Recent Events"])
             for ev in recent_events:
-                lines.append(f"- `{ev.event_type}` {ev.summary}")
+                if isinstance(ev, dict):
+                    event_type = ev.get("event_type", "")
+                    summary = ev.get("payload", {}).get("summary", "")
+                else:
+                    event_type = ev.event_type
+                    summary = ev.summary
+                lines.append(f"- `{event_type}` {summary}")
         return lsp.Hover(
             contents=lsp.MarkupContent(kind=lsp.MarkupKind.Markdown, value="\n".join(lines)),
             range=self.to_range(),

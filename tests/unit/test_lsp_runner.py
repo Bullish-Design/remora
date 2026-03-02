@@ -59,7 +59,6 @@ def mock_server(event_store: EventStore) -> MagicMock:
     server.db = MagicMock()
     server.db.get_activation_chain = AsyncMock(return_value=[])
     server.db.add_to_chain = AsyncMock()
-    server.db.get_events_for_correlation = AsyncMock(return_value=[])
     server.db.set_status = AsyncMock()
     server.db.store_proposal = AsyncMock()
     server.db.update_proposal_status = AsyncMock()

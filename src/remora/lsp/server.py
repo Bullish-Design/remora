@@ -57,16 +57,9 @@ class RemoraLanguageServer(LanguageServer):
     async def emit_event(self, event) -> Any:
         if not getattr(event, "timestamp", None):
             event.timestamp = time.time()
-        await self.db.store_event(event)
 
         if self.event_store:
-            try:
-                core_event = event.to_core_event()
-            except NotImplementedError:
-                core_event = None
-            else:
-                if core_event:
-                    await self.event_store.append("swarm", core_event)
+            await self.event_store.append("swarm", event)
 
         self.protocol.notify("$/remora/event", event.model_dump())
         return event

@@ -62,9 +62,9 @@ async def cmd_get_agent_panel(ls, *args) -> dict | None:
                 {"name": t["function"]["name"], "description": t["function"].get("description", "")} for t in raw_tools
             ]
 
-        # Get recent events (newest first from DB, reverse for chronological display)
-        events = await ls.db.get_recent_events(agent.node_id, limit=50)
-        event_dicts = [e.model_dump() for e in reversed(events)]
+        # Get recent events (newest first from EventStore, reverse for chronological display)
+        events = await ls.event_store.get_recent_events(agent.node_id, limit=50)
+        event_dicts = list(reversed(events))
 
         result = {
             "agent": {

@@ -296,21 +296,80 @@ class EventStore:
             rows = await asyncio.to_thread(cursor.fetchall)
 
         for row in rows:
-            tags = row["tags"]
-            if tags:
-                tags = json.loads(tags)
-            yield {
-                "id": row["id"],
-                "graph_id": row["graph_id"],
-                "event_type": row["event_type"],
-                "payload": json.loads(row["payload"]),
-                "timestamp": row["timestamp"],
-                "created_at": row["created_at"],
-                "from_agent": row["from_agent"],
-                "to_agent": row["to_agent"],
-                "correlation_id": row["correlation_id"],
-                "tags": tags,
-            }
+            yield self._row_to_dict(row)
+
+    async def get_recent_events(
+        self,
+        agent_id: str,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Get recent events involving an agent (as sender or recipient).
+
+        Returns dicts ordered newest-first (DESC by timestamp).
+        """
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        query = """
+            SELECT * FROM events
+            WHERE from_agent = ? OR to_agent = ?
+            ORDER BY timestamp DESC, id DESC
+            LIMIT ?
+        """
+        async with self._lock:
+            cursor = await asyncio.to_thread(
+                self._conn.execute,
+                query,
+                (agent_id, agent_id, limit),
+            )
+            rows = await asyncio.to_thread(cursor.fetchall)
+
+        return [self._row_to_dict(row) for row in rows]
+
+    async def get_events_for_correlation(
+        self,
+        correlation_id: str,
+    ) -> list[dict[str, Any]]:
+        """Get all events for a correlation chain, ordered chronologically (ASC)."""
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        query = """
+            SELECT * FROM events
+            WHERE correlation_id = ?
+            ORDER BY timestamp ASC, id ASC
+        """
+        async with self._lock:
+            cursor = await asyncio.to_thread(
+                self._conn.execute,
+                query,
+                (correlation_id,),
+            )
+            rows = await asyncio.to_thread(cursor.fetchall)
+
+        return [self._row_to_dict(row) for row in rows]
+
+    def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
+        """Convert a SQLite Row to a standard event dict."""
+        tags = row["tags"]
+        if tags:
+            tags = json.loads(tags)
+        return {
+            "id": row["id"],
+            "graph_id": row["graph_id"],
+            "event_type": row["event_type"],
+            "payload": json.loads(row["payload"]),
+            "timestamp": row["timestamp"],
+            "created_at": row["created_at"],
+            "from_agent": row["from_agent"],
+            "to_agent": row["to_agent"],
+            "correlation_id": row["correlation_id"],
+            "tags": tags,
+        }
 
     async def get_graph_ids(
         self,
@@ -516,7 +575,10 @@ class EventStore:
 
     def _serialize_event(self, event: StructuredEvent | RemoraEvent) -> str:
         """Serialize an event to JSON."""
-        if is_dataclass(event):
+        if hasattr(event, "model_dump"):
+            # Pydantic model (e.g. LSP AgentEvent subclasses)
+            data = event.model_dump()
+        elif is_dataclass(event):
             data = asdict(event)
         elif hasattr(event, "__dict__"):
             data = dict(vars(event))

@@ -11,8 +11,6 @@ from typing import ParamSpec, TypeVar
 
 import sqlite3
 
-from remora.lsp.models import AgentEvent
-
 P = ParamSpec("P")
 R = TypeVar("R")
 
@@ -32,10 +30,11 @@ def async_db(fn):
 
 
 class RemoraDB:
-    """LSP-specific database for proposals, events, edges, cursor focus, and commands.
+    """LSP-specific database for proposals, edges, cursor focus, and commands.
 
-    Node state lives in EventStore (core). This DB holds LSP-specific operational
-    state that doesn't belong in the event-sourced core.
+    Node state lives in EventStore (core). Event storage also lives in EventStore.
+    This DB holds LSP-specific operational state that doesn't belong in the
+    event-sourced core.
     """
 
     def __init__(self, db_path: str = ".remora/indexer.db"):
@@ -64,15 +63,6 @@ class RemoraDB:
                 depth INTEGER NOT NULL,
                 timestamp REAL NOT NULL,
                 PRIMARY KEY (correlation_id, agent_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS events (
-                event_id TEXT PRIMARY KEY,
-                event_type TEXT NOT NULL,
-                timestamp REAL NOT NULL,
-                correlation_id TEXT,
-                agent_id TEXT,
-                payload JSON NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS proposals (
@@ -104,8 +94,6 @@ class RemoraDB:
                 processed_at REAL
             );
 
-            CREATE INDEX IF NOT EXISTS idx_events_correlation ON events(correlation_id);
-            CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id);
             CREATE INDEX IF NOT EXISTS idx_chain_correlation ON activation_chain(correlation_id);
         """)
         self.conn.commit()
@@ -130,82 +118,6 @@ class RemoraDB:
         cursor.execute("SELECT agent_id, file_path, line, timestamp FROM cursor_focus WHERE id = 1")
         row = cursor.fetchone()
         return dict(row) if row else None
-
-    # ── LSP events ────────────────────────────────────────────────────────
-
-    def _reconstruct_event(self, row: sqlite3.Row) -> AgentEvent:
-        """Reconstruct an AgentEvent from a DB row.
-
-        The payload column contains the full model_dump(), so subclass fields
-        (to_agent, message, etc.) are preserved there as extra data accessible
-        via event.payload.
-        """
-        stored = json.loads(row["payload"])
-        # Standard fields come from indexed columns (authoritative)
-        standard_keys = {"event_id", "event_type", "timestamp", "correlation_id", "agent_id", "summary", "payload"}
-        extra = {k: v for k, v in stored.items() if k not in standard_keys}
-        # Merge extra subclass fields into the payload dict
-        inner_payload = stored.get("payload", {})
-        if isinstance(inner_payload, dict):
-            extra.update(inner_payload)
-        return AgentEvent(
-            event_id=row["event_id"],
-            event_type=row["event_type"],
-            timestamp=row["timestamp"],
-            correlation_id=row["correlation_id"],
-            agent_id=row["agent_id"],
-            summary=stored.get("summary", ""),
-            payload=extra,
-        )
-
-    @async_db
-    def get_recent_events(self, agent_id: str, limit: int = 5) -> list[AgentEvent]:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT * FROM events 
-            WHERE agent_id = ?
-               OR json_extract(payload, '$.to_agent') = ?
-            ORDER BY timestamp DESC LIMIT ?
-        """,
-            (agent_id, agent_id, limit),
-        )
-        return [self._reconstruct_event(row) for row in cursor.fetchall()]
-
-    @async_db
-    def store_event(self, event: AgentEvent) -> None:
-        cursor = self.conn.cursor()
-        # Serialize the full model so subclass fields (to_agent, message, etc.)
-        # are preserved in the payload column for later reconstruction.
-        full = event.model_dump() if hasattr(event, "model_dump") else {}
-        cursor.execute(
-            """
-            INSERT INTO events (event_id, event_type, timestamp, correlation_id, agent_id, payload)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """,
-            (
-                event.event_id,
-                event.event_type,
-                event.timestamp,
-                event.correlation_id,
-                event.agent_id,
-                json.dumps(full),
-            ),
-        )
-        self.conn.commit()
-
-    @async_db
-    def get_events_for_correlation(self, correlation_id: str) -> list[AgentEvent]:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT * FROM events 
-            WHERE correlation_id = ?
-            ORDER BY timestamp ASC
-        """,
-            (correlation_id,),
-        )
-        return [self._reconstruct_event(row) for row in cursor.fetchall()]
 
     # ── Activation chain ──────────────────────────────────────────────────
 

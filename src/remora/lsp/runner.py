@@ -286,15 +286,17 @@ class AgentRunner:
                     {"role": "system", "content": agent.to_system_prompt()},
                 ]
 
-                events = await self.server.db.get_events_for_correlation(correlation_id)
+                events = await self.server.event_store.get_events_for_correlation(correlation_id)
                 logger.info("execute_turn: %d events for correlation %s", len(events), correlation_id)
                 for event in events:
-                    if event.event_type == "HumanChatEvent" and event.payload.get("to_agent") == agent_id:
-                        messages.append({"role": "user", "content": event.payload.get("message", "")})
-                    elif event.event_type == "AgentMessageEvent" and event.payload.get("to_agent") == agent_id:
-                        from_agent = event.payload.get("from_agent", "unknown")
+                    event_type = event["event_type"]
+                    payload = event.get("payload", {})
+                    if event_type == "HumanChatEvent" and payload.get("to_agent") == agent_id:
+                        messages.append({"role": "user", "content": payload.get("message", "")})
+                    elif event_type == "AgentMessageEvent" and payload.get("to_agent") == agent_id:
+                        from_agent = payload.get("from_agent", "unknown")
                         messages.append(
-                            {"role": "user", "content": f"[From {from_agent}]: {event.payload.get('message', '')}"}
+                            {"role": "user", "content": f"[From {from_agent}]: {payload.get('message', '')}"}
                         )
 
                 if trigger.context.get("rejection_feedback"):

@@ -2,7 +2,7 @@
 
 ## Summary
 - **Total items:** 75+
-- **Completed:** 33 (Batch 1 + items 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9)
+- **Completed:** 34 (Batch 1 + items 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9)
 - **In progress:** 0
 - **Blocked:** ~8 (waiting on critical path)
 
@@ -44,7 +44,7 @@
 
 | # | Ref | Description | Status |
 |---|-----|-------------|--------|
-| 2.1 | 1.4 | RemoraDB dual-write elimination | pending |
+| 2.1 | 1.4 | RemoraDB dual-write elimination | done |
 | 2.2 | 1.6 | SubscribeTool self-referencing bug | done |
 | 2.3 | 1.7 | Hardcoded LLM configs — short-term fix | done |
 | 2.4 | 1.8 | Reconciler stale metadata bug | done |
