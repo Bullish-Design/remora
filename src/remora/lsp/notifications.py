@@ -17,9 +17,9 @@ async def on_cursor_moved(params: dict) -> None:
         line = params.get("line")
         if not uri or line is None:
             return
-        # DB stores file_path as the original URI, so query and store with URI
-        node = await server.db.get_node_at_position(uri, line, 0)
-        agent_id = node["remora_id"] if node else None
+        # EventStore stores file_path as the original URI, so query and store with URI
+        node = await server.event_store.get_node_at_position(uri, line)
+        agent_id = node.node_id if node else None
         # Store the URI (not the converted path) so it matches node file_paths
         await server.db.update_cursor_focus(agent_id, uri, line)
     except Exception:
