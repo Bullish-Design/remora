@@ -6,10 +6,35 @@ from remora.lsp.models import ASTAgentNode, RewriteAppliedEvent, RewriteRejected
 from remora.lsp.server import emit_event, logger, server
 
 
+async def _resolve_agent(ls, args) -> str | None:
+    """Resolve an agent_id from cursor context {uri, line} passed as args[0]."""
+    ctx = args[0] if args else None
+    if not ctx or not isinstance(ctx, dict):
+        return None
+    uri = ctx.get("uri")
+    line = ctx.get("line")
+    if not uri or line is None:
+        return None
+    node = await ls.db.get_node_at_position(uri, line, 0)
+    if node:
+        logger.info("Resolved agent %s (%s) at %s:%s", node["remora_id"], node["name"], uri, line)
+        return node["remora_id"]
+    logger.warning("No agent found at %s:%s", uri, line)
+    return None
+
+
 @server.command("remora.chat")
 async def cmd_chat(ls, *args) -> None:
     try:
-        agent_id = args[0] if args else None
+        agent_id = await _resolve_agent(ls, args)
+        if not agent_id:
+            ls.window_show_message(
+                lsp.ShowMessageParams(
+                    type=lsp.MessageType.Warning,
+                    message="No agent found at cursor — open a Python file first",
+                )
+            )
+            return
         ls.protocol.notify(
             "$/remora/requestInput",
             {"agent_id": agent_id, "prompt": "Message to agent:"},
@@ -21,7 +46,15 @@ async def cmd_chat(ls, *args) -> None:
 @server.command("remora.requestRewrite")
 async def cmd_request_rewrite(ls, *args) -> None:
     try:
-        agent_id = args[0] if args else None
+        agent_id = await _resolve_agent(ls, args)
+        if not agent_id:
+            ls.window_show_message(
+                lsp.ShowMessageParams(
+                    type=lsp.MessageType.Warning,
+                    message="No agent found at cursor — open a Python file first",
+                )
+            )
+            return
         ls.protocol.notify(
             "$/remora/requestInput",
             {"agent_id": agent_id, "prompt": "What should this code do?"},

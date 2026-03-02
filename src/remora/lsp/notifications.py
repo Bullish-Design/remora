@@ -12,7 +12,9 @@ async def on_input_submitted(params: dict) -> None:
             message = params["input"]
 
             correlation_id = server.generate_correlation_id()
-            await emit_event(HumanChatEvent(to_agent=agent_id, message=message, correlation_id=correlation_id))
+            await emit_event(
+                HumanChatEvent(to_agent=agent_id, message=message, correlation_id=correlation_id, timestamp=0.0)
+            )
 
             if server.runner:
                 await server.runner.trigger(agent_id, correlation_id)

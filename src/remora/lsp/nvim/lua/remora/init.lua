@@ -118,13 +118,22 @@ function M.setup(opts)
         })
     end
 
+    --- Get the current buffer URI + cursor line (1-based) for agent resolution.
+    local function cursor_context()
+        local buf = vim.api.nvim_get_current_buf()
+        local uri = vim.uri_from_bufnr(buf)
+        local row, _col = unpack(vim.api.nvim_win_get_cursor(0))
+        -- row is already 1-based from nvim_win_get_cursor, matching our DB storage
+        return { uri = uri, line = row }
+    end
+
     local function setup_commands()
         vim.api.nvim_create_user_command("RemoraChat", function()
-            exec_command("remora.chat")
+            exec_command("remora.chat", { cursor_context() })
         end, {})
 
         vim.api.nvim_create_user_command("RemoraRewrite", function()
-            exec_command("remora.requestRewrite")
+            exec_command("remora.requestRewrite", { cursor_context() })
         end, {})
 
         vim.api.nvim_create_user_command("RemoraAccept", function()

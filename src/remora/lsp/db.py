@@ -182,6 +182,31 @@ class RemoraDB:
         cursor.execute("UPDATE nodes SET pending_proposal_id = NULL, status = 'active' WHERE id = ?", (node_id,))
         self.conn.commit()
 
+    def _reconstruct_event(self, row: sqlite3.Row) -> AgentEvent:
+        """Reconstruct an AgentEvent from a DB row.
+
+        The payload column contains the full model_dump(), so subclass fields
+        (to_agent, message, etc.) are preserved there as extra data accessible
+        via event.payload.
+        """
+        stored = json.loads(row["payload"])
+        # Standard fields come from indexed columns (authoritative)
+        standard_keys = {"event_id", "event_type", "timestamp", "correlation_id", "agent_id", "summary", "payload"}
+        extra = {k: v for k, v in stored.items() if k not in standard_keys}
+        # Merge extra subclass fields into the payload dict
+        inner_payload = stored.get("payload", {})
+        if isinstance(inner_payload, dict):
+            extra.update(inner_payload)
+        return AgentEvent(
+            event_id=row["event_id"],
+            event_type=row["event_type"],
+            timestamp=row["timestamp"],
+            correlation_id=row["correlation_id"],
+            agent_id=row["agent_id"],
+            summary=stored.get("summary", ""),
+            payload=extra,
+        )
+
     @async_db
     def get_recent_events(self, agent_id: str, limit: int = 5) -> list[AgentEvent]:
         cursor = self.conn.cursor()
@@ -193,20 +218,14 @@ class RemoraDB:
         """,
             (agent_id, limit),
         )
-        events = []
-        for row in cursor.fetchall():
-            payload = json.loads(row["payload"])
-            payload["event_id"] = row["event_id"]
-            payload["event_type"] = row["event_type"]
-            payload["timestamp"] = row["timestamp"]
-            payload["correlation_id"] = row["correlation_id"]
-            payload["agent_id"] = row["agent_id"]
-            events.append(AgentEvent(**payload))
-        return events
+        return [self._reconstruct_event(row) for row in cursor.fetchall()]
 
     @async_db
     def store_event(self, event: AgentEvent) -> None:
         cursor = self.conn.cursor()
+        # Serialize the full model so subclass fields (to_agent, message, etc.)
+        # are preserved in the payload column for later reconstruction.
+        full = event.model_dump() if hasattr(event, "model_dump") else {}
         cursor.execute(
             """
             INSERT INTO events (event_id, event_type, timestamp, correlation_id, agent_id, payload)
@@ -218,7 +237,7 @@ class RemoraDB:
                 event.timestamp,
                 event.correlation_id,
                 event.agent_id,
-                json.dumps(event.payload),
+                json.dumps(full),
             ),
         )
         self.conn.commit()
@@ -234,16 +253,7 @@ class RemoraDB:
         """,
             (correlation_id,),
         )
-        events = []
-        for row in cursor.fetchall():
-            payload = json.loads(row["payload"])
-            payload["event_id"] = row["event_id"]
-            payload["event_type"] = row["event_type"]
-            payload["timestamp"] = row["timestamp"]
-            payload["correlation_id"] = row["correlation_id"]
-            payload["agent_id"] = row["agent_id"]
-            events.append(AgentEvent(**payload))
-        return events
+        return [self._reconstruct_event(row) for row in cursor.fetchall()]
 
     @async_db
     def add_to_chain(self, correlation_id: str, agent_id: str) -> None:

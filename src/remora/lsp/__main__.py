@@ -44,7 +44,7 @@ def main(
     log.debug("Server module loaded (handlers registered) in %.1fms", (time.monotonic() - t0) * 1000)
 
     log.debug("Importing remora.lsp.runner ...")
-    from remora.lsp.runner import AgentRunner
+    from remora.lsp.runner import AgentRunner, LLMClient
 
     log.debug("Runner module loaded in %.1fms", (time.monotonic() - t0) * 1000)
 
@@ -52,10 +52,16 @@ def main(
     server.subscriptions = subscriptions
     server.swarm_state = swarm_state
 
+    log.debug("Creating LLM client ...")
+    llm = LLMClient(
+        base_url="http://remora-server:8000/v1",
+        model="Qwen/Qwen3-4B-Instruct-2507-FP8",
+    )
+
     log.debug("Creating AgentRunner ...")
-    runner = AgentRunner(server=server)
+    runner = AgentRunner(server=server, llm=llm)
     server.runner = runner
-    log.debug("AgentRunner created")
+    log.debug("AgentRunner created with LLM client")
 
     @server.feature(lsp.INITIALIZED)
     async def _on_initialized(params: lsp.InitializedParams) -> None:

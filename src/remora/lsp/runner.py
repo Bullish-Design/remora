@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, ConfigDict
@@ -21,8 +24,87 @@ if TYPE_CHECKING:
     from remora.core.swarm_executor import SwarmExecutor
     from remora.lsp.server import RemoraLanguageServer
 
+logger = logging.getLogger("remora.lsp.runner")
 
 MAX_CHAIN_DEPTH = 10
+
+
+# ---------------------------------------------------------------------------
+# LLM client adapter — wraps structured_agents OpenAICompatibleClient
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ToolCall:
+    """Normalized tool call that handle_response expects."""
+
+    name: str
+    arguments: dict[str, Any]
+    id: str = ""
+
+
+@dataclass
+class LLMResponse:
+    """Normalized response from the LLM."""
+
+    content: str | None
+    tool_calls: list[ToolCall]
+
+
+class LLMClient:
+    """Thin adapter over structured_agents.client for the LSP runner."""
+
+    def __init__(self, base_url: str, model: str, api_key: str = "EMPTY") -> None:
+        from structured_agents.client import build_client
+
+        self._client = build_client(
+            {
+                "base_url": base_url,
+                "api_key": api_key,
+                "model": model,
+            }
+        )
+        self.model = model
+        logger.info("LLMClient initialized: model=%s base_url=%s", model, base_url)
+
+    async def chat(self, messages: list[dict], tools: list[dict]) -> LLMResponse:
+        """Send a chat completion and return a normalized LLMResponse."""
+        response = await self._client.chat_completion(
+            messages=messages,
+            tools=tools or None,
+            tool_choice="auto" if tools else "none",
+        )
+
+        tool_calls: list[ToolCall] = []
+        if response.tool_calls:
+            for tc in response.tool_calls:
+                fn = tc.get("function", {})
+                raw_args = fn.get("arguments", "{}")
+                if isinstance(raw_args, str):
+                    try:
+                        parsed = json.loads(raw_args)
+                    except json.JSONDecodeError:
+                        parsed = {"raw": raw_args}
+                else:
+                    parsed = raw_args
+                tool_calls.append(
+                    ToolCall(
+                        name=fn.get("name", ""),
+                        arguments=parsed,
+                        id=tc.get("id", ""),
+                    )
+                )
+
+        return LLMResponse(content=response.content, tool_calls=tool_calls)
+
+    async def close(self) -> None:
+        if hasattr(self._client, "close"):
+            await self._client.close()
+
+
+# ---------------------------------------------------------------------------
+# Runner
+# ---------------------------------------------------------------------------
 
 
 class Trigger(BaseModel):
@@ -33,11 +115,10 @@ class Trigger(BaseModel):
     context: dict = Field(default_factory=dict)
 
 
-
 class AgentRunner:
     """Asynchronous agent execution coordinator for the Remora LSP server."""
 
-    def __init__(self, server: "RemoraLanguageServer", llm: Any = None) -> None:
+    def __init__(self, server: "RemoraLanguageServer", llm: LLMClient | None = None) -> None:
         self.server = server
         self.llm = llm
         self.executor: "SwarmExecutor | None" = None
@@ -69,9 +150,7 @@ class AgentRunner:
     async def emit_error(self, agent_id: str, error: str, correlation_id: str) -> None:
         from remora.lsp.server import emit_event
 
-        await emit_event(
-            AgentErrorEvent(agent_id=agent_id, error=error, correlation_id=correlation_id, timestamp=0.0)
-        )
+        await emit_event(AgentErrorEvent(agent_id=agent_id, error=error, correlation_id=correlation_id, timestamp=0.0))
 
     async def execute_turn(self, trigger: Trigger) -> None:
         from remora.lsp.server import emit_event, refresh_code_lenses
@@ -104,10 +183,13 @@ class AgentRunner:
 
                 events = await self.server.db.get_events_for_correlation(correlation_id)
                 for event in events:
-                    if isinstance(event, HumanChatEvent) and event.to_agent == agent_id:
-                        messages.append({"role": "user", "content": event.message})
-                    elif isinstance(event, AgentMessageEvent) and event.to_agent == agent_id:
-                        messages.append({"role": "user", "content": f"[From {event.from_agent}]: {event.message}"})
+                    if event.event_type == "HumanChatEvent" and event.payload.get("to_agent") == agent_id:
+                        messages.append({"role": "user", "content": event.payload.get("message", "")})
+                    elif event.event_type == "AgentMessageEvent" and event.payload.get("to_agent") == agent_id:
+                        from_agent = event.payload.get("from_agent", "unknown")
+                        messages.append(
+                            {"role": "user", "content": f"[From {from_agent}]: {event.payload.get('message', '')}"}
+                        )
 
                 if trigger.context.get("rejection_feedback"):
                     messages.append(
@@ -143,26 +225,38 @@ class AgentRunner:
             payload=trigger.context,
         )
 
-    async def handle_response(self, agent: ASTAgentNode, response, correlation_id: str) -> None:
+    async def handle_response(self, agent: ASTAgentNode, response: LLMResponse, correlation_id: str) -> None:
         from remora.lsp.server import emit_event
 
-        for tool_call in response.tool_calls:
-            tool_name = getattr(tool_call, "name", None) or getattr(tool_call, "function", {}).get("name", "")
-            args = getattr(tool_call, "arguments", {}) or getattr(tool_call, "function", {}).get("arguments", {})
-            tool_call_id = getattr(tool_call, "id", "")
+        if not response.tool_calls:
+            # Text-only response — emit as an event so the UI can show it
+            if response.content:
+                logger.info("Agent %s responded with text: %s", agent.remora_id, response.content[:200])
+                await emit_event(
+                    AgentEvent(
+                        event_type="AgentTextResponse",
+                        agent_id=agent.remora_id,
+                        correlation_id=correlation_id,
+                        summary=response.content[:200],
+                        timestamp=0.0,
+                        payload={"content": response.content},
+                    )
+                )
+            return
 
-            match tool_name:
+        for tool_call in response.tool_calls:
+            match tool_call.name:
                 case "rewrite_self":
-                    new_source = args.get("new_source", "")
+                    new_source = tool_call.arguments.get("new_source", "")
                     await self.create_proposal(agent, new_source, correlation_id)
 
                 case "message_node":
-                    target_id = args.get("target_id", "")
-                    message = args.get("message", "")
+                    target_id = tool_call.arguments.get("target_id", "")
+                    message = tool_call.arguments.get("message", "")
                     await self.message_node(agent.remora_id, target_id, message, correlation_id)
 
                 case "read_node":
-                    target_id = args.get("target_id", "")
+                    target_id = tool_call.arguments.get("target_id", "")
                     target = await self.server.db.get_node(target_id)
                     if target:
                         tool_result = {
@@ -174,7 +268,7 @@ class AgentRunner:
                         # Currently not used, but left for future integrations.
 
                 case _:
-                    await self.execute_extension_tool(agent, tool_name, args, correlation_id)
+                    await self.execute_extension_tool(agent, tool_call.name, tool_call.arguments, correlation_id)
 
     async def create_proposal(self, agent: ASTAgentNode, new_source: str, correlation_id: str) -> None:
         from remora.lsp.server import emit_event, publish_diagnostics, refresh_code_lenses
@@ -211,7 +305,9 @@ class AgentRunner:
     async def message_node(self, from_id: str, to_id: str, message: str, correlation_id: str) -> None:
         from remora.lsp.server import emit_event
 
-        await emit_event(AgentMessageEvent(from_agent=from_id, to_agent=to_id, message=message, correlation_id=correlation_id))
+        await emit_event(
+            AgentMessageEvent(from_agent=from_id, to_agent=to_id, message=message, correlation_id=correlation_id)
+        )
         await self.trigger(to_id, correlation_id)
 
     async def refresh_code_lens(self, agent_id: str) -> None:
