@@ -18,6 +18,7 @@ from remora.utils import PathLike, normalize_path
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from remora.core.agent_node import AgentNode
     from remora.core.event_bus import EventBus
     from remora.core.projections import NodeProjection
     from remora.core.subscriptions import SubscriptionRegistry
@@ -368,6 +369,61 @@ class EventStore:
             )
             await asyncio.to_thread(self._conn.commit)
             return cursor.rowcount
+
+    async def get_node(self, node_id: str) -> "AgentNode | None":
+        """Get a single AgentNode by ID from the nodes table."""
+        from remora.core.agent_node import AgentNode
+
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        def _fetch(conn: sqlite3.Connection) -> sqlite3.Row | None:
+            cursor = conn.execute("SELECT * FROM nodes WHERE node_id = ?", (node_id,))
+            return cursor.fetchone()
+
+        row = await asyncio.to_thread(_fetch, self._conn)
+        if row is None:
+            return None
+        return AgentNode.from_row(row)
+
+    async def list_nodes(
+        self,
+        *,
+        file_path: str | None = None,
+        node_type: str | None = None,
+    ) -> "list[AgentNode]":
+        """List AgentNodes with optional filters."""
+        from remora.core.agent_node import AgentNode
+
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        query = "SELECT * FROM nodes"
+        params: list[str] = []
+        conditions: list[str] = []
+
+        if file_path:
+            conditions.append("file_path = ?")
+            params.append(file_path)
+        if node_type:
+            conditions.append("node_type = ?")
+            params.append(node_type)
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY file_path, start_line"
+
+        def _fetch(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+            cursor = conn.execute(query, params)
+            return cursor.fetchall()
+
+        rows = await asyncio.to_thread(_fetch, self._conn)
+        return [AgentNode.from_row(row) for row in rows]
 
     async def close(self) -> None:
         """Close the database connection."""
