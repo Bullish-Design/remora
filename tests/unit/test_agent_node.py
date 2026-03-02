@@ -128,3 +128,97 @@ class TestAgentNodeSerialization:
         assert restored.extra_subscriptions[0].event_types == ["ContentChangedEvent"]
         assert restored.extension_name == "TestAgent"
         assert restored.status == "running"
+
+
+from lsprotocol import types as lsp
+
+
+class TestAgentNodeToSystemPrompt:
+    def test_basic_prompt(self):
+        node = _make_node()
+        prompt = node.to_system_prompt()
+        assert "calculate_total" in prompt
+        assert "abc123def456" in prompt
+        assert "/src/billing.py" in prompt
+        assert "def calculate_total" in prompt
+
+    def test_prompt_with_extension(self):
+        node = _make_node(
+            extension_name="TestAgent",
+            custom_system_prompt="You specialize in testing.",
+            mounted_workspaces=["/data/fixtures"],
+        )
+        prompt = node.to_system_prompt()
+        assert "TestAgent" in prompt
+        assert "You specialize in testing." in prompt
+        assert "/data/fixtures" in prompt
+
+    def test_prompt_with_graph_context(self):
+        node = _make_node(
+            caller_ids=["caller1", "caller2"],
+            callee_ids=["callee1"],
+        )
+        prompt = node.to_system_prompt()
+        assert "caller1" in prompt
+        assert "caller2" in prompt
+        assert "callee1" in prompt
+
+
+class TestAgentNodeLSP:
+    def test_to_range(self):
+        node = _make_node(start_line=10, end_line=25)
+        r = node.to_range()
+        assert r.start.line == 9  # 0-based
+        assert r.end.line == 24
+
+    def test_to_code_lens(self):
+        node = _make_node()
+        lens = node.to_code_lens()
+        assert lens.command.command == "remora.selectAgent"
+        assert "abc123def456" in lens.command.arguments[0]
+
+    def test_to_code_lens_status_icons(self):
+        for status, icon in [("idle", "\u25cf"), ("running", "\u25b6"), ("error", "\u25cb")]:
+            node = _make_node(status=status)
+            lens = node.to_code_lens()
+            assert icon in lens.command.title
+
+    def test_to_hover(self):
+        node = _make_node()
+        hover = node.to_hover()
+        assert "abc123def456" in hover.contents.value
+        assert "calculate_total" in hover.contents.value
+
+    def test_to_hover_with_events(self):
+        class FakeEvent:
+            event_type = "ContentChangedEvent"
+            summary = "file changed"
+
+        node = _make_node()
+        hover = node.to_hover(recent_events=[FakeEvent()])
+        assert "ContentChangedEvent" in hover.contents.value
+
+    def test_to_code_actions(self):
+        node = _make_node()
+        actions = node.to_code_actions()
+        commands = {a.command.command for a in actions if a.command}
+        assert "remora.chat" in commands
+        assert "remora.requestRewrite" in commands
+        assert "remora.messageNode" in commands
+
+    def test_to_code_actions_with_extra_tools(self):
+        tool = ToolSchema(
+            name="run_test",
+            description="Run this test",
+            parameters={"type": "object"},
+        )
+        node = _make_node(extra_tools=[tool])
+        actions = node.to_code_actions()
+        tool_commands = [a for a in actions if a.command and "remora.tool.run_test" in a.command.command]
+        assert len(tool_commands) == 1
+
+    def test_to_document_symbol(self):
+        node = _make_node()
+        sym = node.to_document_symbol()
+        assert sym.kind == lsp.SymbolKind.Function
+        assert "idle" in sym.name

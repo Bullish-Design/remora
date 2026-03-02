@@ -35,6 +35,19 @@ class ToolSchema:
             },
         }
 
+    def to_code_action(self, node_id: str) -> lsp.CodeAction:
+        from lsprotocol import types as lsp
+
+        return lsp.CodeAction(
+            title=self.description,
+            kind=lsp.CodeActionKind.Empty,
+            command=lsp.Command(
+                title=self.name,
+                command=f"remora.tool.{self.name}",
+                arguments=[node_id],
+            ),
+        )
+
 
 class AgentNode(BaseModel):
     """Unified agent model: DB row, LLM prompt, and LSP response in one object.
@@ -98,3 +111,143 @@ class AgentNode(BaseModel):
         ]
         data["mounted_workspaces"] = json.loads(data.get("mounted_workspaces") or "[]")
         return cls(**data)
+
+    # --- LSP helper ---
+
+    def to_range(self) -> lsp.Range:
+        from lsprotocol import types as lsp
+
+        return lsp.Range(
+            start=lsp.Position(line=self.start_line - 1, character=0),
+            end=lsp.Position(line=self.end_line - 1, character=0),
+        )
+
+    # --- LLM prompt ---
+
+    def to_system_prompt(self) -> str:
+        """Generate the LLM system prompt from all fields."""
+        prompt = f"""You are an autonomous AI agent embodying a Python {self.node_type}: `{self.name}`
+
+# Identity
+- Node ID: {self.node_id}
+- Location: {self.file_path}:{self.start_line}-{self.end_line}
+- Parent: {self.parent_id or "None (top-level)"}
+
+# Your Source Code
+```python
+{self.source_code}
+```
+
+# Graph Context
+- Called by: {", ".join(self.caller_ids) or "None"}
+- You call: {", ".join(self.callee_ids) or "None"}
+
+# Core Rules
+1. You may ONLY edit your own body using `rewrite_self()`.
+2. To request changes elsewhere, use `message_node(target_id, request)`.
+3. All edits are proposals -- the human must approve before they apply.
+"""
+        if self.custom_system_prompt:
+            prompt += f"\n# Specialization ({self.extension_name})\n{self.custom_system_prompt}\n"
+        if self.mounted_workspaces:
+            prompt += "\n# Available Workspaces\n" + "\n".join(f"- {w}" for w in self.mounted_workspaces) + "\n"
+        return prompt
+
+    # --- LSP conversions ---
+
+    def to_code_lens(self) -> lsp.CodeLens:
+        from lsprotocol import types as lsp
+
+        status_icon = {
+            "idle": "\u25cf",
+            "running": "\u25b6",
+            "pending_approval": "\u23f8",
+            "error": "\u25cb",
+        }
+        return lsp.CodeLens(
+            range=lsp.Range(
+                start=lsp.Position(line=self.start_line - 1, character=0),
+                end=lsp.Position(line=self.start_line - 1, character=0),
+            ),
+            command=lsp.Command(
+                title=f"{status_icon.get(self.status, '?')} {self.node_id}",
+                command="remora.selectAgent",
+                arguments=[self.node_id],
+            ),
+        )
+
+    def to_hover(self, recent_events: list | None = None) -> lsp.Hover:
+        from lsprotocol import types as lsp
+
+        lines = [
+            f"## {self.name}",
+            f"**ID:** `{self.node_id}`  **Type:** {self.node_type}  **Status:** {self.status}",
+            f"**Parent:** `{self.parent_id or 'None'}`",
+            f"**Callers:** {', '.join(f'`{c}`' for c in self.caller_ids) or 'None'}",
+            f"**Callees:** {', '.join(f'`{c}`' for c in self.callee_ids) or 'None'}",
+        ]
+        if self.extension_name:
+            lines.append(f"**Extension:** {self.extension_name}")
+        if recent_events:
+            lines.extend(["", "---", "", "### Recent Events"])
+            for ev in recent_events:
+                lines.append(f"- `{ev.event_type}` {ev.summary}")
+        return lsp.Hover(
+            contents=lsp.MarkupContent(kind=lsp.MarkupKind.Markdown, value="\n".join(lines)),
+            range=self.to_range(),
+        )
+
+    def to_code_actions(self) -> list[lsp.CodeAction]:
+        from lsprotocol import types as lsp
+
+        actions = [
+            lsp.CodeAction(
+                title="Chat with this agent",
+                kind=lsp.CodeActionKind.Empty,
+                command=lsp.Command(
+                    title="Chat",
+                    command="remora.chat",
+                    arguments=[self.node_id],
+                ),
+            ),
+            lsp.CodeAction(
+                title="Ask agent to rewrite itself",
+                kind=lsp.CodeActionKind.RefactorRewrite,
+                command=lsp.Command(
+                    title="Rewrite",
+                    command="remora.requestRewrite",
+                    arguments=[self.node_id],
+                ),
+            ),
+            lsp.CodeAction(
+                title="Message another agent",
+                kind=lsp.CodeActionKind.Empty,
+                command=lsp.Command(
+                    title="Message",
+                    command="remora.messageNode",
+                    arguments=[self.node_id],
+                ),
+            ),
+        ]
+        for tool in self.extra_tools:
+            actions.append(tool.to_code_action(self.node_id))
+        return actions
+
+    def to_document_symbol(self) -> lsp.DocumentSymbol:
+        from lsprotocol import types as lsp
+
+        kind_map = {
+            "function": lsp.SymbolKind.Function,
+            "method": lsp.SymbolKind.Method,
+            "class": lsp.SymbolKind.Class,
+            "file": lsp.SymbolKind.File,
+            "section": lsp.SymbolKind.String,
+            "table": lsp.SymbolKind.Object,
+        }
+        return lsp.DocumentSymbol(
+            name=f"{self.name} [{self.status}]",
+            kind=kind_map.get(self.node_type, lsp.SymbolKind.Variable),
+            range=self.to_range(),
+            selection_range=self.to_range(),
+            detail=self.extension_name or self.node_type,
+        )
