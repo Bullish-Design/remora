@@ -257,10 +257,46 @@ class AgentRunner:
             payload=trigger.context,
         )
 
+    @staticmethod
+    def _extract_text_tool_calls(content: str) -> list[ToolCall]:
+        """Extract tool calls from <tool_call> XML tags in text content.
+
+        Some models (e.g. Qwen) emit tool calls as text rather than using the
+        structured tool_calls field in the response.
+        """
+        import re
+
+        calls: list[ToolCall] = []
+        for m in re.finditer(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", content, re.DOTALL):
+            try:
+                parsed = json.loads(m.group(1))
+                name = parsed.get("name", "")
+                arguments = parsed.get("arguments", {})
+                if isinstance(arguments, str):
+                    arguments = json.loads(arguments)
+                if name:
+                    calls.append(ToolCall(name=name, arguments=arguments))
+            except (json.JSONDecodeError, KeyError):
+                logger.warning("_extract_text_tool_calls: failed to parse: %s", m.group(1)[:200])
+        return calls
+
     async def handle_response(self, agent: ASTAgentNode, response: LLMResponse, correlation_id: str) -> None:
         from remora.lsp.server import emit_event
 
-        if not response.tool_calls:
+        tool_calls = response.tool_calls
+
+        # Some models (e.g. Qwen) emit tool calls as <tool_call> XML in text
+        # content rather than using the structured tool_calls field.
+        if not tool_calls and response.content:
+            tool_calls = self._extract_text_tool_calls(response.content)
+            if tool_calls:
+                logger.info(
+                    "handle_response: extracted %d tool call(s) from text content for agent %s",
+                    len(tool_calls),
+                    agent.remora_id,
+                )
+
+        if not tool_calls:
             # Text-only response — emit as an event so the UI can show it
             if response.content:
                 logger.info("Agent %s responded with text: %s", agent.remora_id, response.content[:200])
@@ -276,7 +312,7 @@ class AgentRunner:
                 )
             return
 
-        for tool_call in response.tool_calls:
+        for tool_call in tool_calls:
             match tool_call.name:
                 case "rewrite_self":
                     new_source = tool_call.arguments.get("new_source", "")
@@ -284,11 +320,29 @@ class AgentRunner:
 
                 case "message_node":
                     target_id = tool_call.arguments.get("target_id", "")
+                    # Resolve symbolic target names
+                    if target_id == "parent" and agent.parent_id:
+                        logger.info(
+                            "message_node: resolved 'parent' -> %s for agent %s", agent.parent_id, agent.remora_id
+                        )
+                        target_id = agent.parent_id
                     message = tool_call.arguments.get("message", "")
-                    await self.message_node(agent.remora_id, target_id, message, correlation_id)
+                    if not target_id or target_id == "parent":
+                        logger.warning(
+                            "message_node: unresolved target_id=%r for agent %s (no parent?)",
+                            target_id,
+                            agent.remora_id,
+                        )
+                        await self.emit_error(
+                            agent.remora_id, f"Cannot resolve message target: {target_id!r}", correlation_id
+                        )
+                    else:
+                        await self.message_node(agent.remora_id, target_id, message, correlation_id)
 
                 case "read_node":
                     target_id = tool_call.arguments.get("target_id", "")
+                    if target_id == "parent" and agent.parent_id:
+                        target_id = agent.parent_id
                     target = await self.server.db.get_node(target_id)
                     if target:
                         tool_result = {

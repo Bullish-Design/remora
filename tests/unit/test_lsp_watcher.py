@@ -34,3 +34,12 @@ def test_parse_preserves_ids():
     old_nodes = [{"name": n.name, "node_type": n.node_type, "id": n.remora_id} for n in nodes1]
     nodes2 = watcher.parse_and_inject_ids("file:///t.py", text, old_nodes)
     assert nodes1[0].remora_id == nodes2[0].remora_id
+
+
+def test_parse_multibyte_characters():
+    """Function names must be correct even when file contains multi-byte UTF-8."""
+    watcher = ASTWatcher()
+    text = "# Comment with emoji: \u2728\ndef read_optional(path):\n    pass\n"
+    nodes = watcher.parse_and_inject_ids("file:///test_mb.py", text)
+    names = [n.name for n in nodes if n.node_type == "function"]
+    assert "read_optional" in names, f"Expected 'read_optional', got {names}"

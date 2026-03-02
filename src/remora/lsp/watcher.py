@@ -32,47 +32,54 @@ class ASTWatcher:
         if not TREESITTER_AVAILABLE:
             return self._parse_fallback(uri, text, old_nodes)
 
-        tree = self.parser.parse(bytes(text, "utf8"))
+        text_bytes = text.encode("utf-8")
+        tree = self.parser.parse(text_bytes)
 
         nodes: list[ASTAgentNode] = []
         old_by_key = {(n["name"], n["node_type"]): n for n in (old_nodes or [])}
 
-        self._find_definitions(tree.root_node, text, uri, nodes, old_by_key)
-
         file_source = text[:200]
-        file_hash = hashlib.md5(text.encode()).hexdigest()
+        file_hash = hashlib.md5(text_bytes).hexdigest()
 
         key = (Path(uri).stem, "file")
         if key in old_by_key:
-            file_id = old_by_key[key]["id"]
+            file_id = old_by_key[key].get("remora_id") or old_by_key[key].get("id")
         else:
             file_id = generate_id()
 
-        nodes.insert(
-            0,
-            ASTAgentNode(
-                remora_id=file_id,
-                node_type="file",
-                name=Path(uri).stem,
-                file_path=uri,
-                start_line=1,
-                end_line=len(text.splitlines()),
-                source_code=file_source,
-                source_hash=file_hash,
-            ),
+        file_node = ASTAgentNode(
+            remora_id=file_id,
+            node_type="file",
+            name=Path(uri).stem,
+            file_path=uri,
+            start_line=1,
+            end_line=len(text.splitlines()),
+            source_code=file_source,
+            source_hash=file_hash,
         )
+        nodes.append(file_node)
+
+        self._find_definitions(tree.root_node, text_bytes, uri, nodes, old_by_key, parent_id=file_id)
 
         return nodes
 
-    def _find_definitions(self, node, text: str, uri: str, nodes: list[ASTAgentNode], old_by_key: dict) -> None:
+    def _find_definitions(
+        self,
+        node,
+        text_bytes: bytes,
+        uri: str,
+        nodes: list[ASTAgentNode],
+        old_by_key: dict,
+        parent_id: str | None = None,
+    ) -> None:
         if node.type == "function_definition":
             name_node = node.child_by_field_name("name")
             if name_node:
-                name = text[name_node.start_byte : name_node.end_byte]
+                name = text_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
                 start_line = node.start_point[0] + 1
                 end_line = node.end_point[0] + 1
-                source = text[node.start_byte : node.end_byte]
-                source_hash = hashlib.md5(source.encode()).hexdigest()
+                source = text_bytes[node.start_byte : node.end_byte].decode("utf-8")
+                source_hash = hashlib.md5(source.encode("utf-8")).hexdigest()
 
                 is_method = (
                     node.parent
@@ -84,7 +91,7 @@ class ASTWatcher:
                 key = (name, node_type)
 
                 if key in old_by_key:
-                    remora_id = old_by_key[key]["id"]
+                    remora_id = old_by_key[key].get("remora_id") or old_by_key[key].get("id")
                     del old_by_key[key]
                 else:
                     remora_id = generate_id()
@@ -99,22 +106,23 @@ class ASTWatcher:
                         end_line=end_line,
                         source_code=source,
                         source_hash=source_hash,
+                        parent_id=parent_id,
                     )
                 )
 
         elif node.type == "class_definition":
             name_node = node.child_by_field_name("name")
             if name_node:
-                name = text[name_node.start_byte : name_node.end_byte]
+                name = text_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
                 start_line = node.start_point[0] + 1
                 end_line = node.end_point[0] + 1
-                source = text[node.start_byte : node.end_byte]
-                source_hash = hashlib.md5(source.encode()).hexdigest()
+                source = text_bytes[node.start_byte : node.end_byte].decode("utf-8")
+                source_hash = hashlib.md5(source.encode("utf-8")).hexdigest()
 
                 key = (name, "class")
 
                 if key in old_by_key:
-                    remora_id = old_by_key[key]["id"]
+                    remora_id = old_by_key[key].get("remora_id") or old_by_key[key].get("id")
                     del old_by_key[key]
                 else:
                     remora_id = generate_id()
@@ -129,17 +137,21 @@ class ASTWatcher:
                         end_line=end_line,
                         source_code=source,
                         source_hash=source_hash,
+                        parent_id=parent_id,
                     )
                 )
 
+                # Methods inside this class get the class as their parent
+                for child in node.children:
+                    self._find_definitions(child, text_bytes, uri, nodes, old_by_key, parent_id=remora_id)
+                return  # Already recursed into children
+
         for child in node.children:
-            self._find_definitions(child, text, uri, nodes, old_by_key)
+            self._find_definitions(child, text_bytes, uri, nodes, old_by_key, parent_id=parent_id)
 
     def _parse_fallback(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[ASTAgentNode]:
         if not self._fallback_warned:
-            logger.warning(
-                "tree-sitter not available; using fallback parser with approximate ranges"
-            )
+            logger.warning("tree-sitter not available; using fallback parser with approximate ranges")
             self._fallback_warned = True
 
         nodes: list[ASTAgentNode] = []

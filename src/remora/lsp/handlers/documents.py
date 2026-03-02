@@ -16,8 +16,9 @@ async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         text = params.text_document.text
         logger.info("did_open: uri=%s text_len=%d", uri, len(text))
 
-        nodes = server.watcher.parse_and_inject_ids(uri, text)
-        logger.info("did_open: parsed %d nodes from %s", len(nodes), uri)
+        old_nodes = await server.db.get_nodes_for_file(uri)
+        nodes = server.watcher.parse_and_inject_ids(uri, text, old_nodes)
+        logger.info("did_open: parsed %d nodes from %s (%d old)", len(nodes), uri, len(old_nodes))
         for nd in nodes:
             logger.debug("did_open:   node: %s (%s) lines %d-%d", nd.name, nd.node_type, nd.start_line, nd.end_line)
 
@@ -82,12 +83,13 @@ async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
         for node in new_nodes:
             key = (node.name, node.node_type)
             if key in old_by_key:
-                node.remora_id = old_by_key[key]["id"]
+                node.remora_id = old_by_key[key].get("remora_id") or old_by_key[key].get("id")
                 del old_by_key[key]
 
         for orphan in old_by_key.values():
-            logger.debug("did_save: orphaning %s", orphan["id"])
-            await server.db.set_status(orphan["id"], "orphaned")
+            orphan_id = orphan.get("remora_id") or orphan.get("id")
+            logger.debug("did_save: orphaning %s", orphan_id)
+            await server.db.set_status(orphan_id, "orphaned")
 
         await server.db.upsert_nodes(new_nodes)
         await server.db.update_edges(new_nodes)

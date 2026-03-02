@@ -26,6 +26,10 @@ M._exec_command = nil   -- function(command, arguments)
 M._cursor_context = nil -- function() -> {uri, line}
 M._get_client = nil     -- function() -> client or nil
 
+-- Debounce state for cursor-driven refresh
+M._debounce_timer = nil
+M._debounce_ms = 300    -- ms to wait after last CursorHold/BufEnter
+
 -- ---------------------------------------------------------------------------
 -- Highlight groups
 -- ---------------------------------------------------------------------------
@@ -93,6 +97,14 @@ end
 --- Check if a buffer is valid.
 local function buf_valid(buf)
     return buf and vim.api.nvim_buf_is_valid(buf)
+end
+
+--- Delete any leftover buffer with the given name (from a previous session).
+local function wipe_named_buf(name)
+    local ok, nr = pcall(vim.fn.bufnr, name)
+    if ok and nr ~= -1 then
+        pcall(vim.api.nvim_buf_delete, nr, { force = true })
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -457,6 +469,10 @@ function M.open()
     -- Remember which window to return to
     local origin_win = vim.api.nvim_get_current_win()
 
+    -- Clean up any stale named buffers from a previous session
+    wipe_named_buf("remora://panel")
+    wipe_named_buf("remora://input")
+
     -- Create the vsplit on the right
     vim.cmd("botright vsplit")
     M._chat_win = vim.api.nvim_get_current_win()
@@ -532,7 +548,7 @@ function M.open()
 
     M._augroup = vim.api.nvim_create_augroup("RemoraPanel", { clear = true })
 
-    -- Auto-refresh when cursor moves to a different agent
+    -- Auto-refresh when cursor moves to a different agent (debounced)
     vim.api.nvim_create_autocmd({ "CursorHold", "BufEnter" }, {
         group = M._augroup,
         callback = function(ev)
@@ -540,7 +556,22 @@ function M.open()
             if ev.buf == M._chat_buf or ev.buf == M._input_buf then return end
             -- Only if panel is still open
             if not win_valid(M._chat_win) then return end
-            fetch_agent_data()
+            -- Debounce: cancel pending timer and start a new one
+            if M._debounce_timer then
+                M._debounce_timer:stop()
+                M._debounce_timer:close()
+            end
+            M._debounce_timer = vim.uv.new_timer()
+            M._debounce_timer:start(M._debounce_ms, 0, vim.schedule_wrap(function()
+                if M._debounce_timer then
+                    M._debounce_timer:stop()
+                    M._debounce_timer:close()
+                    M._debounce_timer = nil
+                end
+                if win_valid(M._chat_win) then
+                    fetch_agent_data()
+                end
+            end))
         end,
     })
 
@@ -571,6 +602,12 @@ end
 
 function M._cleanup()
     log.info("panel._cleanup: called")
+
+    if M._debounce_timer then
+        M._debounce_timer:stop()
+        M._debounce_timer:close()
+        M._debounce_timer = nil
+    end
 
     if M._augroup then
         pcall(vim.api.nvim_del_augroup_by_id, M._augroup)

@@ -153,7 +153,8 @@ def main(
             try:
                 text = fpath.read_text(encoding="utf-8", errors="replace")
                 uri = from_fs_path(str(fpath))
-                nodes = server.watcher.parse_and_inject_ids(uri, text)
+                old_nodes = await server.db.get_nodes_for_file(uri)
+                nodes = server.watcher.parse_and_inject_ids(uri, text, old_nodes)
                 await server.db.upsert_nodes(nodes)
                 await server.db.update_edges(nodes)
                 count += len(nodes)
