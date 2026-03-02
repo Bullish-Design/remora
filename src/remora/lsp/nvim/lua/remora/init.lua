@@ -23,7 +23,7 @@ function M.setup(opts)
 
     local lsp_config = {
         cmd = opts.cmd or { "remora-lsp" },
-        filetypes = opts.filetypes or { "python" },
+        filetypes = opts.filetypes or { "python", "markdown", "toml" },
         root_markers = opts.root_markers or { ".remora", ".git" },
         settings = opts.settings or {},
     }
@@ -258,7 +258,7 @@ function M.setup(opts)
     vim.api.nvim_create_autocmd("CursorHold", {
         callback = function()
             local ft = vim.bo.filetype
-            if ft ~= "python" and ft ~= "markdown" then return end
+            if ft ~= "python" and ft ~= "markdown" and ft ~= "toml" then return end
             local client = get_client({ silent = true })
             if not client then return end
             local ctx = cursor_context()

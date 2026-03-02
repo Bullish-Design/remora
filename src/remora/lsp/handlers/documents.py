@@ -97,7 +97,7 @@ async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
         server.graph.invalidate(uri)
 
         file_path = Path(uri_to_path(uri))
-        if file_path.exists():
+        if file_path.exists() and file_path.suffix == ".py":
             server._injecting.add(uri)
             inject_ids(file_path, new_nodes)
 

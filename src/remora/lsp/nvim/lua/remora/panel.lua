@@ -546,9 +546,9 @@ function M.open()
         callback = function(ev)
             -- Only trigger for non-panel buffers
             if ev.buf == M._chat_buf or ev.buf == M._input_buf then return end
-            -- Only trigger for Python files (skip mini.files, help, etc.)
+            -- Only trigger for supported file types (skip mini.files, help, etc.)
             local ft = vim.api.nvim_get_option_value("filetype", { buf = ev.buf })
-            if ft ~= "python" then return end
+            if ft ~= "python" and ft ~= "markdown" and ft ~= "toml" then return end
             -- Only if panel is still open
             if not win_valid(M._chat_win) then return end
             -- Debounce: cancel pending timer and start a new one

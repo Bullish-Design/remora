@@ -13,6 +13,8 @@ from pathlib import Path
 from datastar_py import attribute_generator as data
 
 from remora_demo.web.layout import (
+    CollapsedDir,
+    DirGroupBox,
     GroupBox,
     LayoutResult,
     NodePosition,
@@ -92,6 +94,10 @@ def render_graph(snapshot: GraphSnapshot) -> str:
         f'<div id="graph-content" style="position:relative;'
         f'width:{layout.total_width + 100}px;height:{layout.total_height + 100}px;">'
     ]
+
+    # Render directory group boxes (outermost first for z-order)
+    for dir_group in sorted(layout.dir_groups, key=lambda g: g.depth):
+        parts.append(_render_dir_group_box(dir_group))
 
     # Render group boxes (class backgrounds)
     for group in layout.groups:
@@ -198,6 +204,17 @@ def _render_group_box(group: GroupBox) -> str:
         f'<div class="class-group" '
         f'style="left:{group.x}px;top:{group.y}px;'
         f'width:{group.w}px;height:{group.h}px;">'
+        f"</div>"
+    )
+
+
+def _render_dir_group_box(group: DirGroupBox) -> str:
+    label = html.escape(group.label)
+    return (
+        f'<div class="dir-group dir-depth-{group.depth}" '
+        f'style="left:{group.x}px;top:{group.y}px;'
+        f'width:{group.w}px;height:{group.h}px;">'
+        f'<div class="dir-group-label">{label}</div>'
         f"</div>"
     )
 
@@ -391,6 +408,30 @@ body {
     background: rgba(69, 71, 90, 0.3);
     border: 1px solid var(--surface2);
     border-radius: 8px;
+}
+
+.dir-group {
+    position: absolute;
+    border: 1px solid var(--surface2);
+    border-radius: 10px;
+    pointer-events: none;
+}
+
+.dir-depth-1 { background: rgba(49, 50, 68, 0.4); }
+.dir-depth-2 { background: rgba(49, 50, 68, 0.25); }
+.dir-depth-3 { background: rgba(49, 50, 68, 0.15); }
+
+.dir-group-label {
+    position: absolute;
+    top: 4px;
+    left: 10px;
+    font-size: 10px;
+    color: var(--subtext);
+    letter-spacing: 0.3px;
+    text-transform: none;
+    opacity: 0.8;
+    pointer-events: none;
+    white-space: nowrap;
 }
 
 .sidebar {

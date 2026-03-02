@@ -134,18 +134,20 @@ def main(
             }
         )
 
-        def _iter_py_files(root: Path):
+        _SUPPORTED_SUFFIXES = frozenset({".py", ".md", ".toml"})
+
+        def _iter_source_files(root: Path):
             """Walk root, pruning skip-dirs early to avoid descending into venvs."""
             for entry in sorted(root.iterdir()):
                 if entry.is_dir():
                     if entry.name in _SKIP_DIRS or entry.name.startswith("."):
                         continue
-                    yield from _iter_py_files(entry)
-                elif entry.is_file() and entry.suffix == ".py":
+                    yield from _iter_source_files(entry)
+                elif entry.is_file() and entry.suffix in _SUPPORTED_SUFFIXES:
                     yield entry
 
-        py_files = list(_iter_py_files(root_path))
-        log.info("_background_scan: found %d .py files in %s (skip-dirs pruned)", len(py_files), root)
+        py_files = list(_iter_source_files(root_path))
+        log.info("_background_scan: found %d source files in %s (skip-dirs pruned)", len(py_files), root)
 
         count = 0
         parsed = 0

@@ -28,7 +28,18 @@ class ASTWatcher:
             self.parser = None
         self._fallback_warned = False
 
+    # Suffixes that tree-sitter-python can parse into function/class nodes
+    _PYTHON_SUFFIXES = frozenset({".py"})
+    # All supported suffixes (non-Python get file-level nodes only)
+    _SUPPORTED_SUFFIXES = frozenset({".py", ".md", ".toml"})
+
     def parse_and_inject_ids(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[ASTAgentNode]:
+        suffix = Path(uri).suffix.lower() if "." in Path(uri).name else ""
+
+        # Non-Python files: create a file-level node only (no AST decomposition)
+        if suffix not in self._PYTHON_SUFFIXES:
+            return self._parse_file_only(uri, text, old_nodes)
+
         if not TREESITTER_AVAILABLE:
             return self._parse_fallback(uri, text, old_nodes)
 
@@ -148,6 +159,30 @@ class ASTWatcher:
 
         for child in node.children:
             self._find_definitions(child, text_bytes, uri, nodes, old_by_key, parent_id=parent_id)
+
+    def _parse_file_only(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[ASTAgentNode]:
+        """Create a single file-level agent node for non-Python files (markdown, toml, etc.)."""
+        old_by_key = {(n["name"], n["node_type"]): n for n in (old_nodes or [])}
+        text_bytes = text.encode("utf-8")
+        file_hash = hashlib.md5(text_bytes).hexdigest()
+
+        key = (Path(uri).stem, "file")
+        if key in old_by_key:
+            file_id = old_by_key[key].get("remora_id") or old_by_key[key].get("id")
+        else:
+            file_id = generate_id()
+
+        file_node = ASTAgentNode(
+            remora_id=file_id,
+            node_type="file",
+            name=Path(uri).stem,
+            file_path=uri,
+            start_line=1,
+            end_line=len(text.splitlines()),
+            source_code=text[:200],
+            source_hash=file_hash,
+        )
+        return [file_node]
 
     def _parse_fallback(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[ASTAgentNode]:
         if not self._fallback_warned:
