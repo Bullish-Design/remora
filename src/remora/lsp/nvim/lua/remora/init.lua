@@ -52,7 +52,8 @@ function M.setup(opts)
     -- -----------------------------------------------------------------------
 
     --- Get the first active remora LSP client, or nil.
-    local function get_client()
+    local function get_client(opts)
+        opts = opts or {}
         local clients = vim.lsp.get_clients({ name = "remora", bufnr = 0 })
         log.debug("get_client: buffer-attached clients=%d", #clients)
         if #clients == 0 then
@@ -61,7 +62,9 @@ function M.setup(opts)
         end
         if #clients == 0 then
             log.warn("get_client: NO remora clients found!")
-            vim.notify("[Remora] LSP not running — is this a supported filetype?", vim.log.levels.WARN)
+            if not opts.silent then
+                vim.notify("[Remora] LSP not running — is this a supported filetype?", vim.log.levels.WARN)
+            end
             return nil
         end
         local client = clients[1]
@@ -124,7 +127,7 @@ function M.setup(opts)
     panel.configure({
         exec_command = exec_command,
         cursor_context = cursor_context,
-        get_client = get_client,
+        get_client = function() return get_client({ silent = true }) end,
     })
     log.info("M.setup: panel configured with callbacks")
 
@@ -247,6 +250,22 @@ function M.setup(opts)
         { desc = "Reject proposal" }
     )
     log.info("M.setup: keymaps set with prefix=%s", prefix)
+
+    -- -----------------------------------------------------------------------
+    -- Always-on cursor tracking (for web graph view)
+    -- -----------------------------------------------------------------------
+
+    vim.api.nvim_create_autocmd("CursorHold", {
+        callback = function()
+            local ft = vim.bo.filetype
+            if ft ~= "python" and ft ~= "markdown" then return end
+            local client = get_client({ silent = true })
+            if not client then return end
+            local ctx = cursor_context()
+            client.notify("$/remora/cursorMoved", ctx)
+        end,
+    })
+    log.info("M.setup: CursorHold autocmd registered for cursor tracking")
 
     -- Close log on exit
     vim.api.nvim_create_autocmd("VimLeavePre", {

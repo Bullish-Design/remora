@@ -95,6 +95,14 @@ class RemoraDB:
                 created_at REAL NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS cursor_focus (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                agent_id TEXT,
+                file_path TEXT,
+                line INTEGER,
+                timestamp REAL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_nodes_file ON nodes(file_path);
             CREATE INDEX IF NOT EXISTS idx_events_correlation ON events(correlation_id);
             CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id);
@@ -169,6 +177,25 @@ class RemoraDB:
         )
         row = cursor.fetchone()
         return self._normalize_node(row) if row else None
+
+    @async_db
+    def update_cursor_focus(self, agent_id: str | None, file_path: str, line: int) -> None:
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO cursor_focus (id, agent_id, file_path, line, timestamp)
+            VALUES (1, ?, ?, ?, ?)
+        """,
+            (agent_id, file_path, line, time.time()),
+        )
+        self.conn.commit()
+
+    def get_cursor_focus(self) -> dict | None:
+        """Read the current cursor focus (sync, for web server reads)."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT agent_id, file_path, line, timestamp FROM cursor_focus WHERE id = 1")
+        row = cursor.fetchone()
+        return dict(row) if row else None
 
     @async_db
     def set_status(self, node_id: str, status: str) -> None:

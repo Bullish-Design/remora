@@ -1,7 +1,28 @@
 from __future__ import annotations
 
 from remora.lsp.models import AgentMessageEvent, HumanChatEvent, RewriteRejectedEvent
-from remora.lsp.server import emit_event, logger, server
+from remora.lsp.server import emit_event, logger, server, uri_to_path
+
+
+@server.feature("$/remora/cursorMoved")
+async def on_cursor_moved(params: dict) -> None:
+    """Handle cursor position updates from neovim for web graph view."""
+    try:
+        if not isinstance(params, dict):
+            params = {
+                "uri": getattr(params, "uri", None),
+                "line": getattr(params, "line", None),
+            }
+        uri = params.get("uri")
+        line = params.get("line")
+        if not uri or line is None:
+            return
+        file_path = uri_to_path(uri)
+        node = await server.db.get_node_at_position(file_path, line, 0)
+        agent_id = node["remora_id"] if node else None
+        await server.db.update_cursor_focus(agent_id, file_path, line)
+    except Exception:
+        logger.debug("Error in on_cursor_moved handler", exc_info=True)
 
 
 @server.feature("$/remora/submitInput")

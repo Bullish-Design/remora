@@ -473,26 +473,29 @@ function M.open()
     wipe_named_buf("remora://panel")
     wipe_named_buf("remora://input")
 
-    -- Create the vsplit on the right
-    vim.cmd("botright vsplit")
-    M._chat_win = vim.api.nvim_get_current_win()
-
-    -- Set width to ~25% of editor
-    local width = math.max(40, math.floor(vim.o.columns * 0.25))
-    vim.api.nvim_win_set_width(M._chat_win, width)
-
-    -- Create scratch buffer for chat content
+    -- Create both buffers first (before any window manipulation)
     M._chat_buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_win_set_buf(M._chat_win, M._chat_buf)
-
-    -- Buffer options
     vim.api.nvim_set_option_value("buftype", "nofile", { buf = M._chat_buf })
     vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = M._chat_buf })
     vim.api.nvim_set_option_value("swapfile", false, { buf = M._chat_buf })
     vim.api.nvim_set_option_value("filetype", "remora-panel", { buf = M._chat_buf })
     vim.api.nvim_buf_set_name(M._chat_buf, "remora://panel")
 
-    -- Window options
+    M._input_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_option_value("buftype", "nofile", { buf = M._input_buf })
+    vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = M._input_buf })
+    vim.api.nvim_set_option_value("swapfile", false, { buf = M._input_buf })
+    vim.api.nvim_set_option_value("filetype", "remora-input", { buf = M._input_buf })
+    vim.api.nvim_buf_set_name(M._input_buf, "remora://input")
+
+    -- Open the chat buffer in a right-edge vertical split.
+    local width = math.max(40, math.floor(vim.o.columns * 0.25))
+    vim.cmd("botright vsplit")
+    M._chat_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(M._chat_win, M._chat_buf)
+    vim.api.nvim_win_set_width(M._chat_win, width)
+
+    -- Chat window options
     vim.api.nvim_set_option_value("number", false, { win = M._chat_win })
     vim.api.nvim_set_option_value("relativenumber", false, { win = M._chat_win })
     vim.api.nvim_set_option_value("signcolumn", "no", { win = M._chat_win })
@@ -501,22 +504,11 @@ function M.open()
     vim.api.nvim_set_option_value("cursorline", false, { win = M._chat_win })
     vim.api.nvim_set_option_value("winfixwidth", true, { win = M._chat_win })
 
-    -- Create input split at the bottom of the panel column
-    -- First make sure we're in the panel window
-    vim.api.nvim_set_current_win(M._chat_win)
+    -- Open the input buffer in a horizontal split below chat
     vim.cmd("belowright split")
     M._input_win = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_height(M._input_win, 3)
-
-    -- Create input buffer
-    M._input_buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_win_set_buf(M._input_win, M._input_buf)
-
-    vim.api.nvim_set_option_value("buftype", "nofile", { buf = M._input_buf })
-    vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = M._input_buf })
-    vim.api.nvim_set_option_value("swapfile", false, { buf = M._input_buf })
-    vim.api.nvim_set_option_value("filetype", "remora-input", { buf = M._input_buf })
-    vim.api.nvim_buf_set_name(M._input_buf, "remora://input")
+    vim.api.nvim_win_set_height(M._input_win, 3)
 
     -- Input window options
     vim.api.nvim_set_option_value("number", false, { win = M._input_win })
@@ -554,6 +546,9 @@ function M.open()
         callback = function(ev)
             -- Only trigger for non-panel buffers
             if ev.buf == M._chat_buf or ev.buf == M._input_buf then return end
+            -- Only trigger for Python files (skip mini.files, help, etc.)
+            local ft = vim.api.nvim_get_option_value("filetype", { buf = ev.buf })
+            if ft ~= "python" then return end
             -- Only if panel is still open
             if not win_valid(M._chat_win) then return end
             -- Debounce: cancel pending timer and start a new one
