@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from lsprotocol import types as lsp
 
-from remora.lsp.models import ASTAgentNode, RewriteAppliedEvent, RewriteRejectedEvent
+from remora.lsp.models import RewriteAppliedEvent, RewriteRejectedEvent
 from remora.lsp.server import emit_event, logger, server
 
 
@@ -18,11 +18,14 @@ async def _resolve_agent(ls, args) -> str | None:
     if not uri or line is None:
         logger.warning("_resolve_agent: missing uri=%r or line=%r", uri, line)
         return None
-    logger.info("_resolve_agent: querying DB for node at %s:%s", uri, line)
-    node = await ls.db.get_node_at_position(uri, line, 0)
-    if node:
-        logger.info("_resolve_agent: FOUND agent %s (%s) at %s:%s", node["remora_id"], node["name"], uri, line)
-        return node["remora_id"]
+    if not ls.event_store:
+        logger.warning("_resolve_agent: no event_store available")
+        return None
+    logger.info("_resolve_agent: querying EventStore for node at %s:%s", uri, line)
+    agent = await ls.event_store.get_node_at_position(uri, line)
+    if agent:
+        logger.info("_resolve_agent: FOUND agent %s (%s) at %s:%s", agent.node_id, agent.name, uri, line)
+        return agent.node_id
     logger.warning("_resolve_agent: NO agent found at %s:%s", uri, line)
     return None
 
@@ -41,44 +44,43 @@ async def cmd_get_agent_panel(ls, *args) -> dict | None:
         if not uri or line is None:
             logger.warning("cmd_get_agent_panel: missing uri=%r or line=%r", uri, line)
             return None
+        if not ls.event_store:
+            return None
 
-        node = await ls.db.get_node_at_position(uri, line, 0)
-        if not node:
+        agent = await ls.event_store.get_node_at_position(uri, line)
+        if not agent:
             logger.info("cmd_get_agent_panel: no agent at %s:%s", uri, line)
             return None
 
-        agent_id = node["remora_id"]
-        logger.info("cmd_get_agent_panel: found agent %s (%s)", agent_id, node["name"])
+        logger.info("cmd_get_agent_panel: found agent %s (%s)", agent.node_id, agent.name)
 
         # Get tools
         tools = []
         if ls.runner:
-            agent_obj = ASTAgentNode(**node)
-            agent_obj = ls.runner.apply_extensions(agent_obj)
-            raw_tools = ls.runner.get_agent_tools(agent_obj)
+            raw_tools = ls.runner.get_agent_tools(agent)
             tools = [
                 {"name": t["function"]["name"], "description": t["function"].get("description", "")} for t in raw_tools
             ]
 
         # Get recent events (newest first from DB, reverse for chronological display)
-        events = await ls.db.get_recent_events(agent_id, limit=50)
+        events = await ls.db.get_recent_events(agent.node_id, limit=50)
         event_dicts = [e.model_dump() for e in reversed(events)]
 
         result = {
             "agent": {
-                "id": agent_id,
-                "name": node["name"],
-                "node_type": node["node_type"],
-                "status": node["status"],
-                "start_line": node["start_line"],
-                "end_line": node["end_line"],
-                "file_path": node.get("file_path", ""),
+                "id": agent.node_id,
+                "name": agent.name,
+                "node_type": agent.node_type,
+                "status": agent.status,
+                "start_line": agent.start_line,
+                "end_line": agent.end_line,
+                "file_path": agent.file_path,
             },
             "tools": tools,
             "events": event_dicts,
         }
         logger.info(
-            "cmd_get_agent_panel: returning agent=%s tools=%d events=%d", agent_id, len(tools), len(event_dicts)
+            "cmd_get_agent_panel: returning agent=%s tools=%d events=%d", agent.node_id, len(tools), len(event_dicts)
         )
         return result
     except Exception:
@@ -134,10 +136,9 @@ async def cmd_request_rewrite(ls, *args) -> None:
 async def cmd_execute_tool(ls, agent_id: str, tool_name: str, *args) -> None:
     try:
         tool_params = args[0] if args else {}
-        if ls.runner:
-            node = await ls.db.get_node(agent_id)
-            if node:
-                agent = ASTAgentNode(**node)
+        if ls.runner and ls.event_store:
+            agent = await ls.event_store.get_node(agent_id)
+            if agent:
                 await ls.runner.execute_extension_tool(agent, tool_name, tool_params, ls.generate_correlation_id())
     except Exception:
         logger.exception("Error in remora.executeTool")
@@ -153,10 +154,9 @@ async def cmd_accept_proposal(ls, proposal_id: str) -> None:
         await ls.workspace_apply_edit(lsp.ApplyWorkspaceEditParams(edit=proposal.to_workspace_edit()))
 
         del ls.proposals[proposal_id]
-        agent = await ls.db.get_node(proposal.agent_id)
-        if agent:
-            await ls.db.set_status(agent["id"], "active")
-            await ls.db.clear_pending_proposal(agent["id"])
+        if ls.event_store:
+            await ls.event_store.set_node_status(proposal.agent_id, "idle")
+        await ls.db.clear_pending_proposal(proposal.agent_id)
 
         await emit_event(
             RewriteAppliedEvent(
