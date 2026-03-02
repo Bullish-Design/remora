@@ -115,20 +115,29 @@ WORKDIR /app
 
 ### 4.2 OpenCode Container
 
-This is the main workload. It needs:
+This is the main workload. It uses a **NixOS-based image** (`nixos/nix`) with **devenv.sh** for environment management — consistent with all other projects in the ecosystem.
 
-- **Base image:** Ubuntu 24.04 or Debian Bookworm (opencode needs a real Linux userspace for its bash tool)
-- **opencode binary:** Installed via the official install script or npm
-- **Node.js:** Required by opencode (it's a Node.js app under the hood)
-- **Git + GitHub CLI (`gh`):** For repo cloning and sync
-- **SSH client:** For git over SSH
-- **Common dev tools:** python3, pip, build-essential (opencode's bash tool may need them)
+- **Base image:** `nixos/nix:latest` — provides the Nix package manager
+- **Environment manager:** devenv.sh — all tools declared in `devenv.nix`
+- **devenv.nix provides:** Node.js, git, GitHub CLI (`gh`), openssh, python3, curl, bash
+- **opencode binary:** Installed via `npm install -g opencode-ai` inside the devenv shell (not in nixpkgs)
 - **Non-root user:** `dev` — opencode should not run as root
+- **Nix store volume:** `/nix` is persisted as a Docker volume to avoid rebuilding the environment on every restart
+
+**Dockerfile approach:**
+1. Start from `nixos/nix:latest`, enable flakes
+2. Install devenv via `nix profile install`
+3. Copy `devenv.nix` and `devenv.yaml` into the image
+4. Pre-build the devenv environment (`devenv shell -- echo "done"`) to cache in the image layer
+5. Install opencode via `devenv shell -- npm install -g opencode-ai`
+6. Create non-root user `dev`, set up directories
 
 **Entrypoint flow:**
-1. Set up GitHub authentication (`gh auth login --with-token`)
-2. Clone/pull configured repos into `/work/`
-3. Start `opencode web --hostname 0.0.0.0 --port 8000` in the target project directory
+1. Source Nix environment, ensure devenv is on PATH
+2. Activate the devenv shell for all subsequent commands
+3. Set up GitHub authentication (`gh auth login --with-token`)
+4. Clone/pull configured repos into `/work/`
+5. Start `opencode web --hostname 0.0.0.0 --port 8000` inside the devenv shell
 
 **Key considerations:**
 - `opencode web` starts both the HTTP server and the backend — it's a single process
@@ -136,17 +145,26 @@ This is the main workload. It needs:
 - `OPENCODE_SERVER_PASSWORD` should be set for auth (even on tailscale, defense in depth)
 - The working directory when opencode starts determines which project it operates on
 
-### 4.3 Multi-Repo Support
+### 4.3 Multi-Repo Workspace
 
-You may want opencode running against different repos. Two approaches:
+The container acts as a persistent workspace — the equivalent of a `Documents/Projects/` directory. The `/work` volume holds 5-10 repos side by side, each in its own subdirectory:
 
-**Option A — Single project (simple):**
-The container clones one repo, opencode starts in that directory. To switch projects, change the config and restart.
+```
+/work/
+├── remora/
+├── agent-sidecar/
+├── my-app/
+└── ...
+```
 
-**Option B — Multiple projects (advanced):**
-Clone multiple repos under `/work/`. Run multiple opencode instances on different ports, or use one instance and switch projects via the web UI. OpenCode's project list (`GET /project`) would show all repos.
+**Repos are managed at runtime**, not at boot:
+- Add a repo: `gh repo clone owner/repo /work/repo` (from opencode's bash tool or SSH)
+- Remove a repo: `rm -rf /work/repo`
+- No container restart needed for any repo operation
 
-Recommendation: **Start with Option A.** The entrypoint takes a `REPO` env var. You can always add multi-repo later.
+The entrypoint only sets up GitHub authentication. It does not clone anything — the `/work` volume persists repos across restarts, and new repos are added on demand.
+
+OpenCode starts in `/work` and can see all project directories. It operates on whichever project you navigate to via the web UI.
 
 ---
 
@@ -164,18 +182,20 @@ gh auth setup-git  # configures git credential helper
 
 This gives both `git` and `gh` access to your repos without SSH keys.
 
-### 5.2 Clone on Startup
+### 5.2 Runtime Repo Management
 
-The entrypoint clones the repo if it doesn't exist, or pulls if it does:
+Repos are **not cloned at startup**. The `/work` volume is a persistent workspace. Add repos at any time from opencode's bash tool or via SSH:
 
 ```bash
-REPO_DIR="/work/$(basename "$GITHUB_REPO" .git)"
-if [ -d "$REPO_DIR/.git" ]; then
-    git -C "$REPO_DIR" pull --ff-only origin main || true
-else
-    gh repo clone "$GITHUB_REPO" "$REPO_DIR"
-fi
+# From opencode's bash tool or SSH into the container:
+gh repo clone anomalyco/remora /work/remora
+gh repo clone anomalyco/my-app /work/my-app
+
+# Or use git directly:
+git clone https://github.com/anomalyco/remora.git /work/remora
 ```
+
+All repos persist across container restarts via the `repos` Docker volume. No restart is needed to add or remove repos.
 
 ### 5.3 Periodic Sync (Optional)
 
@@ -224,8 +244,7 @@ All secrets are injected via `.env` file (never baked into the image):
 |----------|---------|
 | `TS_AUTHKEY` | Tailscale auth key (reusable, ephemeral recommended) |
 | `TS_HOSTNAME` | Tailscale node name (default: `agents`) |
-| `GITHUB_TOKEN` | GitHub PAT with `repo` scope |
-| `GITHUB_REPO` | Repo to clone (e.g., `anomalyco/remora`) |
+| `GITHUB_TOKEN` | GitHub PAT with `repo` scope (for runtime repo cloning and pushing) |
 | `ANTHROPIC_API_KEY` | LLM provider API key |
 | `OPENCODE_SERVER_PASSWORD` | Web UI password |
 | `OPENCODE_SERVER_USERNAME` | Web UI username (default: `opencode`) |
@@ -242,6 +261,7 @@ Named Docker volumes ensure state survives container restarts:
 | `repos` | `/work` | Cloned git repositories |
 | `opencode-data` | `/home/dev/.local/share/opencode` | Sessions, conversation history, project state |
 | `opencode-config` | `/home/dev/.config/opencode` | Global opencode configuration |
+| `nix-store` | `/nix` | Nix store — built packages, devenv environment cache |
 
 ---
 
@@ -348,6 +368,7 @@ agent-container/
 ├── entrypoint.sh               # GitHub auth, repo sync, start opencode web
 ├── opencode.json               # Default opencode config (copied into image)
 ├── update.sh                   # One-command redeploy via SSH
+├── run-test.sh                 # Helper to launch ephemeral NixOS test runner containers
 ├── .env.example                # Template for secrets
 └── README.md                   # Setup and usage instructions
 ```
@@ -362,26 +383,32 @@ Create `agent-container/` with the files listed above.
 ### Step 2: Dockerfile.tailscale
 Copy from `server/Dockerfile.tailscale` — it's identical. The hostname is set via env var, not baked in.
 
-### Step 3: Dockerfile.opencode
+### Step 3: devenv.nix
+Write the devenv configuration declaring all tools: Node.js, git, gh, openssh, python3, curl, bash. opencode-ai is installed via npm in the enterShell hook (it's not in nixpkgs).
+
+### Step 4: Dockerfile.opencode
 Build the main container image:
-- Base: `ubuntu:24.04`
-- Install: curl, git, gh (GitHub CLI), nodejs (via nodesource), build-essential, python3
-- Install opencode: `npm install -g opencode-ai`
+- Base: `nixos/nix:latest`
+- Enable flakes in nix.conf
+- Install devenv via `nix profile install`
+- Copy `devenv.nix` and `devenv.yaml`, pre-build the environment
+- Install opencode: `devenv shell -- npm install -g opencode-ai`
 - Create non-root user `dev` with home at `/home/dev`
 - Copy `entrypoint.sh` and `opencode.json`
 - Set `WORKDIR /work`
 
-### Step 4: entrypoint.sh
+### Step 5: entrypoint.sh
 Write the startup script:
-1. Authenticate `gh` with `$GITHUB_TOKEN`
-2. Clone or pull `$GITHUB_REPO` into `/work/<repo-name>`
-3. `cd` into the repo directory
-4. Start `opencode web --hostname 0.0.0.0 --port 8000`
+1. Source Nix environment, ensure devenv is on PATH
+2. Authenticate `gh` with `$GITHUB_TOKEN` (inside devenv shell)
+3. List existing projects in `/work` (repos persist across restarts)
+4. Start `opencode web --hostname 0.0.0.0 --port 8000` in `/work` inside devenv shell
+5. Repos are added at runtime via `gh repo clone` — no clone at boot
 
-### Step 5: docker-compose.yml
+### Step 6: docker-compose.yml
 Two services:
 - `tailscale` — sidecar with hostname `agents`, SSH enabled, docker socket, tun device
-- `opencode` — main container, `network_mode: service:tailscale`, depends_on tailscale, env_file, volumes for repos/data/config
+- `opencode` — main container, `network_mode: service:tailscale`, depends_on tailscale, env_file, volumes for repos/data/config/nix-store
 
 ### Step 6: .env.example and README
 Document all required variables, setup steps, and verification commands.
@@ -389,7 +416,10 @@ Document all required variables, setup steps, and verification commands.
 ### Step 7: update.sh
 Script for SSH-in redeploy: `git pull && docker compose up -d --build --no-deps opencode`
 
-### Step 8: Test
+### Step 8: run-test.sh
+Helper script that wraps `docker run --rm` to launch ephemeral NixOS test runner containers. Takes a repo and git ref as arguments, passes through `$GITHUB_TOKEN` for private repo access. See [Section 7](#7-nixos-test-runner) for details.
+
+### Step 9: Test
 - `docker compose up -d --build`
 - Verify tailscale joins: `docker exec tailscale-agents tailscale status`
 - Verify opencode starts: `curl http://agents:8000/global/health`
@@ -399,8 +429,8 @@ Script for SSH-in redeploy: `git pull && docker compose up -d --build --no-deps 
 
 ## 10. Open Questions
 
-### Q1: Single repo or multi-repo?
-The plan above defaults to single repo via `GITHUB_REPO` env var. Multi-repo could be supported with a `GITHUB_REPOS` comma-separated list, or by mounting a config file with a repo manifest. **Recommendation: start simple (single repo), iterate later.**
+### Q1: ~~Single repo or multi-repo?~~ RESOLVED
+Multi-repo workspace. The container is a persistent `Documents/Projects/` equivalent. Repos are managed at runtime via `gh repo clone` — no `GITHUB_REPO` env var, no clone at boot. The `/work` volume persists everything across restarts.
 
 ### Q2: Which LLM providers?
 The config supports any provider opencode supports. The `.env` file can include keys for Anthropic, OpenAI, Google, or any other provider. We only need to decide which to configure by default. **Recommendation: Anthropic (Claude) as primary, with env vars for others.**
@@ -413,7 +443,7 @@ OpenCode has an `autoupdate` config option. In a container, this is a tradeoff:
 **Recommendation: OFF in the container. Pin version. Update via `update.sh` rebuild.**
 
 ### Q4: SSH access to the opencode container?
-The tailscale sidecar provides SSH (`ssh root@agents`), but that lands in the Alpine sidecar, not the Ubuntu opencode container. Options:
+The tailscale sidecar provides SSH (`ssh root@agents`), but that lands in the Alpine sidecar, not the NixOS opencode container. Options:
 - Install `openssh-server` in the opencode container and forward port 22 through tailscale
 - Use `docker exec` from the sidecar (docker socket is mounted) to get a shell in the opencode container
 - Use Tailscale SSH directly on the opencode container (requires running tailscaled there too — defeats the sidecar pattern)

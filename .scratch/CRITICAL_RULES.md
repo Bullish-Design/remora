@@ -89,6 +89,16 @@ When writing large documents:
 
 ---
 
+## 6. ALWAYS CONTINUE — NEVER STOP
+
+**After every compaction, resume working IMMEDIATELY.** Do NOT wait for user input. Do NOT ask "what should I do next?" — the answer is always in CONTEXT.md and PROGRESS.md. Pick up the next pending task and keep going until the active project is **completely and totally done** — fully integrated, fully tested, ready to use. Stopping early or waiting for permission is not acceptable.
+
+---
+
 ## REMINDER — NO SUBAGENTS
 
 **NEVER use the Task tool.** Do all work directly. This rule is absolute and non-negotiable.
+
+## REMINDER — ALWAYS CONTINUE
+
+**NEVER stop working after compaction.** Read CONTEXT.md, check PROGRESS.md, resume immediately. Keep going until the project is fully done.

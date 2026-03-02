@@ -11,6 +11,10 @@ Planning project to analyze the entire remora repo and produce a cleanup plan al
 - 4-phase execution plan in `PLAN.md`
 - Assumptions documented in `ASSUMPTIONS.md`
 
+## Follow-Up Deliverable
+
+`REMORA_LAUNCH_PLAN.md` (858 lines, 7 sections) — consolidates ALL findings from all 4 code reviews into a single deduplicated, prioritized action plan. Supersedes this project's `PLAN.md` as the authoritative execution roadmap.
+
 ## Key Discovery
 
 The Option A unification project is marked COMPLETE, but project diagnostics reveal **broken imports still exist** in the LSP layer:
@@ -18,4 +22,4 @@ The Option A unification project is marked COMPLETE, but project diagnostics rev
 - `lsp/handlers/actions.py` and `commands.py` reference `ASTAgentNode`
 - `lsp/server.py` references undefined `AgentRunner`
 
-This should be addressed when executing Phase 3 of the cleanup plan.
+This is tracked in `REMORA_LAUNCH_PLAN.md` as item D15.
