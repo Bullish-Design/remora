@@ -338,7 +338,9 @@ class AgentRunner:
         from remora.lsp.server import emit_event
 
         await emit_event(
-            AgentMessageEvent(from_agent=from_id, to_agent=to_id, message=message, correlation_id=correlation_id)
+            AgentMessageEvent(
+                agent_id=from_id, from_agent=from_id, to_agent=to_id, message=message, correlation_id=correlation_id
+            )
         )
         await self.trigger(to_id, correlation_id)
 

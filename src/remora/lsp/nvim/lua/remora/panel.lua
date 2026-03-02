@@ -254,6 +254,34 @@ local function build_lines()
                 end
                 table.insert(lines, Line())
 
+            elseif etype == "AgentMessageEvent" then
+                -- Inter-agent message
+                local header = Line()
+                header:append(icon, hl)
+                local from = (ev.payload and ev.payload.from_agent) or "unknown"
+                local to = (ev.payload and ev.payload.to_agent) or "unknown"
+                -- Show direction relative to current agent
+                if M._agent and to == M._agent.id then
+                    header:append("From: ", "Comment")
+                    header:append(sanitize(from), "Function")
+                else
+                    header:append("To: ", "Comment")
+                    header:append(sanitize(to), "Function")
+                end
+                local ts = format_time(ev.timestamp)
+                if ts ~= "" then
+                    header:append("  " .. ts, "Comment")
+                end
+                table.insert(lines, header)
+
+                local msg = (ev.payload and ev.payload.message) or ev.summary or ""
+                for _, text_line in ipairs(vim.split(msg, "\n")) do
+                    local ml = Line()
+                    ml:append("  " .. text_line, "Comment")
+                    table.insert(lines, ml)
+                end
+                table.insert(lines, Line())
+
             else
                 -- Generic event
                 local gl = Line()
@@ -583,9 +611,16 @@ function M.on_event(event)
     log.info("panel.on_event: type=%s agent=%s",
         tostring(event.event_type), tostring(event.agent_id))
 
-    -- Only show events for the current agent
-    if not M._agent or event.agent_id ~= M._agent.id then
-        log.debug("panel.on_event: ignoring (agent mismatch or no agent)")
+    -- Only show events for the current agent (as sender or receiver)
+    if not M._agent then
+        log.debug("panel.on_event: ignoring (no agent)")
+        return
+    end
+    local agent_id = M._agent.id
+    local to_agent = event.payload and event.payload.to_agent
+    if event.agent_id ~= agent_id and to_agent ~= agent_id then
+        log.debug("panel.on_event: ignoring (agent mismatch: event.agent_id=%s to_agent=%s current=%s)",
+            tostring(event.agent_id), tostring(to_agent), agent_id)
         return
     end
 

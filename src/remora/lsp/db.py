@@ -219,10 +219,11 @@ class RemoraDB:
         cursor.execute(
             """
             SELECT * FROM events 
-            WHERE agent_id = ? 
+            WHERE agent_id = ?
+               OR json_extract(payload, '$.to_agent') = ?
             ORDER BY timestamp DESC LIMIT ?
         """,
-            (agent_id, limit),
+            (agent_id, agent_id, limit),
         )
         return [self._reconstruct_event(row) for row in cursor.fetchall()]
 

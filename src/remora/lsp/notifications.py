@@ -29,7 +29,9 @@ async def on_input_submitted(params: dict) -> None:
             correlation_id = server.generate_correlation_id()
             logger.debug("on_input_submitted: correlation_id=%s", correlation_id)
             await emit_event(
-                HumanChatEvent(to_agent=agent_id, message=message, correlation_id=correlation_id, timestamp=0.0)
+                HumanChatEvent(
+                    agent_id=agent_id, to_agent=agent_id, message=message, correlation_id=correlation_id, timestamp=0.0
+                )
             )
             logger.info("on_input_submitted: HumanChatEvent emitted")
 
