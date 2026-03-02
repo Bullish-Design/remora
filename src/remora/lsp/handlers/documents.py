@@ -42,6 +42,10 @@ async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         for node in nodes:
             tools = await server.discover_tools_for_agent(node)
             node.extra_tools = tools
+
+        # Notify client of updated agent list
+        if hasattr(server, "_notify_agents_updated"):
+            await server._notify_agents_updated()
     except Exception:
         logger.exception("Error in did_open handler")
 
@@ -81,6 +85,10 @@ async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
             inject_ids(file_path, new_nodes)
 
         await refresh_code_lenses()
+
+        # Notify client of updated agent list
+        if hasattr(server, "_notify_agents_updated"):
+            await server._notify_agents_updated()
     except Exception:
         logger.exception("Error in did_save handler")
 

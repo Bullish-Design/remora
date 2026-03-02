@@ -73,6 +73,10 @@ function M.setup(opts)
         panel.select_agent(result.agent_id)
     end
 
+    vim.lsp.handlers["$/remora/agentsUpdated"] = function(_, result)
+        panel.update_agents(result)
+    end
+
     --- Get the first active remora LSP client, or nil.
     local function get_client()
         -- Try buffer-attached clients first, then fall back to all clients.

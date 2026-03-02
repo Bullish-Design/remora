@@ -151,6 +151,12 @@ class RemoraDB:
         return [self._normalize_node(row) for row in cursor.fetchall()]
 
     @async_db
+    def get_all_nodes(self) -> list[dict]:
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM nodes WHERE status != 'orphaned'")
+        return [self._normalize_node(row) for row in cursor.fetchall()]
+
+    @async_db
     def get_node_at_position(self, uri: str, line: int, character: int) -> dict | None:
         cursor = self.conn.cursor()
         cursor.execute(
