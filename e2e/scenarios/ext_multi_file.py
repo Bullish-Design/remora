@@ -34,7 +34,8 @@ class ExtMultiFileScenario:
         #         function gets FunctionTestScaffold
         # ---------------------------------------------------------------
         schema_file = DEMO_PROJECT / "src" / "configlib" / "schema.py"
-        nv.open_nvim(schema_file, wait_for="class SchemaError")
+        nv.open_nvim(schema_file, wait_for="class SchemaError", lsp_delay=0)
+        nv.wait_for_lsp_ready()
 
         # Open the panel so we see agent assignments
         nv.leader_panel()
@@ -42,11 +43,18 @@ class ExtMultiFileScenario:
         time.sleep(1)
         nv.focus_left()
 
-        # Scroll through — class first, then function
+        # Navigate to class and function nodes
         nv.goto_line(8)  # class SchemaError line
-        time.sleep(1)
+        time.sleep(2)
+
+        content = driver.capture_pane()
+        assert "SchemaError" in content, f"Expected 'SchemaError' after navigating to class:\n{content}"
+
         nv.goto_line(16)  # def validate line
-        time.sleep(1)
+        time.sleep(2)
+
+        content = driver.capture_pane()
+        assert "validate" in content, f"Expected 'validate' after navigating to function:\n{content}"
 
         driver.wait_for_stable(stable_seconds=2.0, timeout=15)
 
@@ -62,11 +70,22 @@ class ExtMultiFileScenario:
 
         # Scroll through the functions
         nv.goto_line(12)  # load_config
-        time.sleep(0.5)
+        time.sleep(1)
+
+        content = driver.capture_pane()
+        assert "load_config" in content, f"Expected 'load_config' in panel:\n{content}"
+
         nv.goto_line(29)  # detect_format
-        time.sleep(0.5)
+        time.sleep(1)
+
+        content = driver.capture_pane()
+        assert "detect_format" in content, f"Expected 'detect_format' in panel:\n{content}"
+
         nv.goto_line(39)  # load_yaml
-        time.sleep(0.5)
+        time.sleep(1)
+
+        content = driver.capture_pane()
+        assert "load_yaml" in content, f"Expected 'load_yaml' in panel:\n{content}"
 
         # ---------------------------------------------------------------
         # Beat 3: Navigate to merge.py — two functions, both get
@@ -80,12 +99,19 @@ class ExtMultiFileScenario:
 
         # Scroll through
         nv.goto_line(8)  # deep_merge
-        time.sleep(0.5)
+        time.sleep(1)
+
+        content = driver.capture_pane()
+        assert "deep_merge" in content, f"Expected 'deep_merge' in panel:\n{content}"
+
         nv.goto_line(19)  # merge_dicts
-        time.sleep(0.5)
+        time.sleep(1)
+
+        content = driver.capture_pane()
+        assert "merge_dicts" in content, f"Expected 'merge_dicts' in panel:\n{content}"
 
         # ---------------------------------------------------------------
         # Beat 4: Final stable state
         # ---------------------------------------------------------------
-        driver.wait_for_stable(stable_seconds=2.0, timeout=10)
-        _content = driver.capture_pane()
+        content = driver.wait_for_stable(stable_seconds=2.0, timeout=10)
+        assert "merge" in content, f"Expected merge file content in final state:\n{content}"

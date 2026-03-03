@@ -250,3 +250,162 @@ class NvimKeys:
         self.driver.wait_for_text(wait_for, timeout=timeout)
         if lsp_delay > 0:
             time.sleep(lsp_delay)
+
+    # ------------------------------------------------------------------
+    # LSP and chat readiness helpers
+    # ------------------------------------------------------------------
+
+    def wait_for_lsp_ready(
+        self,
+        *,
+        indicator: str = "[Remora]",
+        timeout: float = 15.0,
+        extra_settle: float = 2.0,
+    ) -> str:
+        """Wait for the Remora LSP to show its initialization notification.
+
+        After the indicator appears, waits an additional settle period for
+        the LSP to fully attach to all buffers.
+
+        Args:
+            indicator: Text that confirms LSP initialization.
+            timeout: Max seconds to wait for the indicator.
+            extra_settle: Additional seconds after indicator appears.
+
+        Returns:
+            The pane content where the indicator was found.
+        """
+        content = self.driver.wait_for_text(indicator, timeout=timeout)
+        if extra_settle > 0:
+            time.sleep(extra_settle)
+        return content
+
+    def wait_for_chat_prompt(
+        self,
+        *,
+        prompt_text: str = "Message agent",
+        timeout: float = 10.0,
+    ) -> str:
+        """Wait for the chat input prompt to appear after leader_chat().
+
+        The prompt text varies depending on panel width but always starts
+        with "Message agent" (e.g., "Message agent...", "Message to agent:").
+
+        Returns the pane content where the prompt was found.
+        Raises TimeoutError if the prompt doesn't appear (e.g., LSP not running).
+        """
+        return self.driver.wait_for_text(prompt_text, timeout=timeout)
+
+    # ------------------------------------------------------------------
+    # Focus helpers
+    # ------------------------------------------------------------------
+
+    def focus_code_buffer(
+        self,
+        expected_text: str = "def ",
+        timeout: float = 5.0,
+    ) -> str:
+        """Navigate to the window containing source code.
+
+        Tries multiple strategies to find the code buffer:
+        1. Ctrl-h (left window, most common layout)
+        2. Ctrl-w p (previous window)
+        3. Window cycling with Ctrl-w w
+
+        Args:
+            expected_text: Text that identifies the code buffer.
+            timeout: Max seconds to find the code buffer.
+
+        Returns:
+            The pane content of the code buffer.
+
+        Raises:
+            TimeoutError: If code buffer not found within timeout.
+        """
+        start = time.monotonic()
+
+        # Try left window first (most common layout)
+        self.raw("C-h", delay=0.3)
+        content = self.driver.capture_pane()
+        if expected_text in content:
+            return content
+
+        # Try Ctrl-w p (previous window)
+        self.raw("C-w", delay=0.1)
+        self.raw("p", delay=0.3)
+        content = self.driver.capture_pane()
+        if expected_text in content:
+            return content
+
+        # Fallback: cycle through windows
+        for _ in range(4):
+            if time.monotonic() - start > timeout:
+                break
+            self.raw("C-w", delay=0.1)
+            self.raw("w", delay=0.3)
+            content = self.driver.capture_pane()
+            if expected_text in content:
+                return content
+
+        raise TimeoutError(f"Could not find window containing '{expected_text}'")
+
+    # ------------------------------------------------------------------
+    # Assertion helpers
+    # ------------------------------------------------------------------
+
+    def assert_in_pane(self, text: str, msg: str = "") -> str:
+        """Assert that text is in the current pane content.
+
+        Args:
+            text: The text to find.
+            msg: Optional failure message.
+
+        Returns:
+            The pane content.
+
+        Raises:
+            AssertionError: If text is not found.
+        """
+        content = self.driver.capture_pane()
+        assert text in content, msg or f"Expected {text!r} in pane, got:\n{content}"
+        return content
+
+    def assert_not_in_pane(self, text: str, msg: str = "") -> str:
+        """Assert that text is NOT in the current pane content.
+
+        Args:
+            text: The text that should be absent.
+            msg: Optional failure message.
+
+        Returns:
+            The pane content.
+
+        Raises:
+            AssertionError: If text is found.
+        """
+        content = self.driver.capture_pane()
+        assert text not in content, msg or f"Did not expect {text!r} in pane, got:\n{content}"
+        return content
+
+    # ------------------------------------------------------------------
+    # Convenience methods
+    # ------------------------------------------------------------------
+
+    def open_nvim_with_panel(
+        self,
+        file: str | Path,
+        *,
+        wait_for: str = "def ",
+        timeout: float = 15.0,
+    ) -> None:
+        """Open nv2, wait for content and LSP, then open the agent panel.
+
+        Combines open_nvim + wait_for_lsp_ready + leader_panel + focus cycle.
+        This is a common pattern for scenarios that need both the code buffer
+        and the agent panel visible.
+        """
+        self.open_nvim(file, wait_for=wait_for, timeout=timeout, lsp_delay=0)
+        self.wait_for_lsp_ready()
+        self.leader_panel()
+        self.focus_right(delay=0.3)
+        self.focus_left(delay=0.3)

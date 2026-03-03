@@ -33,7 +33,8 @@ class ExtEditCascadeScenario:
         # Beat 1: Open schema.py and let LSP discover nodes
         # ---------------------------------------------------------------
         schema_file = DEMO_PROJECT / "src" / "configlib" / "schema.py"
-        nv.open_nvim(schema_file, wait_for="class SchemaError")
+        nv.open_nvim(schema_file, wait_for="class SchemaError", lsp_delay=0)
+        nv.wait_for_lsp_ready()
 
         # Open the panel to watch agent activity
         nv.leader_panel()
@@ -58,7 +59,10 @@ class ExtEditCascadeScenario:
         nv.save(delay=3)
 
         # Wait for LSP to re-parse and extension to react
-        driver.wait_for_stable(stable_seconds=3.0, timeout=20)
+        content = driver.wait_for_stable(stable_seconds=3.0, timeout=20)
+
+        # Verify the edit persisted
+        assert "severity" in content, f"Edit should be visible in schema.py:\n{content}"
 
         # ---------------------------------------------------------------
         # Beat 3: Navigate to loader.py
@@ -84,7 +88,10 @@ class ExtEditCascadeScenario:
         nv.save(delay=3)
 
         # Wait for extension reaction
-        driver.wait_for_stable(stable_seconds=3.0, timeout=20)
+        content = driver.wait_for_stable(stable_seconds=3.0, timeout=20)
+
+        # Verify the edit persisted
+        assert "timeout" in content, f"Edit should be visible in loader.py:\n{content}"
 
         # ---------------------------------------------------------------
         # Beat 5: Final state — panel shows updated agents
@@ -94,5 +101,7 @@ class ExtEditCascadeScenario:
         time.sleep(1)
         nv.focus_left()
 
-        driver.wait_for_stable(stable_seconds=2.0, timeout=10)
-        _content = driver.capture_pane()
+        content = driver.wait_for_stable(stable_seconds=2.0, timeout=10)
+
+        # Verify panel shows correct agent
+        assert "load_config" in content, f"Expected 'load_config' in panel:\n{content}"

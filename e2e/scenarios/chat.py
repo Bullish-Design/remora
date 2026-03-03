@@ -1,13 +1,12 @@
 """Chat scenario — Chat with an agent.
 
 Opens nv2 on the demo project, positions cursor on `load_config`,
-sends a chat message via <leader>rc, verifies the response, then
-opens the Remora panel via <leader>ra and navigates into it.
+sends a chat message via <leader>rc, verifies the chat panel opened,
+then opens the Remora panel via <leader>ra and navigates into it.
 """
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,8 +27,14 @@ class ChatScenario:
         nv = NvimKeys(driver)
         target_file = DEMO_PROJECT / "src" / "configlib" / "loader.py"
 
-        # Launch nv2 on loader.py
-        nv.open_nvim(target_file, wait_for="def load_config")
+        # Launch nv2 on loader.py and wait for LSP
+        nv.open_nvim(target_file, wait_for="def load_config", lsp_delay=0)
+        nv.wait_for_lsp_ready()
+
+        # Open the agent panel first (required for chat to work)
+        nv.leader_panel()
+        nv.focus_right(delay=0.3)
+        nv.focus_left(delay=0.3)
 
         # Position cursor on load_config (line 13 in loader.py)
         nv.goto_line(13)
@@ -37,14 +42,16 @@ class ChatScenario:
         # --- Test 1: Direct chat via <leader>rc ---
         nv.leader_chat()
 
+        # Wait for chat prompt to appear before typing
+        nv.wait_for_chat_prompt()
+
         # Type a chat message and send it
-        time.sleep(0.5)
         nv.keys("what do you do?", delay=1)
         nv.raw("Escape", delay=0.5)
-        nv.raw("Enter", delay=5)
+        nv.raw("Enter", delay=1)
 
-        # Verify the agent response appears
-        driver.wait_for_text("load_config", timeout=15)
+        # Wait for the response to arrive (pane should stabilize)
+        driver.wait_for_stable(stable_seconds=3.0, timeout=30)
 
         # --- Test 2: Open the agent panel via <leader>ra ---
         nv.leader_panel()
@@ -52,5 +59,8 @@ class ChatScenario:
         # Move focus into the panel
         nv.focus_right(delay=1)
 
-        # Wait for everything to settle
-        driver.wait_for_stable(stable_seconds=2.0, timeout=10)
+        # Wait for panel to render
+        content = driver.wait_for_stable(stable_seconds=2.0, timeout=10)
+
+        # Assert panel shows agent info
+        assert "load_config" in content, f"Expected 'load_config' in panel, got:\n{content}"

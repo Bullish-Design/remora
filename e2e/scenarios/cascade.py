@@ -26,8 +26,9 @@ class CascadeScenario:
         nv = NvimKeys(driver)
         target_file = DEMO_PROJECT / "src" / "configlib" / "loader.py"
 
-        # Launch nv2 on loader.py
-        nv.open_nvim(target_file, wait_for="def load_config")
+        # Launch nv2 on loader.py with event-driven LSP wait
+        nv.open_nvim(target_file, wait_for="def load_config", lsp_delay=0)
+        nv.wait_for_lsp_ready()
 
         # Open the panel first to see agent activity
         nv.leader_panel()
@@ -49,7 +50,10 @@ class CascadeScenario:
         nv.save(delay=5)
 
         # Wait for pane to stabilize
-        driver.wait_for_stable(stable_seconds=3.0, timeout=20)
+        content = driver.wait_for_stable(stable_seconds=3.0, timeout=20)
 
-        # Capture final state
-        _content = driver.capture_pane()
+        # Verify the edit persisted
+        assert "timeout" in content, f"Expected 'timeout' parameter in pane after edit:\n{content}"
+
+        # Verify panel is showing agent info
+        assert "load_config" in content, f"Expected 'load_config' in pane:\n{content}"

@@ -31,7 +31,8 @@ class ExtDiscoveryScenario:
         # Beat 1: Open schema.py — has SchemaError class + validate function
         # ---------------------------------------------------------------
         target_file = DEMO_PROJECT / "src" / "configlib" / "schema.py"
-        nv.open_nvim(target_file, wait_for="class SchemaError")
+        nv.open_nvim(target_file, wait_for="class SchemaError", lsp_delay=0)
+        nv.wait_for_lsp_ready()
 
         # Wait for LSP to finish discovering nodes
         driver.wait_for_stable(stable_seconds=2.0, timeout=15)
@@ -61,7 +62,22 @@ class ExtDiscoveryScenario:
         time.sleep(0.5)
 
         # ---------------------------------------------------------------
-        # Beat 4: Navigate to loader.py to see function agents
+        # Beat 4: Navigate to specific nodes to verify agents
+        # ---------------------------------------------------------------
+        nv.goto_line(8)  # SchemaError class
+        time.sleep(2)
+
+        content = driver.capture_pane()
+        assert "SchemaError" in content, f"Expected 'SchemaError' in panel:\n{content}"
+
+        nv.goto_line(16)  # validate function
+        time.sleep(2)
+
+        content = driver.capture_pane()
+        assert "validate" in content, f"Expected 'validate' in panel:\n{content}"
+
+        # ---------------------------------------------------------------
+        # Beat 5: Navigate to loader.py to see function agents
         # ---------------------------------------------------------------
         loader_file = DEMO_PROJECT / "src" / "configlib" / "loader.py"
         nv.edit_file(loader_file, delay=3)
@@ -75,7 +91,7 @@ class ExtDiscoveryScenario:
         assert "def load_config" in content, f"Expected 'def load_config' in pane:\n{content}"
 
         # ---------------------------------------------------------------
-        # Beat 5: Final stable state — all agents visible in panel
+        # Beat 6: Final stable state — all agents visible in panel
         # ---------------------------------------------------------------
-        driver.wait_for_stable(stable_seconds=2.0, timeout=10)
-        _content = driver.capture_pane()
+        content = driver.wait_for_stable(stable_seconds=2.0, timeout=10)
+        assert "load_config" in content, f"Expected 'load_config' in final state:\n{content}"

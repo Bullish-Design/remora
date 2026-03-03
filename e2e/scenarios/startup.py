@@ -28,15 +28,18 @@ class StartupScenario:
         nv = NvimKeys(driver)
         target_file = DEMO_PROJECT / "src" / "configlib" / "loader.py"
 
-        # Launch nv2 on loader.py and wait for content + LSP startup
-        nv.open_nvim(target_file, wait_for="load_config")
+        # Launch nv2 on loader.py and wait for content (no fixed LSP delay)
+        nv.open_nvim(target_file, wait_for="load_config", lsp_delay=0)
 
-        # Wait for the Remora plugin initialization notification
-        driver.wait_for_text("[Remora]", timeout=15)
+        # Wait for the Remora plugin initialization notification (event-driven)
+        nv.wait_for_lsp_ready(indicator="[Remora]", timeout=15)
 
         # Verify the buffer is showing the loader.py content
         content = driver.capture_pane()
-        assert "def load_config" in content, f"Expected 'def load_config' in pane, got:\n{content}"
+        assert "def load_config" in content, f"Expected 'def load_config' in pane:\n{content}"
 
         # Wait for the pane to stabilize (LSP done processing)
-        driver.wait_for_stable(stable_seconds=2.0, timeout=15)
+        content = driver.wait_for_stable(stable_seconds=2.0, timeout=15)
+
+        # Verify stable state still shows the file
+        assert "load_config" in content, f"Expected 'load_config' in stable state:\n{content}"

@@ -44,6 +44,42 @@ _DEMO_MUTABLE_FILES = [
     DEMO_PROJECT / "MONITOR.md",
 ]
 
+# Remora state directories that should be cleared between runs
+_DEMO_STATE_DIR = DEMO_PROJECT / ".remora"
+
+
+# ---------------------------------------------------------------------------
+# Cleanup utilities
+# ---------------------------------------------------------------------------
+
+
+def cleanup_stale_sessions() -> int:
+    """Kill any orphaned remora-e2e tmux sessions from previous runs.
+
+    Returns the number of sessions killed.
+    """
+    result = subprocess.run(
+        ["tmux", "list-sessions", "-F", "#{session_name}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        # No tmux server running, nothing to clean up
+        return 0
+
+    killed = 0
+    for line in result.stdout.strip().split("\n"):
+        session_name = line.strip()
+        if session_name.startswith(SESSION_PREFIX):
+            subprocess.run(
+                ["tmux", "kill-session", "-t", session_name],
+                capture_output=True,
+                text=True,
+            )
+            killed += 1
+
+    return killed
+
 
 # ---------------------------------------------------------------------------
 # DemoProjectGuard — snapshot and restore mutable demo files
@@ -56,11 +92,19 @@ class DemoProjectGuard:
     Used as a context manager around scenario execution to guarantee the
     demo project is always left in its original state — even if a scenario
     fails or the process is interrupted.
+
+    Also clears Remora event/chat state to ensure test isolation.
     """
 
-    def __init__(self, files: list[Path] | None = None) -> None:
+    def __init__(
+        self,
+        files: list[Path] | None = None,
+        *,
+        clear_state: bool = True,
+    ) -> None:
         self._files = files or _DEMO_MUTABLE_FILES
         self._snapshots: dict[Path, bytes] = {}
+        self._clear_state = clear_state
 
     def save(self) -> None:
         """Read and store the current content of each mutable file."""
@@ -73,8 +117,43 @@ class DemoProjectGuard:
         for fpath, content in self._snapshots.items():
             fpath.write_bytes(content)
 
+    def clear_remora_state(self) -> None:
+        """Clear Remora event/chat databases and logs for test isolation.
+
+        Removes:
+        - .remora/events/ (event store files)
+        - .remora/indexer.db (node projection database)
+        - .remora/subscriptions.db (subscription state)
+        - .remora/logs/ (log files)
+
+        Preserves:
+        - .remora/models/ (extension definitions — should not change)
+        """
+        if not _DEMO_STATE_DIR.exists():
+            return
+
+        # Clear events directory
+        events_dir = _DEMO_STATE_DIR / "events"
+        if events_dir.exists():
+            shutil.rmtree(events_dir)
+            events_dir.mkdir()
+
+        # Clear logs directory
+        logs_dir = _DEMO_STATE_DIR / "logs"
+        if logs_dir.exists():
+            shutil.rmtree(logs_dir)
+            logs_dir.mkdir()
+
+        # Remove database files
+        for db_file in ["indexer.db", "subscriptions.db"]:
+            db_path = _DEMO_STATE_DIR / db_file
+            if db_path.exists():
+                db_path.unlink()
+
     def __enter__(self) -> DemoProjectGuard:
         self.save()
+        if self._clear_state:
+            self.clear_remora_state()
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -236,15 +315,89 @@ class TmuxDriver:
 
         return last_content
 
+    def wait_for_absent(
+        self,
+        pattern: str,
+        *,
+        timeout: float = DEFAULT_TIMEOUT,
+        poll: float = POLL_INTERVAL,
+        regex: bool = False,
+    ) -> str:
+        """Poll capture_pane until pattern is absent or timeout.
+
+        Useful for verifying that an error message has cleared or that a
+        previous state has been replaced.
+
+        Args:
+            pattern: Literal substring or regex to check for absence.
+            timeout: Max seconds to wait.
+            poll: Seconds between polls.
+            regex: If True, treat pattern as a regex.
+
+        Returns:
+            The pane content where pattern was not found.
+
+        Raises:
+            TimeoutError: If pattern still present after timeout.
+        """
+        deadline = time.monotonic() + timeout
+        compiled = re.compile(pattern) if regex else None
+
+        while time.monotonic() < deadline:
+            content = self.capture_pane()
+            if regex:
+                assert compiled is not None
+                if not compiled.search(content):
+                    return content
+            else:
+                if pattern not in content:
+                    return content
+            time.sleep(poll)
+
+        content = self.capture_pane()
+        raise TimeoutError(
+            f"Timed out after {timeout}s waiting for "
+            f"{'regex ' if regex else ''}pattern to disappear: {pattern!r}\n"
+            f"Last pane content:\n{content}"
+        )
+
     def kill(self) -> None:
-        """Kill the tmux session."""
+        """Kill the tmux session and all processes within it.
+
+        This ensures no orphaned nvim or remora-lsp processes are left running
+        after the test completes or fails.
+        """
         if self._started:
+            # First, send SIGTERM to all processes in the session by killing the pane
+            # This is more thorough than just killing the session
+            subprocess.run(
+                ["tmux", "send-keys", "-t", self.session_name, "C-c"],
+                capture_output=True,
+                text=True,
+            )
+            time.sleep(0.1)
+
+            # Kill the session (this sends SIGHUP to all processes)
             subprocess.run(
                 ["tmux", "kill-session", "-t", self.session_name],
                 capture_output=True,
                 text=True,
             )
             self._started = False
+
+            # Verify session is gone
+            result = subprocess.run(
+                ["tmux", "has-session", "-t", self.session_name],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                # Session still exists, force kill
+                subprocess.run(
+                    ["tmux", "kill-session", "-t", self.session_name],
+                    capture_output=True,
+                    text=True,
+                )
 
     def __enter__(self) -> TmuxDriver:
         return self

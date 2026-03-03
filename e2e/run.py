@@ -14,7 +14,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from e2e.harness import OUTPUT_DIR, run_scenario, ScenarioResult
+from e2e.harness import OUTPUT_DIR, run_scenario, ScenarioResult, cleanup_stale_sessions
 from e2e.scenarios import ALL_SCENARIOS
 
 
@@ -78,6 +78,11 @@ def main() -> int:
         list_scenarios()
         return 0
 
+    # Clean up any orphaned sessions from previous runs
+    stale_killed = cleanup_stale_sessions()
+    if stale_killed > 0:
+        print(f"Cleaned up {stale_killed} stale tmux session(s)")
+
     # Determine which scenarios to run
     if args.scenario:
         scenario_names = [args.scenario]
@@ -110,6 +115,11 @@ def main() -> int:
         results.append(result)
         print_result(result)
         print()
+
+    # Final cleanup - ensure no sessions are left behind
+    final_cleanup = cleanup_stale_sessions()
+    if final_cleanup > 0:
+        print(f"Warning: Cleaned up {final_cleanup} orphaned session(s) after run")
 
     # Summary
     passed = sum(1 for r in results if r.success)

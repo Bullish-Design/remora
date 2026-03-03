@@ -34,10 +34,11 @@ class GoldenPathScenario:
         nv = NvimKeys(driver)
 
         # ---------------------------------------------------------------
-        # Beat 1: Open nv2 on loader.py
+        # Beat 1: Open nv2 on loader.py with event-driven LSP wait
         # ---------------------------------------------------------------
         target_file = DEMO_PROJECT / "src" / "configlib" / "loader.py"
-        nv.open_nvim(target_file, wait_for="def load_config")
+        nv.open_nvim(target_file, wait_for="def load_config", lsp_delay=0)
+        nv.wait_for_lsp_ready()
 
         # ---------------------------------------------------------------
         # Beat 2: Explore the file — scroll through functions
@@ -61,16 +62,28 @@ class GoldenPathScenario:
         nv.goto_line(13, delay=1)
 
         # Chat with the agent
-        nv.leader_chat(settle=0.2)
+        nv.leader_chat(settle=0.5)
 
-        # Type the question
-        nv.keys("what do you do?", delay=4)
+        # Wait for chat prompt to appear before typing
+        nv.wait_for_chat_prompt()
+
+        # Type the question and send
+        nv.keys("what do you do?", delay=1)
+        nv.raw("Escape", delay=0.5)
+        nv.raw("Enter", delay=2)
+
+        # Wait for response to arrive
+        driver.wait_for_stable(stable_seconds=3.0, timeout=30)
 
         # ---------------------------------------------------------------
         # Beat 5: Edit load_config — add timeout parameter
         # ---------------------------------------------------------------
-        # Focus back on the code
-        nv.focus_window("h")
+        # Focus back on the code using reliable method
+        nv.focus_code_buffer(expected_text="def load_config")
+
+        # Verify we're in the code buffer
+        content = driver.capture_pane()
+        assert "def load_config" in content, f"Should be in code buffer:\n{content}"
 
         # Go to the function signature line
         nv.goto_line(12)
@@ -84,6 +97,10 @@ class GoldenPathScenario:
         # Save to trigger content change
         nv.save(delay=2)
 
+        # Verify the edit persisted
+        content = driver.capture_pane()
+        assert "timeout" in content, f"Edit should be visible:\n{content}"
+
         # ---------------------------------------------------------------
         # Beat 6: Watch the cascade unfold
         # ---------------------------------------------------------------
@@ -96,6 +113,9 @@ class GoldenPathScenario:
         test_file = DEMO_PROJECT / "tests" / "test_loader.py"
         nv.edit_file(test_file)
 
+        # Wait for file to load
+        driver.wait_for_text("test_load", timeout=10)
+
         # Position on the test function
         nv.goto_line(13, delay=1)
 
@@ -105,7 +125,7 @@ class GoldenPathScenario:
         # ---------------------------------------------------------------
         # Beat 8: Final stable state
         # ---------------------------------------------------------------
-        driver.wait_for_stable(stable_seconds=3.0, timeout=15)
+        content = driver.wait_for_stable(stable_seconds=3.0, timeout=15)
 
-        # Capture final state for verification
-        _content = driver.capture_pane()
+        # Verify test file is showing
+        assert "test_load" in content, f"Expected test file content:\n{content}"

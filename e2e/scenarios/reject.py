@@ -27,8 +27,9 @@ class RejectScenario:
         nv = NvimKeys(driver)
         target_file = DEMO_PROJECT / "src" / "configlib" / "loader.py"
 
-        # Launch nv2 on loader.py
-        nv.open_nvim(target_file, wait_for="def load_config")
+        # Launch nv2 on loader.py with event-driven LSP wait
+        nv.open_nvim(target_file, wait_for="def load_config", lsp_delay=0)
+        nv.wait_for_lsp_ready()
 
         # Position cursor on detect_format (line 29)
         nv.goto_line(29)
@@ -37,14 +38,16 @@ class RejectScenario:
         nv.leader_rewrite()
 
         # Wait for the LLM to produce a proposal
-        driver.wait_for_stable(stable_seconds=2.0, timeout=20)
+        content = driver.wait_for_stable(stable_seconds=3.0, timeout=30)
+
+        # Assert LSP was ready and processed the rewrite
+        assert "LSP not running" not in content, f"LSP should be ready but got 'not running':\n{content}"
 
         # Reject the proposal with <leader>rn
         nv.leader_reject()
 
         # Wait for pane to stabilize after rejection
-        driver.wait_for_stable(stable_seconds=2.0, timeout=10)
+        content = driver.wait_for_stable(stable_seconds=2.0, timeout=10)
 
         # Verify detect_format is still present and unchanged
-        content = driver.capture_pane()
-        assert "def detect_format" in content, f"Expected 'def detect_format' in pane after rejection, got:\n{content}"
+        assert "def detect_format" in content, f"Expected 'def detect_format' in pane after rejection:\n{content}"

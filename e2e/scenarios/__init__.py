@@ -15,6 +15,13 @@ from e2e.scenarios.ext_discovery import ExtDiscoveryScenario
 from e2e.scenarios.ext_multi_file import ExtMultiFileScenario
 from e2e.scenarios.ext_edit_cascade import ExtEditCascadeScenario
 
+# Agent-agent communication scenarios
+from e2e.scenarios.agent_message import AgentMessageScenario
+from e2e.scenarios.agent_broadcast import AgentBroadcastScenario
+from e2e.scenarios.agent_subscribe import AgentSubscriptionScenario
+from e2e.scenarios.swarm_monitor import SwarmMonitorScenario
+from e2e.scenarios.query_agents import QueryAgentsScenario
+
 ALL_SCENARIOS: dict[str, type] = {
     "startup": StartupScenario,
     "chat": ChatScenario,
@@ -28,6 +35,12 @@ ALL_SCENARIOS: dict[str, type] = {
     "ext_discovery": ExtDiscoveryScenario,
     "ext_multi_file": ExtMultiFileScenario,
     "ext_edit_cascade": ExtEditCascadeScenario,
+    # Agent-agent communication
+    "agent_message": AgentMessageScenario,
+    "agent_broadcast": AgentBroadcastScenario,
+    "agent_subscribe": AgentSubscriptionScenario,
+    "swarm_monitor": SwarmMonitorScenario,
+    "query_agents": QueryAgentsScenario,
 }
 
 __all__ = [
@@ -44,4 +57,10 @@ __all__ = [
     "ExtDiscoveryScenario",
     "ExtMultiFileScenario",
     "ExtEditCascadeScenario",
+    # Agent-agent communication
+    "AgentMessageScenario",
+    "AgentBroadcastScenario",
+    "AgentSubscriptionScenario",
+    "SwarmMonitorScenario",
+    "QueryAgentsScenario",
 ]

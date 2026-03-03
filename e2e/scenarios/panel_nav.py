@@ -2,7 +2,7 @@
 
 Opens the Remora agent panel, moves the cursor between different
 functions to trigger panel refresh, toggles the tools section,
-and closes the panel.  Verifies the panel responds to cursor movement.
+and closes the panel. Verifies the panel responds to cursor movement.
 """
 
 from __future__ import annotations
@@ -28,8 +28,9 @@ class PanelNavScenario:
         nv = NvimKeys(driver)
         target_file = DEMO_PROJECT / "src" / "configlib" / "loader.py"
 
-        # Launch nv2 on loader.py
-        nv.open_nvim(target_file, wait_for="def load_config")
+        # Launch nv2 on loader.py with event-driven LSP wait
+        nv.open_nvim(target_file, wait_for="def load_config", lsp_delay=0)
+        nv.wait_for_lsp_ready()
 
         # Open the Remora agent panel
         nv.leader_panel()
@@ -46,7 +47,7 @@ class PanelNavScenario:
         time.sleep(2)
 
         content = driver.capture_pane()
-        assert "load_config" in content, f"Expected 'load_config' in panel after navigating to it, got:\n{content}"
+        assert "load_config" in content, f"Expected 'load_config' in panel after navigating to it:\n{content}"
 
         # ---------------------------------------------------------------
         # Move cursor to detect_format (line 29) — panel should update
@@ -55,7 +56,7 @@ class PanelNavScenario:
         time.sleep(2)
 
         content = driver.capture_pane()
-        assert "detect_format" in content, f"Expected 'detect_format' in panel after navigating to it, got:\n{content}"
+        assert "detect_format" in content, f"Expected 'detect_format' in panel after navigating to it:\n{content}"
 
         # ---------------------------------------------------------------
         # Move cursor to load_yaml (line 39) — panel should update
@@ -64,7 +65,7 @@ class PanelNavScenario:
         time.sleep(2)
 
         content = driver.capture_pane()
-        assert "load_yaml" in content, f"Expected 'load_yaml' in panel after navigating to it, got:\n{content}"
+        assert "load_yaml" in content, f"Expected 'load_yaml' in panel after navigating to it:\n{content}"
 
         # ---------------------------------------------------------------
         # Focus into panel and toggle tools section with 't'
@@ -81,4 +82,7 @@ class PanelNavScenario:
         nv.raw("q", delay=1)
 
         # Focus should return to code — verify the panel closed
-        driver.wait_for_stable(stable_seconds=2.0, timeout=10)
+        content = driver.wait_for_stable(stable_seconds=2.0, timeout=10)
+
+        # Verify we can still see the code
+        assert "def " in content, f"Expected code content after panel close:\n{content}"
