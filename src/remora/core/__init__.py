@@ -5,6 +5,7 @@ from remora.core.agent_node import AgentNode, ToolSchema as AgentToolSchema
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.cairn_externals import CairnExternals
 from remora.core.kernel_factory import create_kernel
+from remora.core.manifest import BundleManifest, load_manifest
 from remora.core.config import (
     Config,
     ConfigError,
@@ -68,6 +69,7 @@ __all__ = [
     "AgentRunner",
     "AgentToolSchema",
     "AgentWorkspace",
+    "BundleManifest",
     "CSTNode",
     "CairnDataProvider",
     "CairnExternals",
@@ -85,6 +87,7 @@ __all__ = [
     "LANGUAGE_EXTENSIONS",
     "Config",
     "ConfigError",
+    "load_manifest",
     "ModelRequestEvent",
     "ModelResponseEvent",
     "NodeDiscoveredEvent",

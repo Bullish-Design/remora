@@ -12,10 +12,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import yaml
-from structured_agents.agent import load_manifest
-from structured_agents.client import build_client
-from structured_agents.types import Message
+from structured_agents import build_client, Message
 
+from remora.core.manifest import load_manifest
 from remora.core.kernel_factory import create_kernel
 
 from remora.core.agent_node import AgentNode

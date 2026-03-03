@@ -1,18 +1,19 @@
-"""Shared kernel factory for LLM client/adapter/kernel creation.
+"""Shared kernel factory for LLM client/kernel creation.
 
-Deduplicates the boilerplate that ``SwarmExecutor._run_kernel`` and
-``ChatSession.send`` both need to set up an ``AgentKernel``.
+v0.4 API: ModelAdapter removed, response_parser is now a direct kernel parameter.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from structured_agents.agent import get_response_parser
-from structured_agents.client import build_client
-from structured_agents.grammar.pipeline import ConstraintPipeline
-from structured_agents.kernel import AgentKernel
-from structured_agents.models.adapter import ModelAdapter
+from structured_agents import (
+    AgentKernel,
+    build_client,
+    get_response_parser,
+    ConstraintPipeline,
+    NullObserver,
+)
 
 
 def create_kernel(
@@ -31,7 +32,7 @@ def create_kernel(
     Parameters
     ----------
     model_name:
-        Model identifier (e.g. ``"Qwen/Qwen3-4B"``).
+        Model identifier (e.g. ``"Qwen/Qwen3-4B"`` or ``"hosted_vllm/Qwen/Qwen3-4B"``).
     base_url:
         OpenAI-compatible API base URL.
     api_key:
@@ -43,10 +44,9 @@ def create_kernel(
     observer:
         Event observer (``EventBus``, ``EventStore`` wrapper, etc.).
     grammar_config:
-        Optional ``structured_agents`` grammar config for constrained decoding.
+        Optional grammar config for constrained decoding (DecodingConstraint).
     client:
-        Pre-built OpenAI-compatible client to reuse. If ``None`` a new one
-        is created via ``build_client``.
+        Pre-built LLM client to reuse. If ``None`` a new one is created.
     """
     if client is None:
         client = build_client(
@@ -58,19 +58,20 @@ def create_kernel(
             }
         )
 
-    parser = get_response_parser(model_name)
-    pipeline = ConstraintPipeline(grammar_config) if grammar_config else None
-    adapter = ModelAdapter(
-        name=model_name,
-        response_parser=parser,
-        constraint_pipeline=pipeline,
-    )
+    # v0.4: response_parser is now a direct kernel parameter
+    response_parser = get_response_parser(model_name)
+
+    # v0.4: constraint_pipeline is now a direct kernel parameter
+    constraint_pipeline = None
+    if grammar_config:
+        constraint_pipeline = ConstraintPipeline(grammar_config)
 
     return AgentKernel(
         client=client,
-        adapter=adapter,
+        response_parser=response_parser,
         tools=tools or [],
-        observer=observer,
+        observer=observer or NullObserver(),
+        constraint_pipeline=constraint_pipeline,
     )
 
 
