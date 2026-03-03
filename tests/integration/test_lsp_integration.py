@@ -125,6 +125,44 @@ async def test_document_handlers_populate_db_and_code_lenses(tmp_path: Path, iso
     assert "remora.requestRewrite" in commands
 
 
+@pytest.mark.asyncio
+async def test_did_save_emits_file_saved_and_content_changed_events(tmp_path: Path, isolated_lsp_server) -> None:
+    """Workstream A: did_save must emit FileSavedEvent + ContentChangedEvent."""
+    source = "def foo():\n    return 1\n"
+    uri = f"file://{tmp_path / 'test.py'}"
+
+    # First open the file so nodes exist
+    open_params = lsp.DidOpenTextDocumentParams(
+        text_document=lsp.TextDocumentItem(
+            uri=uri,
+            language_id="python",
+            version=1,
+            text=source,
+        )
+    )
+    await documents.did_open(open_params)
+
+    # Now save it
+    save_params = lsp.DidSaveTextDocumentParams(
+        text_document=lsp.TextDocumentIdentifier(uri=uri),
+        text=source,
+    )
+    await documents.did_save(save_params)
+
+    # Replay the "files" stream and check for FileSavedEvent + ContentChangedEvent
+    events = [record async for record in server.event_store.replay("files")]
+    event_types = [e["event_type"] for e in events]
+    assert "FileSavedEvent" in event_types, f"Expected FileSavedEvent in {event_types}"
+    assert "ContentChangedEvent" in event_types, f"Expected ContentChangedEvent in {event_types}"
+
+    # Check event payloads contain the file path
+    file_saved = [e for e in events if e["event_type"] == "FileSavedEvent"][0]
+    assert uri in file_saved["payload"]["path"]
+
+    content_changed = [e for e in events if e["event_type"] == "ContentChangedEvent"][0]
+    assert uri in content_changed["payload"]["path"]
+
+
 def test_swarm_start_lsp_smoke(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[2]
     project_root = tmp_path / "project"

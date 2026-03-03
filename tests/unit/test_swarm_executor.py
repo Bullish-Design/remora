@@ -14,13 +14,21 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from remora.core.agent_node import AgentNode
 from remora.core.config import Config
-from remora.core.swarm_executor import SwarmExecutor, _lang_tag_for, _agent_node_to_cst_node
+from remora.core.execution import (
+    _lang_tag_for,
+    _agent_node_to_cst_node,
+    _resolve_bundle_path,
+    _resolve_model_name,
+    _build_prompt,
+)
+from remora.core.swarm_executor import SwarmExecutor
+from remora.utils import PathResolver
 
 
 # ---------------------------------------------------------------------------
@@ -157,36 +165,16 @@ class TestAgentNodeToCstNode:
 class TestResolveBundlePath:
     """Verify bundle path resolution from config mapping."""
 
-    @patch("remora.core.swarm_executor.build_client")
-    def test_mapped_node_type(self, mock_build_client, tmp_path):
+    def test_mapped_node_type(self, tmp_path):
         config = _make_config(tmp_path, bundle_mapping={"function": "code"})
-        mock_build_client.return_value = MagicMock()
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
         node = _make_node(node_type="function")
-        path = executor._resolve_bundle_path(node)
+        path = _resolve_bundle_path(node, config)
         assert path == Path(config.bundle_root) / "code"
 
-    @patch("remora.core.swarm_executor.build_client")
-    def test_unmapped_node_type_returns_bundle_root(self, mock_build_client, tmp_path):
+    def test_unmapped_node_type_returns_bundle_root(self, tmp_path):
         config = _make_config(tmp_path, bundle_mapping={"function": "code"})
-        mock_build_client.return_value = MagicMock()
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
         node = _make_node(node_type="module")
-        path = executor._resolve_bundle_path(node)
+        path = _resolve_bundle_path(node, config)
         assert path == Path(config.bundle_root)
 
 
@@ -198,120 +186,66 @@ class TestResolveBundlePath:
 class TestBuildPrompt:
     """Verify prompt construction from AgentNode and context."""
 
-    @patch("remora.core.swarm_executor.build_client")
-    def test_prompt_contains_target_info(self, mock_build_client, tmp_path):
+    def test_prompt_contains_target_info(self, tmp_path):
         config = _make_config(tmp_path)
-        mock_build_client.return_value = MagicMock()
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
+        resolver = PathResolver(tmp_path)
         node = _make_node()
         cst_node = _agent_node_to_cst_node(node)
-        prompt = executor._build_prompt(node, cst_node, {})
+        prompt = _build_prompt(node, cst_node, {}, resolver, config)
         assert "billing.calculate_total" in prompt
         assert "src/billing.py" in prompt
         assert "Lines: 10-25" in prompt
 
-    @patch("remora.core.swarm_executor.build_client")
-    def test_prompt_includes_code_when_available(self, mock_build_client, tmp_path):
+    def test_prompt_includes_code_when_available(self, tmp_path):
         config = _make_config(tmp_path)
-        mock_build_client.return_value = MagicMock()
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
+        resolver = PathResolver(tmp_path)
         node = _make_node()
         cst_node = _agent_node_to_cst_node(node)
         files = {"src/billing.py": "def calculate_total(items): return sum(items)"}
-        prompt = executor._build_prompt(node, cst_node, files)
+        prompt = _build_prompt(node, cst_node, files, resolver, config)
         assert "## Code" in prompt
         assert "def calculate_total" in prompt
         assert "```python" in prompt
 
-    @patch("remora.core.swarm_executor.build_client")
-    def test_prompt_includes_trigger_event(self, mock_build_client, tmp_path):
+    def test_prompt_includes_trigger_event(self, tmp_path):
         config = _make_config(tmp_path)
-        mock_build_client.return_value = MagicMock()
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
+        resolver = PathResolver(tmp_path)
         node = _make_node()
         cst_node = _agent_node_to_cst_node(node)
 
         class FakeTrigger:
             content = "file changed"
 
-        prompt = executor._build_prompt(node, cst_node, {}, trigger_event=FakeTrigger())
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, trigger_event=FakeTrigger())
         assert "## Trigger Event" in prompt
         assert "file changed" in prompt
 
-    @patch("remora.core.swarm_executor.build_client")
-    def test_prompt_includes_chat_history(self, mock_build_client, tmp_path):
+    def test_prompt_includes_chat_history(self, tmp_path):
         config = _make_config(tmp_path)
-        mock_build_client.return_value = MagicMock()
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
+        resolver = PathResolver(tmp_path)
         node = _make_node()
         cst_node = _agent_node_to_cst_node(node)
         chat_history = [
             {"role": "user", "content": "fix the bug"},
             {"role": "assistant", "content": "I fixed it"},
         ]
-        prompt = executor._build_prompt(node, cst_node, {}, chat_history=chat_history, requires_context=True)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, chat_history=chat_history, requires_context=True)
         assert "## Recent Chat History" in prompt
         assert "fix the bug" in prompt
         assert "I fixed it" in prompt
 
-    @patch("remora.core.swarm_executor.build_client")
-    def test_prompt_skips_history_when_requires_context_false(self, mock_build_client, tmp_path):
+    def test_prompt_skips_history_when_requires_context_false(self, tmp_path):
         config = _make_config(tmp_path)
-        mock_build_client.return_value = MagicMock()
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
+        resolver = PathResolver(tmp_path)
         node = _make_node()
         cst_node = _agent_node_to_cst_node(node)
         chat_history = [{"role": "user", "content": "fix the bug"}]
-        prompt = executor._build_prompt(node, cst_node, {}, chat_history=chat_history, requires_context=False)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, chat_history=chat_history, requires_context=False)
         assert "## Recent Chat History" not in prompt
 
-    @patch("remora.core.swarm_executor.build_client")
-    def test_prompt_respects_chat_history_limit(self, mock_build_client, tmp_path):
+    def test_prompt_respects_chat_history_limit(self, tmp_path):
         config = _make_config(tmp_path, chat_history_limit=2)
-        mock_build_client.return_value = MagicMock()
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
+        resolver = PathResolver(tmp_path)
         node = _make_node()
         cst_node = _agent_node_to_cst_node(node)
         chat_history = [
@@ -321,7 +255,7 @@ class TestBuildPrompt:
             {"role": "assistant", "content": "resp2"},
             {"role": "user", "content": "msg3"},
         ]
-        prompt = executor._build_prompt(node, cst_node, {}, chat_history=chat_history, requires_context=True)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, chat_history=chat_history, requires_context=True)
         # Only the last 2 entries should be included
         assert "msg1" not in prompt
         assert "resp1" not in prompt
@@ -385,40 +319,20 @@ class TestConnectionPooling:
 class TestResolveModelName:
     """Verify model name resolution from bundle.yaml or config fallback."""
 
-    @patch("remora.core.swarm_executor.build_client")
-    def test_falls_back_to_config_default(self, mock_build_client, tmp_path):
-        mock_build_client.return_value = MagicMock()
+    def test_falls_back_to_config_default(self, tmp_path):
         config = _make_config(tmp_path, model_default="default/model")
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
         # Non-existent bundle path -> falls back to config default
         manifest = MagicMock(model="")
-        model = executor._resolve_model_name(tmp_path / "nonexistent", manifest)
+        model = _resolve_model_name(tmp_path / "nonexistent", manifest, config)
         assert model == "default/model"
 
-    @patch("remora.core.swarm_executor.build_client")
-    def test_reads_from_bundle_yaml(self, mock_build_client, tmp_path):
-        mock_build_client.return_value = MagicMock()
+    def test_reads_from_bundle_yaml(self, tmp_path):
         config = _make_config(tmp_path, model_default="default/model")
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
         # Create a bundle.yaml with a model override
         bundle_dir = tmp_path / "agents" / "code"
         bundle_dir.mkdir(parents=True)
         (bundle_dir / "bundle.yaml").write_text("model:\n  id: custom/override\n")
 
         manifest = MagicMock(model="")
-        model = executor._resolve_model_name(bundle_dir, manifest)
+        model = _resolve_model_name(bundle_dir, manifest, config)
         assert model == "custom/override"

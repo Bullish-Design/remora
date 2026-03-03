@@ -30,6 +30,7 @@ class LazyGraph:
         self.graph = rx.PyDiGraph()
         self.node_indices: dict[str, int] = {}
         self.loaded_files: set[str] = set()
+        self._expanded: set[str] = set()  # nodes whose neighborhood has been loaded
 
     def invalidate(self, file_path: str) -> None:
         self.loaded_files.discard(file_path)
@@ -37,6 +38,7 @@ class LazyGraph:
         nodes = self._get_nodes_for_file(file_path)
         for node in nodes:
             nid = node.get("id", node.get("node_id"))
+            self._expanded.discard(nid)
             if nid in self.node_indices:
                 idx = self.node_indices.pop(nid)
                 try:
@@ -45,13 +47,14 @@ class LazyGraph:
                     pass
 
     def ensure_loaded(self, node_id: str) -> None:
-        if node_id in self.node_indices:
+        if node_id in self._expanded:
             return
 
         node = self._get_node(node_id)
         if not node:
             return
 
+        self._expanded.add(node_id)
         neighbors = self._get_neighborhood(node_id, depth=2)
 
         for neighbor in neighbors:

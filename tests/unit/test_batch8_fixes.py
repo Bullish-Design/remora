@@ -87,8 +87,9 @@ class TestDuplicatePromptContext:
     passed as kernel messages (requires_context=False avoids duplication)."""
 
     def test_prompt_without_context_excludes_history(self):
-        from remora.core.swarm_executor import SwarmExecutor, _agent_node_to_cst_node
+        from remora.core.execution import _agent_node_to_cst_node, _build_prompt
         from remora.core.agent_node import AgentNode
+        from remora.utils import PathResolver
 
         node = AgentNode(
             node_id="test",
@@ -109,21 +110,15 @@ class TestDuplicatePromptContext:
         ]
         cst_node = _agent_node_to_cst_node(node)
         config = Config()
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=Path("/tmp"),
-        )
+        resolver = PathResolver(Path("/tmp"))
 
-        prompt = executor._build_prompt(node, cst_node, {}, chat_history=chat_history, requires_context=False)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, chat_history=chat_history, requires_context=False)
         assert "Recent Chat History" not in prompt
 
     def test_prompt_with_context_includes_history(self):
-        from remora.core.swarm_executor import SwarmExecutor, _agent_node_to_cst_node
+        from remora.core.execution import _agent_node_to_cst_node, _build_prompt
         from remora.core.agent_node import AgentNode
+        from remora.utils import PathResolver
 
         node = AgentNode(
             node_id="test",
@@ -144,16 +139,9 @@ class TestDuplicatePromptContext:
         ]
         cst_node = _agent_node_to_cst_node(node)
         config = Config()
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=Path("/tmp"),
-        )
+        resolver = PathResolver(Path("/tmp"))
 
-        prompt = executor._build_prompt(node, cst_node, {}, chat_history=chat_history, requires_context=True)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, chat_history=chat_history, requires_context=True)
         assert "Recent Chat History" in prompt
 
 
@@ -453,18 +441,8 @@ class TestDeferServerSingleton:
 
 
 # ── 8.6  L3: Document Qwen XML tag parser ─────────────────────────────────
-
-
-class TestDocumentQwenXMLParser:
-    """8.6 — _extract_text_tool_calls should have a docstring explaining the Qwen workaround."""
-
-    def test_has_docstring(self):
-        from remora.lsp.runner import AgentRunner
-
-        method = AgentRunner._extract_text_tool_calls
-        assert method.__doc__ is not None
-        # Should mention Qwen specifically
-        assert "qwen" in method.__doc__.lower() or "xml" in method.__doc__.lower()
+# REMOVED: TestDocumentQwenXMLParser — _extract_text_tool_calls was removed
+# from AgentRunner during Workstream B (runner.py now delegates to execution.py).
 
 
 # ── 8.7  L5: Fix ensure_file_synced stub ──────────────────────────────────
@@ -598,8 +576,9 @@ class TestChatHistoryLimitConfigurable:
         assert config.chat_history_limit == 5  # sensible default
 
     def test_build_prompt_uses_config_limit(self):
-        from remora.core.swarm_executor import SwarmExecutor, _agent_node_to_cst_node
+        from remora.core.execution import _agent_node_to_cst_node, _build_prompt
         from remora.core.agent_node import AgentNode
+        from remora.utils import PathResolver
 
         config = Config()
         config_custom = Config(chat_history_limit=2)
@@ -618,29 +597,14 @@ class TestChatHistoryLimitConfigurable:
         )
         chat_history = [{"role": "user", "content": f"msg{i}"} for i in range(10)]
         cst_node = _agent_node_to_cst_node(node)
+        resolver = PathResolver(Path("/tmp"))
 
-        executor_default = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="t",
-            project_root=Path("/tmp"),
-        )
-        prompt_default = executor_default._build_prompt(
-            node, cst_node, {}, chat_history=chat_history, requires_context=True
+        prompt_default = _build_prompt(
+            node, cst_node, {}, resolver, config, chat_history=chat_history, requires_context=True
         )
 
-        executor_custom = SwarmExecutor(
-            config=config_custom,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="t",
-            project_root=Path("/tmp"),
-        )
-        prompt_custom = executor_custom._build_prompt(
-            node, cst_node, {}, chat_history=chat_history, requires_context=True
+        prompt_custom = _build_prompt(
+            node, cst_node, {}, resolver, config_custom, chat_history=chat_history, requires_context=True
         )
 
         # With limit=2, only last 2 history entries should appear

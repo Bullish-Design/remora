@@ -22,6 +22,10 @@ from e2e.scenarios.agent_subscribe import AgentSubscriptionScenario
 from e2e.scenarios.swarm_monitor import SwarmMonitorScenario
 from e2e.scenarios.query_agents import QueryAgentsScenario
 
+# Companion demo scenarios
+from e2e.scenarios.companion_sidebar import CompanionSidebarScenario
+from e2e.scenarios.companion_connections import CompanionConnectionsScenario
+
 ALL_SCENARIOS: dict[str, type] = {
     "startup": StartupScenario,
     "chat": ChatScenario,
@@ -41,6 +45,9 @@ ALL_SCENARIOS: dict[str, type] = {
     "agent_subscribe": AgentSubscriptionScenario,
     "swarm_monitor": SwarmMonitorScenario,
     "query_agents": QueryAgentsScenario,
+    # Companion demo
+    "companion_sidebar": CompanionSidebarScenario,
+    "companion_connections": CompanionConnectionsScenario,
 }
 
 __all__ = [
@@ -63,4 +70,7 @@ __all__ = [
     "AgentSubscriptionScenario",
     "SwarmMonitorScenario",
     "QueryAgentsScenario",
+    # Companion demo
+    "CompanionSidebarScenario",
+    "CompanionConnectionsScenario",
 ]

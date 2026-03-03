@@ -1,20 +1,19 @@
 # src/remora/lsp/watcher.py
+"""AST watcher — delegates to core.discovery.parse_content() for tree-sitter parsing.
+
+Converts CSTNode objects from the core discovery pipeline into the dict format
+expected by the LSP path (EventStore / NodeDiscoveredEvent / NodeRemovedEvent).
+"""
+
 from __future__ import annotations
 
 import hashlib
 import re
 from pathlib import Path
 
-try:
-    from tree_sitter import Language, Parser
-    from tree_sitter_python import language as py_language
-
-    TREESITTER_AVAILABLE = True
-except ImportError:
-    TREESITTER_AVAILABLE = False
-
 import logging
 
+from remora.core.discovery import parse_content, CSTNode
 from remora.lsp.models import generate_id
 
 logger = logging.getLogger("remora.lsp.watcher")
@@ -22,222 +21,53 @@ logger = logging.getLogger("remora.lsp.watcher")
 
 class ASTWatcher:
     def __init__(self):
-        if TREESITTER_AVAILABLE:
-            self.parser = Parser(Language(py_language()))
-        else:
-            self.parser = None
-        self._fallback_warned = False
-
-    # Suffixes that tree-sitter-python can parse into function/class nodes
-    _PYTHON_SUFFIXES = frozenset({".py"})
-    # All supported suffixes (non-Python get file-level nodes only)
-    _SUPPORTED_SUFFIXES = frozenset({".py", ".md", ".toml"})
+        pass
 
     def parse_and_inject_ids(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[dict]:
-        suffix = Path(uri).suffix.lower() if "." in Path(uri).name else ""
+        """Parse text and return list of node dicts for the LSP path.
 
-        # Non-Python files: create a file-level node only (no AST decomposition)
-        if suffix not in self._PYTHON_SUFFIXES:
-            return self._parse_file_only(uri, text, old_nodes)
+        Delegates to ``core.discovery.parse_content()`` for tree-sitter parsing,
+        then converts CSTNode objects to dicts and assigns stable IDs.
+        """
+        cst_nodes = parse_content(uri, text)
+        return self._convert_nodes(uri, text, cst_nodes, old_nodes)
 
-        if not TREESITTER_AVAILABLE:
-            return self._parse_fallback(uri, text, old_nodes)
-
-        text_bytes = text.encode("utf-8")
-        tree = self.parser.parse(text_bytes)
-
-        nodes: list[dict] = []
-        old_by_key = {(n["name"], n["node_type"]): n for n in (old_nodes or [])}
-        stem = Path(uri).stem
-
-        file_source = text[:200]
-        file_hash = hashlib.md5(text_bytes).hexdigest()
-
-        key = (stem, "file")
-        if key in old_by_key:
-            file_id = old_by_key[key]["node_id"]
-        else:
-            file_id = generate_id()
-
-        file_node = {
-            "node_id": file_id,
-            "node_type": "file",
-            "name": stem,
-            "full_name": stem,
-            "file_path": uri,
-            "start_line": 1,
-            "end_line": len(text.splitlines()),
-            "start_byte": 0,
-            "end_byte": len(text_bytes),
-            "source_code": file_source,
-            "source_hash": file_hash,
-            "parent_id": None,
-        }
-        nodes.append(file_node)
-
-        self._find_definitions(
-            tree.root_node, text_bytes, uri, nodes, old_by_key, parent_id=file_id, parent_full_name=stem
-        )
-
-        return nodes
-
-    def _find_definitions(
+    def _convert_nodes(
         self,
-        node,
-        text_bytes: bytes,
         uri: str,
-        nodes: list[dict],
-        old_by_key: dict,
-        parent_id: str | None = None,
-        parent_full_name: str = "",
-    ) -> None:
-        stem = Path(uri).stem
-
-        if node.type == "function_definition":
-            name_node = node.child_by_field_name("name")
-            if name_node:
-                name = text_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
-                start_line = node.start_point[0] + 1
-                end_line = node.end_point[0] + 1
-                source = text_bytes[node.start_byte : node.end_byte].decode("utf-8")
-                source_hash = hashlib.md5(source.encode("utf-8")).hexdigest()
-
-                is_method = (
-                    node.parent
-                    and node.parent.type == "block"
-                    and node.parent.parent
-                    and node.parent.parent.type == "class_definition"
-                )
-                node_type = "method" if is_method else "function"
-                key = (name, node_type)
-
-                if key in old_by_key:
-                    node_id = old_by_key[key]["node_id"]
-                    del old_by_key[key]
-                else:
-                    node_id = generate_id()
-
-                full_name = f"{parent_full_name}.{name}"
-
-                nodes.append(
-                    {
-                        "node_id": node_id,
-                        "node_type": node_type,
-                        "name": name,
-                        "full_name": full_name,
-                        "file_path": uri,
-                        "start_line": start_line,
-                        "end_line": end_line,
-                        "start_byte": node.start_byte,
-                        "end_byte": node.end_byte,
-                        "source_code": source,
-                        "source_hash": source_hash,
-                        "parent_id": parent_id,
-                    }
-                )
-
-        elif node.type == "class_definition":
-            name_node = node.child_by_field_name("name")
-            if name_node:
-                name = text_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
-                start_line = node.start_point[0] + 1
-                end_line = node.end_point[0] + 1
-                source = text_bytes[node.start_byte : node.end_byte].decode("utf-8")
-                source_hash = hashlib.md5(source.encode("utf-8")).hexdigest()
-
-                key = (name, "class")
-
-                if key in old_by_key:
-                    node_id = old_by_key[key]["node_id"]
-                    del old_by_key[key]
-                else:
-                    node_id = generate_id()
-
-                full_name = f"{parent_full_name}.{name}"
-
-                nodes.append(
-                    {
-                        "node_id": node_id,
-                        "node_type": "class",
-                        "name": name,
-                        "full_name": full_name,
-                        "file_path": uri,
-                        "start_line": start_line,
-                        "end_line": end_line,
-                        "start_byte": node.start_byte,
-                        "end_byte": node.end_byte,
-                        "source_code": source,
-                        "source_hash": source_hash,
-                        "parent_id": parent_id,
-                    }
-                )
-
-                # Methods inside this class get the class as their parent
-                for child in node.children:
-                    self._find_definitions(
-                        child, text_bytes, uri, nodes, old_by_key, parent_id=node_id, parent_full_name=full_name
-                    )
-                return  # Already recursed into children
-
-        for child in node.children:
-            self._find_definitions(
-                child, text_bytes, uri, nodes, old_by_key, parent_id=parent_id, parent_full_name=parent_full_name
-            )
-
-    def _parse_file_only(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[dict]:
-        """Create a single file-level agent node for non-Python files (markdown, toml, etc.)."""
+        text: str,
+        cst_nodes: list[CSTNode],
+        old_nodes: list[dict] | None = None,
+    ) -> list[dict]:
+        """Convert CSTNode list to LSP-path dicts with parent_id and stable IDs."""
         old_by_key = {(n["name"], n["node_type"]): n for n in (old_nodes or [])}
-        text_bytes = text.encode("utf-8")
-        file_hash = hashlib.md5(text_bytes).hexdigest()
         stem = Path(uri).stem
 
-        key = (stem, "file")
-        if key in old_by_key:
-            file_id = old_by_key[key]["node_id"]
-        else:
-            file_id = generate_id()
-
-        return [
-            {
-                "node_id": file_id,
-                "node_type": "file",
-                "name": stem,
-                "full_name": stem,
-                "file_path": uri,
-                "start_line": 1,
-                "end_line": len(text.splitlines()),
-                "start_byte": 0,
-                "end_byte": len(text_bytes),
-                "source_code": text[:200],
-                "source_hash": file_hash,
-                "parent_id": None,
-            }
+        # Deduplicate: when both "function" and "method" exist for the same
+        # (name, start_line, end_line), keep only "method".
+        method_keys = {(c.name, c.start_line, c.end_line) for c in cst_nodes if c.node_type == "method"}
+        filtered = [
+            c
+            for c in cst_nodes
+            if not (c.node_type == "function" and (c.name, c.start_line, c.end_line) in method_keys)
         ]
 
-    def _parse_fallback(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[dict]:
-        if not self._fallback_warned:
-            logger.warning("tree-sitter not available; using fallback parser with approximate ranges")
-            self._fallback_warned = True
+        # First pass: convert to dicts with deterministic IDs
+        dicts: list[dict] = []
+        for cst in filtered:
+            node_type = cst.node_type
+            name = cst.name
 
-        nodes: list[dict] = []
-        old_by_key = {(n["name"], n["node_type"]): n for n in (old_nodes or [])}
-        lines = text.split("\n")
-        total_lines = len(lines)
-        stem = Path(uri).stem
-
-        for match in re.finditer(r"^(\s*)(def|class)\s+(\w+)", text, re.MULTILINE):
-            indent = match.group(1)
-            keyword = match.group(2)
-            name = match.group(3)
-            line_num = text[: match.start()].count("\n") + 1
-
-            if keyword == "class":
-                node_type = "class"
-            elif indent:
-                node_type = "method"
+            # For file nodes, use stem as name (LSP convention)
+            if node_type == "file":
+                name = stem
+                source_code = text[:200]
             else:
-                node_type = "function"
+                source_code = cst.text
 
+            source_hash = hashlib.md5(cst.text.encode("utf-8")).hexdigest()
+
+            # Stable IDs: reuse old node ID if the (name, type) key matches
             key = (name, node_type)
             if key in old_by_key:
                 node_id = old_by_key[key]["node_id"]
@@ -245,31 +75,69 @@ class ASTWatcher:
             else:
                 node_id = generate_id()
 
-            start_line = line_num
-            end_line = total_lines
-            source = "\n".join(lines[start_line - 1 : end_line])
-
-            # Fallback: approximate full_name (no class context tracking)
-            full_name = f"{stem}.{name}"
-
-            nodes.append(
+            dicts.append(
                 {
                     "node_id": node_id,
                     "node_type": node_type,
                     "name": name,
-                    "full_name": full_name,
+                    "full_name": "",  # computed in second pass
                     "file_path": uri,
-                    "start_line": start_line,
-                    "end_line": end_line,
-                    "start_byte": 0,
-                    "end_byte": 0,
-                    "source_code": source,
-                    "source_hash": hashlib.md5(source.encode()).hexdigest(),
+                    "start_line": cst.start_line,
+                    "end_line": cst.end_line,
+                    "start_byte": cst.start_byte,
+                    "end_byte": cst.end_byte,
+                    "source_code": source_code,
+                    "source_hash": source_hash,
                     "parent_id": None,
                 }
             )
 
-        return nodes
+        # Second pass: assign parent_id and full_name by containment
+        self._assign_parents(dicts, stem)
+
+        return dicts
+
+    @staticmethod
+    def _assign_parents(dicts: list[dict], stem: str) -> None:
+        """Assign parent_id and full_name by line-range containment.
+
+        Rules:
+        - file node: parent_id = None, full_name = stem
+        - class/function/section/table/etc: parent = innermost enclosing node
+        - method: parent = enclosing class
+        """
+        for node in dicts:
+            if node["node_type"] == "file":
+                node["full_name"] = stem
+                node["parent_id"] = None
+                continue
+
+            # Find the innermost *strictly* enclosing node.
+            # "Strictly enclosing" means the candidate's span is strictly
+            # larger than this node's span (not the exact same range).
+            node_span = node["end_line"] - node["start_line"]
+            best_parent = None
+            best_span = float("inf")
+            for candidate in dicts:
+                if candidate is node:
+                    continue
+                cand_span = candidate["end_line"] - candidate["start_line"]
+                # candidate must fully contain node AND be strictly larger
+                if (
+                    candidate["start_line"] <= node["start_line"]
+                    and candidate["end_line"] >= node["end_line"]
+                    and cand_span > node_span
+                ):
+                    if cand_span < best_span:
+                        best_span = cand_span
+                        best_parent = candidate
+
+            if best_parent is not None:
+                node["parent_id"] = best_parent["node_id"]
+                node["full_name"] = f"{best_parent['full_name']}.{node['name']}"
+            else:
+                node["parent_id"] = None
+                node["full_name"] = f"{stem}.{node['name']}"
 
 
 def inject_ids(file_path: Path, nodes: list[dict]) -> str:

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from cairn.runtime import workspace_manager as cairn_workspace_manager
+from cairn.runtime.workspace_manager import _open_workspace as cairn_open_workspace
 
 from remora.core.config import Config, DEFAULT_IGNORE_PATTERNS
 from remora.core.cairn_externals import CairnExternals
@@ -75,7 +76,7 @@ class CairnWorkspaceService:
         stable_path = self._swarm_root / "stable.db"
 
         try:
-            self._stable_workspace = await cairn_workspace_manager._open_workspace(
+            self._stable_workspace = await cairn_open_workspace(
                 stable_path,
                 readonly=False,
             )
@@ -98,7 +99,7 @@ class CairnWorkspaceService:
         workspace_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            workspace = await cairn_workspace_manager._open_workspace(
+            workspace = await cairn_open_workspace(
                 workspace_path,
                 readonly=False,
             )

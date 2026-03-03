@@ -301,56 +301,25 @@ class TestReconcilerUsesEventStore:
 class TestSwarmExecutorUsesAgentNode:
     """SwarmExecutor.run_agent should accept AgentNode, not AgentState."""
 
-    @patch("remora.core.swarm_executor.build_client")
-    def test_resolve_bundle_path_with_agent_node(self, mock_build_client, tmp_path):
+    def test_resolve_bundle_path_with_agent_node(self, tmp_path):
         """_resolve_bundle_path should work with AgentNode."""
-        from remora.core.swarm_executor import SwarmExecutor
+        from remora.core.execution import _resolve_bundle_path
 
-        mock_build_client.return_value = MagicMock()
         config = _make_config(tmp_path, bundle_mapping={"function": "code"})
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
         node = _make_agent_node(node_type="function")
-        path = executor._resolve_bundle_path(node)
+        path = _resolve_bundle_path(node, config)
         assert path == Path(config.bundle_root) / "code"
 
-    @patch("remora.core.swarm_executor.build_client")
-    def test_build_prompt_with_agent_node(self, mock_build_client, tmp_path):
+    def test_build_prompt_with_agent_node(self, tmp_path):
         """_build_prompt should work with AgentNode."""
-        from remora.core.swarm_executor import SwarmExecutor
+        from remora.core.execution import _build_prompt, _agent_node_to_cst_node
+        from remora.utils import PathResolver
 
-        mock_build_client.return_value = MagicMock()
         config = _make_config(tmp_path)
-        executor = SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
+        resolver = PathResolver(tmp_path)
         node = _make_agent_node()
-        from remora.core.discovery import CSTNode
-
-        cst_node = CSTNode(
-            node_id="abc123",
-            node_type="function",
-            name="calculate_total",
-            full_name="billing.calculate_total",
-            file_path="src/billing.py",
-            text="",
-            start_line=10,
-            end_line=25,
-            start_byte=100,
-            end_byte=500,
-        )
-        prompt = executor._build_prompt(node, cst_node, {})
+        cst_node = _agent_node_to_cst_node(node)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config)
         assert "billing.calculate_total" in prompt
         assert "src/billing.py" in prompt
         assert "Lines: 10-25" in prompt

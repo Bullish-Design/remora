@@ -418,10 +418,110 @@ def parse_file(file_path: PathLike) -> list[CSTNode]:
     return _parse_file(path_obj, language)
 
 
+def parse_content(file_path: str, content: str, language: str | None = None) -> list[CSTNode]:
+    """Parse text content and return CSTNode list.
+
+    Like ``_parse_file()`` but accepts content directly instead of reading
+    from disk.  Used by the LSP path where content comes from the editor.
+
+    Args:
+        file_path: File path (or URI) — used for node IDs and language detection.
+        content: The text content to parse.
+        language: Explicit language name (e.g. "python").  Auto-detected from
+            file extension if ``None``.
+
+    Returns:
+        List of CSTNode objects representing discovered code elements.
+    """
+    path_obj = Path(file_path)
+
+    if language is None:
+        language = _detect_language(path_obj)
+
+    if language is None:
+        return [_create_file_node_from_content(file_path, content)]
+
+    parser = _get_parser(language)
+    if parser is None:
+        return [_create_file_node_from_content(file_path, content)]
+
+    tree = parser.parse(content.encode())
+
+    # Load and apply queries
+    query_text = _load_queries(language)
+    if query_text is None:
+        return [_create_file_node_from_content(file_path, content)]
+
+    try:
+        lang_module = __import__(f"tree_sitter_{language}")
+        lang = Language(lang_module.language())
+        query = Query(lang, query_text)
+    except Exception as e:
+        logger.warning("Query error for %s: %s", language, e)
+        return [_create_file_node_from_content(file_path, content)]
+
+    # Extract matches
+    nodes: list[CSTNode] = []
+    captures = _collect_captures(query, tree.root_node)
+
+    for node, capture_name in captures:
+        if capture_name.endswith(NAME_CAPTURE_SUFFIXES):
+            continue
+        if capture_name in _POSTPROCESS_CAPTURES:
+            continue
+
+        node_type = capture_name.split(".", 1)[0]
+        name = _extract_name(node, captures)
+
+        cst_node = CSTNode(
+            node_id=compute_node_id(file_path, name, node.start_point[0] + 1, node.end_point[0] + 1),
+            node_type=node_type,
+            name=name,
+            full_name=f"{node_type}:{name}",
+            file_path=file_path,
+            text=content[node.start_byte : node.end_byte],
+            start_line=node.start_point[0] + 1,
+            end_line=node.end_point[0] + 1,
+            start_byte=node.start_byte,
+            end_byte=node.end_byte,
+        )
+        nodes.append(cst_node)
+
+    # Markdown post-processing: create note/todo-note from frontmatter
+    if language == "markdown":
+        nodes = _postprocess_markdown(path_obj, content, captures, nodes)
+
+    # Always include file-level node
+    if not any(n.node_type == "file" for n in nodes):
+        nodes.insert(0, _create_file_node_from_content(file_path, content))
+
+    return nodes
+
+
+def _create_file_node_from_content(file_path: str, content: str) -> CSTNode:
+    """Create a file-level CSTNode from in-memory content (no disk I/O)."""
+    path_obj = Path(file_path)
+    line_count = content.count("\n") + 1 if content else 1
+    byte_length = len(content.encode("utf-8")) if content else 0
+    return CSTNode(
+        node_id=compute_node_id(file_path, path_obj.name, 1, line_count),
+        node_type="file",
+        name=path_obj.name,
+        full_name=path_obj.name,
+        file_path=file_path,
+        text=content,
+        start_line=1,
+        end_line=line_count,
+        start_byte=0,
+        end_byte=byte_length,
+    )
+
+
 __all__ = [
     "CSTNode",
     "compute_node_id",
     "discover",
     "LANGUAGE_EXTENSIONS",
+    "parse_content",
     "parse_file",
 ]

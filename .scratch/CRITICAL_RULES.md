@@ -37,10 +37,11 @@ Use kebab-case for directory names (e.g. `option-a-unification`, `web-demo-migra
 
 ### Standard Files
 
-Each project directory contains these standard files:
+Each project directory contains these standard files. Create them if they don't yet exist:
 
 | File | Purpose |
 |------|---------|
+| `REPO_RULES.md` | The file that you should append self-reminders to specific to this repository.
 | `PROGRESS.md` | Task tracker with status (pending/in-progress/done). The source of truth for what's been completed and what remains. |
 | `CONTEXT.md` | Current state for resumption after compaction. What just happened, what's next, key variable state. Update this before any large context shift. |
 | `PLAN.md` | Implementation plan. Ordered steps, dependencies, acceptance criteria. |

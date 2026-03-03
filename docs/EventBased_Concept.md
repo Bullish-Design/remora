@@ -78,7 +78,7 @@ Consumers read the log by polling with a cursor (last-seen `id`) or by subscribi
 
 ### 1.2 Events
 
-Events are frozen Python dataclasses. They carry the minimum data needed to describe what happened. There are four categories:
+Events are frozen Pydantic classes. They carry the minimum data needed to describe what happened. There are four categories:
 
 **Agent lifecycle events** — emitted by the AgentRunner when an agent starts, completes, or errors:
 

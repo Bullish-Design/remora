@@ -66,23 +66,16 @@ class TestChatConfigFromConfig:
 
 
 class TestLspMainUsesConfig:
-    """The LSP entry point must create LLMClient from Config values."""
+    """The LSP entry point must pass Config to AgentRunner."""
 
     def test_lsp_main_reads_config(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-        """Verify that main() loads Config and passes its values to LLMClient."""
+        """Verify that main() loads Config and passes it to AgentRunner."""
         captured: dict = {}
 
-        # Stub LLMClient to capture init args
-        class FakeLLMClient:
-            def __init__(self, base_url: str, model: str, api_key: str = "EMPTY"):
-                captured["base_url"] = base_url
-                captured["model"] = model
-                captured["api_key"] = api_key
-
-        # Stub AgentRunner to do nothing
+        # Stub AgentRunner to capture kwargs
         class FakeRunner:
             def __init__(self, **kwargs):
-                pass
+                captured.update(kwargs)
 
         # Stub server
         class FakeServer:
@@ -116,10 +109,9 @@ class TestLspMainUsesConfig:
 
         monkeypatch.setattr(lsp_main_mod, "_get_server", lambda: fake_server)
 
-        # Monkeypatch the runner module imports
+        # Monkeypatch AgentRunner in the runner module
         import remora.lsp.runner as runner_mod
 
-        monkeypatch.setattr(runner_mod, "LLMClient", FakeLLMClient)
         monkeypatch.setattr(runner_mod, "AgentRunner", FakeRunner)
 
         # Make _setup_logging not create filesystem artifacts
@@ -132,9 +124,10 @@ class TestLspMainUsesConfig:
         with pytest.raises(_StopSentinel):
             lsp_main_mod.main()
 
-        assert captured["base_url"] == "http://test-host:1234/v1"
-        assert captured["model"] == "test-org/test-model"
-        assert captured["api_key"] == "test-api-key"
+        assert captured["config"] is test_config
+        assert captured["config"].model_base_url == "http://test-host:1234/v1"
+        assert captured["config"].model_default == "test-org/test-model"
+        assert captured["config"].model_api_key == "test-api-key"
 
 
 # ---------------------------------------------------------------------------

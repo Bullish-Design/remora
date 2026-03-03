@@ -4,8 +4,9 @@ Dispatches based on (agent_identity, trigger_type, round_number) extracted
 from the messages list. Falls back to a generic acknowledgment if no script
 matches.
 
-Used by the Neovim/LSP demo side. Conforms to the same chat() interface as
-remora.lsp.runner.LLMClient.
+Used by the Neovim/LSP demo side. Previously used LLMClient/LLMResponse/
+ToolCall from remora.lsp.runner, but those were removed during the Workstream B
+unification. Simple Pydantic models are now defined locally.
 """
 
 from __future__ import annotations
@@ -15,7 +16,27 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from remora.lsp.runner import LLMResponse, ToolCall
+from pydantic import BaseModel
+
+
+# ---------------------------------------------------------------------------
+# Lightweight response models (formerly in remora.lsp.runner)
+# ---------------------------------------------------------------------------
+
+
+class ToolCall(BaseModel):
+    """A single tool call from the LLM."""
+
+    name: str
+    arguments: dict[str, Any] = {}
+    id: str = ""
+
+
+class LLMResponse(BaseModel):
+    """A normalized LLM response."""
+
+    content: str | None = None
+    tool_calls: list[ToolCall] = []
 
 
 # ---------------------------------------------------------------------------

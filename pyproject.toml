@@ -45,6 +45,12 @@ frontend = [
   "httpx>=0.27",
 ]
 
+companion = [
+  "sqlite-vec>=0.1",
+  "sentence-transformers>=2.2",
+  "jinja2>=3.1",
+]
+
 dev = [
   "pytest>=7.0",
   "pytest-cov>=4.1",
@@ -75,6 +81,7 @@ remora-index = "remora.indexer.cli:main"
 remora-lsp = "remora.lsp:main"
 remora-demo = "remora_demo.__main__:main"
 remora-web = "remora_demo.web.__main__:main"
+companion-lsp = "remora_demo.companion.lsp:main"
 
 #[project.urls]
 #homepage = "https://github.com/Bullish-Design/template-py"

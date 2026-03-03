@@ -4,7 +4,7 @@ from pathlib import Path
 
 from lsprotocol import types as lsp
 
-from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
+from remora.core.events import ContentChangedEvent, FileSavedEvent, NodeDiscoveredEvent, NodeRemovedEvent
 from remora.lsp.models import RewriteProposal
 from remora.lsp.server import logger, publish_diagnostics, refresh_code_lenses, server, uri_to_path
 from remora.lsp.watcher import inject_ids
@@ -138,6 +138,10 @@ async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
                     end_byte=nd.get("end_byte", 0),
                 )
                 await server.event_store.append("nodes", event)
+
+            # Emit file-level reactive events (Gap #10 — reactive loop)
+            await server.event_store.append("files", FileSavedEvent(path=uri))
+            await server.event_store.append("files", ContentChangedEvent(path=uri))
 
         # Update edges in RemoraDB
         await server.db.update_edges(new_dicts)

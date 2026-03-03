@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field, ConfigDict
 
 from remora.core.agent_node import AgentNode
+from remora.core.execution import ExecutionResult, execute_agent_turn
+from remora.core.tools.lsp import build_lsp_tools
 from remora.extensions import extension_matches, load_extensions
 from remora.lsp.models import (
     LspAgentErrorEvent,
@@ -23,93 +25,12 @@ from remora.lsp.models import (
 )
 
 if TYPE_CHECKING:
+    from remora.core.config import Config
     from remora.lsp.server import RemoraLanguageServer
 
 logger = logging.getLogger("remora.lsp.runner")
 
 MAX_CHAIN_DEPTH = 10
-MAX_TOOL_ROUNDS = 5  # max LLM↔tool round-trips per turn
-
-
-# ---------------------------------------------------------------------------
-# LLM client adapter — wraps structured_agents OpenAICompatibleClient
-# ---------------------------------------------------------------------------
-
-
-class ToolCall(BaseModel):
-    """Normalized tool call that handle_response expects."""
-
-    name: str
-    arguments: dict[str, Any]
-    id: str = ""
-
-
-class LLMResponse(BaseModel):
-    """Normalized response from the LLM."""
-
-    content: str | None
-    tool_calls: list[ToolCall]
-
-
-class LLMClient:
-    """Thin adapter over structured_agents.client for the LSP runner."""
-
-    def __init__(self, base_url: str, model: str, api_key: str = "EMPTY") -> None:
-        from structured_agents.client import build_client
-
-        self._client = build_client(
-            {
-                "base_url": base_url,
-                "api_key": api_key,
-                "model": model,
-            }
-        )
-        self.model = model
-        logger.info("LLMClient initialized: model=%s base_url=%s", model, base_url)
-
-    async def chat(self, messages: list[dict], tools: list[dict]) -> LLMResponse:
-        """Send a chat completion and return a normalized LLMResponse."""
-        logger.info("LLMClient.chat: sending %d messages, %d tools to %s", len(messages), len(tools), self.model)
-        try:
-            response = await self._client.chat_completion(
-                messages=messages,
-                tools=tools or None,
-                tool_choice="auto" if tools else "none",
-            )
-            logger.info(
-                "LLMClient.chat: got response content=%r tool_calls=%d",
-                (response.content or "")[:100],
-                len(response.tool_calls or []),
-            )
-        except Exception:
-            logger.exception("LLMClient.chat: FAILED to call LLM")
-            raise
-
-        tool_calls: list[ToolCall] = []
-        if response.tool_calls:
-            for tc in response.tool_calls:
-                fn = tc.get("function", {})
-                raw_args = fn.get("arguments", "{}")
-                if isinstance(raw_args, str):
-                    try:
-                        parsed = json.loads(raw_args)
-                    except json.JSONDecodeError:
-                        parsed = {"raw": raw_args}
-                else:
-                    parsed = raw_args
-                tool_calls.append(
-                    ToolCall(
-                        name=fn.get("name", ""),
-                        arguments=parsed,
-                        id=tc.get("id", ""),
-                    )
-                )
-
-        return LLMResponse(content=response.content, tool_calls=tool_calls)
-
-    async def close(self) -> None:
-        if hasattr(self._client, "close"):
-            await self._client.close()
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +76,7 @@ class _HeadlessServer:
         self.event_store = event_store
         self.db = _HeadlessDB()
         self.proposals: dict[str, Any] = {}
+        self.subscriptions = None
 
     def generate_correlation_id(self) -> str:
         return uuid.uuid4().hex[:12]
@@ -166,21 +88,27 @@ class AgentRunner:
     Merges LSP runner (tool loop, AgentNode, proposals) with core runner
     cascade-safety features (depth tracking, cooldown, concurrency semaphore).
     Usable from both the LSP server and the CLI swarm entrypoint.
+
+    Agent execution is delegated to ``execute_agent_turn()`` from
+    ``remora.core.execution``, with LSP-specific tools injected via
+    ``build_lsp_tools()`` from ``remora.core.tools.lsp``.
     """
 
     def __init__(
         self,
         server: "RemoraLanguageServer",
-        llm: LLMClient | None = None,
         *,
+        config: "Config | None" = None,
         max_trigger_depth: int | None = None,
         trigger_cooldown_ms: int | None = None,
         max_concurrency: int = 4,
     ) -> None:
         self.server = server
-        self.llm = llm
         self.queue: asyncio.Queue[Trigger] = asyncio.Queue()
         self._running = False
+
+        # Config — stored on server by __main__.py, or loaded on demand
+        self._config = config
 
         # Cascade prevention — ported from core/agent_runner.py
         self._max_trigger_depth = max_trigger_depth if max_trigger_depth is not None else MAX_CHAIN_DEPTH
@@ -191,12 +119,21 @@ class AgentRunner:
         self._last_trigger_time: dict[str, float] = {}
         self._semaphore = asyncio.Semaphore(self._max_concurrency)
 
+    @property
+    def config(self) -> "Config":
+        """Lazily resolve configuration."""
+        if self._config is None:
+            from remora.core.config import load_config
+
+            self._config = load_config()
+        return self._config
+
     @classmethod
     def create_headless(
         cls,
         event_store: Any,
-        llm: LLMClient | None = None,
         *,
+        config: "Config | None" = None,
         max_trigger_depth: int | None = None,
         trigger_cooldown_ms: int | None = None,
         max_concurrency: int = 4,
@@ -210,7 +147,7 @@ class AgentRunner:
         server = _HeadlessServer(event_store)
         return cls(
             server,  # type: ignore[arg-type]
-            llm=llm,
+            config=config,
             max_trigger_depth=max_trigger_depth,
             trigger_cooldown_ms=trigger_cooldown_ms,
             max_concurrency=max_concurrency,
@@ -391,6 +328,11 @@ class AgentRunner:
         )
 
     async def execute_turn(self, trigger: Trigger) -> None:
+        """Execute a single agent turn.
+
+        Handles cascade tracking, status management, and code lenses,
+        then delegates actual agent execution to ``execute_agent_turn()``.
+        """
         from remora.lsp.server import emit_event, refresh_code_lenses
 
         agent_id = trigger.agent_id
@@ -418,69 +360,100 @@ class AgentRunner:
             try:
                 agent = self.apply_extensions(agent)
 
-                messages = [
-                    {"role": "system", "content": agent.to_system_prompt()},
-                ]
-
+                # Build chat history from correlation events
+                chat_history: list[dict[str, str]] = []
                 events = await self.server.event_store.get_events_for_correlation(correlation_id)
                 logger.info("execute_turn: %d events for correlation %s", len(events), correlation_id)
                 for event in events:
                     event_type = event["event_type"]
                     payload = event.get("payload", {})
                     if event_type == "HumanChatEvent" and payload.get("to_agent") == agent_id:
-                        messages.append({"role": "user", "content": payload.get("message", "")})
+                        chat_history.append({"role": "user", "content": payload.get("message", "")})
                     elif event_type == "AgentMessageEvent" and payload.get("to_agent") == agent_id:
                         from_agent = payload.get("from_agent", "unknown")
-                        messages.append(
+                        chat_history.append(
                             {"role": "user", "content": f"[From {from_agent}]: {payload.get('message', '')}"}
                         )
 
                 if trigger.context.get("rejection_feedback"):
-                    messages.append(
+                    chat_history.append(
                         {
                             "role": "user",
                             "content": f"[Feedback on rejected proposal]: {trigger.context['rejection_feedback']}",
                         }
                     )
 
-                tools = self.get_agent_tools(agent)
-                logger.info("execute_turn: %d messages, %d tools — calling LLM", len(messages), len(tools))
-                logger.debug("execute_turn: messages=%r", [(m["role"], m["content"][:100]) for m in messages])
-
-                if not self.llm:
-                    await self.emit_error(agent_id, "No LLM client configured", correlation_id)
-                else:
-                    # Tool call loop: LLM → tool calls → results → LLM → ... → text response
-                    for round_num in range(MAX_TOOL_ROUNDS):
-                        logger.info("execute_turn: round %d/%d", round_num + 1, MAX_TOOL_ROUNDS)
-                        response = await self.llm.chat(messages, tools)
-                        logger.info(
-                            "execute_turn: LLM response: content=%r tool_calls=%d",
-                            (response.content or "")[:200],
-                            len(response.tool_calls),
+                # Build LSP-specific tools via callback injection
+                async def _emit_tool_event(
+                    agent_id: str, summary: str, result_summary: str, payload: dict[str, Any]
+                ) -> None:
+                    payload["result_summary"] = result_summary
+                    await emit_event(
+                        LspAgentEvent(
+                            event_type="ToolResultEvent",
+                            agent_id=agent_id,
+                            correlation_id=correlation_id,
+                            summary=summary,
+                            timestamp=0.0,
+                            payload=payload,
                         )
+                    )
 
-                        tool_results = await self.handle_response(agent, response, correlation_id)
-                        if not tool_results:
-                            # No tool calls or only side-effect tools — turn is done
-                            break
+                lsp_tools = build_lsp_tools(
+                    agent,
+                    self.server.event_store,
+                    create_proposal=lambda a, src, _cid: self.create_proposal(a, src, correlation_id),
+                    message_node=lambda from_id, to_id, msg, _cid: self.message_node(
+                        from_id, to_id, msg, correlation_id
+                    ),
+                    emit_tool_event=_emit_tool_event,
+                )
 
-                        # Append assistant message + tool results for next round
-                        assistant_msg: dict[str, Any] = {"role": "assistant", "content": response.content or ""}
-                        messages.append(assistant_msg)
+                # Resolve project root from workspace or cwd
+                project_root = Path.cwd()
+                if hasattr(self.server, "workspace") and hasattr(self.server.workspace, "root_path"):
+                    root_path = getattr(self.server.workspace, "root_path", None)
+                    if root_path:
+                        project_root = Path(root_path)
 
-                        for tr in tool_results:
-                            messages.append(
-                                {
-                                    "role": "user",
-                                    "content": f"[Tool result for {tr['tool']}]:\n{tr['result']}",
-                                }
-                            )
-                        logger.info("execute_turn: appended %d tool results, continuing loop", len(tool_results))
-                    else:
-                        logger.warning(
-                            "execute_turn: max tool rounds (%d) reached for agent %s", MAX_TOOL_ROUNDS, agent_id
+                # On-kernel-event callback: forward to LSP UI
+                async def _on_kernel_event(event: Any) -> None:
+                    await emit_event(
+                        LspAgentEvent(
+                            event_type="KernelEvent",
+                            agent_id=agent_id,
+                            correlation_id=correlation_id,
+                            summary=str(type(event).__name__),
+                            timestamp=0.0,
+                            payload={"event": str(event)},
                         )
+                    )
+
+                result = await execute_agent_turn(
+                    node=agent,
+                    config=self.config,
+                    event_store=self.server.event_store,
+                    subscriptions=getattr(self.server, "subscriptions", None),
+                    swarm_id="swarm",
+                    project_root=project_root,
+                    extra_tools=lsp_tools,
+                    on_kernel_event=_on_kernel_event,
+                    chat_history=chat_history,
+                )
+
+                # Emit final text response if present
+                if result.response_text:
+                    await emit_event(
+                        LspAgentEvent(
+                            event_type="AgentTextResponse",
+                            agent_id=agent_id,
+                            correlation_id=correlation_id,
+                            summary=result.response_text[:200],
+                            timestamp=0.0,
+                            payload={"content": result.response_text},
+                        )
+                    )
+
             except Exception as e:
                 await self.emit_error(agent_id, str(e), correlation_id)
             finally:
@@ -494,183 +467,6 @@ class AgentRunner:
 
                 await self.server.event_store.set_node_status(agent_id, "idle")
                 await refresh_code_lenses()
-
-    @staticmethod
-    def _extract_text_tool_calls(content: str) -> list[ToolCall]:
-        """Extract tool calls from <tool_call> XML tags in text content.
-
-        Some models (e.g. Qwen) emit tool calls as text rather than using the
-        structured tool_calls field in the response.
-        """
-        import re
-
-        calls: list[ToolCall] = []
-        for m in re.finditer(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", content, re.DOTALL):
-            try:
-                parsed = json.loads(m.group(1))
-                name = parsed.get("name", "")
-                arguments = parsed.get("arguments", {})
-                if isinstance(arguments, str):
-                    arguments = json.loads(arguments)
-                if name:
-                    calls.append(ToolCall(name=name, arguments=arguments))
-            except (json.JSONDecodeError, KeyError):
-                logger.warning("_extract_text_tool_calls: failed to parse: %s", m.group(1)[:200])
-        return calls
-
-    async def handle_response(self, agent: AgentNode, response: LLMResponse, correlation_id: str) -> list[dict]:
-        """Process an LLM response, executing any tool calls.
-
-        Returns a list of tool result dicts ``[{"tool": name, "result": text}, ...]``
-        that should be fed back to the LLM in the next round.  An empty list means the
-        turn is complete (text-only response or only side-effect tools).
-        """
-        from remora.lsp.server import emit_event
-
-        tool_calls = response.tool_calls
-
-        # Some models (e.g. Qwen) emit tool calls as <tool_call> XML in text
-        # content rather than using the structured tool_calls field.
-        if not tool_calls and response.content:
-            tool_calls = self._extract_text_tool_calls(response.content)
-            if tool_calls:
-                logger.info(
-                    "handle_response: extracted %d tool call(s) from text content for agent %s",
-                    len(tool_calls),
-                    agent.node_id,
-                )
-
-        if not tool_calls:
-            # Text-only response — emit as an event so the UI can show it
-            if response.content:
-                logger.info("Agent %s responded with text: %s", agent.node_id, response.content[:200])
-                await emit_event(
-                    LspAgentEvent(
-                        event_type="AgentTextResponse",
-                        agent_id=agent.node_id,
-                        correlation_id=correlation_id,
-                        summary=response.content[:200],
-                        timestamp=0.0,
-                        payload={"content": response.content},
-                    )
-                )
-            return []
-
-        tool_results: list[dict] = []
-        for tool_call in tool_calls:
-            match tool_call.name:
-                case "rewrite_self":
-                    new_source = tool_call.arguments.get("new_source", "")
-                    await self.create_proposal(agent, new_source, correlation_id)
-                    # Emit event so the panel can show the tool call
-                    await emit_event(
-                        LspAgentEvent(
-                            event_type="ToolResultEvent",
-                            agent_id=agent.node_id,
-                            correlation_id=correlation_id,
-                            summary="rewrite_self",
-                            timestamp=0.0,
-                            payload={
-                                "tool_name": "rewrite_self",
-                                "target_id": agent.node_id,
-                                "result_summary": f"proposal created — {len(new_source)} chars",
-                            },
-                        )
-                    )
-                    # Side-effect only — no result to feed back
-
-                case "message_node":
-                    target_id = tool_call.arguments.get("target_id", "")
-                    # Resolve symbolic target names
-                    if target_id == "parent" and agent.parent_id:
-                        logger.info(
-                            "message_node: resolved 'parent' -> %s for agent %s", agent.parent_id, agent.node_id
-                        )
-                        target_id = agent.parent_id
-                    message = tool_call.arguments.get("message", "")
-                    if not target_id or target_id == "parent":
-                        logger.warning(
-                            "message_node: unresolved target_id=%r for agent %s (no parent?)",
-                            target_id,
-                            agent.node_id,
-                        )
-                        await self.emit_error(
-                            agent.node_id, f"Cannot resolve message target: {target_id!r}", correlation_id
-                        )
-                    else:
-                        await self.message_node(agent.node_id, target_id, message, correlation_id)
-                        # Emit event so the panel can show the tool call
-                        await emit_event(
-                            LspAgentEvent(
-                                event_type="ToolResultEvent",
-                                agent_id=agent.node_id,
-                                correlation_id=correlation_id,
-                                summary=f"message_node({target_id})",
-                                timestamp=0.0,
-                                payload={
-                                    "tool_name": "message_node",
-                                    "target_id": target_id,
-                                    "result_summary": f"sent — {len(message)} chars",
-                                },
-                            )
-                        )
-                    # Side-effect only — no result to feed back
-
-                case "read_node":
-                    target_id = tool_call.arguments.get("target_id", "")
-                    if target_id == "parent" and agent.parent_id:
-                        logger.info("read_node: resolved 'parent' -> %s for agent %s", agent.parent_id, agent.node_id)
-                        target_id = agent.parent_id
-                    target = await self.server.event_store.get_node(target_id)
-                    if target:
-                        result_text = json.dumps(
-                            {
-                                "name": target.name,
-                                "type": target.node_type,
-                                "source": target.source_code,
-                                "file": target.file_path,
-                            },
-                            indent=2,
-                        )
-                        logger.info("read_node: returning %d chars for node %s", len(result_text), target_id)
-                        tool_results.append({"tool": "read_node", "result": result_text})
-                        # Emit event so the panel can show tool usage
-                        await emit_event(
-                            LspAgentEvent(
-                                event_type="ToolResultEvent",
-                                agent_id=agent.node_id,
-                                correlation_id=correlation_id,
-                                summary=f"read_node({target_id})",
-                                timestamp=0.0,
-                                payload={
-                                    "tool_name": "read_node",
-                                    "target_id": target_id,
-                                    "result_summary": f"{target.name} ({target.node_type}) — {len(target.source_code)} chars",
-                                },
-                            )
-                        )
-                    else:
-                        logger.warning("read_node: node %s not found", target_id)
-                        tool_results.append({"tool": "read_node", "result": f"Error: node {target_id!r} not found"})
-                        await emit_event(
-                            LspAgentEvent(
-                                event_type="ToolResultEvent",
-                                agent_id=agent.node_id,
-                                correlation_id=correlation_id,
-                                summary=f"read_node({target_id}) — not found",
-                                timestamp=0.0,
-                                payload={
-                                    "tool_name": "read_node",
-                                    "target_id": target_id,
-                                    "result_summary": "not found",
-                                },
-                            )
-                        )
-
-                case _:
-                    await self.execute_extension_tool(agent, tool_call.name, tool_call.arguments, correlation_id)
-
-        return tool_results
 
     async def create_proposal(self, agent: AgentNode, new_source: str, correlation_id: str) -> None:
         from remora.lsp.server import emit_event, publish_diagnostics, refresh_code_lenses
@@ -727,61 +523,6 @@ class AgentRunner:
         node = await self.server.event_store.get_node(agent_id)
         if node:
             await refresh_code_lenses()
-
-    def get_agent_tools(self, agent: AgentNode) -> list[dict]:
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "rewrite_self",
-                    "description": "Rewrite the agent's own source code with new implementation",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "new_source": {
-                                "type": "string",
-                                "description": "The new source code for this function/class",
-                            }
-                        },
-                        "required": ["new_source"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "message_node",
-                    "description": "Send a message to another agent to request changes",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "target_id": {"type": "string", "description": "The node_id of the target agent"},
-                            "message": {"type": "string", "description": "Message to send to the target agent"},
-                        },
-                        "required": ["target_id", "message"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "read_node",
-                    "description": "Read another agent's source code",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "target_id": {"type": "string", "description": "The node_id of the target agent"}
-                        },
-                        "required": ["target_id"],
-                    },
-                },
-            },
-        ]
-
-        for tool in agent.extra_tools:
-            tools.append(tool.to_llm_tool())
-
-        return tools
 
     def apply_extensions(self, agent: AgentNode) -> AgentNode:
         extensions = load_extensions(Path(".remora/models"))

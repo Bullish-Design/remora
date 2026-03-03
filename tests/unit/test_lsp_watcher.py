@@ -119,12 +119,18 @@ class MyClass:
 
 
 def test_parse_non_python_file():
-    """Non-Python files should return a single file-level dict."""
+    """Non-Python files with tree-sitter support should return structured nodes."""
     watcher = ASTWatcher()
     text = "# My Document\n\nSome content here.\n"
     nodes = watcher.parse_and_inject_ids("file:///readme.md", text)
-    assert len(nodes) == 1
-    assert isinstance(nodes[0], dict)
-    assert nodes[0]["node_type"] == "file"
-    assert nodes[0]["name"] == "readme"
-    assert nodes[0]["full_name"] == "readme"
+    # Markdown now returns file + section + heading nodes (Gap #5 fix)
+    assert len(nodes) >= 1
+    assert all(isinstance(n, dict) for n in nodes)
+    # File node should always be present
+    file_nodes = [n for n in nodes if n["node_type"] == "file"]
+    assert len(file_nodes) == 1
+    assert file_nodes[0]["name"] == "readme"
+    assert file_nodes[0]["full_name"] == "readme"
+    # Section/heading nodes should also be present for Markdown
+    non_file = [n for n in nodes if n["node_type"] != "file"]
+    assert len(non_file) >= 1, "Expected Markdown sections/headings"

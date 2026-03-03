@@ -78,24 +78,17 @@ def main(
     log.debug("Server module loaded (handlers registered) in %.1fms", (time.monotonic() - t0) * 1000)
 
     log.debug("Importing remora.lsp.runner ...")
-    from remora.lsp.runner import AgentRunner, LLMClient
+    from remora.lsp.runner import AgentRunner
 
     log.debug("Runner module loaded in %.1fms", (time.monotonic() - t0) * 1000)
 
     server.event_store = event_store
     server.subscriptions = subscriptions
 
-    log.debug("Creating LLM client ...")
-    llm = LLMClient(
-        base_url=config.model_base_url,
-        model=config.model_default,
-        api_key=config.model_api_key or "EMPTY",
-    )
-
     log.debug("Creating AgentRunner ...")
-    runner = AgentRunner(server=server, llm=llm)
+    runner = AgentRunner(server=server, config=config)
     server.runner = runner
-    log.debug("AgentRunner created with LLM client")
+    log.debug("AgentRunner created")
 
     @server.feature(lsp.INITIALIZED)
     async def _on_initialized(params: lsp.InitializedParams) -> None:

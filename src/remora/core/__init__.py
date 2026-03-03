@@ -2,6 +2,11 @@
 
 from remora.core.agent_context import AgentContext
 from remora.core.agent_node import AgentNode, ToolSchema as AgentToolSchema
+from remora.core.agent_state import (
+    AgentExecutionMetrics,
+    AgentMemory,
+    AgentTurnState,
+)
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.cairn_externals import CairnExternals
 from remora.core.kernel_factory import create_kernel
@@ -12,6 +17,7 @@ from remora.core.config import (
     load_config,
     serialize_config,
 )
+from remora.core.state_manager import RemoraStateManager
 
 from remora.core.discovery import (
     CSTNode,
@@ -63,11 +69,14 @@ __all__ = [
     "AgentCompleteEvent",
     "AgentContext",
     "AgentErrorEvent",
+    "AgentExecutionMetrics",
+    "AgentMemory",
     "AgentMessageEvent",
     "AgentNode",
     "AgentStartEvent",
     "AgentRunner",
     "AgentToolSchema",
+    "AgentTurnState",
     "AgentWorkspace",
     "BundleManifest",
     "CSTNode",
@@ -96,6 +105,7 @@ __all__ = [
     "RemoraError",
     "RemoraEvent",
     "RemoraGrailTool",
+    "RemoraStateManager",
     "ScaffoldRequestEvent",
     "SwarmExecutor",
     "Subscription",

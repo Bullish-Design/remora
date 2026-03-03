@@ -86,7 +86,7 @@ class TestCascadeDepthTracking:
         """Unified runner should have _correlation_depth for cascade tracking."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         assert hasattr(runner, "_correlation_depth")
         assert isinstance(runner._correlation_depth, dict)
 
@@ -94,7 +94,7 @@ class TestCascadeDepthTracking:
         """Unified runner should have _check_depth_limit method."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         assert hasattr(runner, "_check_depth_limit")
         assert callable(runner._check_depth_limit)
 
@@ -102,7 +102,7 @@ class TestCascadeDepthTracking:
         """When depth >= max, _check_depth_limit should return False."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         # Simulate a cascade that's hit the max
         key = "agent_a:corr_1"
         runner._correlation_depth[key] = (runner._max_trigger_depth, time.time())
@@ -112,7 +112,7 @@ class TestCascadeDepthTracking:
         """When depth < max, _check_depth_limit should return True."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         key = "agent_a:corr_1"
         runner._correlation_depth[key] = (1, time.time())
         assert runner._check_depth_limit("agent_a", "corr_1") is True
@@ -121,7 +121,7 @@ class TestCascadeDepthTracking:
         """Agent with no depth entry should be allowed."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         assert runner._check_depth_limit("new_agent", "corr_1") is True
 
     @pytest.mark.asyncio
@@ -129,7 +129,7 @@ class TestCascadeDepthTracking:
         """Calling trigger should increment the correlation depth."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         # Override execute_turn to prevent actual execution
         runner.execute_turn = AsyncMock()
 
@@ -151,7 +151,7 @@ class TestCascadeCooldown:
         """Unified runner should have _last_trigger_time for cooldown."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         assert hasattr(runner, "_last_trigger_time")
         assert isinstance(runner._last_trigger_time, dict)
 
@@ -159,7 +159,7 @@ class TestCascadeCooldown:
         """Unified runner should have _check_cooldown method."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         assert hasattr(runner, "_check_cooldown")
         assert callable(runner._check_cooldown)
 
@@ -167,14 +167,14 @@ class TestCascadeCooldown:
         """First trigger for an agent should always pass cooldown."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         assert runner._check_cooldown("agent_a") is True
 
     def test_rapid_trigger_fails_cooldown(self, mock_server):
         """Immediate second trigger should fail cooldown."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         runner._check_cooldown("agent_a")  # first call sets the time
         assert runner._check_cooldown("agent_a") is False
 
@@ -182,7 +182,7 @@ class TestCascadeCooldown:
         """After cooldown period, trigger should pass again."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         runner._last_trigger_time["agent_a"] = (time.time() - 10) * 1000  # 10s ago in ms
         assert runner._check_cooldown("agent_a") is True
 
@@ -199,7 +199,7 @@ class TestConcurrencySemaphore:
         """Unified runner should have _semaphore for concurrency control."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         assert hasattr(runner, "_semaphore")
         assert isinstance(runner._semaphore, asyncio.Semaphore)
 
@@ -207,7 +207,7 @@ class TestConcurrencySemaphore:
         """Unified runner should expose _max_concurrency."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         assert hasattr(runner, "_max_concurrency")
         assert runner._max_concurrency > 0
 
@@ -224,21 +224,21 @@ class TestConfigurableParameters:
         """Runner should accept custom max_trigger_depth."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None, max_trigger_depth=3)
+        runner = AgentRunner(mock_server, max_trigger_depth=3)
         assert runner._max_trigger_depth == 3
 
     def test_trigger_cooldown_configurable(self, mock_server):
         """Runner should accept custom trigger_cooldown_ms."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None, trigger_cooldown_ms=500)
+        runner = AgentRunner(mock_server, trigger_cooldown_ms=500)
         assert runner._trigger_cooldown_ms == 500
 
     def test_max_concurrency_configurable(self, mock_server):
         """Runner should accept custom max_concurrency."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None, max_concurrency=2)
+        runner = AgentRunner(mock_server, max_concurrency=2)
         assert runner._max_concurrency == 2
         # Semaphore should reflect the configured value
         assert runner._semaphore._value == 2
@@ -247,7 +247,7 @@ class TestConfigurableParameters:
         """Default values should match the module-level constants."""
         from remora.lsp.runner import AgentRunner, MAX_CHAIN_DEPTH
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         assert runner._max_trigger_depth == MAX_CHAIN_DEPTH
 
 
@@ -263,7 +263,7 @@ class TestEventStoreTriggerBridge:
         """Unified runner should have a method to bridge EventStore triggers."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         assert hasattr(runner, "run_from_event_store")
         assert callable(runner.run_from_event_store)
 
@@ -272,7 +272,7 @@ class TestEventStoreTriggerBridge:
         """EventStore triggers should be translated into queue Triggers."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         runner.execute_turn = AsyncMock()
 
         # Inject a trigger into the EventStore
@@ -301,14 +301,14 @@ class TestStaleDepthCleanup:
         """Runner should have _cleanup_stale_depths method."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         assert hasattr(runner, "_cleanup_stale_depths")
 
     def test_cleanup_removes_old_entries(self, mock_server):
         """Entries older than TTL should be removed."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         now = time.time()
         runner._correlation_depth["old_key"] = (1, now - 600)  # 10 min ago
         runner._correlation_depth["fresh_key"] = (1, now)
@@ -332,7 +332,7 @@ class TestTriggerChainDepthCompat:
         """trigger() should still check db.get_activation_chain for cycle detection."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         mock_server.db.get_activation_chain = AsyncMock(return_value=["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"])
 
         runner.execute_turn = AsyncMock()
@@ -346,7 +346,7 @@ class TestTriggerChainDepthCompat:
         """trigger() should respect cooldown before enqueuing."""
         from remora.lsp.runner import AgentRunner
 
-        runner = AgentRunner(mock_server, llm=None)
+        runner = AgentRunner(mock_server)
         runner.execute_turn = AsyncMock()
 
         # First trigger — should pass

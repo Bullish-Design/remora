@@ -25,6 +25,7 @@ class AgentWorkspace:
     """Workspace for a single agent execution.
 
     Wraps a Cairn workspace with agent-specific convenience methods.
+    Implements WorkspaceProtocol for testability.
     """
 
     def __init__(
@@ -105,7 +106,17 @@ class AgentWorkspace:
             entries.update(stable_entries)
         return sorted(entries)
 
+    async def delete(self, path: PathLike) -> None:
+        """Delete a file from the workspace."""
+        path_str = normalize_path(path).as_posix()
+        async with self._lock:
+            await self._workspace.files.delete(path_str)
 
+    async def mkdir(self, path: PathLike) -> None:
+        """Create a directory in the workspace."""
+        path_str = normalize_path(path).as_posix()
+        async with self._lock:
+            await self._workspace.files.mkdir(path_str)
 
 
 class CairnDataProvider:

@@ -11,13 +11,13 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from remora.core.agent_node import AgentNode
 from remora.core.config import Config
-from remora.core.swarm_executor import SwarmExecutor, _agent_node_to_cst_node
+from remora.core.execution import _agent_node_to_cst_node, _build_prompt
+from remora.utils import PathResolver
 
 
 # ---------------------------------------------------------------------------
@@ -66,18 +66,11 @@ def _make_node(**overrides: Any) -> AgentNode:
 
 
 @pytest.fixture
-def executor(tmp_path):
+def prompt_deps(tmp_path):
+    """Return (config, path_resolver) for calling _build_prompt."""
     config = _make_config(tmp_path)
-    with patch("remora.core.swarm_executor.build_client") as mock_build_client:
-        mock_build_client.return_value = MagicMock()
-        return SwarmExecutor(
-            config=config,
-            event_bus=None,
-            event_store=MagicMock(),
-            subscriptions=MagicMock(),
-            swarm_id="test",
-            project_root=tmp_path,
-        )
+    resolver = PathResolver(tmp_path)
+    return config, resolver
 
 
 # =========================================================================
@@ -89,8 +82,9 @@ class TestScaffoldPromptEnrichment:
     """When a scaffold node gets its prompt built, it should include
     parent source code, sibling info, and the scaffold intent."""
 
-    def test_scaffold_prompt_includes_parent_source(self, executor):
+    def test_scaffold_prompt_includes_parent_source(self, prompt_deps):
         """Scaffold node prompt should include parent source code section."""
+        config, resolver = prompt_deps
         node = _make_node(
             status="scaffold",
             source_code="class Calculator: pass",
@@ -104,15 +98,16 @@ class TestScaffoldPromptEnrichment:
             "intent": "",
         }
 
-        prompt = executor._build_prompt(node, cst_node, {}, scaffold_context=scaffold_context)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, scaffold_context=scaffold_context)
 
         assert "## Scaffold Context" in prompt
         assert "### Parent Source" in prompt
         assert "import math" in prompt
         assert "class MathUtils" in prompt
 
-    def test_scaffold_prompt_includes_siblings(self, executor):
+    def test_scaffold_prompt_includes_siblings(self, prompt_deps):
         """Scaffold node prompt should list sibling names and types."""
+        config, resolver = prompt_deps
         node = _make_node(
             status="scaffold",
             source_code="def process(): pass",
@@ -129,7 +124,7 @@ class TestScaffoldPromptEnrichment:
             "intent": "",
         }
 
-        prompt = executor._build_prompt(node, cst_node, {}, scaffold_context=scaffold_context)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, scaffold_context=scaffold_context)
 
         assert "### Siblings" in prompt
         assert "validate_input" in prompt
@@ -137,8 +132,9 @@ class TestScaffoldPromptEnrichment:
         assert "OutputFormatter" in prompt
         assert "class" in prompt
 
-    def test_scaffold_prompt_includes_intent(self, executor):
+    def test_scaffold_prompt_includes_intent(self, prompt_deps):
         """Scaffold node prompt should include the intent from ScaffoldRequestEvent."""
+        config, resolver = prompt_deps
         node = _make_node(
             status="scaffold",
             source_code="class HttpClient: pass",
@@ -152,13 +148,14 @@ class TestScaffoldPromptEnrichment:
             "intent": "HTTP client with retry logic and connection pooling",
         }
 
-        prompt = executor._build_prompt(node, cst_node, {}, scaffold_context=scaffold_context)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, scaffold_context=scaffold_context)
 
         assert "### Intent" in prompt
         assert "HTTP client with retry logic and connection pooling" in prompt
 
-    def test_scaffold_prompt_includes_all_sections(self, executor):
+    def test_scaffold_prompt_includes_all_sections(self, prompt_deps):
         """Scaffold node prompt should include all three scaffold context subsections."""
+        config, resolver = prompt_deps
         node = _make_node(
             status="scaffold",
             source_code="def fetch_data(): ...",
@@ -174,7 +171,7 @@ class TestScaffoldPromptEnrichment:
             "intent": "Fetch data from the remote API",
         }
 
-        prompt = executor._build_prompt(node, cst_node, {}, scaffold_context=scaffold_context)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, scaffold_context=scaffold_context)
 
         assert "## Scaffold Context" in prompt
         assert "### Parent Source" in prompt
@@ -184,30 +181,33 @@ class TestScaffoldPromptEnrichment:
         assert "### Intent" in prompt
         assert "Fetch data from the remote API" in prompt
 
-    def test_non_scaffold_node_no_scaffold_section(self, executor):
+    def test_non_scaffold_node_no_scaffold_section(self, prompt_deps):
         """Non-scaffold (idle) nodes should NOT get a scaffold context section."""
+        config, resolver = prompt_deps
         node = _make_node(status="idle")
         cst_node = _agent_node_to_cst_node(node)
 
-        prompt = executor._build_prompt(node, cst_node, {})
+        prompt = _build_prompt(node, cst_node, {}, resolver, config)
 
         assert "## Scaffold Context" not in prompt
         assert "### Parent Source" not in prompt
         assert "### Siblings" not in prompt
         assert "### Intent" not in prompt
 
-    def test_scaffold_without_context_no_scaffold_section(self, executor):
+    def test_scaffold_without_context_no_scaffold_section(self, prompt_deps):
         """Scaffold node without scaffold_context kwarg should not crash or add section."""
+        config, resolver = prompt_deps
         node = _make_node(status="scaffold", source_code="def foo(): pass")
         cst_node = _agent_node_to_cst_node(node)
 
         # No scaffold_context passed — should still work, just no extra section
-        prompt = executor._build_prompt(node, cst_node, {})
+        prompt = _build_prompt(node, cst_node, {}, resolver, config)
 
         assert "## Scaffold Context" not in prompt
 
-    def test_scaffold_empty_parent_source_omits_parent_section(self, executor):
+    def test_scaffold_empty_parent_source_omits_parent_section(self, prompt_deps):
         """When parent_source is empty string, the parent section should be omitted."""
+        config, resolver = prompt_deps
         node = _make_node(
             status="scaffold",
             source_code="class Foo: pass",
@@ -221,15 +221,16 @@ class TestScaffoldPromptEnrichment:
             "intent": "some intent",
         }
 
-        prompt = executor._build_prompt(node, cst_node, {}, scaffold_context=scaffold_context)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, scaffold_context=scaffold_context)
 
         assert "## Scaffold Context" in prompt
         assert "### Parent Source" not in prompt
         assert "### Siblings" in prompt
         assert "### Intent" in prompt
 
-    def test_scaffold_empty_siblings_omits_siblings_section(self, executor):
+    def test_scaffold_empty_siblings_omits_siblings_section(self, prompt_deps):
         """When siblings list is empty, the siblings section should be omitted."""
+        config, resolver = prompt_deps
         node = _make_node(
             status="scaffold",
             source_code="class Foo: pass",
@@ -243,15 +244,16 @@ class TestScaffoldPromptEnrichment:
             "intent": "some intent",
         }
 
-        prompt = executor._build_prompt(node, cst_node, {}, scaffold_context=scaffold_context)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, scaffold_context=scaffold_context)
 
         assert "## Scaffold Context" in prompt
         assert "### Parent Source" in prompt
         assert "### Siblings" not in prompt
         assert "### Intent" in prompt
 
-    def test_scaffold_empty_intent_omits_intent_section(self, executor):
+    def test_scaffold_empty_intent_omits_intent_section(self, prompt_deps):
         """When intent is empty string, the intent section should be omitted."""
+        config, resolver = prompt_deps
         node = _make_node(
             status="scaffold",
             source_code="class Foo: pass",
@@ -265,15 +267,16 @@ class TestScaffoldPromptEnrichment:
             "intent": "",
         }
 
-        prompt = executor._build_prompt(node, cst_node, {}, scaffold_context=scaffold_context)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, scaffold_context=scaffold_context)
 
         assert "## Scaffold Context" in prompt
         assert "### Parent Source" in prompt
         assert "### Siblings" in prompt
         assert "### Intent" not in prompt
 
-    def test_scaffold_all_empty_no_scaffold_section(self, executor):
+    def test_scaffold_all_empty_no_scaffold_section(self, prompt_deps):
         """When all scaffold_context fields are empty, no scaffold section at all."""
+        config, resolver = prompt_deps
         node = _make_node(
             status="scaffold",
             source_code="class Foo: pass",
@@ -287,12 +290,13 @@ class TestScaffoldPromptEnrichment:
             "intent": "",
         }
 
-        prompt = executor._build_prompt(node, cst_node, {}, scaffold_context=scaffold_context)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, scaffold_context=scaffold_context)
 
         assert "## Scaffold Context" not in prompt
 
-    def test_existing_prompt_sections_still_present(self, executor):
+    def test_existing_prompt_sections_still_present(self, prompt_deps):
         """Scaffold enrichment should not remove existing prompt sections."""
+        config, resolver = prompt_deps
         node = _make_node(
             status="scaffold",
             source_code="class Foo: pass",
@@ -306,7 +310,7 @@ class TestScaffoldPromptEnrichment:
             "intent": "test intent",
         }
 
-        prompt = executor._build_prompt(node, cst_node, {}, scaffold_context=scaffold_context)
+        prompt = _build_prompt(node, cst_node, {}, resolver, config, scaffold_context=scaffold_context)
 
         # Standard sections should still be there
         assert "# Target:" in prompt

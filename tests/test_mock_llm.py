@@ -6,10 +6,11 @@ import pytest
 
 pytest.importorskip("remora_demo", reason="remora_demo package not installed")
 
-from remora.lsp.runner import LLMResponse, ToolCall
 from remora_demo.neovim.mock_llm import (
+    LLMResponse,
     MockContext,
     MockLLMClient,
+    ToolCall,
     parse_context,
     ContentChangedAnalyzeScript,
     HumanChatScript,
