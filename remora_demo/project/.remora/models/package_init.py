@@ -5,8 +5,8 @@ from remora.extensions import AgentExtension
 
 class PackageInitExtension(AgentExtension):
     @staticmethod
-    def matches(node_type: str, name: str) -> bool:
-        return node_type == "file" and name == "__init__.py"
+    def matches(node_type: str, name: str, *, file_path: str = "", source_code: str = "") -> bool:
+        return node_type == "file" and name == "__init__"
 
     @staticmethod
     def get_extension_data() -> dict:

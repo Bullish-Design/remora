@@ -13,9 +13,21 @@
 - [x] GIF conversion step (cast_to_gif in harness.py)
 - [x] Runner script (run.py)
 - [x] Smoke test all scenarios (6/6 pass, no recording)
-
-## Status: COMPLETE
-
-All scenarios implemented and passing. Recording (asciinema) and GIF
-conversion (agg) require running inside the devenv shell where those
-tools are on PATH.
+- [x] Rewrite AsciinemaRecorder (capture-pane polling, no PTY dependency)
+- [x] Add timestamps to output filenames
+- [x] Fix leader key (Space, not backslash) in all scenarios
+- [x] Fix <Space>ra / <Space>rc interaction flow
+- [x] Fix LSP not starting when file passed on command line (FileType re-trigger)
+- [x] Fix "No agent found at cursor" — event_store wiring in remora-lsp entrypoint
+- [x] Create e2e/keys.py — standardized NvimKeys helper class
+- [x] Refactor all 6 scenarios to use NvimKeys
+- [x] Add defensive migration for proposals.file_path column in RemoraDB and EventStore
+- [x] Fix mock LLM not activating — env var expansion in config + MockLLMClient wiring
+- [x] TEST_SUITE_ADDITIONS.md — document file corruption bug and proposed tests
+- [x] Switch to real vLLM (Qwen/Qwen3-4B-Instruct-2507-FP8) — remove mock LLM wiring
+- [x] Verify all 6 original scenarios pass against real vLLM with GIF output
+- [x] Scenario: Reject proposal (<Space>rn)
+- [x] Scenario: Multi-file navigation (loader.py -> merge.py, chat on both)
+- [x] Scenario: Panel navigation (open panel, move between functions, toggle tools, close)
+- [x] Add merge.py + test_merge.py to DemoProjectGuard mutable files
+- [x] Full suite run: 9/9 pass with recording + GIF (~280s total)

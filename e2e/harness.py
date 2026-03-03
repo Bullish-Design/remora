@@ -1,17 +1,21 @@
 """E2E demo test harness — TmuxDriver, AsciinemaRecorder, Scenario protocol.
 
 Drives the Neovim LSP demo via tmux send-keys, records terminal output
-with asciinema, and converts recordings to GIF via agg.
+as asciicast v2 files (.cast), and converts recordings to GIF via agg.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import subprocess
+import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -26,6 +30,53 @@ POLL_INTERVAL = 0.3  # seconds between capture-pane polls
 SESSION_PREFIX = "remora-e2e"
 
 OUTPUT_DIR = Path(__file__).parent / "output"
+
+# The demo project that scenarios open in nv2
+DEMO_PROJECT = Path(__file__).parent.parent / "remora_demo" / "project"
+
+# Files in the demo project that scenarios may modify
+_DEMO_MUTABLE_FILES = [
+    DEMO_PROJECT / "src" / "configlib" / "loader.py",
+    DEMO_PROJECT / "src" / "configlib" / "merge.py",
+    DEMO_PROJECT / "tests" / "test_loader.py",
+    DEMO_PROJECT / "tests" / "test_merge.py",
+]
+
+
+# ---------------------------------------------------------------------------
+# DemoProjectGuard — snapshot and restore mutable demo files
+# ---------------------------------------------------------------------------
+
+
+class DemoProjectGuard:
+    """Saves and restores demo project files that scenarios may modify.
+
+    Used as a context manager around scenario execution to guarantee the
+    demo project is always left in its original state — even if a scenario
+    fails or the process is interrupted.
+    """
+
+    def __init__(self, files: list[Path] | None = None) -> None:
+        self._files = files or _DEMO_MUTABLE_FILES
+        self._snapshots: dict[Path, bytes] = {}
+
+    def save(self) -> None:
+        """Read and store the current content of each mutable file."""
+        for fpath in self._files:
+            if fpath.exists():
+                self._snapshots[fpath] = fpath.read_bytes()
+
+    def restore(self) -> None:
+        """Write back the saved content, restoring files to their original state."""
+        for fpath, content in self._snapshots.items():
+            fpath.write_bytes(content)
+
+    def __enter__(self) -> DemoProjectGuard:
+        self.save()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.restore()
 
 
 # ---------------------------------------------------------------------------
@@ -207,86 +258,94 @@ class TmuxDriver:
 
 @dataclass
 class AsciinemaRecorder:
-    """Wraps asciinema rec to record a tmux session.
+    """Records a tmux session to asciicast v2 format (.cast).
 
-    Spawns `asciinema rec` in a subprocess that connects to the tmux pane
-    via `tmux pipe-pane`. Alternatively, records the entire terminal by
-    running asciinema inside the tmux session.
+    Instead of running ``asciinema rec`` (which needs a real PTY), this
+    recorder polls ``tmux capture-pane`` in a background thread and writes
+    screen snapshots as asciicast v2 JSONL.  The resulting ``.cast`` file
+    can be rendered to GIF with ``agg``.
 
-    The simpler approach: run `asciinema rec` wrapping the tmux attach,
-    or use asciinema's --command to attach to the session.
+    Each captured frame is written as a full-screen redraw (cursor-home +
+    erase-screen + content).  This produces a slightly larger file than a
+    true terminal recording but is 100 % reliable in headless / CI
+    environments.
     """
 
     output_path: Path = field(default_factory=lambda: OUTPUT_DIR / "recording.cast")
     cols: int = DEFAULT_COLS
     rows: int = DEFAULT_ROWS
-    _process: subprocess.Popen | None = field(default=None, init=False, repr=False)
+    poll_interval: float = 0.25  # seconds between captures
+    _thread: threading.Thread | None = field(default=None, init=False, repr=False)
+    _stop_event: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+    _tmux_session: str = field(default="", init=False, repr=False)
+    _started: bool = field(default=False, init=False, repr=False)
 
     def start(self, tmux_session: str) -> None:
-        """Start recording by running asciinema rec with tmux attach as command."""
+        """Begin recording *tmux_session* in a background thread."""
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Remove existing file so asciinema doesn't prompt for overwrite
         if self.output_path.exists():
             self.output_path.unlink()
+        self._tmux_session = tmux_session
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._record_loop, daemon=True)
+        self._started = True
+        self._thread.start()
 
-        env = os.environ.copy()
-        env["ASCIINEMA_REC"] = "1"
+    # ---- internal -------------------------------------------------------
 
-        self._process = subprocess.Popen(
-            [
-                "asciinema",
-                "rec",
-                str(self.output_path),
-                "--cols",
-                str(self.cols),
-                "--rows",
-                str(self.rows),
-                "--command",
-                f"tmux attach-session -t {tmux_session}",
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=env,
+    def _capture(self) -> str:
+        """Grab the current pane content via tmux (with ANSI escapes)."""
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", self._tmux_session, "-p", "-e"],
+            capture_output=True,
+            text=True,
         )
+        return result.stdout if result.returncode == 0 else ""
+
+    def _record_loop(self) -> None:
+        """Background thread: poll capture-pane and write .cast frames."""
+        start = time.monotonic()
+        last_content = ""
+
+        with open(self.output_path, "w") as fh:
+            # asciicast v2 header
+            header = {
+                "version": 2,
+                "width": self.cols,
+                "height": self.rows,
+                "timestamp": int(time.time()),
+                "env": {"TERM": "xterm-256color", "SHELL": "/bin/bash"},
+            }
+            fh.write(json.dumps(header) + "\n")
+
+            while not self._stop_event.is_set():
+                content = self._capture()
+                if content and content != last_content:
+                    elapsed = time.monotonic() - start
+                    # Convert \n to \r\n so each line starts at column 0
+                    # in the terminal emulator, then prepend a full-screen
+                    # reset (home cursor + erase screen).
+                    lines = content.replace("\r\n", "\n").replace("\n", "\r\n")
+                    frame = f"\x1b[H\x1b[2J{lines}"
+                    fh.write(json.dumps([round(elapsed, 4), "o", frame]) + "\n")
+                    fh.flush()
+                    last_content = content
+                self._stop_event.wait(timeout=self.poll_interval)
+
+    # ---- public API -----------------------------------------------------
 
     def stop(self) -> Path:
-        """Stop the recording and return path to the .cast file.
-
-        Detaches from tmux (which causes asciinema's command to exit)
-        and waits for the process to finish.
-        """
-        if self._process is None:
+        """Stop recording and return path to the ``.cast`` file."""
+        if not self._started:
             raise RuntimeError("Recorder not started")
 
-        # Send 'q' then close stdin to cause the attached tmux client to detach
-        # Actually, the cleaner way: send tmux detach-client
-        try:
-            # Detach the tmux client that asciinema launched
-            subprocess.run(
-                ["tmux", "detach-client", "-s", ""],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-        except subprocess.TimeoutExpired:
-            pass
-
-        # If still running, terminate
-        if self._process.poll() is None:
-            self._process.terminate()
-            try:
-                self._process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-                self._process.wait()
-
-        self._process = None
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+        self._started = False
 
         if not self.output_path.exists():
             raise RuntimeError(f"Recording file not created: {self.output_path}")
-
         return self.output_path
 
 
@@ -385,7 +444,6 @@ def run_scenario(
     record: bool = True,
     gif: bool = False,
     working_dir: str | Path | None = None,
-    mock: bool = True,
 ) -> ScenarioResult:
     """Run a single scenario with optional recording and GIF conversion.
 
@@ -394,24 +452,20 @@ def run_scenario(
         record: Whether to record with asciinema.
         gif: Whether to convert recording to GIF.
         working_dir: Working directory for the tmux session.
-        mock: If True, set REMORA_MODEL=mock env var.
     """
     start_time = time.monotonic()
-    cast_path = OUTPUT_DIR / f"{scenario.name}.cast"
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    cast_path = OUTPUT_DIR / f"{scenario.name}_{stamp}.cast"
     driver = TmuxDriver()
     recorder = AsciinemaRecorder(output_path=cast_path) if record else None
-
-    # Set mock mode via environment
-    if mock:
-        os.environ["REMORA_MODEL"] = "mock"
+    guard = DemoProjectGuard()
+    guard.save()
 
     try:
         driver.start(working_dir=working_dir)
 
         if recorder:
             recorder.start(driver.session_name)
-            # Give asciinema a moment to attach
-            time.sleep(1.0)
 
         scenario.run(driver)
 
@@ -434,7 +488,7 @@ def run_scenario(
 
     except Exception as e:
         # Try to stop recorder if running
-        if recorder and recorder._process:
+        if recorder and recorder._started:
             try:
                 recorder.stop()
             except Exception:
@@ -449,3 +503,5 @@ def run_scenario(
 
     finally:
         driver.kill()
+        # Always restore demo project files to their original state
+        guard.restore()

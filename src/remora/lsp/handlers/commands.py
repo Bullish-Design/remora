@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from lsprotocol import types as lsp
 
-from remora.lsp.models import RewriteAppliedEvent, RewriteRejectedEvent
+from remora.lsp.models import LspRewriteAppliedEvent, LspRewriteRejectedEvent
 from remora.lsp.server import emit_event, logger, server
 
 
@@ -159,7 +159,7 @@ async def cmd_accept_proposal(ls, proposal_id: str) -> None:
         await ls.db.update_proposal_status(proposal_id, "accepted")
 
         await emit_event(
-            RewriteAppliedEvent(
+            LspRewriteAppliedEvent(
                 agent_id=proposal.agent_id,
                 proposal_id=proposal_id,
                 correlation_id=proposal.correlation_id or "",

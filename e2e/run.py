@@ -5,7 +5,6 @@ Usage:
     python -m e2e.run --scenario startup       # Run one scenario
     python -m e2e.run --list                   # List available scenarios
     python -m e2e.run --gif                    # Record + convert to GIF
-    python -m e2e.run --real                   # Use real LLM (not mock)
     python -m e2e.run --no-record              # Run without recording
 """
 
@@ -44,11 +43,6 @@ def parse_args() -> argparse.Namespace:
         "--gif",
         action="store_true",
         help="Convert recordings to GIF after completion",
-    )
-    parser.add_argument(
-        "--real",
-        action="store_true",
-        help="Use real LLM instead of mock (requires REMORA_LLM_URL)",
     )
     parser.add_argument(
         "--no-record",
@@ -94,7 +88,6 @@ def main() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     print(f"E2E Demo Test Runner")
-    print(f"  Mode:       {'real LLM' if args.real else 'mock LLM'}")
     print(f"  Recording:  {'disabled' if args.no_record else 'enabled'}")
     print(f"  GIF:        {'yes' if args.gif else 'no'}")
     print(f"  Scenarios:  {', '.join(scenario_names)}")
@@ -113,7 +106,6 @@ def main() -> int:
             record=not args.no_record,
             gif=args.gif,
             working_dir=DEMO_PROJECT,
-            mock=not args.real,
         )
         results.append(result)
         print_result(result)

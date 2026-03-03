@@ -120,6 +120,16 @@ class RemoraDB:
             CREATE INDEX IF NOT EXISTS idx_chain_correlation ON activation_chain(correlation_id);
         """)
         self.conn.commit()
+        self._migrate()
+
+    def _migrate(self):
+        """Add columns that may be missing from older databases."""
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(proposals)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "file_path" not in columns:
+            cursor.execute("ALTER TABLE proposals ADD COLUMN file_path TEXT")
+            self.conn.commit()
 
     # ── Cursor focus ──────────────────────────────────────────────────────
 

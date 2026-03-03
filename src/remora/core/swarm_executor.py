@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 from structured_agents.agent import load_manifest
@@ -321,7 +321,7 @@ class SwarmExecutor:
                 role = entry.get("role")
                 content = entry.get("content")
                 if role and content:
-                    messages.append(Message(role=role, content=content))
+                    messages.append(Message(role=cast(Any, role), content=content))
             messages.append(Message(role="user", content=prompt))
             tool_schemas = [tool.schema for tool in tools]
             if manifest.grammar_config and not manifest.grammar_config.send_tools_to_api:

@@ -7,11 +7,11 @@ as the [Remora] notification and code lenses appearing).
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from e2e.harness import TmuxDriver
+from e2e.keys import NvimKeys
 
 # The demo project that nv2 opens
 DEMO_PROJECT = Path(__file__).parent.parent.parent / "remora_demo" / "project"
@@ -25,19 +25,14 @@ class StartupScenario:
     description: str = "Open nv2 on demo project, verify LSP connects and discovers agents"
 
     def run(self, driver: TmuxDriver) -> None:
-        # Launch nv2 on the demo project's loader.py
+        nv = NvimKeys(driver)
         target_file = DEMO_PROJECT / "src" / "configlib" / "loader.py"
-        driver.send_keys(f"nv2 {target_file}")
 
-        # Wait for Neovim to load — look for the file content
-        driver.wait_for_text("load_config", timeout=15)
+        # Launch nv2 on loader.py and wait for content + LSP startup
+        nv.open_nvim(target_file, wait_for="load_config")
 
         # Wait for the Remora plugin initialization notification
-        # The extraInitLua prints: [Remora] nv2 initialized remora plugin
         driver.wait_for_text("[Remora]", timeout=15)
-
-        # Give the LSP time to start and do background scan
-        time.sleep(3)
 
         # Verify the buffer is showing the loader.py content
         content = driver.capture_pane()

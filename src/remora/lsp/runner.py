@@ -13,12 +13,12 @@ from pydantic import BaseModel, Field, ConfigDict
 from remora.core.agent_node import AgentNode
 from remora.extensions import extension_matches, load_extensions
 from remora.lsp.models import (
-    AgentErrorEvent,
-    AgentEvent,
-    AgentMessageEvent,
-    HumanChatEvent,
+    LspAgentErrorEvent,
+    LspAgentEvent,
+    LspAgentMessageEvent,
+    LspHumanChatEvent,
     RewriteProposal,
-    RewriteProposalEvent,
+    LspRewriteProposalEvent,
     generate_id,
 )
 
@@ -302,10 +302,10 @@ class AgentRunner:
 
         if cmd_type == "chat" and agent_id:
             correlation_id = self.server.generate_correlation_id()
-            from remora.lsp.models import HumanChatEvent
+            from remora.lsp.models import LspHumanChatEvent
 
             await emit_event(
-                HumanChatEvent(
+                LspHumanChatEvent(
                     agent_id=agent_id,
                     to_agent=agent_id,
                     message=payload.get("message", ""),
@@ -327,10 +327,10 @@ class AgentRunner:
             feedback = payload.get("feedback", "")
             proposal = self.server.proposals.get(proposal_id)
             if proposal:
-                from remora.lsp.models import RewriteRejectedEvent
+                from remora.lsp.models import LspRewriteRejectedEvent
 
                 await emit_event(
-                    RewriteRejectedEvent(
+                    LspRewriteRejectedEvent(
                         agent_id=proposal.agent_id,
                         proposal_id=proposal_id,
                         feedback=feedback,
@@ -386,7 +386,9 @@ class AgentRunner:
     async def emit_error(self, agent_id: str, error: str, correlation_id: str) -> None:
         from remora.lsp.server import emit_event
 
-        await emit_event(AgentErrorEvent(agent_id=agent_id, error=error, correlation_id=correlation_id, timestamp=0.0))
+        await emit_event(
+            LspAgentErrorEvent(agent_id=agent_id, error=error, correlation_id=correlation_id, timestamp=0.0)
+        )
 
     async def execute_turn(self, trigger: Trigger) -> None:
         from remora.lsp.server import emit_event, refresh_code_lenses
@@ -543,7 +545,7 @@ class AgentRunner:
             if response.content:
                 logger.info("Agent %s responded with text: %s", agent.node_id, response.content[:200])
                 await emit_event(
-                    AgentEvent(
+                    LspAgentEvent(
                         event_type="AgentTextResponse",
                         agent_id=agent.node_id,
                         correlation_id=correlation_id,
@@ -562,7 +564,7 @@ class AgentRunner:
                     await self.create_proposal(agent, new_source, correlation_id)
                     # Emit event so the panel can show the tool call
                     await emit_event(
-                        AgentEvent(
+                        LspAgentEvent(
                             event_type="ToolResultEvent",
                             agent_id=agent.node_id,
                             correlation_id=correlation_id,
@@ -599,7 +601,7 @@ class AgentRunner:
                         await self.message_node(agent.node_id, target_id, message, correlation_id)
                         # Emit event so the panel can show the tool call
                         await emit_event(
-                            AgentEvent(
+                            LspAgentEvent(
                                 event_type="ToolResultEvent",
                                 agent_id=agent.node_id,
                                 correlation_id=correlation_id,
@@ -634,7 +636,7 @@ class AgentRunner:
                         tool_results.append({"tool": "read_node", "result": result_text})
                         # Emit event so the panel can show tool usage
                         await emit_event(
-                            AgentEvent(
+                            LspAgentEvent(
                                 event_type="ToolResultEvent",
                                 agent_id=agent.node_id,
                                 correlation_id=correlation_id,
@@ -651,7 +653,7 @@ class AgentRunner:
                         logger.warning("read_node: node %s not found", target_id)
                         tool_results.append({"tool": "read_node", "result": f"Error: node {target_id!r} not found"})
                         await emit_event(
-                            AgentEvent(
+                            LspAgentEvent(
                                 event_type="ToolResultEvent",
                                 agent_id=agent.node_id,
                                 correlation_id=correlation_id,
@@ -695,7 +697,7 @@ class AgentRunner:
         await refresh_code_lenses()
 
         await emit_event(
-            RewriteProposalEvent(
+            LspRewriteProposalEvent(
                 agent_id=agent.node_id,
                 proposal_id=proposal_id,
                 diff=proposal.diff,
@@ -708,7 +710,7 @@ class AgentRunner:
         from remora.lsp.server import emit_event
 
         await emit_event(
-            AgentMessageEvent(
+            LspAgentMessageEvent(
                 agent_id=from_id,
                 from_agent=from_id,
                 to_agent=to_id,
@@ -804,7 +806,7 @@ class AgentRunner:
         from remora.lsp.server import emit_event
 
         await emit_event(
-            AgentEvent(
+            LspAgentEvent(
                 event_type="ToolResultEvent",
                 agent_id=agent.node_id,
                 correlation_id=correlation_id,

@@ -1,7 +1,14 @@
-"""Unified event types for Remora.
+"""Unified domain event types for the Remora core runtime.
 
 All events are frozen Pydantic models that can be pattern-matched.
 Re-exports structured-agents events for unified event handling.
+
+The LSP layer (``remora.lsp.models``) defines a separate set of event
+classes with the ``Lsp`` prefix (``LspAgentEvent``, ``LspAgentMessageEvent``,
+``LspAgentErrorEvent``, etc.).  Those are LSP protocol events stored in the
+LSP DB for diagnostics, proposals, and editor notifications.  The events
+in *this* module are **domain events** stored in the ``EventStore`` and
+used for subscriptions, routing, and the core execution pipeline.
 """
 
 from __future__ import annotations

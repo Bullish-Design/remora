@@ -8,6 +8,8 @@ Remora uses two configuration levels:
 from __future__ import annotations
 
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -112,12 +114,40 @@ def _find_config_file() -> Path | None:
     return None
 
 
+# Regex for ${VAR:-default} and ${VAR} patterns
+_ENV_PATTERN = re.compile(r"\$\{([^}:]+)(?::-((?:[^}\\]|\\.)*)?)?\}")
+
+
+def _expand_env_value(value: str) -> str:
+    """Expand ``${VAR:-default}`` and ``${VAR}`` in a single string."""
+
+    def _replace(m: re.Match) -> str:
+        var_name = m.group(1)
+        default = m.group(2) if m.group(2) is not None else ""
+        return os.environ.get(var_name, default)
+
+    return _ENV_PATTERN.sub(_replace, value)
+
+
+def _expand_env_vars(data: Any) -> Any:
+    """Recursively expand shell-style env vars in a parsed YAML structure."""
+    if isinstance(data, str):
+        return _expand_env_value(data)
+    if isinstance(data, dict):
+        return {k: _expand_env_vars(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_expand_env_vars(item) for item in data]
+    return data
+
+
 def _build_config(data: dict[str, Any]) -> Config:
     """Build Config from dictionary data.
 
     Pydantic handles list-to-tuple coercion automatically.
+    Shell-style ``${VAR:-default}`` patterns in string values are expanded.
     """
-    return Config(**data)
+    expanded = _expand_env_vars(data)
+    return Config(**expanded)
 
 
 def serialize_config(config: Config) -> dict[str, Any]:

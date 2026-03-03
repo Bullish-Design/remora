@@ -73,39 +73,3 @@ async def configured_event_store(
     await store.initialize()
     yield store
     await store.close()
-
-
-class DummyKernel:
-    """Dummy kernel that returns predefined responses deterministically.
-
-    Used to test the reactive system without hitting a real LLM API.
-    """
-
-    def __init__(self, responses: list[str] | None = None):
-        self.responses = responses or ["Dummy response"]
-        self.call_count = 0
-
-    async def run(self, messages: list, tool_schemas: list, max_turns: int = 1) -> "DummyResult":
-        response = self.responses[self.call_count % len(self.responses)]
-        self.call_count += 1
-        return DummyResult(content=response)
-
-    async def close(self) -> None:
-        pass
-
-
-class DummyResult:
-    """Dummy result from DummyKernel."""
-
-    def __init__(self, content: str = "", tool_calls: list | None = None):
-        self.content = content
-        self.tool_calls = tool_calls or []
-
-    def __str__(self) -> str:
-        return self.content
-
-
-@pytest.fixture
-def dummy_kernel():
-    """Factory fixture for creating DummyKernel instances."""
-    return DummyKernel

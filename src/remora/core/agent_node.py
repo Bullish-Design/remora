@@ -9,9 +9,12 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from lsprotocol import types as lsp
 
 from remora.core.subscriptions import SubscriptionPattern
 
@@ -47,7 +50,7 @@ class ToolSchema(BaseModel):
             },
         }
 
-    def to_code_action(self, node_id: str) -> lsp.CodeAction:
+    def to_code_action(self, node_id: str) -> "lsp.CodeAction":
         from lsprotocol import types as lsp
 
         return lsp.CodeAction(

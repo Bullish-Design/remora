@@ -2,51 +2,69 @@
 
 ## Status: COMPLETE
 
-## What Was Done
+All tasks done. All 9 e2e scenarios pass (9/9, ~280s total) against real vLLM.
 
-Built a complete E2E test framework that drives the Neovim LSP demo via
-tmux send-keys, records terminal output with asciinema, and converts
-recordings to GIF via agg.
+## Summary of All Changes Made
 
-### Files Created
+### Bug Fixes (production code)
 
-| File | Purpose |
+1. **Fixed "No agent found at cursor"** — `src/remora/lsp/__init__.py:main()`
+   now creates EventStore + SubscriptionRegistry before calling `_main()`,
+   matching what `cli/main.py` does.
+
+2. **Fixed mock LLM not activating** (now reverted — see #6 below)
+
+3. **Added defensive DB migration** — Both `RemoraDB._init_schema()` (db.py)
+   and `EventStore._migrate_routing_fields()` (event_store.py) now check for
+   and add the `file_path` column to the `proposals` table if missing.
+
+4. **Added env var expansion in config** — `src/remora/core/config.py` expands
+   `${VAR:-default}` patterns in YAML config values via `_expand_env_vars()`.
+
+### Switch to Real vLLM
+
+5. **Removed mock LLM wiring** — `src/remora/lsp/__main__.py` always uses
+   real `LLMClient` now. MockLLMClient still exists as dead code.
+
+6. **Config defaults point to vLLM** — `remora_demo/project/remora.yaml` defaults:
+   - `model_base_url: ${REMORA_LLM_URL:-http://remora-server:8000/v1}`
+   - `model_default: ${REMORA_MODEL:-Qwen/Qwen3-4B-Instruct-2507-FP8}`
+
+### E2E Framework
+
+7. **Created `e2e/keys.py`** — `NvimKeys` helper class centralizing all
+   Neovim keystroke patterns.
+
+8. **9 scenarios total** — all passing against real vLLM with recording + GIF:
+   - `startup` (11.8s) — LSP connects, agents discovered
+   - `chat` (29.1s) — chat with load_config agent, verify response
+   - `rewrite` (18.8s) — trigger rewrite, wait for diagnostic
+   - `proposal` (26.5s) — trigger rewrite + accept
+   - `cascade` (27.4s) — edit triggers cascade to test agent
+   - `golden_path` (69.2s) — full flow: startup→chat→edit→cascade→accept
+   - `reject` (27.1s) — trigger rewrite + reject, verify file unchanged
+   - `multi_file` (38.4s) — navigate loader.py→merge.py, chat on both
+   - `panel_nav` (32.8s) — open panel, move between functions, toggle tools, close
+
+### Files Modified (latest session)
+
+| File | Changes |
 |------|---------|
-| `e2e/__init__.py` | Package init |
-| `e2e/harness.py` | Core: TmuxDriver, AsciinemaRecorder, cast_to_gif, Scenario protocol, run_scenario |
-| `e2e/run.py` | CLI runner: `python -m e2e.run [--scenario NAME] [--mock/--real] [--gif] [--list] [--no-record]` |
-| `e2e/scenarios/__init__.py` | Scenario registry (ALL_SCENARIOS dict) |
-| `e2e/scenarios/startup.py` | LSP startup + agent discovery |
-| `e2e/scenarios/chat.py` | Chat with load_config agent |
-| `e2e/scenarios/rewrite.py` | Trigger rewrite, verify diagnostic |
-| `e2e/scenarios/proposal.py` | Accept proposal via code action |
-| `e2e/scenarios/cascade.py` | Edit triggers cascade: source agent -> test agent |
-| `e2e/scenarios/golden_path.py` | Full demo flow (all beats) |
-| `e2e/output/` | Directory for .cast and .gif files |
+| `e2e/scenarios/reject.py` | NEW — reject proposal scenario |
+| `e2e/scenarios/multi_file.py` | NEW — multi-file navigation + chat scenario |
+| `e2e/scenarios/panel_nav.py` | NEW — panel navigation scenario |
+| `e2e/scenarios/__init__.py` | Added 3 new scenarios to registry |
+| `e2e/harness.py` | Added merge.py + test_merge.py to DemoProjectGuard |
 
-### Test Results
+### GIF Output
 
-All 6 scenarios pass (no-record mode, ~110s total):
-- startup: 8.9s
-- chat: 13.9s
-- rewrite: 12.7s
-- proposal: 16.2s
-- cascade: 17.7s
-- golden_path: 39.7s
-
-### Usage
-
-```bash
-# Inside devenv shell:
-python -m e2e.run --list                    # List scenarios
-python -m e2e.run --no-record               # Run all without recording
-python -m e2e.run --scenario startup        # Run one scenario
-python -m e2e.run --gif                     # Record + convert to GIF
-python -m e2e.run --real                    # Use real LLM
-```
-
-### Notes
-- asciinema and agg are in devenv.nix packages but only available inside `devenv shell`
-- The current opencode bash session doesn't have devenv PATH, so recording tests require manual devenv entry
-- All scenarios use mock LLM by default (REMORA_MODEL=mock)
-- TmuxDriver properly cleans up sessions on exit (verified: no leftover sessions)
+All GIFs in `e2e/output/`:
+- `startup_20260302_220147.gif`
+- `chat_20260302_220159.gif`
+- `rewrite_20260302_220228.gif`
+- `proposal_20260302_220247.gif`
+- `cascade_20260302_220313.gif`
+- `golden_path_20260302_220340.gif`
+- `reject_20260302_220450.gif`
+- `multi_file_20260302_220517.gif`
+- `panel_nav_20260302_220555.gif`

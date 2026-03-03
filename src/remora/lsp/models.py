@@ -1,3 +1,17 @@
+"""LSP protocol event and proposal models.
+
+These models are used exclusively by the LSP server layer
+(``remora.lsp.runner``, ``remora.lsp.server``, ``remora.lsp.notifications``,
+``remora.lsp.handlers``).  They inherit from ``LspAgentEvent`` and carry
+LSP-specific fields (``event_id``, ``event_type``, ``correlation_id``,
+``summary``, ``payload``).
+
+All LSP event classes use the ``Lsp`` prefix (e.g. ``LspAgentMessageEvent``,
+``LspAgentErrorEvent``) to disambiguate from the core domain events in
+``remora.core.events`` (``AgentMessageEvent``, ``AgentErrorEvent``, etc.)
+which have the same base names but different schemas and purposes.
+"""
+
 from __future__ import annotations
 
 import difflib
@@ -89,7 +103,7 @@ class RewriteProposal(BaseModel):
         ]
 
 
-class AgentEvent(BaseModel):
+class LspAgentEvent(BaseModel):
     event_id: str = Field(default_factory=generate_id)
     event_type: str
     timestamp: float
@@ -99,7 +113,7 @@ class AgentEvent(BaseModel):
     payload: dict = Field(default_factory=dict)
 
 
-class HumanChatEvent(AgentEvent):
+class LspHumanChatEvent(LspAgentEvent):
     to_agent: str = ""
     message: str = ""
 
@@ -111,7 +125,7 @@ class HumanChatEvent(AgentEvent):
         return values
 
 
-class AgentMessageEvent(AgentEvent):
+class LspAgentMessageEvent(LspAgentEvent):
     from_agent: str = ""
     to_agent: str = ""
     message: str = ""
@@ -124,7 +138,7 @@ class AgentMessageEvent(AgentEvent):
         return values
 
 
-class RewriteProposalEvent(AgentEvent):
+class LspRewriteProposalEvent(LspAgentEvent):
     proposal_id: str = ""
     diff: str = ""
 
@@ -136,7 +150,7 @@ class RewriteProposalEvent(AgentEvent):
         return values
 
 
-class RewriteAppliedEvent(AgentEvent):
+class LspRewriteAppliedEvent(LspAgentEvent):
     agent_id: str = ""
     proposal_id: str = ""
 
@@ -148,7 +162,7 @@ class RewriteAppliedEvent(AgentEvent):
         return values
 
 
-class RewriteRejectedEvent(AgentEvent):
+class LspRewriteRejectedEvent(LspAgentEvent):
     agent_id: str = ""
     proposal_id: str = ""
     feedback: str = ""
@@ -161,7 +175,7 @@ class RewriteRejectedEvent(AgentEvent):
         return values
 
 
-class AgentErrorEvent(AgentEvent):
+class LspAgentErrorEvent(LspAgentEvent):
     error: str = ""
 
     @model_validator(mode="before")
@@ -174,10 +188,10 @@ class AgentErrorEvent(AgentEvent):
 
 # Resolve forward references explicitly for Pydantic
 RewriteProposal.model_rebuild()
-AgentEvent.model_rebuild()
-HumanChatEvent.model_rebuild()
-AgentMessageEvent.model_rebuild()
-RewriteProposalEvent.model_rebuild()
-RewriteAppliedEvent.model_rebuild()
-RewriteRejectedEvent.model_rebuild()
-AgentErrorEvent.model_rebuild()
+LspAgentEvent.model_rebuild()
+LspHumanChatEvent.model_rebuild()
+LspAgentMessageEvent.model_rebuild()
+LspRewriteProposalEvent.model_rebuild()
+LspRewriteAppliedEvent.model_rebuild()
+LspRewriteRejectedEvent.model_rebuild()
+LspAgentErrorEvent.model_rebuild()

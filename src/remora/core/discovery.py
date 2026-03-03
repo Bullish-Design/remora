@@ -89,7 +89,7 @@ def _get_query_dir() -> Path:
 
     This correctly resolves the path regardless of installation method.
     """
-    return Path(importlib.resources.files("remora")) / "queries"
+    return Path(importlib.resources.files("remora")) / "queries"  # type: ignore[arg-type]
 
 
 def _load_queries(language: str, query_pack: str = "remora_core") -> str | None:
@@ -192,7 +192,7 @@ def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
 def _collect_captures(query: tree_sitter.Query, root: tree_sitter.Node) -> list[tuple[tree_sitter.Node, str]]:
     """Collect captures with compatibility across tree-sitter versions."""
     try:
-        captures = query.captures(root)
+        captures = query.captures(root)  # type: ignore[attr-defined]
     except AttributeError:
         cursor = QueryCursor(query)
         captures = cursor.captures(root)

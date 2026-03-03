@@ -214,6 +214,7 @@ class EventStore:
 
     async def _migrate_routing_fields(self) -> None:
         """Add routing fields to existing tables."""
+        assert self._conn is not None, "_migrate_routing_fields called before connection"
         cursor = await asyncio.to_thread(
             self._conn.execute,
             "PRAGMA table_info(events)",
@@ -257,6 +258,18 @@ class EventStore:
             await asyncio.to_thread(
                 self._conn.execute,
                 "ALTER TABLE nodes ADD COLUMN end_byte INTEGER NOT NULL DEFAULT 0",
+            )
+
+        # Migrate proposals table: add file_path for existing DBs
+        cursor = await asyncio.to_thread(
+            self._conn.execute,
+            "PRAGMA table_info(proposals)",
+        )
+        proposal_columns = {row["name"] for row in cursor.fetchall()}
+        if "file_path" not in proposal_columns:
+            await asyncio.to_thread(
+                self._conn.execute,
+                "ALTER TABLE proposals ADD COLUMN file_path TEXT",
             )
 
     async def append(

@@ -36,6 +36,25 @@ function M.setup(opts)
     vim.lsp.enable("remora")
     log.info("M.setup: vim.lsp.enable('remora') called")
 
+    -- If a matching buffer was already open before setup() ran (e.g. nv2
+    -- was launched with a filename argument), the FileType autocmd that
+    -- vim.lsp.enable() installs will have already fired before we
+    -- registered.  Re-trigger FileType for those buffers so the LSP
+    -- client actually starts.
+    local matching_fts = {}
+    for _, ft in ipairs(lsp_config.filetypes) do matching_fts[ft] = true end
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_loaded(buf) then
+            local ft = vim.bo[buf].filetype
+            if matching_fts[ft] then
+                log.info("M.setup: re-triggering FileType for buf=%d ft=%s", buf, ft)
+                vim.api.nvim_buf_call(buf, function()
+                    vim.cmd("doautocmd FileType " .. ft)
+                end)
+            end
+        end
+    end
+
     local function setup_highlights()
         -- Status highlights
         vim.api.nvim_set_hl(0, "RemoraActive", { fg = "#a6e3a1" })

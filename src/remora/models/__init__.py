@@ -9,10 +9,6 @@ from pydantic import BaseModel
 from remora.core.config import Config, serialize_config
 
 
-def _from_mapping(data: Mapping[str, Any] | None) -> dict[str, Any]:
-    return dict(data or {})
-
-
 class SwarmEmitRequest(BaseModel):
     event_type: str
     data: dict[str, Any]

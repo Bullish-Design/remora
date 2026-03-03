@@ -76,8 +76,11 @@ async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         if server.event_store:
             agents = await server.event_store.list_nodes(file_path=uri)
             for agent in agents:
-                tools = await server.discover_tools_for_agent(agent)
-                # TODO: persist extra_tools on agent node if needed
+                # Discover tools so they are cached on the server for later use.
+                # Tools are not persisted to the node row because they are
+                # re-discovered on every file open/save, making persistence
+                # redundant for now.
+                await server.discover_tools_for_agent(agent)
 
         # Notify client of updated agent list
         await server.notify_agents_updated()

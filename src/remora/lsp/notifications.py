@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from remora.lsp.models import AgentMessageEvent, HumanChatEvent, RewriteRejectedEvent
+from remora.lsp.models import LspHumanChatEvent, LspRewriteRejectedEvent
 from remora.lsp.server import emit_event, logger, server
 
 
@@ -51,7 +51,7 @@ async def on_input_submitted(params: dict) -> None:
             correlation_id = server.generate_correlation_id()
             logger.debug("on_input_submitted: correlation_id=%s", correlation_id)
             await emit_event(
-                HumanChatEvent(
+                LspHumanChatEvent(
                     agent_id=agent_id, to_agent=agent_id, message=message, correlation_id=correlation_id, timestamp=0.0
                 )
             )
@@ -72,7 +72,7 @@ async def on_input_submitted(params: dict) -> None:
 
             if proposal:
                 await emit_event(
-                    RewriteRejectedEvent(
+                    LspRewriteRejectedEvent(
                         agent_id=proposal.agent_id,
                         proposal_id=proposal_id,
                         feedback=feedback,

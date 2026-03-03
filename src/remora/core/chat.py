@@ -1,7 +1,7 @@
 """Chat session wrapper for single-agent interactions."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 import time
 import uuid
 
@@ -159,7 +159,7 @@ class ChatSession:
 
         # Build messages for kernel
         messages = [KernelMessage(role="system", content=self.config.system_prompt)]
-        messages += [KernelMessage(role=m.role, content=m.content) for m in self._history]
+        messages += [KernelMessage(role=cast(Any, m.role), content=m.content) for m in self._history]
         tool_schemas = [tool.schema for tool in self._tools]
 
         # Run agent
@@ -253,10 +253,10 @@ def build_chat_tools(agent_workspace: AgentWorkspace, project_root: Path) -> lis
         ]
 
     return [
-        Tool.from_function(read_file),
-        Tool.from_function(write_file),
-        Tool.from_function(list_dir),
-        Tool.from_function(file_exists),
-        Tool.from_function(search_files),
-        Tool.from_function(discover_symbols),
+        Tool.from_function(read_file),  # type: ignore[attr-defined]
+        Tool.from_function(write_file),  # type: ignore[attr-defined]
+        Tool.from_function(list_dir),  # type: ignore[attr-defined]
+        Tool.from_function(file_exists),  # type: ignore[attr-defined]
+        Tool.from_function(search_files),  # type: ignore[attr-defined]
+        Tool.from_function(discover_symbols),  # type: ignore[attr-defined]
     ]
