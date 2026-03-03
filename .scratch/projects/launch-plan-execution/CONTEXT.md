@@ -1,59 +1,56 @@
 # CONTEXT — Launch Plan Execution
 
 ## Current State
-- **Active batch:** ALL BATCHES COMPLETE
-- **Last completed:** Appendix A (Data Flow Walkthrough) for PYDANTIC_CONSOLIDATION_REFACTOR.md
-- **Test suite:** 653 passed, 2 xfailed
+- **Active batch:** ALL BATCHES COMPLETE + PYDANTIC CONSOLIDATION REFACTOR COMPLETE
+- **Last completed:** Pydantic Consolidation Refactor — all 6 steps implemented
+- **Test suite:** 659 passed, 2 xfailed (6 new TDD tests added)
 
 ## What Just Happened
-- Completed `PYDANTIC_CONSOLIDATION_REFACTOR.md` — full document with Appendix A:
-  - **Sections 1-9** (989 lines): Executive summary, before/after analysis for all 5 conversion items (ToolSchema, SubscriptionPattern/Subscription, CSTNode, ToolCall/LLMResponse, Message/ChatConfig/AgentResponse), serialization simplification, implementation order, estimated scope
-  - **Appendix A** — Data Flow Walkthrough (Before/After), 4 scenarios:
-    - A.1 — Discovery → Storage → LSP Display (Neovim Path) — COMPLETE
-    - A.2 — Event → Subscription → Trigger → LLM → Proposal (Reactive Path) — COMPLETE
-    - A.3 — Chat Service → Message → AgentResponse (HTTP API Path) — COMPLETE
-    - A.4 — Events → UiStateProjector → Graph Web UI (Frontend Path) — COMPLETE
-    - Cross-cutting summary table at the end
-  - Total document: ~1800+ lines
-- All launch plan batches remain complete (653 passed, 2 xfailed)
+- **Implemented the full Pydantic Consolidation Refactor** (described in `PYDANTIC_CONSOLIDATION_REFACTOR.md`):
+  - **Step 1:** `ToolSchema` → `BaseModel` in `agent_node.py`, updated `to_row()` to use `model_dump()`, updated test assertion, added `model_dump` fallback to `projections.py:_dataclass_default()`
+  - **Step 2:** `SubscriptionPattern` + `Subscription` → `BaseModel` in `subscriptions.py`, replaced `asdict(pattern)` with `pattern.model_dump()`, simplified `agent_node.py to_row()` (removed all `is_dataclass` branches), removed `dataclasses` imports from `agent_node.py`
+  - **Step 3:** `ToolCall` + `LLMResponse` → `BaseModel` in `runner.py`, removed `dataclasses` import
+  - **Step 4:** `Message` + `ChatConfig` + `AgentResponse` → `BaseModel` in `chat.py`, removed dead `from dataclasses import asdict` in `chat_service.py`
+  - **Step 5:** `CSTNode` → `BaseModel` with `ConfigDict(frozen=True)` in `discovery.py`, preserved custom `__hash__` (only hashes `node_id`) with detailed docstring, added 3 regression tests
+  - **Step 6:** Updated serialization in `projector.py` — reordered `_to_jsonable()` and `_event_payload()` to check `model_dump` before `is_dataclass`, kept `is_dataclass`/`asdict` for `structured_agents` external events
+- All TDD: wrote failing tests first, then converted, then verified full suite green
+- `UiStateProjector` remains `@dataclass` (service component, not a data model)
+- `is_dataclass`/`asdict` imports kept in `projections.py` and `projector.py` for external `structured_agents` events
 
 ## What Needs to Be Done Next
 
-ALL BATCHES COMPLETE. ALL DOCUMENTATION COMPLETE.
-- The launch plan execution is finished (75+ items, Batches 1-8)
-- The Pydantic consolidation refactor guide is finished (sections 1-9 + Appendix A)
-- Implementation of the Pydantic consolidation is a future task (~78 LOC, ~90 min, 7 files)
+ALL WORK IS COMPLETE.
+- Launch plan execution: 75+ items, Batches 1-8 — all done
+- Pydantic consolidation refactor guide: written and implemented in full
+- No remaining stdlib `@dataclass` data models in `src/remora/` (only `UiStateProjector` stays as service @dataclass)
 
-## Key Context for Resumption
-- Master task list: `REMORA_LAUNCH_PLAN.md` (root)
-- Execution plan: `.scratch/projects/launch-plan-execution/PLAN.md`
-- Progress tracker: `.scratch/projects/launch-plan-execution/PROGRESS.md`
-- Pydantic refactor guide: `PYDANTIC_CONSOLIDATION_REFACTOR.md` (root)
-- Test command: `python -m pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn --ignore=tests/unit/test_graph_app.py --ignore=tests/unit/test_graph_integration.py --ignore=tests/unit/test_graph_shell.py --ignore=tests/unit/test_graph_sidebar.py --ignore=tests/unit/test_graph_state.py --ignore=tests/unit/test_web_layout.py --ignore=tests/unit/test_graph_cli.py --ignore=tests/test_app.py --ignore=tests/test_bridge.py --ignore=tests/test_css.py --ignore=tests/test_entry_points.py --ignore=tests/test_integration_graph.py --ignore=tests/test_layout.py --ignore=tests/test_svg.py --ignore=tests/test_views.py -q --no-cov`
-- All work is in `src/remora/` — `remora_demo/` is out of scope
+## Files Modified in Pydantic Consolidation
+1. `src/remora/core/agent_node.py` — ToolSchema → BaseModel, removed dataclass imports, simplified to_row()
+2. `src/remora/core/subscriptions.py` — SubscriptionPattern/Subscription → BaseModel, model_dump()
+3. `src/remora/lsp/runner.py` — ToolCall/LLMResponse → BaseModel, removed dataclass import
+4. `src/remora/core/chat.py` — Message/ChatConfig/AgentResponse → BaseModel
+5. `src/remora/service/chat_service.py` — removed dead `from dataclasses import asdict`
+6. `src/remora/core/discovery.py` — CSTNode → BaseModel(frozen=True), preserved __hash__
+7. `src/remora/core/projections.py` — added model_dump fallback in _dataclass_default()
+8. `src/remora/ui/projector.py` — reordered model_dump before is_dataclass in _to_jsonable/_event_payload
+
+## Test Files Modified
+1. `tests/unit/test_lsp_server.py` — assert ToolSchema issubclass(BaseModel)
+2. `tests/unit/test_subscriptions.py` — added test_subscription_pattern_is_pydantic_model
+3. `tests/unit/test_runner_loop.py` — added test_tool_call_llm_response_are_pydantic_models
+4. `tests/unit/test_chat_session.py` — added test_chat_types_are_pydantic_models
+5. `tests/test_discovery.py` — added TestCSTNodeIsPydantic (3 tests: model check, hash regression, frozen check)
+6. `tests/unit/test_phase1_gaps.py` — updated test_extra_tools_missing_fields to accept ValidationError
 
 ## Key Decisions Made (carried forward)
-1. LSP events stored directly in EventStore (no `to_core_event()` conversion)
-2. `to_hover()` dual-format — accepts both dicts and objects
-3. Runner dict access — `event["event_type"]` for EventStore query results
-4. `build_chat_tools` is broken — `Tool.from_function()` doesn't exist (documented with xfail)
-5. `get_subscriptions` name collision — **FIXED**: property `subscription_registry` + method `get_agent_subscriptions(agent_id)`
-6. LSP runner is the base for unification — modern AgentNode-based approach, tool loop, proposals
-7. `_HeadlessServer` + `_HeadlessDB` stubs provide minimal server duck-type for CLI mode
-8. `ExecutionContext` dropped — only used internally by the now-deleted core runner
-9. **Reconciler uses NodeDiscoveredEvent/NodeRemovedEvent** — same projection path as LSP watcher
-10. **SwarmExecutor chat history** pulled from `EventStore.get_recent_events()` — no mutable `state.chat_history`
-11. **Core events are now frozen Pydantic BaseModel** — `_FrozenEvent` base class
-12. **Config is Pydantic BaseSettings** — `env_prefix="REMORA_"`
-13. **AgentContext replaces externals dict** — typed Pydantic model with `as_externals()`
-14. **Kernel factory** — `create_kernel()` deduplicates boilerplate
-15. **Single SQLite DB** — EventStore creates all tables; SubscriptionRegistry/RemoraDB accept shared connection
-16. **UI components stay as @dataclass** — rendering components (Component ABC), not data models
-17. **`is_dataclass` branches kept in projector** — needed for `structured_agents` external events
+1-17. (Same as before — see previous version)
+18. **All stdlib @dataclass data models → Pydantic BaseModel** — ToolSchema, SubscriptionPattern, Subscription, ToolCall, LLMResponse, Message, ChatConfig, AgentResponse, CSTNode
+19. **CSTNode __hash__ override preserved** — Pydantic frozen hashes all fields, but CSTNode identity is node_id only
+20. **Serialization fallbacks check model_dump before is_dataclass** — future-proof ordering
 
 ## How to Resume
 1. Read `.scratch/CRITICAL_RULES.md`
 2. Read `.scratch/REPO_RULES.md`
 3. Read this file
-4. Check PROGRESS.md for next batch
-5. Start next pending batch
+4. Check PROGRESS.md
+5. All work is complete — no remaining tasks

@@ -350,8 +350,10 @@ class TestFromRowMalformedJSON:
 
     def test_extra_tools_missing_fields(self):
         """JSON list of dicts but missing required ToolSchema fields."""
+        from pydantic import ValidationError
+
         row = self._make_db_row(extra_tools='[{"name": "x"}]')
-        with pytest.raises(TypeError):
+        with pytest.raises((TypeError, ValidationError)):
             AgentNode.from_row(row)
 
     def test_null_json_fields_use_empty_defaults(self):

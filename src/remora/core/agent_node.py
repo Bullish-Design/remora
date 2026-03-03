@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -31,8 +30,7 @@ _LANG_BY_EXT: dict[str, tuple[str, str]] = {
 }
 
 
-@dataclass
-class ToolSchema:
+class ToolSchema(BaseModel):
     """Schema for an agent tool."""
 
     name: str
@@ -108,10 +106,8 @@ class AgentNode(BaseModel):
         data = self.model_dump()
         data["caller_ids"] = json.dumps(data["caller_ids"])
         data["callee_ids"] = json.dumps(data["callee_ids"])
-        data["extra_tools"] = json.dumps([asdict(t) if is_dataclass(t) else t for t in self.extra_tools])
-        data["extra_subscriptions"] = json.dumps(
-            [asdict(s) if is_dataclass(s) else s for s in self.extra_subscriptions]
-        )
+        data["extra_tools"] = json.dumps([t.model_dump() for t in self.extra_tools])
+        data["extra_subscriptions"] = json.dumps([s.model_dump() for s in self.extra_subscriptions])
         data["mounted_workspaces"] = json.dumps(data["mounted_workspaces"])
         return data
 

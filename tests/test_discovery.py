@@ -75,3 +75,58 @@ class TestDiscover:
         node_types = {n.node_type for n in nodes}
         assert "file" in node_types
         assert "section" in node_types
+
+
+class TestCSTNodeIsPydantic:
+    """CSTNode should be a Pydantic BaseModel with custom node_id-only __hash__."""
+
+    def test_cstnode_is_pydantic_model(self) -> None:
+        from pydantic import BaseModel
+
+        assert issubclass(CSTNode, BaseModel), "CSTNode should be a Pydantic BaseModel"
+
+    def test_cstnode_hash_uses_only_node_id(self) -> None:
+        """Two CSTNodes with same node_id but different text should hash equally."""
+        a = CSTNode(
+            node_id="abc123",
+            node_type="function",
+            name="foo",
+            full_name="mod.foo",
+            file_path="a.py",
+            text="def foo(): pass",
+            start_line=1,
+            end_line=1,
+            start_byte=0,
+            end_byte=15,
+        )
+        b = CSTNode(
+            node_id="abc123",
+            node_type="function",
+            name="foo",
+            full_name="mod.foo",
+            file_path="a.py",
+            text="def foo(): return 42",
+            start_line=1,
+            end_line=1,
+            start_byte=0,
+            end_byte=20,
+        )
+        assert hash(a) == hash(b), "CSTNodes with same node_id must have equal hash"
+        assert a != b, "CSTNodes with different text should not be equal"
+
+    def test_cstnode_is_frozen(self) -> None:
+        """CSTNode should be immutable."""
+        node = CSTNode(
+            node_id="abc123",
+            node_type="function",
+            name="foo",
+            full_name="mod.foo",
+            file_path="a.py",
+            text="def foo(): pass",
+            start_line=1,
+            end_line=1,
+            start_byte=0,
+            end_byte=15,
+        )
+        with pytest.raises((AttributeError, ValueError)):
+            node.name = "bar"  # type: ignore[misc]

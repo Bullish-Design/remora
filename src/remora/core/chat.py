@@ -1,10 +1,11 @@
 """Chat session wrapper for single-agent interactions."""
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 import time
 import uuid
+
+from pydantic import BaseModel, Field
 
 from remora.core.discovery import discover
 from remora.core.event_bus import EventBus
@@ -17,15 +18,14 @@ from structured_agents import Tool
 from structured_agents.types import Message as KernelMessage
 
 
-@dataclass
-class Message:
+class Message(BaseModel):
     """A message in the conversation."""
 
     id: str
     role: str  # "user" or "assistant"
     content: str
     timestamp: float
-    tool_calls: list[dict] = field(default_factory=list)
+    tool_calls: list[dict] = Field(default_factory=list)
 
     @classmethod
     def user(cls, content: str) -> "Message":
@@ -47,13 +47,12 @@ class Message:
         )
 
 
-@dataclass
-class ChatConfig:
+class ChatConfig(BaseModel):
     """Configuration for a chat session."""
 
     workspace_path: str
     system_prompt: str
-    tool_presets: list[str] = field(default_factory=lambda: ["file_ops"])
+    tool_presets: list[str] = Field(default_factory=lambda: ["file_ops"])
     model_name: str = "Qwen/Qwen3-4B"
     model_base_url: str = "http://localhost:8000/v1"
     model_api_key: str = ""
@@ -81,8 +80,7 @@ class ChatConfig:
         )
 
 
-@dataclass
-class AgentResponse:
+class AgentResponse(BaseModel):
     """Response from the agent."""
 
     message: Message

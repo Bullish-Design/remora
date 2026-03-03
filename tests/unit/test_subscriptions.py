@@ -341,3 +341,12 @@ class TestSubscriptionCache:
         assert "agent-3" in msg_matches  # wildcard matches
 
         await registry.close()
+
+
+def test_subscription_pattern_is_pydantic_model() -> None:
+    """SubscriptionPattern should be a Pydantic BaseModel, not a stdlib dataclass."""
+    from pydantic import BaseModel
+    from remora.core.subscriptions import Subscription
+
+    assert issubclass(SubscriptionPattern, BaseModel), "SubscriptionPattern should be a Pydantic BaseModel"
+    assert issubclass(Subscription, BaseModel), "Subscription should be a Pydantic BaseModel"

@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 def _dataclass_default(obj: Any) -> Any:
-    """JSON serialization fallback for dataclass instances."""
+    """JSON serialization fallback for model/dataclass instances."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
     if is_dataclass(obj) and not isinstance(obj, type):
         return asdict(obj)
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")

@@ -45,10 +45,10 @@ class EventKind(str, Enum):
 def _to_jsonable(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
-    if is_dataclass(value) and not isinstance(value, type):
-        return _to_jsonable(asdict(value))
     if hasattr(value, "model_dump"):
         return _to_jsonable(value.model_dump())
+    if is_dataclass(value) and not isinstance(value, type):
+        return _to_jsonable(asdict(value))
     if isinstance(value, dict):
         return {str(key): _to_jsonable(val) for key, val in value.items()}
     if isinstance(value, (list, tuple, set)):
@@ -92,8 +92,10 @@ def _event_kind(event: StructuredEvent | RemoraEvent) -> EventKind:
 
 
 def _event_payload(event: StructuredEvent | RemoraEvent) -> dict[str, Any]:
-    if is_dataclass(event):
-        payload: dict[str, Any] = asdict(event)
+    if hasattr(event, "model_dump"):
+        payload: dict[str, Any] = event.model_dump()
+    elif is_dataclass(event):
+        payload = asdict(event)
     elif hasattr(event, "__dict__"):
         payload = dict(vars(event))
     else:

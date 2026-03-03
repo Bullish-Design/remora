@@ -5,7 +5,6 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -37,8 +36,7 @@ MAX_TOOL_ROUNDS = 5  # max LLM↔tool round-trips per turn
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class ToolCall:
+class ToolCall(BaseModel):
     """Normalized tool call that handle_response expects."""
 
     name: str
@@ -46,8 +44,7 @@ class ToolCall:
     id: str = ""
 
 
-@dataclass
-class LLMResponse:
+class LLMResponse(BaseModel):
     """Normalized response from the LLM."""
 
     content: str | None

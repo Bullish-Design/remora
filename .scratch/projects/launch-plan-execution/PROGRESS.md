@@ -1,11 +1,11 @@
 # PROGRESS — Launch Plan Execution
 
 ## Summary
-- **Total items:** 75+
-- **Completed:** Batches 1, 2, 3, 7, 8, 4, 5, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6 — ALL DONE
+- **Total items:** 75+ (launch plan) + 6 (Pydantic consolidation)
+- **Completed:** Batches 1, 2, 3, 7, 8, 4, 5, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6 + Pydantic Consolidation Refactor — ALL DONE
 - **In progress:** None
 - **Remaining:** None
-- **Test suite:** 653 passed, 2 xfailed
+- **Test suite:** 659 passed, 2 xfailed
 
 ---
 
@@ -154,3 +154,18 @@
 | 6.4 | 2.5 | Typed externals protocol (AgentContext) | done (commit `b4f54d9`) |
 | 6.5 | 2.6 | Kernel factory | done (commit `b4f54d9`) |
 | 6.6 | D9 | Delete stdlib dataclass models | done |
+
+---
+
+## Pydantic Consolidation Refactor — COMPLETE
+
+| Step | Description | Status |
+|------|-------------|--------|
+| 1 | ToolSchema → BaseModel | done |
+| 2 | SubscriptionPattern/Subscription → BaseModel + simplify to_row() | done |
+| 3 | ToolCall/LLMResponse → BaseModel | done |
+| 4 | Message/ChatConfig/AgentResponse → BaseModel + remove dead import | done |
+| 5 | CSTNode → BaseModel (frozen, preserved __hash__) + 3 regression tests | done |
+| 6 | Serialization cleanup (projections.py + projector.py) | done |
+
+**Test suite:** 659 passed, 2 xfailed (6 new TDD tests added)

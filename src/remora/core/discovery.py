@@ -10,12 +10,13 @@ import hashlib
 import importlib.resources
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
 import tree_sitter
 from tree_sitter import Language, Parser, QueryCursor, Query
+
+from pydantic import BaseModel, ConfigDict
 
 from remora.utils import PathLike, normalize_path
 
@@ -41,13 +42,14 @@ LANGUAGE_EXTENSIONS: dict[str, str] = {
 # ============================================================================
 
 
-@dataclass(frozen=True, slots=True)
-class CSTNode:
+class CSTNode(BaseModel):
     """A concrete syntax tree node discovered from source code.
 
     Immutable data object representing a discovered code element.
     The node_id is deterministic based on file path, name, and position.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     node_id: str
     node_type: str  # "function", "class", "file", "section", "table"
@@ -61,6 +63,13 @@ class CSTNode:
     end_byte: int
 
     def __hash__(self) -> int:
+        """Hash only by node_id — intentional override.
+
+        Pydantic frozen models hash ALL fields by default, but CSTNode
+        identity is defined solely by node_id.  Two nodes with the same
+        node_id but different text (e.g. after an edit) must hash equally.
+        DO NOT REMOVE this override.
+        """
         return hash(self.node_id)
 
 

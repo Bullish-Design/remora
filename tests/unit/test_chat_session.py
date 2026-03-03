@@ -358,3 +358,12 @@ class TestBuildChatTools:
             "search_files",
             "discover_symbols",
         }
+
+
+def test_chat_types_are_pydantic_models() -> None:
+    """Message, ChatConfig, and AgentResponse should be Pydantic BaseModel."""
+    from pydantic import BaseModel
+
+    assert issubclass(Message, BaseModel), "Message should be a Pydantic BaseModel"
+    assert issubclass(ChatConfig, BaseModel), "ChatConfig should be a Pydantic BaseModel"
+    assert issubclass(AgentResponse, BaseModel), "AgentResponse should be a Pydantic BaseModel"

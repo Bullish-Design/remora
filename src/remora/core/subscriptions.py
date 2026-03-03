@@ -11,9 +11,10 @@ import asyncio
 import json
 import logging
 import time
-from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, Field
 
 from remora.utils import PathLike, normalize_path
 
@@ -23,8 +24,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class SubscriptionPattern:
+class SubscriptionPattern(BaseModel):
     """Pattern for matching events.
 
     All fields are optional. A None field means "match anything".
@@ -74,16 +74,15 @@ class SubscriptionPattern:
         return True
 
 
-@dataclass
-class Subscription:
+class Subscription(BaseModel):
     """A registered subscription."""
 
     id: int
     agent_id: str
     pattern: SubscriptionPattern
     is_default: bool = False
-    created_at: float = field(default_factory=time.time)
-    updated_at: float = field(default_factory=time.time)
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
 
 
 class SubscriptionRegistry:
@@ -175,7 +174,7 @@ class SubscriptionRegistry:
             await self.initialize()
 
         now = time.time()
-        pattern_json = json.dumps(asdict(pattern))
+        pattern_json = json.dumps(pattern.model_dump())
 
         def _exec(conn: Any) -> int:
             cursor = conn.execute(

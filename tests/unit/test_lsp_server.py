@@ -27,9 +27,9 @@ def test_server_imports_core_tool_schema():
     # The function should reference ToolSchema — check that the return annotation
     # or body uses the core ToolSchema (dataclass, not Pydantic)
     from remora.core.agent_node import ToolSchema as CoreToolSchema
-    import dataclasses
+    from pydantic import BaseModel
 
-    assert dataclasses.is_dataclass(CoreToolSchema), "Core ToolSchema should be a dataclass"
+    assert issubclass(CoreToolSchema, BaseModel), "Core ToolSchema should be a Pydantic BaseModel"
 
 
 @pytest.mark.asyncio()

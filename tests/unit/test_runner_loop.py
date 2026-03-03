@@ -782,3 +782,11 @@ class TestExecuteTurnDepthTracking:
 
         # After turn, depth entry should be cleaned up (was 1, decremented to 0 and removed)
         assert "rm_test1:corr_1" not in runner._correlation_depth
+
+
+def test_tool_call_llm_response_are_pydantic_models() -> None:
+    """ToolCall and LLMResponse should be Pydantic BaseModel."""
+    from pydantic import BaseModel
+
+    assert issubclass(ToolCall, BaseModel), "ToolCall should be a Pydantic BaseModel"
+    assert issubclass(LLMResponse, BaseModel), "LLMResponse should be a Pydantic BaseModel"
