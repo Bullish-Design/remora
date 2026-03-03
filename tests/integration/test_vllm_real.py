@@ -28,7 +28,13 @@ async def test_real_vllm_tool_calling():
     3. Prompt formatting and model instruction-following are aligned
     """
     try:
-        from structured_agents import AgentKernel, ModelAdapter, QwenResponseParser, ToolSchema
+        from structured_agents import (
+            AgentKernel,
+            ConstraintPipeline,
+            NullObserver,
+            ToolSchema,
+            get_response_parser,
+        )
         from structured_agents.client import build_client
         from structured_agents.types import Message, ToolCall, ToolResult
     except ImportError as exc:
@@ -47,7 +53,7 @@ async def test_real_vllm_tool_calling():
         }
     )
 
-    adapter = ModelAdapter(name="qwen", response_parser=QwenResponseParser())
+    response_parser = get_response_parser("qwen")
 
     class SendMessageTool:
         """Test tool for sending messages between agents."""
@@ -86,7 +92,13 @@ async def test_real_vllm_tool_calling():
     tools = [SendMessageTool()]
     tool_schemas = [t.schema for t in tools]
 
-    kernel = AgentKernel(client=client, adapter=adapter, tools=tools)
+    kernel = AgentKernel(
+        client=client,
+        response_parser=response_parser,
+        constraint_pipeline=ConstraintPipeline.no_constraints(),
+        observer=NullObserver(),
+        tools=tools,
+    )
 
     try:
         result = await kernel.run(
@@ -113,15 +125,19 @@ async def test_real_vllm_grail_tool_execution(tmp_path: Path):
     3. Tool executes successfully in sandbox
     """
     try:
-        from structured_agents import AgentKernel, ModelAdapter, QwenResponseParser
+        from structured_agents import (
+            AgentKernel,
+            ConstraintPipeline,
+            NullObserver,
+            get_response_parser,
+        )
         from structured_agents.client import build_client
         from structured_agents.types import Message
-        from structured_agents import GrailTool
         import grail
+        from remora.core.tools import GrailTool
     except ImportError as exc:
-        pytest.fail("structured_agents/ml dependencies not available", pytrace=False)
+        pytest.fail("structured_agents/grail dependencies not available", pytrace=False)
 
-    # print(f"\n\nTesting real grail tool call...\n")
     vllm_config = load_vllm_config()
     if not vllm_available(vllm_config["base_url"]):
         pytest.fail(f"vLLM server not reachable at {vllm_config['base_url']}", pytrace=False)
@@ -135,31 +151,32 @@ async def test_real_vllm_grail_tool_execution(tmp_path: Path):
         }
     )
 
-    adapter = ModelAdapter(name="qwen", response_parser=QwenResponseParser())
+    response_parser = get_response_parser("qwen")
 
-    grail_script = '''
+    grail_script = """
 from grail import Input
 
 a: int = Input("a")
 b: int = Input("b")
 
-def add() -> int:
-    """Add two numbers."""
-    return a + b
+# Grail scripts return the value of their final expression
+a + b
+"""
 
-def multiply() -> int:
-    """Multiply two numbers."""
-    return a * b
-'''
-
-    tools = []
     grail_script_path = tmp_path / "add_tool.pym"
     grail_script_path.write_text(textwrap.dedent(grail_script).strip() + "\n", encoding="utf-8")
     grail_script_obj = grail.load(grail_script_path)
-    tools.append(GrailTool(grail_script_obj))
+
+    tools = [GrailTool(grail_script_obj)]
     tool_schemas = [t.schema for t in tools]
 
-    kernel = AgentKernel(client=client, adapter=adapter, tools=tools)
+    kernel = AgentKernel(
+        client=client,
+        response_parser=response_parser,
+        constraint_pipeline=ConstraintPipeline.no_constraints(),
+        observer=NullObserver(),
+        tools=tools,
+    )
 
     try:
         result = await kernel.run(

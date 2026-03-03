@@ -43,6 +43,57 @@ def _build_parameters(script: grail.GrailScript) -> dict[str, Any]:
     return schema
 
 
+class GrailTool:
+    """Simple Grail tool wrapper for standalone use.
+
+    This is a simpler version of RemoraGrailTool that doesn't require
+    workspace context or file providers. Useful for testing and simple
+    integrations where externals/files aren't needed.
+
+    Replaces the GrailTool that was removed from structured-agents v0.4.0.
+    """
+
+    def __init__(
+        self,
+        script: grail.GrailScript,
+        *,
+        limits: grail.Limits | None = None,
+    ) -> None:
+        self._script = script
+        self._limits = limits
+        self._schema = ToolSchema(
+            name=getattr(script, "name", "grail_tool"),
+            description=script.__doc__ or f"Grail tool: {script.name}",
+            parameters=_build_parameters(script),
+        )
+
+    @property
+    def schema(self) -> ToolSchema:
+        return self._schema
+
+    async def execute(self, arguments: dict[str, Any], context: ToolCall | None) -> ToolResult:
+        call_id = context.id if context else ""
+        try:
+            result = await self._script.run(
+                inputs=arguments,
+                limits=self._limits,
+            )
+            output = json.dumps(result) if not isinstance(result, str) else result
+            return ToolResult(
+                call_id=call_id,
+                name=self._schema.name,
+                output=output,
+                is_error=False,
+            )
+        except Exception as exc:
+            return ToolResult(
+                call_id=call_id,
+                name=self._schema.name,
+                output=str(exc),
+                is_error=True,
+            )
+
+
 class RemoraGrailTool:
     """A tool backed by a .pym script with external helpers and virtual FS."""
 
@@ -146,4 +197,4 @@ def discover_grail_tools(
     return tools
 
 
-__all__ = ["RemoraGrailTool", "build_virtual_fs", "discover_grail_tools"]
+__all__ = ["GrailTool", "RemoraGrailTool", "build_virtual_fs", "discover_grail_tools"]
