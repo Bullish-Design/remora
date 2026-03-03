@@ -283,7 +283,10 @@ class EventStore:
         if self._conn is None:
             raise RuntimeError("EventStore not initialized")
 
-        event_type = type(event).__name__
+        # Prefer the model's event_type field (e.g. "HumanChatEvent") over
+        # the Python class name (e.g. "LspHumanChatEvent") so panel.lua can
+        # match on the canonical event_type string.
+        event_type = getattr(event, "event_type", None) or type(event).__name__
         payload = self._serialize_event(event)
         timestamp = getattr(event, "timestamp", time.time())
         created_at = time.time()
@@ -445,15 +448,66 @@ class EventStore:
         return [self._row_to_dict(row) for row in rows]
 
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
-        """Convert a SQLite Row to a standard event dict."""
+        """Convert a SQLite Row to a standard event dict.
+
+        The payload column stores the full ``model_dump()`` of the event, so
+        all model fields (``message``, ``content``, ``tool_name``, …) live at
+        the top level of that blob.  To reconstruct an event dict that
+        panel.lua can render we:
+
+        1. Use the stored model ``event_type`` (e.g. ``"HumanChatEvent"``)
+           instead of the DB column which may contain the Python class name
+           (e.g. ``"LspHumanChatEvent"``).
+
+        2. Promote model-specific fields into a ``payload`` sub-dict so that
+           ``ev.payload.message``, ``ev.payload.content``, etc. work in Lua.
+        """
         tags = row["tags"]
         if tags:
             tags = json.loads(tags)
+
+        stored = json.loads(row["payload"])  # full model_dump()
+
+        # Prefer the event_type from the serialised model (handles both old
+        # events stored with the Python class name and new ones).
+        event_type = stored.get("event_type") or row["event_type"]
+
+        # Top-level metadata keys that should NOT go into the payload sub-dict
+        _META_KEYS = {
+            "event_id",
+            "event_type",
+            "timestamp",
+            "correlation_id",
+            "agent_id",
+            "summary",
+            "payload",
+            "from_agent",
+            "to_agent",
+            "tags",
+            "graph_id",
+            "created_at",
+            "id",
+        }
+
+        # Build the nested payload from model-specific fields (message,
+        # content, tool_name, diff, proposal_id, feedback, target_id, …).
+        # If the stored model already had a non-empty ``payload`` dict (e.g.
+        # AgentTextResponse sets payload={"content": ...}), merge those too.
+        nested_payload: dict[str, Any] = {}
+        original_payload = stored.get("payload")
+        if isinstance(original_payload, dict) and original_payload:
+            nested_payload.update(original_payload)
+
+        for key, value in stored.items():
+            if key not in _META_KEYS and value not in (None, "", {}, []):
+                nested_payload[key] = value
+
         return {
             "id": row["id"],
             "graph_id": row["graph_id"],
-            "event_type": row["event_type"],
-            "payload": json.loads(row["payload"]),
+            "event_type": event_type,
+            "payload": nested_payload,
+            "summary": stored.get("summary", ""),
             "timestamp": row["timestamp"],
             "created_at": row["created_at"],
             "from_agent": row["from_agent"],

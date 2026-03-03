@@ -529,11 +529,12 @@ function M.open()
     vim.api.nvim_set_option_value("cursorline", false, { win = M._chat_win })
     vim.api.nvim_set_option_value("winfixwidth", true, { win = M._chat_win })
 
-    -- Open the input buffer in a horizontal split below chat
+    -- Open the input buffer in a horizontal split below chat (~1/5 of panel)
     vim.cmd("belowright split")
     M._input_win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(M._input_win, M._input_buf)
-    vim.api.nvim_win_set_height(M._input_win, 3)
+    local input_height = math.max(5, math.floor(vim.o.lines * 0.20))
+    vim.api.nvim_win_set_height(M._input_win, input_height)
 
     -- Input window options
     vim.api.nvim_set_option_value("number", false, { win = M._input_win })

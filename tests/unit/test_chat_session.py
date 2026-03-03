@@ -325,31 +325,17 @@ class TestChatSessionSend:
 
 
 class TestBuildChatTools:
-    """Tests for build_chat_tools utility function.
+    """Tests for build_chat_tools utility function."""
 
-    NOTE: These tests are xfail because build_chat_tools calls
-    Tool.from_function() which doesn't exist — Tool is a Protocol with
-    only execute/schema. A FunctionTool adapter is needed (tracked as
-    pre-existing bug in chat.py).
-    """
-
-    @pytest.mark.xfail(
-        reason="Tool.from_function() doesn't exist — pre-existing bug in chat.py",
-        raises=AttributeError,
-    )
     def test_returns_six_tools(self):
         mock_workspace = MagicMock()
         tools = build_chat_tools(mock_workspace, Path("/tmp/project"))
         assert len(tools) == 6
 
-    @pytest.mark.xfail(
-        reason="Tool.from_function() doesn't exist — pre-existing bug in chat.py",
-        raises=AttributeError,
-    )
     def test_tool_names(self):
         mock_workspace = MagicMock()
         tools = build_chat_tools(mock_workspace, Path("/tmp/project"))
-        names = {t.schema["function"]["name"] for t in tools}
+        names = {t.schema.name for t in tools}
         assert names == {
             "read_file",
             "write_file",

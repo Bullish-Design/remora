@@ -1,7 +1,9 @@
 """Chat session wrapper for single-agent interactions."""
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, Awaitable, cast, get_type_hints
+import inspect
+import json
 import time
 import uuid
 
@@ -14,8 +16,7 @@ from remora.core.config import Config
 from remora.core.kernel_factory import create_kernel
 from remora.core.workspace import AgentWorkspace
 from structured_agents import Tool
-
-from structured_agents.types import Message as KernelMessage
+from structured_agents.types import Message as KernelMessage, ToolCall, ToolResult, ToolSchema
 
 
 class Message(BaseModel):
@@ -213,6 +214,73 @@ class ChatSession:
             await self._workspace.close()
 
 
+_PY_TYPE_TO_JSON: dict[type, str] = {
+    str: "string",
+    int: "integer",
+    float: "number",
+    bool: "boolean",
+}
+
+
+def _params_schema(func: Callable[..., Any]) -> dict[str, Any]:
+    """Build a JSON-Schema-style ``parameters`` dict from *func*'s signature."""
+    sig = inspect.signature(func)
+    hints = get_type_hints(func)
+
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+
+    for name, param in sig.parameters.items():
+        json_type = _PY_TYPE_TO_JSON.get(hints.get(name, str), "string")
+        properties[name] = {"type": json_type}
+        if param.default is inspect.Parameter.empty:
+            required.append(name)
+
+    schema: dict[str, Any] = {"type": "object", "properties": properties}
+    if required:
+        schema["required"] = required
+    return schema
+
+
+class FunctionTool:
+    """Wraps an async callable so it satisfies the ``Tool`` protocol."""
+
+    def __init__(self, func: Callable[..., Awaitable[Any]]) -> None:
+        self._func = func
+        self._schema = ToolSchema(
+            name=func.__name__,
+            description=func.__doc__ or func.__name__,
+            parameters=_params_schema(func),
+        )
+
+    @property
+    def schema(self) -> ToolSchema:
+        return self._schema
+
+    async def execute(
+        self,
+        arguments: dict[str, Any],
+        context: ToolCall | None = None,
+    ) -> ToolResult:
+        call_id = context.id if context else "unknown"
+        try:
+            result = await self._func(**arguments)
+            output = json.dumps(result) if not isinstance(result, str) else result
+            return ToolResult(
+                call_id=call_id,
+                name=self._schema.name,
+                output=output,
+                is_error=False,
+            )
+        except Exception as exc:
+            return ToolResult(
+                call_id=call_id,
+                name=self._schema.name,
+                output=str(exc),
+                is_error=True,
+            )
+
+
 def build_chat_tools(agent_workspace: AgentWorkspace, project_root: Path) -> list[Tool]:
     """Construct the basic file and discovery tools for chat sessions."""
 
@@ -253,10 +321,10 @@ def build_chat_tools(agent_workspace: AgentWorkspace, project_root: Path) -> lis
         ]
 
     return [
-        Tool.from_function(read_file),  # type: ignore[attr-defined]
-        Tool.from_function(write_file),  # type: ignore[attr-defined]
-        Tool.from_function(list_dir),  # type: ignore[attr-defined]
-        Tool.from_function(file_exists),  # type: ignore[attr-defined]
-        Tool.from_function(search_files),  # type: ignore[attr-defined]
-        Tool.from_function(discover_symbols),  # type: ignore[attr-defined]
+        FunctionTool(read_file),
+        FunctionTool(write_file),
+        FunctionTool(list_dir),
+        FunctionTool(file_exists),
+        FunctionTool(search_files),
+        FunctionTool(discover_symbols),
     ]

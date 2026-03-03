@@ -11,6 +11,9 @@ from e2e.scenarios.golden_path import GoldenPathScenario
 from e2e.scenarios.reject import RejectScenario
 from e2e.scenarios.multi_file import MultiFileScenario
 from e2e.scenarios.panel_nav import PanelNavScenario
+from e2e.scenarios.ext_discovery import ExtDiscoveryScenario
+from e2e.scenarios.ext_multi_file import ExtMultiFileScenario
+from e2e.scenarios.ext_edit_cascade import ExtEditCascadeScenario
 
 ALL_SCENARIOS: dict[str, type] = {
     "startup": StartupScenario,
@@ -22,6 +25,9 @@ ALL_SCENARIOS: dict[str, type] = {
     "reject": RejectScenario,
     "multi_file": MultiFileScenario,
     "panel_nav": PanelNavScenario,
+    "ext_discovery": ExtDiscoveryScenario,
+    "ext_multi_file": ExtMultiFileScenario,
+    "ext_edit_cascade": ExtEditCascadeScenario,
 }
 
 __all__ = [
@@ -35,4 +41,7 @@ __all__ = [
     "RejectScenario",
     "MultiFileScenario",
     "PanelNavScenario",
+    "ExtDiscoveryScenario",
+    "ExtMultiFileScenario",
+    "ExtEditCascadeScenario",
 ]

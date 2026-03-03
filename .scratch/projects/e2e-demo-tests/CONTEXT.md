@@ -21,6 +21,20 @@ All tasks done. All 9 e2e scenarios pass (9/9, ~280s total) against real vLLM.
 4. **Added env var expansion in config** — `src/remora/core/config.py` expands
    `${VAR:-default}` patterns in YAML config values via `_expand_env_vars()`.
 
+5. **Fixed chat history lost on navigate away/back** — Two issues in
+   `src/remora/core/event_store.py`:
+   - `append()` stored `type(event).__name__` (e.g. `"LspHumanChatEvent"`) as
+     `event_type` column instead of the model's `event_type` field
+     (`"HumanChatEvent"`). Panel.lua matches on the canonical string.
+   - `_row_to_dict()` returned the raw `model_dump()` blob as `payload`,
+     which meant `ev.payload.message` in Lua resolved to `nil` because
+     `message` was at the top level of the blob, not nested under `payload`.
+     Fixed to reconstruct a proper `payload` sub-dict from model-specific
+     fields.
+
+6. **Panel input box enlarged** — `panel.lua` now sets input window height to
+   `max(5, floor(vim.o.lines * 0.20))` instead of hardcoded 3 lines.
+
 ### Switch to Real vLLM
 
 5. **Removed mock LLM wiring** — `src/remora/lsp/__main__.py` always uses

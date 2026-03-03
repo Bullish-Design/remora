@@ -345,6 +345,7 @@ class SwarmExecutor:
         chat_history: list[dict[str, str]] | None = None,
         trigger_event: Any = None,
         requires_context: bool = True,
+        scaffold_context: dict[str, Any] | None = None,
     ) -> str:
         sections: list[str] = []
         sections.append(f"# Target: {node.full_name or node.node_id}")
@@ -377,6 +378,34 @@ class SwarmExecutor:
                 sections.append("")
                 sections.append("## Recent Chat History")
                 sections.extend(history_items)
+        # Scaffold context enrichment: when a scaffold node has context,
+        # add parent source, sibling info, and intent to the prompt.
+        if node.status == "scaffold" and scaffold_context:
+            subsections: list[str] = []
+            parent_source = scaffold_context.get("parent_source", "")
+            siblings = scaffold_context.get("siblings", [])
+            intent = scaffold_context.get("intent", "")
+
+            if parent_source:
+                lang = _lang_tag_for(node.file_path)
+                subsections.append("### Parent Source")
+                subsections.append(f"```{lang}")
+                subsections.append(parent_source)
+                subsections.append("```")
+
+            if siblings:
+                subsections.append("### Siblings")
+                for sib in siblings:
+                    subsections.append(f"- {sib['name']} ({sib['node_type']})")
+
+            if intent:
+                subsections.append("### Intent")
+                subsections.append(intent)
+
+            if subsections:
+                sections.append("")
+                sections.append("## Scaffold Context")
+                sections.extend(subsections)
         return "\n".join(sections)
 
 

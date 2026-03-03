@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from dataclasses import asdict, is_dataclass
 from typing import Any, Type
@@ -22,6 +23,51 @@ from remora.core.events import (
 from remora.extensions import extension_matches
 
 logger = logging.getLogger(__name__)
+
+
+# Regex for stub patterns: def/class with only pass/... as body
+_STUB_INLINE_RE = re.compile(
+    r"^\s*(?:(?:async\s+)?def\s+\w+\s*\([^)]*\)\s*(?:->[^:]+)?\s*:\s*(?:pass|\.\.\.)"
+    r"|class\s+\w+(?:\([^)]*\))?\s*:\s*(?:pass|\.\.\.))\s*$",
+    re.DOTALL,
+)
+
+_STUB_BLOCK_RE = re.compile(
+    r"^\s*(?:(?:async\s+)?def\s+\w+\s*\([^)]*\)\s*(?:->[^:]+)?\s*:"
+    r"|class\s+\w+(?:\([^)]*\))?\s*:)"
+    r"\s*\n"  # newline after colon
+    r"(?:\s*(?:#[^\n]*|\"\"\"[^\"]*\"\"\"|\'\'\'[^\']*\'\'\')\s*\n)*"  # optional comments/docstrings
+    r"\s*(?:pass|\.\.\.)\s*$",
+    re.DOTALL,
+)
+
+# Content that is only comments, docstrings, and/or whitespace
+_TRIVIAL_CONTENT_RE = re.compile(
+    r"^(?:\s*(?:#[^\n]*|\"\"\"[^\"]*\"\"\"|\'\'\'[^\']*\'\'\')?\s*\n?)*$",
+    re.DOTALL,
+)
+
+
+def _is_stub(source_code: str) -> bool:
+    """Return True if source_code is empty, trivial, or a known stub pattern.
+
+    Stub patterns include:
+    - Empty or whitespace-only
+    - Comments/docstrings only
+    - ``class Foo: pass`` / ``class Foo: ...``
+    - ``def foo(): pass`` / ``def foo(): ...``
+    - Block form with optional docstring: ``def foo():\\n    pass``
+    """
+    stripped = source_code.strip()
+    if not stripped:
+        return True
+    if _TRIVIAL_CONTENT_RE.fullmatch(source_code):
+        return True
+    if _STUB_INLINE_RE.fullmatch(stripped):
+        return True
+    if _STUB_BLOCK_RE.fullmatch(stripped):
+        return True
+    return False
 
 
 def _dataclass_default(obj: Any) -> Any:
@@ -68,7 +114,7 @@ class NodeProjection:
             "parent_id": event.parent_id,
             "caller_ids": "[]",
             "callee_ids": "[]",
-            "status": "idle",
+            "status": "scaffold" if _is_stub(event.source_code) else "idle",
             "last_trigger_event": "",
             "last_completed_at": None,
             "extension_name": None,
@@ -99,7 +145,10 @@ class NodeProjection:
 
         cols = ", ".join(row.keys())
         placeholders = ", ".join("?" * len(row))
-        # Upsert: on conflict, update mutable fields but preserve status
+        # Upsert: on conflict, update mutable fields.
+        # Status is updated to match the new source_code (scaffold if stub, idle otherwise),
+        # but ONLY when the current status is idle or scaffold.  Running/error status is
+        # preserved — a re-discovery during agent execution must not clobber lifecycle state.
         conn.execute(
             f"""INSERT INTO nodes ({cols}) VALUES ({placeholders})
                 ON CONFLICT(node_id) DO UPDATE SET
@@ -114,6 +163,11 @@ class NodeProjection:
                     source_code = excluded.source_code,
                     source_hash = excluded.source_hash,
                     parent_id = excluded.parent_id,
+                    status = CASE
+                        WHEN nodes.status IN ('running', 'error')
+                        THEN nodes.status
+                        ELSE excluded.status
+                    END,
                     extension_name = excluded.extension_name,
                     custom_system_prompt = excluded.custom_system_prompt,
                     mounted_workspaces = excluded.mounted_workspaces,

@@ -31,3 +31,5 @@
 - [x] Scenario: Panel navigation (open panel, move between functions, toggle tools, close)
 - [x] Add merge.py + test_merge.py to DemoProjectGuard mutable files
 - [x] Full suite run: 9/9 pass with recording + GIF (~280s total)
+- [x] Fix chat history lost on navigate away/back — event_type stored as Python class name, payload not restructured
+- [x] Increase panel input box height from 3 lines to ~1/5 of terminal height

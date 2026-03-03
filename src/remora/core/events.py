@@ -165,6 +165,20 @@ class NodeDiscoveredEvent(_FrozenEvent):
     timestamp: float = Field(default_factory=time.time)
 
 
+class ScaffoldRequestEvent(_FrozenEvent):
+    """Emitted when a scaffold node is created and needs initialization.
+
+    Triggers the scaffold lifecycle: the node gathers context from its
+    parent/siblings and fills itself in via rewrite_self().
+    """
+
+    node_id: str
+    node_type: str
+    parent_id: str | None = None
+    intent: str = ""  # Optional human-provided hint (e.g. "HTTP client class")
+    timestamp: float = Field(default_factory=time.time)
+
+
 class NodeRemovedEvent(_FrozenEvent):
     """Emitted when a code node is no longer found in source."""
 
@@ -194,6 +208,7 @@ RemoraEvent = (
     |
     # Node lifecycle events
     NodeDiscoveredEvent
+    | ScaffoldRequestEvent
     | NodeRemovedEvent
     |
     # Re-exported structured-agents events
@@ -220,6 +235,7 @@ __all__ = [
     "ManualTriggerEvent",
     # Node lifecycle events
     "NodeDiscoveredEvent",
+    "ScaffoldRequestEvent",
     "NodeRemovedEvent",
     # Re-exports
     "KernelStartEvent",

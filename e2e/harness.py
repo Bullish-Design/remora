@@ -38,8 +38,10 @@ DEMO_PROJECT = Path(__file__).parent.parent / "remora_demo" / "project"
 _DEMO_MUTABLE_FILES = [
     DEMO_PROJECT / "src" / "configlib" / "loader.py",
     DEMO_PROJECT / "src" / "configlib" / "merge.py",
+    DEMO_PROJECT / "src" / "configlib" / "schema.py",
     DEMO_PROJECT / "tests" / "test_loader.py",
     DEMO_PROJECT / "tests" / "test_merge.py",
+    DEMO_PROJECT / "MONITOR.md",
 ]
 
 

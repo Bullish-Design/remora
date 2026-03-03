@@ -43,7 +43,7 @@ def _discovered_event(**overrides) -> NodeDiscoveredEvent:
         "file_path": "/src/billing.py",
         "start_line": 10,
         "end_line": 25,
-        "source_code": "def calculate_total(): pass",
+        "source_code": "def calculate_total():\n    return sum(items)",
         "source_hash": "aabb",
     }
     defaults.update(overrides)
@@ -66,7 +66,7 @@ class TestProjectNodeDiscovered:
         event1 = _discovered_event(source_hash="v1")
         projection.apply(store._conn, event1)
 
-        event2 = _discovered_event(source_hash="v2", source_code="def calculate_total(x): pass")
+        event2 = _discovered_event(source_hash="v2", source_code="def calculate_total(x):\n    return x * 2")
         projection.apply(store._conn, event2)
 
         row = store._conn.execute("SELECT * FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
@@ -210,6 +210,40 @@ class TestProjectStatusUpdates:
         projection.apply(store._conn, _discovered_event())
         error = AgentErrorEvent(graph_id="s", agent_id="abc123", error="boom")
         projection.apply(store._conn, error)
+
+        row = store._conn.execute("SELECT status FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
+        assert row["status"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_rediscovery_preserves_running_status(self, store: EventStore, projection: NodeProjection):
+        """When a node is 'running' and gets re-discovered, status should stay 'running'."""
+        projection.apply(store._conn, _discovered_event())
+        start = AgentStartEvent(graph_id="swarm", agent_id="abc123", node_name="calculate_total")
+        projection.apply(store._conn, start)
+
+        row = store._conn.execute("SELECT status FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
+        assert row["status"] == "running"
+
+        # Re-discover while running (e.g., watcher detects file change)
+        event2 = _discovered_event(source_hash="v2", source_code="def calculate_total():\n    return sum(items)")
+        projection.apply(store._conn, event2)
+
+        row = store._conn.execute("SELECT status FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
+        assert row["status"] == "running"
+
+    @pytest.mark.asyncio
+    async def test_rediscovery_preserves_error_status(self, store: EventStore, projection: NodeProjection):
+        """When a node is 'error' and gets re-discovered, status should stay 'error'."""
+        projection.apply(store._conn, _discovered_event())
+        error = AgentErrorEvent(graph_id="s", agent_id="abc123", error="boom")
+        projection.apply(store._conn, error)
+
+        row = store._conn.execute("SELECT status FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
+        assert row["status"] == "error"
+
+        # Re-discover while in error state
+        event2 = _discovered_event(source_hash="v2", source_code="def calculate_total():\n    return sum(items)")
+        projection.apply(store._conn, event2)
 
         row = store._conn.execute("SELECT status FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
         assert row["status"] == "error"

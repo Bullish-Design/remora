@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterator
 
+import yaml
 import tree_sitter
 from tree_sitter import Language, Parser, QueryCursor, Query
 
@@ -128,6 +129,9 @@ def _get_parser(language: str) -> Parser | None:
 
 NAME_CAPTURE_SUFFIXES = (".name", ".lang")
 
+# Captures that are handled by language-specific post-processing, not the generic pipeline.
+_POSTPROCESS_CAPTURES = frozenset({"frontmatter.def"})
+
 
 def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
     """Parse a single file and extract nodes using tree-sitter queries."""
@@ -164,6 +168,8 @@ def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
     for node, capture_name in captures:
         if capture_name.endswith(NAME_CAPTURE_SUFFIXES):
             continue  # Skip name-only captures
+        if capture_name in _POSTPROCESS_CAPTURES:
+            continue  # Handled by language-specific post-processing
 
         node_type = capture_name.split(".", 1)[0]
         name = _extract_name(node, captures)
@@ -182,9 +188,69 @@ def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
         )
         nodes.append(cst_node)
 
+    # Markdown post-processing: create note/todo-note from frontmatter
+    if language == "markdown":
+        nodes = _postprocess_markdown(file_path, content, captures, nodes)
+
     # Always include file-level node
     if not any(n.node_type == "file" for n in nodes):
         nodes.insert(0, _create_file_node(file_path, content))
+
+    return nodes
+
+
+def _postprocess_markdown(
+    file_path: Path,
+    content: str,
+    captures: list[tuple[tree_sitter.Node, str]],
+    nodes: list[CSTNode],
+) -> list[CSTNode]:
+    """Create note/todo-note CSTNode from YAML frontmatter if present."""
+    # Find frontmatter capture
+    frontmatter_node = None
+    for node, capture_name in captures:
+        if capture_name == "frontmatter.def":
+            frontmatter_node = node
+            break
+
+    if frontmatter_node is None:
+        return nodes
+
+    # Parse YAML from frontmatter text (strip --- delimiters)
+    raw_text = content[frontmatter_node.start_byte : frontmatter_node.end_byte]
+    yaml_text = raw_text.strip().removeprefix("---").removesuffix("---").strip()
+
+    metadata: dict = {}
+    try:
+        parsed = yaml.safe_load(yaml_text)
+        if isinstance(parsed, dict):
+            metadata = parsed
+    except yaml.YAMLError:
+        logger.debug("Could not parse frontmatter YAML in %s", file_path)
+
+    # Determine node type: "todo" if type: todo, otherwise "note"
+    fm_type = str(metadata.get("type", "note")).lower()
+    node_type = "todo" if fm_type == "todo" else "note"
+
+    # Determine name: frontmatter title, fallback to filename
+    name = str(metadata.get("title", file_path.name))
+
+    line_count = content.count("\n") + 1 if content else 1
+    byte_length = len(content.encode("utf-8")) if content else 0
+
+    note_node = CSTNode(
+        node_id=compute_node_id(str(file_path), name, 1, line_count),
+        node_type=node_type,
+        name=name,
+        full_name=f"{node_type}:{name}",
+        file_path=str(file_path),
+        text=content,
+        start_line=1,
+        end_line=line_count,
+        start_byte=0,
+        end_byte=byte_length,
+    )
+    nodes.insert(0, note_node)
 
     return nodes
 
@@ -202,16 +268,29 @@ def _collect_captures(query: tree_sitter.Query, root: tree_sitter.Node) -> list[
         for name, nodes in captures.items():
             for node in nodes:
                 flat.append((node, name))
+        # Dict-branch groups by capture name, not document position.
+        # Sort by start position to restore document order.
+        flat.sort(key=lambda pair: (pair[0].start_point[0], pair[0].start_point[1]))
         return flat
 
     return list(captures)
 
 
+def _is_ancestor(ancestor: tree_sitter.Node, descendant: tree_sitter.Node) -> bool:
+    """Check if *ancestor* is an ancestor of *descendant* (walking up parents)."""
+    current = descendant.parent
+    while current is not None:
+        if current.id == ancestor.id:
+            return True
+        current = current.parent
+    return False
+
+
 def _extract_name(node: tree_sitter.Node, captures: list) -> str:
     """Extract the name for a captured node."""
-    # Look for corresponding .name capture
+    # Look for corresponding .name capture — walk ancestors, not just direct parent.
     for n, name in captures:
-        if name.endswith(NAME_CAPTURE_SUFFIXES) and n.parent == node:
+        if name.endswith(NAME_CAPTURE_SUFFIXES) and _is_ancestor(node, n):
             return n.text.decode() if n.text else "unknown"
 
     # Try common child names

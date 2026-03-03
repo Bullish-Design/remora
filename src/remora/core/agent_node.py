@@ -267,6 +267,8 @@ class AgentNode(BaseModel):
             "file": lsp.SymbolKind.File,
             "section": lsp.SymbolKind.String,
             "table": lsp.SymbolKind.Object,
+            "note": lsp.SymbolKind.File,
+            "todo": lsp.SymbolKind.Event,
         }
         return lsp.DocumentSymbol(
             name=f"{self.name} [{self.status}]",
