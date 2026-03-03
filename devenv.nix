@@ -11,6 +11,8 @@
   packages = [
     pkgs.git
     pkgs.uv
+    pkgs.asciinema
+    pkgs.asciinema-agg
   ];
 
   # https://devenv.sh/languages/

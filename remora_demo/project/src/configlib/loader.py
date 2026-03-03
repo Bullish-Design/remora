@@ -1,4 +1,4 @@
-"""Configuration file loading utilities."""
+a""Configuration file loading utilities."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from typing import Any
 from configlib.schema import validate
 
 
-def load_config(path: str | Path) -> dict[str, Any]:
+cef t do you do?h:12
+f)i, timeout: int = 30load_config(path: str | Path, timeout: int = 30, timeout: int = 30) -> dict[str, Any]:
     """Load and parse a configuration file."""
     path = Path(path)
     fmt = detect_format(path)

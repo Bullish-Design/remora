@@ -2,43 +2,33 @@
 
 ## Current State
 - **Active batch:** ALL BATCHES COMPLETE
-- **Last completed:** Batch 6.6 (Delete stdlib dataclass models)
+- **Last completed:** Appendix A (Data Flow Walkthrough) for PYDANTIC_CONSOLIDATION_REFACTOR.md
 - **Test suite:** 653 passed, 2 xfailed
 
 ## What Just Happened
-- Completed Batch 6.6 (Delete stdlib dataclass models):
-  - Converted all 4 models in `src/remora/models/__init__.py` from stdlib `@dataclass(slots=True)` to Pydantic `BaseModel`
-  - `to_dict()` now delegates to `model_dump()` instead of `asdict(self)`
-  - Removed all `from dataclasses import asdict, dataclass` from the module
-  - 15 TDD tests in `tests/unit/test_pydantic_models.py`
-- Completed Batch 6.3 (Single SQLite Database) — commit `a89a3d2`:
-  - EventStore creates all tables + WAL mode
-  - SubscriptionRegistry and RemoraDB accept shared connection
-  - 15 TDD tests in `tests/unit/test_single_db.py`
-- All 75+ items from the launch plan are now complete
-
-## Completed Batches
-- **Batch 1**: 25 quick fixes (commit `597a550`)
-- **Batch 2**: 12 medium items (commits `a69957c` through `4eceb4c`)
-- **Batch 3**: Runner merge (commit `59cb192`)
-- **Batch 7**: Testing — 87 new tests (commit `81f851e`)
-- **Batch 8**: Quality & Polish (commits `4038a02`, `595ceb9`)
-- **Batch 4**: Identity unification (commit `e546588`)
-- **Batch 5**: Post-Unification Cleanup (commit `9b9171a`)
-- **Batch 6.1**: Unified events → frozen Pydantic (commit `b4f54d9`)
-- **Batch 6.2**: Pydantic Config/BaseSettings (commit `b4f54d9`)
-- **Batch 6.6**: Delete stdlib dataclass models (pending commit)
-- **Batch 6.4**: Typed externals / AgentContext (commit `b4f54d9`)
-- **Batch 6.5**: Kernel factory (commit `b4f54d9`)
+- Completed `PYDANTIC_CONSOLIDATION_REFACTOR.md` — full document with Appendix A:
+  - **Sections 1-9** (989 lines): Executive summary, before/after analysis for all 5 conversion items (ToolSchema, SubscriptionPattern/Subscription, CSTNode, ToolCall/LLMResponse, Message/ChatConfig/AgentResponse), serialization simplification, implementation order, estimated scope
+  - **Appendix A** — Data Flow Walkthrough (Before/After), 4 scenarios:
+    - A.1 — Discovery → Storage → LSP Display (Neovim Path) — COMPLETE
+    - A.2 — Event → Subscription → Trigger → LLM → Proposal (Reactive Path) — COMPLETE
+    - A.3 — Chat Service → Message → AgentResponse (HTTP API Path) — COMPLETE
+    - A.4 — Events → UiStateProjector → Graph Web UI (Frontend Path) — COMPLETE
+    - Cross-cutting summary table at the end
+  - Total document: ~1800+ lines
+- All launch plan batches remain complete (653 passed, 2 xfailed)
 
 ## What Needs to Be Done Next
 
-ALL BATCHES COMPLETE. The launch plan execution is finished.
+ALL BATCHES COMPLETE. ALL DOCUMENTATION COMPLETE.
+- The launch plan execution is finished (75+ items, Batches 1-8)
+- The Pydantic consolidation refactor guide is finished (sections 1-9 + Appendix A)
+- Implementation of the Pydantic consolidation is a future task (~78 LOC, ~90 min, 7 files)
 
 ## Key Context for Resumption
 - Master task list: `REMORA_LAUNCH_PLAN.md` (root)
 - Execution plan: `.scratch/projects/launch-plan-execution/PLAN.md`
 - Progress tracker: `.scratch/projects/launch-plan-execution/PROGRESS.md`
+- Pydantic refactor guide: `PYDANTIC_CONSOLIDATION_REFACTOR.md` (root)
 - Test command: `python -m pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn --ignore=tests/unit/test_graph_app.py --ignore=tests/unit/test_graph_integration.py --ignore=tests/unit/test_graph_shell.py --ignore=tests/unit/test_graph_sidebar.py --ignore=tests/unit/test_graph_state.py --ignore=tests/unit/test_web_layout.py --ignore=tests/unit/test_graph_cli.py --ignore=tests/test_app.py --ignore=tests/test_bridge.py --ignore=tests/test_css.py --ignore=tests/test_entry_points.py --ignore=tests/test_integration_graph.py --ignore=tests/test_layout.py --ignore=tests/test_svg.py --ignore=tests/test_views.py -q --no-cov`
 - All work is in `src/remora/` — `remora_demo/` is out of scope
 
@@ -58,6 +48,8 @@ ALL BATCHES COMPLETE. The launch plan execution is finished.
 13. **AgentContext replaces externals dict** — typed Pydantic model with `as_externals()`
 14. **Kernel factory** — `create_kernel()` deduplicates boilerplate
 15. **Single SQLite DB** — EventStore creates all tables; SubscriptionRegistry/RemoraDB accept shared connection
+16. **UI components stay as @dataclass** — rendering components (Component ABC), not data models
+17. **`is_dataclass` branches kept in projector** — needed for `structured_agents` external events
 
 ## How to Resume
 1. Read `.scratch/CRITICAL_RULES.md`
