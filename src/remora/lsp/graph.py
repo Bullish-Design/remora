@@ -3,12 +3,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 
-try:
-    import rustworkx as rx
-
-    RUSTWORKX_AVAILABLE = True
-except ImportError:
-    RUSTWORKX_AVAILABLE = False
+import rustworkx as rx
 
 from remora.lsp.db import RemoraDB
 
@@ -32,14 +27,12 @@ class LazyGraph:
             self._nodes_conn.row_factory = sqlite3.Row
 
         self._lock = threading.Lock()
-        self.graph = rx.PyDiGraph() if RUSTWORKX_AVAILABLE else None
+        self.graph = rx.PyDiGraph()
         self.node_indices: dict[str, int] = {}
         self.loaded_files: set[str] = set()
 
     def invalidate(self, file_path: str) -> None:
         self.loaded_files.discard(file_path)
-        if not RUSTWORKX_AVAILABLE or self.graph is None:
-            return
 
         nodes = self._get_nodes_for_file(file_path)
         for node in nodes:
@@ -52,9 +45,6 @@ class LazyGraph:
                     pass
 
     def ensure_loaded(self, node_id: str) -> None:
-        if not RUSTWORKX_AVAILABLE or self.graph is None:
-            return
-
         if node_id in self.node_indices:
             return
 
@@ -78,9 +68,6 @@ class LazyGraph:
                 )
 
     def get_parent(self, node_id: str) -> str | None:
-        if not RUSTWORKX_AVAILABLE or self.graph is None:
-            return None
-
         self.ensure_loaded(node_id)
         if node_id not in self.node_indices:
             return None
@@ -95,9 +82,6 @@ class LazyGraph:
         return None
 
     def get_callers(self, node_id: str) -> list[str]:
-        if not RUSTWORKX_AVAILABLE or self.graph is None:
-            return []
-
         self.ensure_loaded(node_id)
         if node_id not in self.node_indices:
             return []

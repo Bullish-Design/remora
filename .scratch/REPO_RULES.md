@@ -5,6 +5,28 @@ These are **in addition to** the universal coding standards in CRITICAL_RULES.
 
 ---
 
+## devenv.sh Environment (MANDATORY)
+
+**All commands must run through `devenv shell --`.** See `.scratch/skill.md` for full details.
+
+```bash
+devenv shell -- pytest tests/unit/test_lsp_graph.py -v
+devenv shell -- ruff check src/
+devenv shell -- uv sync --extra dev
+```
+
+Never run `python`, `pytest`, `uv run`, or any tool directly from the system PATH.
+
+---
+
+## Hard Dependencies
+
+All packages in `pyproject.toml` `[project.dependencies]` are hard dependencies:
+- Import unconditionally (no `try/except ImportError` guards).
+- Test unconditionally (no `pytest.mark.skipif` for missing deps).
+
+---
+
 ## Coding Standards (repo-specific)
 
 - **No isinstance in business logic**: Projection dispatch (internal) is the exception.

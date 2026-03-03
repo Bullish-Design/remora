@@ -1,1 +1,0 @@
-"""Component demo package."""
