@@ -1,20 +1,42 @@
 # Documentation Rework — CONTEXT
 
-## Current State
-PROJECT COMPLETE. All analysis done, deliverable written.
+## Current State: PROJECT COMPLETE
 
-## What Was Done
-1. Inventoried and analyzed all 90 documentation files across 4 locations
-2. Cross-referenced documentation claims against actual source code
-3. Created 5 scratch analysis files for context preservation
-4. Wrote comprehensive DOCUMENTATION_REWORK.md deliverable at project root (542 lines)
+All 4 priority phases (P0, P1, P2, P3) have been implemented and committed.
 
-## Deliverable Location
-`/DOCUMENTATION_REWORK.md` — 8 sections covering inventory, accuracy assessment, file-by-file actions, recommended structure, new docs needed, priority ordering, and stale references catalog.
+## Commits
+1. `4015ca1` — docs(P0): move 16 root files, delete stale docs, merge ARCHITECTURE.md
+2. `cc08207` — docs(P1): fix stale references in README, HOW_TO_USE, INSTALLATION, UI API
+3. `aa30c24` — docs(P2): archive old plans/training, delete SPEC.md, revise reference docs
+4. `197c26d` — docs(P3): fix guides accuracy, revise architecture.md fields/schema, update server docs
 
-## Key Findings Summary
-- 16 of 19 root files should be moved to .hidden/ or docs/plans/
-- 10 docs contain stale references to removed classes
-- 1 doc (CONCEPT.md) is entirely wrong — describes V1 architecture
-- 3 docs falsely claim pip install works
-- Recommended: 22 prioritized action items (P0 through P3)
+## Summary of All Changes
+
+### P0 (File restructuring)
+- Moved 13 root-level historical .md files to .hidden/
+- Moved 3 plan files to docs/plans/
+- Deleted docs/CONCEPT.md and docs/reports/cairn_test_coverage.md
+- Merged docs/ARCHITECTURE.md into docs/architecture.md
+
+### P1 (Core doc fixes)
+- README.md: SwarmState→AgentNode, pip→devenv/uv, doc link fix
+- HOW_TO_USE_REMORA.md: SwarmState section replaced, --nvim→--lsp, endpoints added
+- docs/INSTALLATION.md: complete rewrite for devenv/uv
+- docs/REMORA_UI_API.md: complete rewrite with actual endpoints
+- pyproject.toml: readme field and description fixed
+
+### P2 (Archive and reference docs)
+- Moved 10 old plans and training_examples/ to .hidden/ (untracked)
+- Deleted docs/SPEC.md
+- Rewrote TESTING_GUIDELINES.md, TROUBLESHOOTING.md, API_REFERENCE.md
+
+### P3 (Guides and accuracy)
+- getting-started.md: stale pip install → devenv/uv instructions
+- customization.md: removed non-existent swarm_state.db
+- programming-workflow.md: port 8000→8420
+- architecture.md: fixed AgentNode fields table, events table schema, DB location claims, Grail tool example, complete built-in tools list
+- server/README.md: added Qwen3 model info
+- server/SERVER_DEV_GUIDE.md: added deprecation note, updated model reference
+
+## No Further Work Required
+This project is fully complete. All documentation has been audited and corrected.
