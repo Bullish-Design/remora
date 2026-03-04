@@ -82,25 +82,45 @@ Each node gets a deterministic `node_id` based on its file path and structural p
 
 `AgentNode` is a Pydantic `BaseModel` representing any agent. It has ~20 fields:
 
+**Identity** (from CSTNode via event projection):
+
 | Field | Type | Purpose |
 |-------|------|---------|
 | `node_id` | `str` | Unique identifier (hash of file path + name + type) |
-| `node_type` | `str` | `function`, `class`, `file`, `section`, `todo`, `note`, `table` |
+| `node_type` | `str` | `function`, `class`, `method`, `file`, `section`, `todo`, `table` |
 | `name` | `str` | Short name (e.g., `calculate_total`) |
 | `full_name` | `str` | Qualified name (e.g., `src/utils.py::calculate_total`) |
 | `file_path` | `str` | Absolute path to source file |
 | `source_code` | `str` | The node's source text |
+| `source_hash` | `str` | Hash of the source text (for change detection) |
 | `start_line` / `end_line` | `int` | Line range in the file |
 | `start_byte` / `end_byte` | `int` | Byte range in the file |
-| `status` | `str` | `idle`, `running`, `scaffold`, `error` |
-| `language` | `str` | Programming language |
-| `parent_id` | `str` | ID of containing node (e.g., file for a function) |
-| `tags` | `tuple[str, ...]` | Metadata tags |
-| `system_prompt` | `str` | Custom system prompt (from extension) |
-| `tools` | `list[ToolSchema]` | Available tools (from extension) |
-| `subscriptions` | `list` | Event subscriptions |
-| `extension_data` | `dict` | Arbitrary extension metadata |
+
+**Graph context** (from edges table):
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `parent_id` | `str \| None` | ID of containing node (e.g., file for a function) |
+| `caller_ids` | `list[str]` | IDs of nodes that call this one |
+| `callee_ids` | `list[str]` | IDs of nodes this one calls |
+
+**Runtime state** (from event projections):
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `status` | `str` | `idle`, `running`, `pending_approval`, `error` |
 | `last_trigger_event` | `str` | ID of the event that last triggered this agent |
+| `last_completed_at` | `float \| None` | Timestamp of last completed execution |
+
+**Specialization** (from extension config matching):
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `extension_name` | `str \| None` | Name of the matched extension |
+| `custom_system_prompt` | `str` | Custom system prompt (from extension) |
+| `mounted_workspaces` | `list[str]` | Workspace paths available to this agent |
+| `extra_tools` | `list[ToolSchema]` | Additional tools (from extension) |
+| `extra_subscriptions` | `list[SubscriptionPattern]` | Event subscriptions (from extension) |
 
 AgentNode provides rendering methods used by the LSP layer:
 - `to_code_lens()` -- generates code lens annotations
@@ -115,12 +135,12 @@ The EventStore is an append-only SQLite database at `.remora/events/events.db`. 
 
 ### Tables
 
-- **`events`** -- the append-only event log. Columns: `id`, `swarm_id`, `timestamp`, `event_type`, `agent_id`, `payload` (JSON), `correlation_id`.
+- **`events`** -- the append-only event log. Columns: `id`, `graph_id`, `event_type`, `payload` (JSON), `timestamp`, `created_at`, `from_agent`, `to_agent`, `correlation_id`, `tags`.
 - **`nodes`** -- a materialized projection of the current agent state. Updated automatically when `NodeDiscoveredEvent` or `NodeRemovedEvent` events are appended. This is a read-optimized view, not an independent store.
 
 ### Key Operations
 
-- **`append(swarm_id, event)`** -- writes an event and triggers projection updates + subscription matching.
+- **`append(graph_id, event)`** -- writes an event and triggers projection updates + subscription matching.
 - **`get_node(node_id)`** -- reads an agent from the `nodes` projection.
 - **`list_nodes()`** -- lists all known agents.
 - **`get_recent_events(agent_id, limit)`** -- retrieves recent events for an agent (used for chat history).
@@ -163,7 +183,7 @@ Safety mechanisms prevent runaway cascades:
 
 ## Subscriptions
 
-A subscription is a pattern that an agent registers to express interest in certain events. The `SubscriptionRegistry` stores subscriptions in a SQLite database at `.remora/subscriptions.db`.
+A subscription is a pattern that an agent registers to express interest in certain events. The `SubscriptionRegistry` stores subscriptions in the `subscriptions` table within the EventStore database (`.remora/events/events.db`). In shared mode (the default), it reuses the EventStore's SQLite connection.
 
 Subscriptions match on:
 - **Event type** (e.g., `ContentChangedEvent`)
@@ -270,27 +290,36 @@ class Tool(Protocol):
 The primary way to define tools is through Grail `.pym` scripts. These are Python-like scripts that declare inputs and produce outputs:
 
 ```python
-# agents/my_bundle/tools/read_file.pym
+# agents/my_bundle/tools/add_numbers.pym
 from grail import Input
 
-path: str = Input("path", description="File path to read")
+a: int = Input("a", description="First number")
+b: int = Input("b", description="Second number")
 
-with open(path) as f:
-    content = f.read()
-
-result = {"path": path, "content": content[:2000]}
+result = {"sum": a + b, "a": a, "b": b}
 result
 ```
 
-Grail tools are discovered automatically from the bundle's `agents_dir`. Each `.pym` file becomes a tool with a schema derived from its `Input` declarations.
+Grail tools are discovered automatically from the bundle's `agents_dir`. Each `.pym` file becomes a tool with a schema derived from its `Input` declarations. The script's final expression is the tool's return value.
 
 ### Built-in Agent Tools
 
 Beyond Grail scripts, agents have access to context-dependent tools:
+
+**Swarm tools** (from `remora.core.tools.swarm`):
+- **`send_message`** -- send a message to a specific agent
 - **`subscribe`** -- register a subscription to future events
 - **`unsubscribe`** -- remove a subscription
 - **`broadcast`** -- send a message to children, siblings, or file-scoped agents
 - **`query_agents`** -- list agents filtered by node type
+
+**LSP tools** (from `remora.core.tools.lsp`):
+- **`rewrite_self`** -- propose a rewrite of the agent's own source code
+- **`message_node`** -- send a message to another agent (with LSP context)
+- **`read_node`** -- read another agent's source code
+
+**Other tools**:
+- **`spawn_child`** -- create a new child node under this agent
 
 These are wired through the `AgentContext` passed to the executor.
 
@@ -319,14 +348,16 @@ The LSP server holds references to the `EventStore` and `SubscriptionRegistry` a
 
 ### RemoraDB
 
-A secondary SQLite database (`.remora/remora.db`) holds LSP-specific operational state:
+`RemoraDB` manages LSP-specific operational tables. In the default shared mode, these tables live in the same `events.db` database (created by `EventStore.initialize()`). It can also operate standalone with its own SQLite file for backward compatibility.
+
+The operational tables:
 - **`edges`** -- relationships between nodes (parent-child, imports, calls)
 - **`proposals`** -- pending rewrite proposals
 - **`cursor_focus`** -- current editor cursor position
 - **`command_queue`** -- pending LSP commands
 - **`activation_chain`** -- cascade tracking for visualization
 
-This is separate from the EventStore to keep LSP concerns isolated from the core reactive system.
+These tables are logically separate from the EventStore's event log and node projection, keeping LSP concerns distinct even though they share a database connection.
 
 ## Data Flow Diagram
 

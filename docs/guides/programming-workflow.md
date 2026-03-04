@@ -253,7 +253,7 @@ Remora includes a web-based graph viewer that visualizes your agent swarm as an 
 remora serve
 ```
 
-This opens a web interface (default: `http://localhost:8000`) showing:
+This opens a web interface (default: `http://localhost:8420`) showing:
 
 - **Nodes** for each discovered agent (functions, classes, files)
 - **Edges** representing relationships and event subscriptions between agents

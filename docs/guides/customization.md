@@ -452,7 +452,6 @@ your_project/
           custom_node.scm
     events.db                          # EventStore (SQLite, auto-created)
     subscriptions.db                   # SubscriptionRegistry (auto-created)
-    swarm_state.db                     # SwarmState (auto-created)
     agents/                            # Per-agent state (auto-created)
       ab/
         abcdef.../

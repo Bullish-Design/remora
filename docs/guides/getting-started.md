@@ -4,7 +4,7 @@
 
 ## Table of Contents
 
-1. [Installation](#installation) -- Installing the Python package
+1. [Installation](#installation) -- Setting up the project with devenv and uv
 2. [Project Setup](#project-setup) -- Creating remora.yaml and the .remora directory
 3. [Starting an LLM Backend](#starting-an-llm-backend) -- Running vLLM or connecting to an external API
 4. [First Run: Reconciliation](#first-run-reconciliation) -- Discovering your codebase
@@ -16,40 +16,42 @@
 
 ## Installation
 
-### With pip
+Remora uses [devenv](https://devenv.sh/) and [uv](https://docs.astral.sh/uv/) for dependency management.
+
+### With devenv (Recommended)
+
+1. Install [devenv](https://devenv.sh/getting-started/) if you haven't already.
+2. Clone the repository and enter the devenv shell:
 
 ```bash
-# Core only (discovery, events, CLI)
-pip install remora
-
-# With backend (LLM execution, Grail tools, vLLM support)
-pip install "remora[backend]"
-
-# With frontend (web service, dashboard)
-pip install "remora[frontend]"
-
-# Everything
-pip install "remora[full]"
+git clone <remora-repo-url>
+cd remora
+devenv shell
 ```
 
-For most users who want the full agent experience, use `remora[backend]` or `remora[full]`.
+3. Install dependencies with uv:
 
-### With Nix / devenv
+```bash
+uv sync --extra dev
+```
 
-If your project uses [devenv](https://devenv.sh/), add Remora as a dependency in your `devenv.nix`:
+This installs Remora with all development dependencies. Available extras:
+- `frontend` -- web service and dashboard
+- `companion` -- companion tools
+- `dev` -- development and testing dependencies (includes both of the above)
 
-```nix
-{ pkgs, lib, ... }:
-{
-  languages.python = {
-    enable = true;
-    package = pkgs.python313;
-    venv.enable = true;
-    venv.requirements = ''
-      remora[full]
-    '';
-  };
-}
+### With uv (without devenv)
+
+If you have Python 3.13+ and uv installed:
+
+```bash
+uv sync
+```
+
+Or with optional extras:
+
+```bash
+uv sync --extra frontend --extra companion
 ```
 
 ### Requirements
