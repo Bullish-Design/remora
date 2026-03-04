@@ -24,8 +24,8 @@ Remora uses an event-driven architecture:
 
 - **EventStore**: Append-only log of all events, the single source of truth
 - **SubscriptionRegistry**: Maps events to agents via pattern matching
-- **SwarmState**: Tracks active agents and their metadata
-- **AgentRunner**: Consumes triggers from EventStore and executes agent turns
+- **AgentNode**: Unified agent model discovered from code via tree-sitter
+- **SwarmExecutor**: Consumes triggers from EventStore and executes agent turns
 
 Agents are discovered from code via tree-sitter, given persistent workspaces in `.remora/agents/<id>/`, and triggered by events matching their subscriptions.
 
@@ -49,15 +49,22 @@ See `remora.yaml.example` for the flat configuration format. Key options:
 
 ## Installation
 
+Remora is not published to PyPI. Install via [devenv.sh](https://devenv.sh/) and uv:
+
 ```bash
-pip install remora
-pip install "remora[backend]"   # With structured-agents and vLLM support
-pip install "remora[full]"      # Everything included
+# 1. Install devenv (see https://devenv.sh/getting-started/)
+# 2. Enter the dev shell (installs Python 3.13, uv, and system deps)
+devenv shell
+
+# 3. Sync Python dependencies
+uv sync --extra dev
 ```
+
+Optional extras: `frontend`, `companion`, `dev`.
 
 ## Documentation
 
-- `docs/ARCHITECTURE.md` — Swarm architecture and data flow
+- `docs/architecture.md` — Swarm architecture and data flow
 - `docs/CONFIGURATION.md` — Configuration reference
 - `HOW_TO_USE_REMORA.md` — Detailed usage guide
 

@@ -98,33 +98,44 @@ await subscriptions.register(
 )
 ```
 
-### SwarmState
+### AgentNode
 
-Tracks discovered agents and their metadata.
+Unified agent model representing a single agent in the swarm. Built from `CSTNode` discovery results during reconciliation.
 
 ```python
-from remora.core.swarm_state import SwarmState, AgentMetadata
+from remora.core.agent_node import AgentNode
 
-swarm_state = SwarmState(path)
-swarm_state.initialize()
+# AgentNode fields include:
+# node_id, node_type, name, full_name, file_path, source_code,
+# start_line, end_line, status, parent_id, extension_name,
+# custom_system_prompt, tools, subscriptions, tags, etc.
 
-# List agents
-agents = swarm_state.list_agents(status="active")
+# Discovery produces CSTNodes, which reconciliation converts to AgentNodes:
+from remora import discover, CSTNode
 
-# Get specific agent
-agent = swarm_state.get_agent(agent_id)
+nodes: list[CSTNode] = discover(
+    paths=["src/"],
+    languages=["python"],
+)
 ```
 
 ---
 
 ## 3. Service API
 
-Start with `remora serve`. Endpoints:
+Start with `remora serve`. HTTP endpoints (via Starlette adapter):
 
-- `GET /swarm/agents` - List all agents
-- `GET /swarm/agents/{id}` - Get agent details
-- `POST /swarm/events` - Emit an event
-- `GET /swarm/subscriptions/{id}` - Get agent subscriptions
+- `GET /` — HTML shell (Datastar UI)
+- `GET /subscribe` — Datastar SSE patches
+- `GET /events` — Raw JSON SSE event stream
+- `GET /replay?graph_id=<id>` — Replay events for a graph run
+- `POST /input` — Submit a human response (`{ "request_id": "...", "response": "..." }`)
+- `GET /config` — Sanitized config snapshot
+- `GET /snapshot` — Current UI state snapshot
+- `GET /swarm/agents` — List all agents
+- `GET /swarm/agents/{id}` — Get agent details
+- `POST /swarm/events` — Emit an event (`{ "event_type": "...", "data": {...} }`)
+- `GET /swarm/subscriptions/{id}` — Get agent subscriptions
 
 ---
 
@@ -133,7 +144,7 @@ Start with `remora serve`. Endpoints:
 Remora provides a JSON-RPC server for Neovim:
 
 ```bash
-remora swarm start --nvim
+remora swarm start --lsp
 ```
 
 Connect via `nvim --listen .remora/nvim.sock`.
