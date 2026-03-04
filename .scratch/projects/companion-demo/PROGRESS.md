@@ -30,7 +30,7 @@ The Companion demo is now functional with all core components implemented and te
 |------|--------|-------|
 | 1.1 cursor_tracker agent | ✅ Complete | Debounced, linger detection |
 | 1.2 edit_tracker agent | ✅ Complete | Coalesced edits |
-| 1.3 file_watcher agent | Pending | |
+| 1.3 file_watcher agent | ✅ Complete | Watchdog-based, ignore patterns, 18 tests |
 | 1.4 session_clock agent | ✅ Complete | Periodic ticks |
 
 ## Phase 2: Extractors
@@ -40,7 +40,7 @@ The Companion demo is now functional with all core components implemented and te
 | 2.1 context_extractor agent | ✅ Complete | Text region, content type, structure |
 | 2.2 term_extractor agent | Pending | Grail script |
 | 2.3 structure_parser agent | Pending | AST/heading |
-| 2.4 edit_summarizer agent | Pending | |
+| 2.4 edit_summarizer agent | ✅ Complete | Summarizes edits per file, 11 tests |
 
 ## Phase 3: Searchers
 
@@ -58,14 +58,14 @@ The Companion demo is now functional with all core components implemented and te
 | 4.1 task_inferrer agent | ✅ Complete | Pattern detection, 4 heuristics, 10 tests |
 | 4.2 connection_finder agent | ✅ Complete | Test/doc/concept connections |
 | 4.3 question_generator agent | ✅ Complete | Context/connection questions, 10 tests |
-| 4.4 claim_checker agent | Pending | Prose only |
+| 4.4 claim_checker agent | ✅ Complete | Prose only, detects statistical/superlative/authority claims, 13 tests |
 
 ## Phase 5: Composers
 
 | Task | Status | Notes |
 |------|--------|-------|
 | 5.1 sidebar_composer agent | ✅ Complete | Markdown composition |
-| 5.2 session_summarizer agent | Pending | |
+| 5.2 session_summarizer agent | ✅ Complete | Composes session summary from ticks, 14 tests |
 | 5.3 vault_writer agent | Pending | |
 | 5.4 Sidebar markdown template | ✅ Complete | Inline in composer |
 
@@ -101,6 +101,16 @@ The Companion demo is now functional with all core components implemented and te
 ---
 
 ## Change Log
+
+### 2026-03-03 (Session 12)
+
+- Wired `claim_checker` into `CompanionRuntime` — import, instance var, init, routing in `_on_path_change`, activations
+- Created `agents/composers/session_summarizer.py` — composes session summary from SessionTick events (elapsed time, files touched, inferred task, connections, questions)
+- Created `tests/companion/test_session_summarizer.py` — 14 tests, all passing
+- Registered `SessionSummarizer` in `agents/composers/__init__.py`
+- Wired `session_summarizer` into `CompanionRuntime` — import, SessionTick import, instance var, init, event handler wiring via `_on_session_tick`, activations
+- All 177 companion unit tests passing, 0 regressions
+- **All buildable agents are now complete** — remaining items (web clipper, term_extractor, term_definer, vault_linker, vault_writer, WebSocket) require external dependencies or Obsidian
 
 ### 2026-03-03 (Session 9)
 
@@ -248,13 +258,13 @@ companion-lsp --workspace /path/to/project --debug
 
 ---
 
-## What's Left (Nice to Have)
+## What's Left (Nice to Have — External Dependencies Required)
 
 1. **Performance**: Use smaller/faster embedding model
-2. **Vault integration**: Write sidebar to Obsidian vault
-3. **More analyzers**: task_inferrer, question_generator
-4. **WebSocket updates**: Real-time timeline without polling
-5. **Web clipper**: Browser extension integration
+2. **Vault integration**: Write sidebar to Obsidian vault (vault_writer, vault_linker)
+3. **WebSocket updates**: Real-time timeline without polling
+4. **Web clipper**: Browser extension integration
+5. **Term extractor/definer**: Grail script integration
 
 ---
 

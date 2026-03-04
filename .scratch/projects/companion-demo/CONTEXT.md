@@ -8,15 +8,15 @@
 
 ## Current State
 
-**Phase:** ANALYZER AGENTS COMPLETE
+**Phase:** ALL BUILDABLE AGENTS COMPLETE
 
-**Last action (Session 9):**
-- Built `task_inferrer` agent — detects exploration, debugging, doc writing, focused coding patterns from nav history
-- Built `question_generator` agent — generates contextual questions from connections (test/doc/similar/reference) and context (function/class/heading)
-- Both agents fully tested (10 tests each, all passing)
-- Both registered in `analyzers/__init__.py` and wired into `CompanionRuntime`
-- All 121 companion unit tests passing, 0 regressions
-- The sidebar composer already reads from `/companion/analysis/inferred_task` and `/companion/analysis/questions/*`, so the full pipeline now flows end-to-end
+**Last action (Session 12):**
+- Wired `claim_checker` into `CompanionRuntime` (5 edits: import, instance var, init, routing, activations)
+- Built `session_summarizer` composer — reads workspace state on SessionTick events, composes markdown summary with elapsed time, files touched, key insights, open threads, resume point
+- 14 new tests for session_summarizer, all passing
+- Wired `session_summarizer` into `CompanionRuntime` (6 edits: import SessionSummarizer, import SessionTick, instance var, init, event handler + wiring, activations)
+- All 177 companion unit tests passing, 0 regressions
+- **All 13 agents wired into runtime:** cursor_tracker, edit_tracker, file_watcher, session_clock, context_extractor, edit_summarizer, embedding_searcher, connection_finder, task_inferrer, question_generator, claim_checker, sidebar_composer, session_summarizer
 
 ---
 
@@ -41,8 +41,8 @@
 4. **Timeline Visualization**: Web UI showing agent activations
 5. **Demo Harness** (`remora_demo/companion/demo/`): Headless scripted demo with asciicast/GIF recording
 6. **E2E Scenarios** (`e2e/scenarios/`): 3 companion scenarios (sidebar, connections, pipeline)
-7. **All Core Agents**: cursor_tracker, edit_tracker, session_clock, context_extractor, embedding_searcher, connection_finder, task_inferrer, question_generator, sidebar_composer
-8. **Unit tests**: 121 passing, 0 failing
+7. **All Core Agents**: cursor_tracker, edit_tracker, file_watcher, session_clock, context_extractor, edit_summarizer, embedding_searcher, connection_finder, task_inferrer, question_generator, claim_checker, sidebar_composer, session_summarizer
+8. **Unit tests**: 177 passing, 0 failing
 
 ---
 
@@ -62,8 +62,12 @@
 | `e2e/scenarios/companion_connections.py` | Connection detection e2e scenario |
 | `remora_demo/companion/agents/analyzers/task_inferrer.py` | TaskInferrer - pattern-based task inference |
 | `remora_demo/companion/agents/analyzers/question_generator.py` | QuestionGenerator - contextual questions |
+| `remora_demo/companion/agents/analyzers/claim_checker.py` | ClaimChecker - detects verifiable claims in prose |
+| `remora_demo/companion/agents/composers/session_summarizer.py` | SessionSummarizer - session summary from ticks |
 | `tests/companion/test_task_inferrer.py` | 10 tests for TaskInferrer |
 | `tests/companion/test_question_generator.py` | 10 tests for QuestionGenerator |
+| `tests/companion/test_claim_checker.py` | 13 tests for ClaimChecker |
+| `tests/companion/test_session_summarizer.py` | 14 tests for SessionSummarizer |
 | `tests/companion/test_harness.py` | 10 tests for DemoHarness |
 | `tests/companion/test_recording.py` | 33 tests for AsciicastWriter |
 | `tests/companion/test_renderer.py` | Tests for TerminalRenderer |
@@ -104,13 +108,13 @@ devenv shell -- uv sync --extra companion --extra dev
 
 ---
 
-## What's Left (Nice to Have)
+## What's Left (Nice to Have — External Dependencies Required)
 
 1. **Performance**: Embedding model loading is slow (~60s)
-2. **Vault integration**: Auto-write sidebar to Obsidian
+2. **Vault integration**: Auto-write sidebar to Obsidian (vault_writer, vault_linker)
 3. **WebSocket updates**: Real-time timeline without polling
 4. **Web clipper**: Browser extension for clipping notes
-5. **More agents**: claim_checker, session_summarizer, vault_writer, term_extractor
+5. **Term extractor/definer**: Grail script integration
 
 ---
 

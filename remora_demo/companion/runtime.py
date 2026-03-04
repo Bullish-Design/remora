@@ -7,12 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from remora_demo.companion.agents.analyzers import (
+    ClaimChecker,
     ConnectionFinder,
     QuestionGenerator,
     TaskInferrer,
 )
 from remora_demo.companion.agents.base import InMemoryWorkspace, WorkspaceInterface
-from remora_demo.companion.agents.composers import SidebarComposer
+from remora_demo.companion.agents.composers import SessionSummarizer, SidebarComposer
 from remora_demo.companion.agents.extractors import ContextExtractor, EditSummarizer
 from remora_demo.companion.agents.searchers import EmbeddingSearcher
 from remora_demo.companion.agents.sensors import (
@@ -23,7 +24,7 @@ from remora_demo.companion.agents.sensors import (
     SessionClock,
 )
 from remora_demo.companion.indexing import IndexConfig, Indexer
-from remora_demo.companion.models.events import ContentEdited, CursorMoved, FileChanged, PathChanged
+from remora_demo.companion.models.events import ContentEdited, CursorMoved, FileChanged, PathChanged, SessionTick
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +80,12 @@ class CompanionRuntime:
         self._context_extractor: ContextExtractor | None = None
         self._edit_summarizer: EditSummarizer | None = None
         self._embedding_searcher: EmbeddingSearcher | None = None
+        self._claim_checker: ClaimChecker | None = None
         self._connection_finder: ConnectionFinder | None = None
         self._task_inferrer: TaskInferrer | None = None
         self._question_generator: QuestionGenerator | None = None
         self._sidebar_composer: SidebarComposer | None = None
+        self._session_summarizer: SessionSummarizer | None = None
 
     @property
     def workspace(self) -> WorkspaceInterface:
@@ -125,15 +128,18 @@ class CompanionRuntime:
         self._context_extractor = ContextExtractor(self.workspace)
         self._edit_summarizer = EditSummarizer(self.workspace)
         self._embedding_searcher = EmbeddingSearcher(self.workspace, self.indexer)
+        self._claim_checker = ClaimChecker(self.workspace)
         self._connection_finder = ConnectionFinder(self.workspace)
         self._task_inferrer = TaskInferrer(self.workspace)
         self._question_generator = QuestionGenerator(self.workspace)
         self._sidebar_composer = SidebarComposer(self.workspace)
+        self._session_summarizer = SessionSummarizer(self.workspace)
 
         # Wire up event flow
         self._cursor_tracker.on_event(self._on_cursor_event)
         self._edit_tracker.on_event(self._on_content_edited_event)
         self._file_watcher.on_event(self._on_file_changed)
+        self._session_clock.on_event(self._on_session_tick)
 
         # Set up workspace listeners for agent-to-agent communication
         if isinstance(self.workspace, InMemoryWorkspace):
@@ -184,6 +190,11 @@ class CompanionRuntime:
         logger.debug("File changed: %s (%s)", event.path, event.kind)
         # Could trigger re-indexing or notify other agents in the future
 
+    async def _on_session_tick(self, event: SessionTick) -> None:
+        """Handle session tick events from session clock."""
+        if self._session_summarizer:
+            await self._session_summarizer.on_session_tick(event)
+
     async def _on_path_change(self, change: PathChanged) -> None:
         """Handle workspace path changes for agent-to-agent communication."""
         # Forward to embedding searcher
@@ -197,6 +208,10 @@ class CompanionRuntime:
         # Forward to task inferrer (watches context changes)
         if self._task_inferrer and change.path.startswith("/companion/context/"):
             await self._task_inferrer.on_context_change(change)
+
+        # Forward to claim checker (watches context changes, checks markdown claims)
+        if self._claim_checker and change.path.startswith("/companion/context/"):
+            await self._claim_checker.on_context_change(change)
 
         # Forward to question generator (watches context and connections)
         if self._question_generator:
@@ -255,10 +270,12 @@ class CompanionRuntime:
             self._context_extractor,
             self._edit_summarizer,
             self._embedding_searcher,
+            self._claim_checker,
             self._connection_finder,
             self._task_inferrer,
             self._question_generator,
             self._sidebar_composer,
+            self._session_summarizer,
         ]:
             if agent:
                 for act in agent.activations:
