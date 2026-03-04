@@ -4,15 +4,16 @@
 
 ### `remora swarm start`
 
-Start the reactive swarm.
+Start the reactive swarm. Discovers agents, reconciles workspaces, and begins consuming events.
 
 Key flags:
-- `--config`: path to `remora.yaml`
-- `--nvim`: start Neovim JSON-RPC server
+- `--project-root`: Override project root directory
+- `--config`: Path to `remora.yaml`
+- `--lsp`: Start Neovim LSP JSON-RPC server alongside the swarm
 
 ### `remora swarm list`
 
-List discovered agents.
+List all discovered agents and their metadata.
 
 ### `remora swarm emit`
 
@@ -23,44 +24,77 @@ remora swarm emit AgentMessageEvent '{"to_agent": "agent_123", "content": "hello
 remora swarm emit ContentChangedEvent '{"path": "src/main.py"}'
 ```
 
+### `remora swarm reconcile`
+
+Reconcile agent state: re-discover agents, update workspaces, sync subscriptions.
+
 ### `remora serve`
 
 Start the HTTP service (Starlette adapter).
 
 Key flags:
-- `--host`, `--port`: bind address
-- `--project-root`: override project root
-- `--config`: path to `remora.yaml`
+- `--host`, `--port`: Bind address (default: `127.0.0.1:8420`)
+- `--project-root`: Override project root
+- `--config`: Path to `remora.yaml`
 
-## Python Modules
+### `remora workspace`
 
-### Core Runtime (`remora.core`)
+Workspace management subcommands.
+
+## Python Public API
+
+Exports from `remora` (see `src/remora/__init__.py`):
+
+### Core Runtime
 
 - `remora.core.config`: `Config`, `load_config()`, `serialize_config()`
-- `remora.core.discovery`: `discover()`, `CSTNode`, `TreeSitterDiscoverer`
-- `remora.core.event_store`: `EventStore`, `EventSourcedBus`
-- `remora.core.event_bus`: `EventBus`
-- `remora.core.subscriptions`: `SubscriptionRegistry`, `SubscriptionPattern`
-- `remora.core.swarm_state`: `SwarmState`, `AgentMetadata`
-- `remora.core.agent_runner`: `AgentRunner`
+- `remora.core.discovery`: `discover()`, `CSTNode`, `LANGUAGE_EXTENSIONS`, `compute_node_id()`
+- `remora.core.event_store`: `EventStore`
+- `remora.core.event_bus`: `EventBus`, `EventHandler`
+- `remora.core.subscriptions`: `SubscriptionRegistry`, `SubscriptionPattern`, `Subscription`
+- `remora.core.agent_node`: `AgentNode` (unified agent model)
+- `remora.core.agent_context`: `AgentContext`
 - `remora.core.swarm_executor`: `SwarmExecutor`
-- `remora.core.agent_state`: `AgentState`
-- `remora.core.reconciler`: `reconcile_on_startup`, `get_agent_workspace_path`
+- `remora.core.reconciler`: `reconcile_on_startup()`, `get_agent_dir()`, `get_agent_workspace_path()`
+- `remora.core.errors`: `RemoraError`, `ConfigError`, `DiscoveryError`, `ExecutionError`, `WorkspaceError`
 
-### Events
+### Events (`remora.core.events`)
 
-- `remora.core.events`: Event classes (`AgentMessageEvent`, `ContentChangedEvent`, `FileSavedEvent`, `ManualTriggerEvent`, etc.)
+All event classes:
+- `RemoraEvent` (base)
+- `AgentStartEvent`, `AgentCompleteEvent`, `AgentErrorEvent`
+- `AgentMessageEvent`, `ContentChangedEvent`, `FileSavedEvent`
+- `ManualTriggerEvent`, `NodeDiscoveredEvent`, `NodeRemovedEvent`
+- `HumanInputRequestEvent`, `HumanInputResponseEvent`
+- `ModelRequestEvent`, `ModelResponseEvent`
+- `ToolCallEvent`, `ToolResultEvent`
+- `KernelStartEvent`, `KernelEndEvent`, `TurnCompleteEvent`
 
 ### Workspaces
 
 - `remora.core.workspace`: `AgentWorkspace`, `CairnDataProvider`
 - `remora.core.cairn_bridge`: `CairnWorkspaceService`
+- `remora.core.cairn_externals`: `CairnExternals`
+
+### Tools
+
+- `remora.core.tools`: `RemoraGrailTool`, `build_virtual_fs()`, `discover_grail_tools()`
+
+### LSP
+
+- `remora.lsp.runner`: `AgentRunner` (LSP-integrated agent runner)
 
 ### Service Layer
 
-- `remora.service.RemoraService`: API surface with `/swarm/agents`, `/swarm/events`, etc.
-- `remora.adapters.starlette.create_app`: Starlette adapter
+- `remora.service.api`: `RemoraService` (framework-agnostic API)
+- `remora.adapters.starlette`: `create_app()` (Starlette HTTP adapter)
 
-### Models
+### Models (`remora.models`)
 
-- `remora.models.SwarmEmitRequest`, `SwarmEmitResponse`
+- `SwarmEmitRequest`, `SwarmEmitResponse`
+- `InputResponse`
+- `ConfigSnapshot`
+
+### Utilities
+
+- `remora.utils`: `PathResolver`, `to_project_relative()`

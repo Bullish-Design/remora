@@ -1,45 +1,118 @@
-Remora V2 ships with phase-aligned unit suites and a focused integration signal. The primary goals:
+# Testing Guidelines
 
-1. Validate the **event bus** (pub/sub, filtering, streams, `wait_for`).
-2. Confirm the **graph builder + executor** choose bundles deterministically and emit lifecycle events.
-3. Verify the **workspace helpers** (per-agent Cairn workspaces, shared snapshots, cleanup).
-4. Exercise the **context builder** (short/long tracks, knowledge ingestion, prompt sections).
-5. Ensure service endpoints and CLI consumers can replay the same **EventBus** stream.
+Remora's test suite covers the event-driven runtime, agent discovery, workspaces, service layer, and UI components. The suite currently contains ~1400 tests including Hypothesis property-based tests.
 
-## Unit Testing
+## Running Tests
 
-| Phase | Targeted Module | Focus |
-|-------|----------------|-------|
-| 1 | `tests/unit/test_event_bus.py` | pub/sub, wildcard matching, SSE stream iteration, JSON serialization |
-| 2 | `tests/test_context_manager.py` | `ContextBuilder` tracks recent actions and knowledge summaries |
-| 3 | `tests/unit/test_workspace.py` | cairn workspace creation, snapshot/restore, and shared directories |
+```bash
+# Full suite
+devenv shell -- pytest
 
-Run the full unit suite with `pytest tests/unit/ -v`. Each test should focus on observable behavior through events, workspace state, or context summaries rather than private helpers.
+# Unit tests only
+devenv shell -- pytest tests/unit/ -v
 
-## Integration Testing
+# Integration tests (requires vLLM server)
+devenv shell -- pytest tests/integration/ -v
 
-Integration tests should stitch discovery → metadata-driven graph → execution → service events, asserting that the EventBus produces the expected lifecycle. The future integration suite will exercise `GraphExecutor`, the service SSE endpoints, and `ResultSummary` propagation.
+# Cairn workspace tests
+devenv shell -- pytest tests/integration/cairn/ -v -m cairn
 
-Run the integration suite with `pytest tests/integration/ -v`. These tests expect a real vLLM server (see `tests/config/vllm_server.yaml` for defaults) and will skip when the server is unavailable.
-Integration tests also depend on AgentFS (Cairn workspace backing). When AgentFS is unavailable, vLLM-backed integration tests will skip.
+# Hypothesis property tests
+devenv shell -- pytest tests/test_hypothesis_properties.py -v
+```
 
-The concurrent agent workflow test (`tests/integration/test_agent_workflow_real.py`) uses these env vars to tune load:
+Always run `devenv shell -- uv sync --extra dev` before the first test run in a session.
+
+## Test Directory Structure
+
+```
+tests/
+  unit/                        # Fast, isolated unit tests
+    test_event_bus.py          # EventBus pub/sub, filtering, streams
+    test_workspace.py          # Cairn workspace creation, snapshot/restore
+    ...
+  integration/                 # Tests requiring external services
+    cairn/                     # Cairn copy-on-write isolation, concurrency
+    ...
+  benchmarks/                  # Performance benchmarks
+  companion/                   # Companion LSP tests
+  roundtrip/                   # Serialization roundtrip tests
+  test_hypothesis_properties.py  # Property-based tests (Hypothesis)
+  test_discovery.py            # Agent discovery via tree-sitter
+  test_tool_script_fuzzing.py  # Tool script fuzz testing
+  conftest.py                  # Shared fixtures (EventStore, SubscriptionRegistry, etc.)
+```
+
+## Test Categories
+
+### Unit Tests
+
+Validate individual components in isolation:
+
+- **EventBus**: pub/sub, wildcard matching, SSE stream iteration, JSON serialization
+- **EventStore**: append, replay, trigger consumption
+- **SubscriptionRegistry**: pattern matching, agent registration
+- **Workspaces**: Cairn workspace creation, snapshot/restore, shared directories
+- **Discovery**: tree-sitter node extraction, CSTNode construction
+- **Config**: load/serialize/validate config from YAML
+
+### Integration Tests
+
+Stitch multiple components together. Integration tests expect a real vLLM server and will skip when unavailable.
+
+- Agent workflow: discovery -> execution -> event emission
+- Cairn isolation: copy-on-write semantics, concurrent access
+
+Environment variables for tuning:
 - `REMORA_WORKFLOW_RUNS` (default 20)
 - `REMORA_WORKFLOW_CONCURRENCY` (default 8)
 - `REMORA_WORKFLOW_MIN_SUCCESS` (default 0.8)
+- `REMORA_CAIRN_STRESS_AGENTS` (default 200)
 
-## Cairn Integration Testing
+### Hypothesis Property Tests
 
-The Cairn-focused suite lives in `tests/integration/cairn/` and validates copy-on-write isolation, read/write semantics, KV submissions, lifecycle behavior, and concurrency safety. These tests require AgentFS (fsdantic) to be available and will skip if it is not.
+Property-based tests using the Hypothesis library for fuzzing and invariant checking:
 
-Run the Cairn suite with `pytest tests/integration/cairn/ -v -m cairn`.
-Run isolation-only checks with `pytest tests/integration/cairn/ -v -m cairn_isolation`.
-Skip slow stress tests with `pytest tests/integration/cairn/ -v -m \"cairn and not cairn_slow\"`.
+- Config serialization roundtrips
+- Event serialization/deserialization
+- AgentNode model validation
+- SubscriptionPattern matching properties
+- Discovery determinism
 
-Use `REMORA_CAIRN_STRESS_AGENTS` to scale the stress concurrency test (default 200).
+These tests generate random inputs and verify that invariants hold across all generated cases.
 
-Coverage report for Cairn integration: `pytest tests/integration/cairn/ -v -m cairn --cov=remora.cairn_bridge --cov=remora.workspace --cov-report=term-missing`.
+### Cairn Integration Tests
 
-## Monitoring & Dashboards
+Located in `tests/integration/cairn/`. Validates:
 
-Since every UI consumer ultimately relies on the EventBus stream (via `/subscribe` or `/events`), regression tests should assert on emitted events (e.g., `agent_completed`, `tool_result`). Keeping assertions at the public event level makes the suite resilient as internal plumbing evolves.
+- Copy-on-write isolation between agent workspaces
+- Read/write semantics
+- KV submissions and lifecycle behavior
+- Concurrency safety under load
+
+Markers: `cairn`, `cairn_isolation`, `cairn_concurrent`, `cairn_lifecycle`, `cairn_slow`.
+
+## Test Markers
+
+Defined in `pyproject.toml`:
+
+| Marker | Description |
+|--------|-------------|
+| `integration` | Requires vLLM server |
+| `grail_runtime` | Exercises Grail runtime execution |
+| `acceptance` | End-to-end MVP tests (requires vLLM) |
+| `acceptance_mock` | End-to-end tests with mock server |
+| `slow` | Long-running tests |
+| `cairn` | Cairn workspace integration |
+| `cairn_isolation` | Copy-on-write isolation tests |
+| `cairn_concurrent` | Concurrency safety tests |
+| `cairn_lifecycle` | Workspace lifecycle tests |
+| `cairn_slow` | Long-running Cairn tests |
+
+## Writing New Tests
+
+- Keep assertions at the **public event/model level** rather than testing private internals
+- Use the shared fixtures from `tests/conftest.py` (e.g., `event_store`, `subscription_registry`)
+- For async tests, `asyncio_mode = "auto"` is configured — just use `async def test_*`
+- For property-based tests, use `@given()` from Hypothesis with appropriate strategies
+- Mark integration tests with the appropriate marker so they skip in CI without external services
