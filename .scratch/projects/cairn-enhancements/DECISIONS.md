@@ -177,6 +177,41 @@ Key decisions with rationale. Load ASSUMPTIONS.md before making decisions.
 
 ---
 
+## D9: Turso Concurrency Strategy
+
+**Date:** 2026-03-03  
+**Decision:** Enable WAL+MVCC at workspace open, provide connection pool for true concurrency, remove Remora lock band-aids  
+**Alternatives Considered:**
+- Option A: Keep asyncio.Lock band-aids in Remora, add WAL mode only
+- Option B: Enable WAL+MVCC in Cairn, provide concurrent workspace wrapper, remove Remora locks (CHOSEN)
+- Option C: Multi-connection pool per workspace with automatic retry on conflict
+
+**Rationale:**
+- Research confirmed: turso.aio.Connection already serializes operations via worker thread + SimpleQueue. Remora's asyncio.Lock is redundant for single-connection access.
+- WAL mode enables concurrent readers alongside a writer (verified empirically).
+- MVCC + BEGIN CONCURRENT enables optimistic multi-writer access for callers that need it (verified: non-conflicting writes succeed, conflicting writes raise DatabaseError at execute time).
+- The connection pool (Option C) is premature — current usage pattern is one connection per workspace DB file, which is already correctly serialized.
+- Cairn should enable WAL mode automatically and document the concurrency guarantees so consumers (Remora) know they don't need application-level locks.
+
+**Key Findings from Empirical Testing:**
+1. `PRAGMA journal_mode=wal` — works on file-based DBs
+2. `experimental_features='mvcc'` + `BEGIN CONCURRENT` — enables optimistic concurrent writes
+3. Write-write conflicts on same row detected at execute time (not commit time), raising `turso.lib.DatabaseError`
+4. 5 concurrent readers + 1 writer work without any locks in WAL mode
+5. `turso.lib.threadsafety = 1` — connections must not be shared across threads (already satisfied by worker thread pattern)
+
+**Implementation Plan:**
+1. In Cairn `open_workspace()`: enable WAL mode after connection open
+2. In Cairn: add `open_workspace()` parameter `enable_mvcc=False` for callers needing BEGIN CONCURRENT
+3. In Cairn: document concurrency guarantees in docstring and module docstring
+4. In Remora `AgentWorkspace`: remove `_lock`, `_stable_lock` parameters and `async with self._lock:` wrappers
+5. In Remora `CairnWorkspaceService`: remove `_stable_lock` creation and passing
+6. Bump Cairn to 0.2.1
+
+**Assumptions Referenced:** Invariants #5 (async everything), Design Decisions #1 (clean dependency chain)
+
+---
+
 ## Decision Template
 
 ```markdown

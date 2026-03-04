@@ -7,12 +7,9 @@ metadata that swarm tools and Grail scripts need at runtime.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine
 
 from pydantic import BaseModel, ConfigDict, Field
-
-if TYPE_CHECKING:
-    from remora.core.state_manager import RemoraStateManager
 
 # Callback type aliases for readability
 EmitEventFn = Callable[[str, Any], Coroutine[Any, Any, None]]
@@ -43,8 +40,10 @@ class AgentContext(BaseModel):
     # Cairn file-system externals for Grail runtime
     cairn_externals: dict[str, Any] = Field(default_factory=dict)
 
-    # State manager for persisting agent state (optional)
-    state_manager: "RemoraStateManager | None" = None
+    # State manager for persisting agent state (optional).
+    # Typed as Any to avoid Pydantic forward-ref resolution issues;
+    # at runtime this is a RemoraStateManager instance.
+    state_manager: Any = None
 
     def as_externals(self) -> dict[str, Any]:
         """Return a flat dict for backward compatibility with Grail scripts.

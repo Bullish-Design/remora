@@ -7,14 +7,13 @@ through Cairn.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from cairn.runtime import workspace_manager as cairn_workspace_manager
-from cairn.runtime.workspace_manager import _open_workspace as cairn_open_workspace
+from cairn.runtime.workspace_manager import open_workspace as cairn_open_workspace
 
 from remora.core.config import Config, DEFAULT_IGNORE_PATTERNS
 from remora.core.cairn_externals import CairnExternals
@@ -53,7 +52,6 @@ class CairnWorkspaceService:
         self._manager = cairn_workspace_manager.WorkspaceManager()
         self._stable_workspace: Any | None = None
         self._agent_workspaces: dict[str, AgentWorkspace] = {}
-        self._stable_lock = asyncio.Lock()
         self._ignore_patterns: set[str] = set(config.workspace_ignore_patterns or DEFAULT_IGNORE_PATTERNS)
         self._ignore_dotfiles: bool = config.workspace_ignore_dotfiles
         self._file_mtimes: dict[str, float] = {}
@@ -112,8 +110,6 @@ class CairnWorkspaceService:
             agent_id,
             stable_workspace=self._stable_workspace,
             ensure_file_synced=self.ensure_file_synced,
-            lock=asyncio.Lock(),
-            stable_lock=self._stable_lock,
         )
         self._agent_workspaces[agent_id] = agent_workspace
         return agent_workspace

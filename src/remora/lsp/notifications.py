@@ -6,7 +6,11 @@ from remora.lsp.server import emit_event, logger, server
 
 @server.feature("$/remora/cursorMoved")
 async def on_cursor_moved(params: dict) -> None:
-    """Handle cursor position updates from neovim for web graph view."""
+    """Handle cursor position updates from neovim for web graph view.
+
+    Debounced (200ms): the actual DB update and CursorFocusEvent emission
+    only fire after the cursor has been stable for 200ms.
+    """
     try:
         if not isinstance(params, dict):
             params = {
@@ -17,11 +21,11 @@ async def on_cursor_moved(params: dict) -> None:
         line = params.get("line")
         if not uri or line is None:
             return
-        # EventStore stores file_path as the original URI, so query and store with URI
+        # Resolve which agent (if any) the cursor is on
         node = await server.event_store.get_node_at_position(uri, line)
         agent_id = node.node_id if node else None
-        # Store the URI (not the converted path) so it matches node file_paths
-        await server.db.update_cursor_focus(agent_id, uri, line)
+        # Debounce: actual DB write + CursorFocusEvent emission delayed 200ms
+        server.schedule_cursor_update(agent_id, uri, line, delay_ms=200)
     except Exception:
         logger.debug("Error in on_cursor_moved handler", exc_info=True)
 

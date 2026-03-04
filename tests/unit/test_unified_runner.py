@@ -69,6 +69,7 @@ def mock_server(event_store: EventStore) -> MagicMock:
     server.db.set_status = AsyncMock()
     server.db.store_proposal = AsyncMock()
     server.db.update_proposal_status = AsyncMock()
+    server.emit_event = AsyncMock()
     server.proposals = {}
     server.generate_correlation_id = MagicMock(return_value="corr_test")
     return server

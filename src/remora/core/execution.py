@@ -19,7 +19,7 @@ from remora.core.agent_context import AgentContext
 from remora.core.agent_node import AgentNode
 from remora.core.discovery import CSTNode
 from remora.core.event_store import EventStore
-from remora.core.events import AgentMessageEvent
+from remora.core.events import AgentMessageEvent, ScaffoldRequestEvent
 from remora.core.kernel_factory import create_kernel
 from remora.core.manifest import load_manifest
 from remora.core.subscriptions import SubscriptionRegistry
@@ -375,6 +375,22 @@ async def execute_agent_turn(
                 elif ev.get("from_agent") == node.node_id:
                     chat_history.append({"role": "assistant", "content": payload.get("content", "")})
 
+    # 4a. Build scaffold context if trigger is ScaffoldRequestEvent
+    scaffold_context: dict[str, Any] | None = None
+    if isinstance(trigger_event, ScaffoldRequestEvent):
+        scaffold_context = {"parent_source": "", "siblings": [], "intent": getattr(trigger_event, "intent", "")}
+        if trigger_event.parent_id:
+            parent_node = await event_store.get_node(trigger_event.parent_id)
+            if parent_node is not None:
+                scaffold_context["parent_source"] = parent_node.source_code or ""
+        # Siblings: nodes with same parent_id, excluding self
+        all_nodes = await event_store.list_nodes()
+        scaffold_context["siblings"] = [
+            {"name": n.name, "node_type": n.node_type}
+            for n in all_nodes
+            if n.parent_id == trigger_event.parent_id and n.node_id != node.node_id
+        ]
+
     prompt = _build_prompt(
         node,
         cst_node,
@@ -384,6 +400,7 @@ async def execute_agent_turn(
         chat_history=chat_history,
         trigger_event=trigger_event,
         requires_context=getattr(manifest, "requires_context", True),
+        scaffold_context=scaffold_context,
     )
 
     # 5. Discover tools (Grail + swarm + extra_tools)

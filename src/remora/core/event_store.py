@@ -310,8 +310,9 @@ class EventStore:
 
             # Project event into materialized views (e.g. nodes table)
             # within the SAME transaction as the event INSERT
+            follow_ups: list[RemoraEvent] = []
             if self._projection is not None:
-                await asyncio.to_thread(self._projection.apply, self._conn, event)
+                follow_ups = await asyncio.to_thread(self._projection.apply, self._conn, event)
 
             await asyncio.to_thread(self._conn.commit)
 
@@ -329,6 +330,12 @@ class EventStore:
 
         if self._event_bus is not None:
             await self._event_bus.emit(event)
+
+        # Re-append follow-up events produced by the projection (e.g.
+        # ScaffoldRequestEvent when a stub node is discovered).  These are
+        # appended as separate events after the original transaction commits.
+        for follow_up in follow_ups:
+            await self.append(graph_id, follow_up)
 
         return event_id
 

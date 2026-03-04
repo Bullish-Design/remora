@@ -16,6 +16,7 @@ from remora.core.events import (
     AgentStartEvent,
     NodeDiscoveredEvent,
     NodeRemovedEvent,
+    ScaffoldRequestEvent,
 )
 from remora.core.projections import NodeProjection
 from remora.extensions import AgentExtension
@@ -249,6 +250,43 @@ class TestProjectStatusUpdates:
         assert row["status"] == "error"
 
 
+class TestAgentCompleteEventTags:
+    @pytest.mark.asyncio
+    async def test_tags_default_empty(self, store: EventStore, projection: NodeProjection):
+        """AgentCompleteEvent.tags defaults to empty tuple."""
+        event = AgentCompleteEvent(graph_id="s", agent_id="abc123", result_summary="done")
+        assert event.tags == ()
+
+    @pytest.mark.asyncio
+    async def test_tags_can_be_set(self, store: EventStore, projection: NodeProjection):
+        """AgentCompleteEvent accepts tags for chained workflows."""
+        event = AgentCompleteEvent(graph_id="s", agent_id="abc123", result_summary="done", tags=("scaffold",))
+        assert event.tags == ("scaffold",)
+
+    @pytest.mark.asyncio
+    async def test_tags_multiple_values(self, store: EventStore, projection: NodeProjection):
+        """tags supports multiple values."""
+        event = AgentCompleteEvent(
+            graph_id="s", agent_id="abc123", result_summary="done", tags=("scaffold", "interface")
+        )
+        assert event.tags == ("scaffold", "interface")
+
+    @pytest.mark.asyncio
+    async def test_existing_code_without_tags_works(self, store: EventStore, projection: NodeProjection):
+        """Existing callers that don't pass tags should continue to work."""
+        projection.apply(store._conn, _discovered_event())
+        projection.apply(
+            store._conn,
+            AgentStartEvent(graph_id="s", agent_id="abc123", node_name="x"),
+        )
+        # This is how existing code calls it — no tags arg
+        complete = AgentCompleteEvent(graph_id="s", agent_id="abc123", result_summary="done")
+        projection.apply(store._conn, complete)
+
+        row = store._conn.execute("SELECT status FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
+        assert row["status"] == "idle"
+
+
 class TestProjectNodeRemoved:
     @pytest.mark.asyncio
     async def test_remove_deletes_row(self, store: EventStore, projection: NodeProjection):
@@ -257,3 +295,113 @@ class TestProjectNodeRemoved:
 
         row = store._conn.execute("SELECT * FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
         assert row is None
+
+
+class TestScaffoldFollowUpEvents:
+    """Verify that NodeProjection emits ScaffoldRequestEvent as a follow-up
+    when a stub node is discovered (status='scaffold')."""
+
+    @pytest.mark.asyncio
+    async def test_stub_node_returns_scaffold_request(self, store: EventStore, projection: NodeProjection):
+        """Discovering a stub node should return a ScaffoldRequestEvent follow-up."""
+        stub_event = _discovered_event(
+            source_code="def calculate_total(): ...",
+            parent_id="parent_1",
+        )
+        follow_ups = projection.apply(store._conn, stub_event)
+
+        assert len(follow_ups) == 1
+        assert isinstance(follow_ups[0], ScaffoldRequestEvent)
+        assert follow_ups[0].node_id == "abc123"
+        assert follow_ups[0].to_agent == "abc123"
+        assert follow_ups[0].node_type == "function"
+        assert follow_ups[0].parent_id == "parent_1"
+
+    @pytest.mark.asyncio
+    async def test_non_stub_node_returns_no_follow_up(self, store: EventStore, projection: NodeProjection):
+        """Discovering a non-stub node should return an empty list."""
+        event = _discovered_event(
+            source_code="def calculate_total():\n    return sum(items)",
+        )
+        follow_ups = projection.apply(store._conn, event)
+
+        assert follow_ups == []
+
+    @pytest.mark.asyncio
+    async def test_non_discovered_events_return_empty(self, store: EventStore, projection: NodeProjection):
+        """Non-NodeDiscoveredEvent events should return an empty list."""
+        projection.apply(store._conn, _discovered_event())  # need the node first
+        start = AgentStartEvent(graph_id="swarm", agent_id="abc123", node_name="x")
+        follow_ups = projection.apply(store._conn, start)
+        assert follow_ups == []
+
+    @pytest.mark.asyncio
+    async def test_stub_rediscovery_while_running_no_follow_up(self, store: EventStore, projection: NodeProjection):
+        """Re-discovering a stub while running should NOT emit ScaffoldRequestEvent
+        (status is preserved as 'running', not set to 'scaffold')."""
+        # First discover as stub
+        stub_event = _discovered_event(source_code="def calculate_total(): ...")
+        projection.apply(store._conn, stub_event)
+
+        # Mark as running
+        start = AgentStartEvent(graph_id="swarm", agent_id="abc123", node_name="x")
+        projection.apply(store._conn, start)
+
+        # Re-discover while running — status stays 'running', no scaffold follow-up
+        stub_event2 = _discovered_event(source_code="def calculate_total(): ...", source_hash="v2")
+        follow_ups = projection.apply(store._conn, stub_event2)
+        assert follow_ups == []
+
+        row = store._conn.execute("SELECT status FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
+        assert row["status"] == "running"
+
+    @pytest.mark.asyncio
+    async def test_event_store_reappends_follow_ups(self, tmp_path):
+        """EventStore.append() should re-append follow-up events from projection."""
+        projection = NodeProjection()
+        es = EventStore(tmp_path / "test_followup.db", projection=projection)
+        await es.initialize()
+
+        try:
+            stub_event = _discovered_event(source_code="class Foo: ...")
+            await es.append("swarm", stub_event)
+
+            # The follow-up ScaffoldRequestEvent should have been appended
+            events = []
+            async for ev in es.replay("swarm"):
+                events.append(ev)
+
+            event_types = [e["event_type"] for e in events]
+            assert "NodeDiscoveredEvent" in event_types
+            assert "ScaffoldRequestEvent" in event_types
+        finally:
+            await es.close()
+
+    @pytest.mark.asyncio
+    async def test_scaffold_request_matches_default_direct_subscription(
+        self, store: EventStore, projection: NodeProjection
+    ):
+        """ScaffoldRequestEvent with to_agent should match the default direct-message subscription.
+
+        register_defaults() creates SubscriptionPattern(to_agent=agent_id) which
+        is a wildcard (no event_types filter). ScaffoldRequestEvent has to_agent=node_id,
+        so the subscription should match.
+        """
+        from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
+
+        registry = SubscriptionRegistry(connection=store._conn, lock=store._lock)
+
+        # Register default subscriptions for agent "abc123"
+        await registry.register_defaults("abc123", "/src/billing.py")
+
+        # Create a ScaffoldRequestEvent as it would come from the projection
+        scaffold_event = ScaffoldRequestEvent(
+            node_id="abc123",
+            to_agent="abc123",
+            node_type="function",
+            parent_id="parent_1",
+        )
+
+        # The default direct-message subscription should match
+        matching = await registry.get_matching_agents(scaffold_event)
+        assert "abc123" in matching

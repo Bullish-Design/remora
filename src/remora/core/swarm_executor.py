@@ -17,6 +17,7 @@ from structured_agents import build_client
 
 from remora.core.agent_node import AgentNode
 from remora.core.event_store import EventStore
+from remora.core.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent, ScaffoldRequestEvent
 from remora.core.execution import execute_agent_turn
 from remora.core.subscriptions import SubscriptionRegistry
 from remora.core.cairn_bridge import CairnWorkspaceService
@@ -85,16 +86,55 @@ class SwarmExecutor:
             await self._workspace_service.initialize()
             self._workspace_initialized = True
 
-        result = await execute_agent_turn(
-            node=node,
-            config=self.config,
-            event_store=self._event_store,
-            subscriptions=self._subscriptions,
-            swarm_id=self._swarm_id,
-            project_root=self._project_root,
-            trigger_event=trigger_event,
-            workspace_service=self._workspace_service,
-            client=self._client,
+        # Emit domain-level AgentStartEvent so projections populate
+        # last_trigger_event (Workstream E — Gap #11)
+        trigger_event_type = type(trigger_event).__name__ if trigger_event is not None else ""
+        await self._event_store.append(
+            self._swarm_id,
+            AgentStartEvent(
+                graph_id=self._swarm_id,
+                agent_id=node.node_id,
+                node_name=node.name,
+                trigger_event_type=trigger_event_type,
+            ),
+        )
+
+        try:
+            result = await execute_agent_turn(
+                node=node,
+                config=self.config,
+                event_store=self._event_store,
+                subscriptions=self._subscriptions,
+                swarm_id=self._swarm_id,
+                project_root=self._project_root,
+                trigger_event=trigger_event,
+                workspace_service=self._workspace_service,
+                client=self._client,
+            )
+        except Exception as e:
+            # Emit domain-level AgentErrorEvent so projections set
+            # status = 'error' (Workstream E — Gap #11)
+            await self._event_store.append(
+                self._swarm_id,
+                AgentErrorEvent(
+                    graph_id=self._swarm_id,
+                    agent_id=node.node_id,
+                    error=str(e),
+                ),
+            )
+            raise
+
+        # Emit domain-level AgentCompleteEvent so projections
+        # populate last_completed_at (Workstream E — Gap #11)
+        tags = ("scaffold",) if isinstance(trigger_event, ScaffoldRequestEvent) else ()
+        await self._event_store.append(
+            self._swarm_id,
+            AgentCompleteEvent(
+                graph_id=self._swarm_id,
+                agent_id=node.node_id,
+                result_summary=result.response_text[:200] if result.response_text else "",
+                tags=tags,
+            ),
         )
 
         truncated_response = truncate(result.response_text, max_len=self.config.truncation_limit)

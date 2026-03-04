@@ -223,9 +223,9 @@ def create_app(state: ChatServiceState | None = None) -> Starlette:
     async def startup_event():
         logger.info("Chat service starting...")
         try:
-            from cairn import Cairn
+            import cairn
 
-            logger.info("cairn: OK")
+            logger.info("cairn %s: OK", getattr(cairn, "__version__", "unknown"))
         except ImportError as e:
             logger.error(f"cairn not available: {e}")
 

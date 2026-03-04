@@ -20,8 +20,8 @@ dependencies = [
   "uvicorn>=0.23",
   "structured-agents>=0.4.0",
   "grail>=3.0.0",
-  "cairn",
-  "fsdantic>=0.2.0",
+  "cairn>=0.2.1",
+  "fsdantic>=0.3.1",
   "pydantic>=2.0",
   "pydantic-settings>=2.0",
   "starlette>=0.30",
@@ -70,8 +70,8 @@ dev = [
 #]
 
 [tool.uv.sources]
-fsdantic = { git = "https://github.com/Bullish-Design/fsdantic.git" }
-cairn = { git = "https://github.com/Bullish-Design/cairn.git" }
+fsdantic = { git = "https://github.com/Bullish-Design/fsdantic.git", tag = "v0.3.1" }
+cairn = { git = "https://github.com/Bullish-Design/cairn.git", tag = "v0.2.1" }
 structured-agents = { git = "https://github.com/Bullish-Design/structured-agents.git", tag = "v0.4.0" }
 grail = { git = "https://github.com/Bullish-Design/grail.git", rev = "main" }
 

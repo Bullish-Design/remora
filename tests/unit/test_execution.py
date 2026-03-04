@@ -187,6 +187,97 @@ class TestBuildPrompt:
         assert "## Trigger Event" in prompt
         assert "ContentChangedEvent" in prompt
 
+    def test_prompt_with_scaffold_context(self):
+        """_build_prompt includes Scaffold Context section when scaffold_context is provided."""
+        from remora.core.execution import _agent_node_to_cst_node
+
+        node = _make_agent()
+        cst_node = _agent_node_to_cst_node(node)
+        config = _make_config()
+        path_resolver = MagicMock()
+        path_resolver.to_workspace_path = MagicMock(return_value="src/mod.py")
+
+        scaffold_context = {
+            "parent_source": "class MyClass:\n    pass",
+            "siblings": [
+                {"name": "method_a", "node_type": "function"},
+                {"name": "method_b", "node_type": "function"},
+            ],
+            "intent": "",
+        }
+
+        prompt = _build_prompt(
+            node,
+            cst_node,
+            {},
+            path_resolver,
+            config,
+            scaffold_context=scaffold_context,
+        )
+
+        assert "## Scaffold Context" in prompt
+        assert "### Parent Source" in prompt
+        assert "class MyClass:" in prompt
+        assert "### Siblings" in prompt
+        assert "method_a (function)" in prompt
+        assert "method_b (function)" in prompt
+
+    def test_prompt_scaffold_context_with_intent(self):
+        """_build_prompt includes intent when provided in scaffold_context."""
+        from remora.core.execution import _agent_node_to_cst_node
+
+        node = _make_agent()
+        cst_node = _agent_node_to_cst_node(node)
+        config = _make_config()
+        path_resolver = MagicMock()
+        path_resolver.to_workspace_path = MagicMock(return_value="src/mod.py")
+
+        scaffold_context = {
+            "parent_source": "",
+            "siblings": [],
+            "intent": "HTTP client class",
+        }
+
+        prompt = _build_prompt(
+            node,
+            cst_node,
+            {},
+            path_resolver,
+            config,
+            scaffold_context=scaffold_context,
+        )
+
+        assert "## Scaffold Context" in prompt
+        assert "### Intent" in prompt
+        assert "HTTP client class" in prompt
+
+    def test_prompt_scaffold_context_empty_omits_section(self):
+        """_build_prompt omits Scaffold Context section when all fields are empty."""
+        from remora.core.execution import _agent_node_to_cst_node
+
+        node = _make_agent()
+        cst_node = _agent_node_to_cst_node(node)
+        config = _make_config()
+        path_resolver = MagicMock()
+        path_resolver.to_workspace_path = MagicMock(return_value="src/mod.py")
+
+        scaffold_context = {
+            "parent_source": "",
+            "siblings": [],
+            "intent": "",
+        }
+
+        prompt = _build_prompt(
+            node,
+            cst_node,
+            {},
+            path_resolver,
+            config,
+            scaffold_context=scaffold_context,
+        )
+
+        assert "## Scaffold Context" not in prompt
+
 
 # =========================================================================
 # 3. _CompositeObserver
@@ -653,3 +744,137 @@ class TestExecuteAgentTurn:
 
         # Should fallback to str(result)
         assert result.response_text == "FakeRunResult"
+
+    @pytest.mark.asyncio
+    async def test_scaffold_context_built_for_scaffold_request_event(self):
+        """When trigger_event is ScaffoldRequestEvent, execute_agent_turn should
+        build scaffold_context with parent source and siblings, and pass it to
+        _build_prompt."""
+        from remora.core.events import ScaffoldRequestEvent
+
+        node = _make_agent(node_id="child_fn", parent_id="parent_cls")
+        config = _make_config()
+        es = _make_mock_event_store()
+        subs = _make_mock_subscriptions()
+        ws = _make_mock_workspace_service()
+        kernel = _make_mock_kernel("Scaffold done.")
+
+        # Set up parent node and sibling nodes
+        parent_node = _make_agent(
+            node_id="parent_cls",
+            node_type="class",
+            name="MyClass",
+            source_code="class MyClass:\n    pass",
+        )
+        sibling_node = _make_agent(
+            node_id="sibling_fn",
+            node_type="function",
+            name="helper",
+            parent_id="parent_cls",
+        )
+
+        async def mock_get_node(node_id: str):
+            if node_id == "parent_cls":
+                return parent_node
+            if node_id == "child_fn":
+                return node
+            return None
+
+        es.get_node = AsyncMock(side_effect=mock_get_node)
+        es.list_nodes = AsyncMock(return_value=[node, sibling_node, parent_node])
+
+        trigger = ScaffoldRequestEvent(
+            node_id="child_fn",
+            to_agent="child_fn",
+            node_type="function",
+            parent_id="parent_cls",
+        )
+
+        with (
+            patch("remora.core.execution.load_manifest") as mock_manifest,
+            patch("remora.core.execution.create_kernel", return_value=kernel),
+            patch("remora.core.execution.discover_grail_tools", return_value=[]),
+            patch("remora.core.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.execution.build_client"),
+            patch("remora.core.execution._build_prompt", wraps=_build_prompt) as mock_bp,
+        ):
+            mock_manifest.return_value = MagicMock(
+                name="test-bundle",
+                system_prompt="You are a code agent.",
+                agents_dir=None,
+                grammar_config=None,
+                max_turns=8,
+                requires_context=True,
+            )
+            mock_dp_instance = MagicMock()
+            mock_dp_instance.load_files = AsyncMock(return_value={})
+            mock_dp.return_value = mock_dp_instance
+
+            result = await execute_agent_turn(
+                node=node,
+                config=config,
+                event_store=es,
+                subscriptions=subs,
+                swarm_id="swarm1",
+                project_root=Path("/tmp/project"),
+                workspace_service=ws,
+                trigger_event=trigger,
+            )
+
+        assert result.response_text == "Scaffold done."
+        # Verify _build_prompt was called with scaffold_context
+        bp_call = mock_bp.call_args
+        sc = bp_call.kwargs.get("scaffold_context") if bp_call.kwargs else None
+        assert sc is not None
+        assert sc["parent_source"] == "class MyClass:\n    pass"
+        assert any(s["name"] == "helper" for s in sc["siblings"])
+
+    @pytest.mark.asyncio
+    async def test_no_scaffold_context_for_non_scaffold_trigger(self):
+        """When trigger_event is NOT ScaffoldRequestEvent, scaffold_context should be None."""
+        from remora.core.events import ContentChangedEvent
+
+        node = _make_agent()
+        config = _make_config()
+        es = _make_mock_event_store()
+        subs = _make_mock_subscriptions()
+        ws = _make_mock_workspace_service()
+        kernel = _make_mock_kernel()
+
+        trigger = ContentChangedEvent(path="src/mod.py")
+
+        with (
+            patch("remora.core.execution.load_manifest") as mock_manifest,
+            patch("remora.core.execution.create_kernel", return_value=kernel),
+            patch("remora.core.execution.discover_grail_tools", return_value=[]),
+            patch("remora.core.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.execution.build_client"),
+            patch("remora.core.execution._build_prompt", wraps=_build_prompt) as mock_bp,
+        ):
+            mock_manifest.return_value = MagicMock(
+                name="test-bundle",
+                system_prompt="You are a code agent.",
+                agents_dir=None,
+                grammar_config=None,
+                max_turns=8,
+                requires_context=True,
+            )
+            mock_dp_instance = MagicMock()
+            mock_dp_instance.load_files = AsyncMock(return_value={})
+            mock_dp.return_value = mock_dp_instance
+
+            await execute_agent_turn(
+                node=node,
+                config=config,
+                event_store=es,
+                subscriptions=subs,
+                swarm_id="swarm1",
+                project_root=Path("/tmp/project"),
+                workspace_service=ws,
+                trigger_event=trigger,
+            )
+
+        # scaffold_context should not have been passed (or should be None)
+        bp_call = mock_bp.call_args
+        sc = bp_call.kwargs.get("scaffold_context") if bp_call.kwargs else None
+        assert sc is None

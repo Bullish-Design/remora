@@ -19,6 +19,7 @@ from remora.core.events import (
     NodeDiscoveredEvent,
     NodeRemovedEvent,
     RemoraEvent,
+    ScaffoldRequestEvent,
 )
 from remora.extensions import extension_matches
 
@@ -85,10 +86,16 @@ class NodeProjection:
     def __init__(self, extension_configs: list[Type] | None = None):
         self._extension_configs = extension_configs or []
 
-    def apply(self, conn: sqlite3.Connection, event: RemoraEvent) -> None:
-        """Apply a single event to the nodes table."""
+    def apply(self, conn: sqlite3.Connection, event: RemoraEvent) -> list[RemoraEvent]:
+        """Apply a single event to the nodes table.
+
+        Returns a (possibly empty) list of follow-up events that should be
+        appended after the current transaction commits.  For example, when a
+        stub node is discovered the projection returns a
+        ``ScaffoldRequestEvent`` so that the scaffold lifecycle is triggered.
+        """
         if isinstance(event, NodeDiscoveredEvent):
-            self._project_node_discovered(conn, event)
+            return self._project_node_discovered(conn, event)
         elif isinstance(event, NodeRemovedEvent):
             self._project_node_removed(conn, event)
         elif isinstance(event, AgentStartEvent):
@@ -97,8 +104,10 @@ class NodeProjection:
             self._project_agent_complete(conn, event)
         elif isinstance(event, AgentErrorEvent):
             self._project_agent_error(conn, event)
+        return []
 
-    def _project_node_discovered(self, conn: sqlite3.Connection, event: NodeDiscoveredEvent) -> None:
+    def _project_node_discovered(self, conn: sqlite3.Connection, event: NodeDiscoveredEvent) -> list[RemoraEvent]:
+        is_stub = _is_stub(event.source_code)
         row: dict[str, Any] = {
             "node_id": event.node_id,
             "node_type": event.node_type,
@@ -114,7 +123,7 @@ class NodeProjection:
             "parent_id": event.parent_id,
             "caller_ids": "[]",
             "callee_ids": "[]",
-            "status": "scaffold" if _is_stub(event.source_code) else "idle",
+            "status": "scaffold" if is_stub else "idle",
             "last_trigger_event": "",
             "last_completed_at": None,
             "extension_name": None,
@@ -176,6 +185,25 @@ class NodeProjection:
             """,
             list(row.values()),
         )
+
+        # Emit ScaffoldRequestEvent follow-up when the node is actually in
+        # 'scaffold' status after the upsert.  The CASE in the upsert
+        # preserves running/error status, so we query the actual result.
+        if is_stub:
+            actual = conn.execute(
+                "SELECT status FROM nodes WHERE node_id = ?",
+                (event.node_id,),
+            ).fetchone()
+            if actual and actual["status"] == "scaffold":
+                return [
+                    ScaffoldRequestEvent(
+                        node_id=event.node_id,
+                        to_agent=event.node_id,
+                        node_type=event.node_type,
+                        parent_id=event.parent_id,
+                    )
+                ]
+        return []
 
     def _project_node_removed(self, conn: sqlite3.Connection, event: NodeRemovedEvent) -> None:
         conn.execute("DELETE FROM nodes WHERE node_id = ?", (event.node_id,))

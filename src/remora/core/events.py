@@ -67,6 +67,7 @@ class AgentCompleteEvent(_FrozenEvent):
     agent_id: str
     result_summary: str
     response: str = ""  # Full response content for display
+    tags: tuple[str, ...] = ()  # Enables chained agent workflows (e.g. ("scaffold",))
     timestamp: float = Field(default_factory=time.time)
 
 
@@ -134,6 +135,15 @@ class ContentChangedEvent(_FrozenEvent):
     timestamp: float = Field(default_factory=time.time)
 
 
+class CursorFocusEvent(_FrozenEvent):
+    """Cursor moved to focus on a specific agent (debounced)."""
+
+    focused_agent_id: str | None
+    file_path: str
+    line: int
+    timestamp: float = Field(default_factory=time.time)
+
+
 class ManualTriggerEvent(_FrozenEvent):
     """Manual trigger to start an agent."""
 
@@ -170,9 +180,14 @@ class ScaffoldRequestEvent(_FrozenEvent):
 
     Triggers the scaffold lifecycle: the node gathers context from its
     parent/siblings and fills itself in via rewrite_self().
+
+    ``to_agent`` is set to ``node_id`` so that the existing direct-message
+    subscription (``SubscriptionPattern(to_agent=agent_id)``) routes this
+    event to the correct agent without needing a separate subscription.
     """
 
     node_id: str
+    to_agent: str  # same as node_id — enables subscription routing
     node_type: str
     parent_id: str | None = None
     intent: str = ""  # Optional human-provided hint (e.g. "HTTP client class")
@@ -204,6 +219,7 @@ RemoraEvent = (
     AgentMessageEvent
     | FileSavedEvent
     | ContentChangedEvent
+    | CursorFocusEvent
     | ManualTriggerEvent
     |
     # Node lifecycle events
@@ -232,6 +248,7 @@ __all__ = [
     "AgentMessageEvent",
     "FileSavedEvent",
     "ContentChangedEvent",
+    "CursorFocusEvent",
     "ManualTriggerEvent",
     # Node lifecycle events
     "NodeDiscoveredEvent",

@@ -100,6 +100,12 @@ def main(
         log.info("Workspace root_path: %s", getattr(server.workspace, "root_path", "NOT SET"))
         log.info("Starting agent runner loop...")
         asyncio.ensure_future(runner.run_forever())
+        # Wire subscription-based triggers into the runner so the reactive
+        # loop is fully closed: event → EventStore → subscription matching
+        # → trigger queue → AgentRunner (Gap #1 closure)
+        if server.event_store is not None:
+            log.info("Starting EventStore trigger bridge...")
+            asyncio.ensure_future(runner.run_from_event_store(server.event_store))
         log.info("Starting background workspace scan...")
         asyncio.ensure_future(_background_scan())
 

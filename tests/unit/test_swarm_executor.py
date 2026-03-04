@@ -14,12 +14,13 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from remora.core.agent_node import AgentNode
 from remora.core.config import Config
+from remora.core.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent
 from remora.core.execution import (
     _lang_tag_for,
     _agent_node_to_cst_node,
@@ -336,3 +337,326 @@ class TestResolveModelName:
         manifest = MagicMock(model="")
         model = _resolve_model_name(bundle_dir, manifest, config)
         assert model == "custom/override"
+
+
+# =========================================================================
+# 7. SwarmExecutor emits AgentStartEvent / AgentCompleteEvent
+# =========================================================================
+
+
+class TestSwarmExecutorDomainEvents:
+    """Verify SwarmExecutor.run_agent emits AgentStartEvent/AgentCompleteEvent
+    via event_store.append() so that NodeProjection populates last_trigger_event
+    and last_completed_at (Workstream E — Gap #11)."""
+
+    @pytest.mark.asyncio
+    @patch("remora.core.swarm_executor.build_client")
+    @patch("remora.core.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
+    async def test_emits_start_and_complete_events(self, mock_exec, mock_build_client, tmp_path):
+        from remora.core.execution import ExecutionResult
+
+        mock_build_client.return_value = MagicMock()
+        mock_exec.return_value = ExecutionResult(response_text="Done.", kernel_events=[])
+
+        config = _make_config(tmp_path)
+        event_store = MagicMock()
+        event_store.append = AsyncMock(return_value=1)
+
+        executor = SwarmExecutor(
+            config=config,
+            event_bus=None,
+            event_store=event_store,
+            subscriptions=MagicMock(),
+            swarm_id="test",
+            project_root=tmp_path,
+        )
+        executor._workspace_initialized = True  # skip workspace init
+
+        node = _make_node()
+        await executor.run_agent(node)
+
+        # Find AgentStartEvent
+        start_events = [call for call in event_store.append.call_args_list if isinstance(call[0][1], AgentStartEvent)]
+        assert len(start_events) == 1
+        assert start_events[0][0][1].agent_id == "agent_func_1"
+
+        # Find AgentCompleteEvent
+        complete_events = [
+            call for call in event_store.append.call_args_list if isinstance(call[0][1], AgentCompleteEvent)
+        ]
+        assert len(complete_events) == 1
+        assert complete_events[0][0][1].agent_id == "agent_func_1"
+
+    @pytest.mark.asyncio
+    @patch("remora.core.swarm_executor.build_client")
+    @patch("remora.core.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
+    async def test_emits_error_event_on_failure(self, mock_exec, mock_build_client, tmp_path):
+        mock_build_client.return_value = MagicMock()
+        mock_exec.side_effect = RuntimeError("model error")
+
+        config = _make_config(tmp_path)
+        event_store = MagicMock()
+        event_store.append = AsyncMock(return_value=1)
+
+        executor = SwarmExecutor(
+            config=config,
+            event_bus=None,
+            event_store=event_store,
+            subscriptions=MagicMock(),
+            swarm_id="test",
+            project_root=tmp_path,
+        )
+        executor._workspace_initialized = True
+
+        node = _make_node()
+        with pytest.raises(RuntimeError, match="model error"):
+            await executor.run_agent(node)
+
+        # Find AgentErrorEvent
+        error_events = [call for call in event_store.append.call_args_list if isinstance(call[0][1], AgentErrorEvent)]
+        assert len(error_events) == 1
+        assert "model error" in error_events[0][0][1].error
+
+        # Should NOT have emitted AgentCompleteEvent
+        complete_events = [
+            call for call in event_store.append.call_args_list if isinstance(call[0][1], AgentCompleteEvent)
+        ]
+        assert len(complete_events) == 0
+
+    @pytest.mark.asyncio
+    @patch("remora.core.swarm_executor.build_client")
+    @patch("remora.core.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
+    async def test_scaffold_trigger_adds_scaffold_tag(self, mock_exec, mock_build_client, tmp_path):
+        """When trigger_event is ScaffoldRequestEvent, AgentCompleteEvent should have tags=('scaffold',)."""
+        from remora.core.events import ScaffoldRequestEvent
+        from remora.core.execution import ExecutionResult
+
+        mock_build_client.return_value = MagicMock()
+        mock_exec.return_value = ExecutionResult(response_text="Scaffolded.", kernel_events=[])
+
+        config = _make_config(tmp_path)
+        event_store = MagicMock()
+        event_store.append = AsyncMock(return_value=1)
+
+        executor = SwarmExecutor(
+            config=config,
+            event_bus=None,
+            event_store=event_store,
+            subscriptions=MagicMock(),
+            swarm_id="test",
+            project_root=tmp_path,
+        )
+        executor._workspace_initialized = True
+
+        node = _make_node()
+        trigger = ScaffoldRequestEvent(
+            node_id="agent_func_1",
+            to_agent="agent_func_1",
+            node_type="function",
+        )
+        await executor.run_agent(node, trigger_event=trigger)
+
+        # Find AgentCompleteEvent and check tags
+        complete_events = [
+            call for call in event_store.append.call_args_list if isinstance(call[0][1], AgentCompleteEvent)
+        ]
+        assert len(complete_events) == 1
+        assert complete_events[0][0][1].tags == ("scaffold",)
+
+    @pytest.mark.asyncio
+    @patch("remora.core.swarm_executor.build_client")
+    @patch("remora.core.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
+    async def test_non_scaffold_trigger_has_no_tags(self, mock_exec, mock_build_client, tmp_path):
+        """When trigger_event is not ScaffoldRequestEvent, AgentCompleteEvent tags should be empty."""
+        from remora.core.events import ContentChangedEvent
+        from remora.core.execution import ExecutionResult
+
+        mock_build_client.return_value = MagicMock()
+        mock_exec.return_value = ExecutionResult(response_text="Done.", kernel_events=[])
+
+        config = _make_config(tmp_path)
+        event_store = MagicMock()
+        event_store.append = AsyncMock(return_value=1)
+
+        executor = SwarmExecutor(
+            config=config,
+            event_bus=None,
+            event_store=event_store,
+            subscriptions=MagicMock(),
+            swarm_id="test",
+            project_root=tmp_path,
+        )
+        executor._workspace_initialized = True
+
+        node = _make_node()
+        trigger = ContentChangedEvent(path="src/billing.py")
+        await executor.run_agent(node, trigger_event=trigger)
+
+        complete_events = [
+            call for call in event_store.append.call_args_list if isinstance(call[0][1], AgentCompleteEvent)
+        ]
+        assert len(complete_events) == 1
+        assert complete_events[0][0][1].tags == ()
+
+
+# =========================================================================
+# 8. Swarm tools end-to-end with real SubscriptionRegistry (Gap #3)
+# =========================================================================
+
+
+class TestSwarmToolsEndToEnd:
+    """Verify SubscribeTool and UnsubscribeTool work end-to-end
+    with a real SubscriptionRegistry backed by in-memory SQLite.
+
+    This closes Gap #3: swarm tools wired end-to-end."""
+
+    @pytest.fixture
+    async def registry(self):
+        """Create a real SubscriptionRegistry with in-memory SQLite."""
+        from remora.core.subscriptions import SubscriptionRegistry
+
+        reg = SubscriptionRegistry(db_path=":memory:")
+        await reg.initialize()
+        yield reg
+        await reg.close()
+
+    def _make_context(self, registry) -> "AgentContext":
+        """Build an AgentContext with real registry callbacks."""
+        from remora.core.agent_context import AgentContext
+        from remora.core.subscriptions import SubscriptionRegistry
+
+        async def _register_sub(agent_id: str, pattern) -> None:
+            await registry.register(agent_id, pattern)
+
+        async def _unsubscribe_sub(subscription_id: int) -> str:
+            removed = await registry.unregister(subscription_id)
+            if removed:
+                return f"Subscription {subscription_id} removed."
+            return f"No subscription found for {subscription_id}."
+
+        async def _emit_event(event_type: str, event_obj) -> None:
+            pass  # no-op for this test
+
+        async def _broadcast(to_pattern: str, content: str) -> str:
+            return "ok"
+
+        async def _query_agents(filter_type=None):
+            return []
+
+        return AgentContext(
+            agent_id="agent_test_1",
+            correlation_id="corr_test",
+            emit_event=_emit_event,
+            register_subscription=_register_sub,
+            unsubscribe_subscription=_unsubscribe_sub,
+            broadcast=_broadcast,
+            query_agents=_query_agents,
+        )
+
+    @pytest.mark.asyncio
+    async def test_subscribe_tool_registers_subscription(self, registry):
+        """SubscribeTool.execute() should create a subscription in the registry."""
+        from remora.core.tools.swarm import SubscribeTool
+
+        ctx = self._make_context(registry)
+        tool = SubscribeTool(ctx)
+
+        result = await tool.execute(
+            {"event_types": ["ContentChangedEvent"], "path_glob": "src/*.py"},
+            context=None,
+        )
+
+        assert not result.is_error
+        assert "successfully" in result.output.lower()
+
+        # Verify it's actually in the registry
+        subs = await registry.get_subscriptions("agent_test_1")
+        assert len(subs) == 1
+        assert subs[0].pattern.event_types == ["ContentChangedEvent"]
+        assert subs[0].pattern.path_glob == "src/*.py"
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_tool_removes_subscription(self, registry):
+        """UnsubscribeTool.execute() should remove the subscription from the registry."""
+        from remora.core.subscriptions import SubscriptionPattern
+        from remora.core.tools.swarm import UnsubscribeTool
+
+        # Pre-register a subscription
+        pattern = SubscriptionPattern(event_types=["AgentMessageEvent"])
+        sub = await registry.register("agent_test_1", pattern)
+
+        ctx = self._make_context(registry)
+        tool = UnsubscribeTool(ctx)
+
+        result = await tool.execute(
+            {"subscription_id": sub.id},
+            context=None,
+        )
+
+        assert not result.is_error
+        assert "removed" in result.output.lower()
+
+        # Verify it's gone from the registry
+        subs = await registry.get_subscriptions("agent_test_1")
+        assert len(subs) == 0
+
+    @pytest.mark.asyncio
+    async def test_subscribe_then_unsubscribe_round_trip(self, registry):
+        """Full round-trip: subscribe via tool, verify, unsubscribe via tool, verify gone."""
+        from remora.core.tools.swarm import SubscribeTool, UnsubscribeTool
+
+        ctx = self._make_context(registry)
+
+        # Subscribe
+        sub_tool = SubscribeTool(ctx)
+        await sub_tool.execute(
+            {"event_types": ["ContentChangedEvent", "AgentMessageEvent"]},
+            context=None,
+        )
+
+        subs = await registry.get_subscriptions("agent_test_1")
+        assert len(subs) == 1
+        sub_id = subs[0].id
+
+        # Unsubscribe
+        unsub_tool = UnsubscribeTool(ctx)
+        result = await unsub_tool.execute(
+            {"subscription_id": sub_id},
+            context=None,
+        )
+
+        assert not result.is_error
+        subs = await registry.get_subscriptions("agent_test_1")
+        assert len(subs) == 0
+
+    @pytest.mark.asyncio
+    async def test_subscribe_tool_matches_events(self, registry):
+        """A subscription created by SubscribeTool should match events via get_matching_agents."""
+        from remora.core.events import ContentChangedEvent
+        from remora.core.tools.swarm import SubscribeTool
+
+        ctx = self._make_context(registry)
+        tool = SubscribeTool(ctx)
+
+        await tool.execute(
+            {"event_types": ["ContentChangedEvent"]},
+            context=None,
+        )
+
+        # Now check that this agent matches a ContentChangedEvent
+        event = ContentChangedEvent(path="/src/foo.py")
+        matching = await registry.get_matching_agents(event)
+        assert "agent_test_1" in matching
+
+    @pytest.mark.asyncio
+    async def test_build_swarm_tools_includes_subscribe_unsubscribe(self):
+        """build_swarm_tools() should include SubscribeTool and UnsubscribeTool."""
+        from remora.core.tools.swarm import build_swarm_tools, SubscribeTool, UnsubscribeTool
+
+        ctx = MagicMock()
+        ctx.agent_id = "agent_1"
+        tools = build_swarm_tools(ctx)
+
+        tool_types = [type(t) for t in tools]
+        assert SubscribeTool in tool_types
+        assert UnsubscribeTool in tool_types

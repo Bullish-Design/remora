@@ -131,6 +131,7 @@ class SpawnChildTool:
             # Emit ScaffoldRequestEvent
             scaffold_req = ScaffoldRequestEvent(
                 node_id=node_id,
+                to_agent=node_id,
                 node_type=node_type,
                 parent_id=parent_id,
                 intent=intent,

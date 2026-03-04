@@ -11,11 +11,16 @@ import click
 from remora.adapters.starlette import create_app
 from remora.core.config import ConfigError, load_config
 from remora.service.api import RemoraService
+from remora.cli.workspace import workspace
 
 
 @click.group()
 def main() -> None:
     """Remora - Agent-based code analysis."""
+
+
+# Register workspace command group
+main.add_command(workspace)
 
 
 @main.group()

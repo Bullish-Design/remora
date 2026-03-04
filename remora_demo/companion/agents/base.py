@@ -89,7 +89,8 @@ class AgentBase(ABC):
     def __init__(self, name: str | None = None) -> None:
         self.name = name or self.__class__.__name__
         self._subscriptions: list[Subscription] = []
-        self._debounce_timers: dict[str, float] = {}
+        self._debounce_tasks: dict[str, asyncio.Task[None]] = {}  # Pending debounced calls
+        self._debounce_latest_data: dict[str, Any] = {}  # Latest data for debounced calls
         self._activations: list[AgentActivation] = []
 
         # Collect subscriptions from decorated methods
@@ -150,19 +151,41 @@ class AgentBase(ABC):
                 await self._invoke_handler(sub, change)
 
     async def _invoke_handler(self, sub: Subscription, data: Any) -> None:
-        """Invoke a subscription handler with debouncing and activation tracking."""
+        """Invoke a subscription handler with debouncing and activation tracking.
+
+        Uses trailing-edge debouncing: waits for quiet period, then fires with latest data.
+        This ensures all rapid updates complete before the handler runs.
+        """
         if sub.handler is None:
             return
 
-        # Check debounce
         handler_key = f"{sub.target}:{id(sub.handler)}"
-        now = time.time() * 1000  # ms
 
+        # If debouncing, use trailing-edge: schedule/reschedule delayed execution
         if sub.debounce_ms > 0:
-            last_invoke = self._debounce_timers.get(handler_key, 0)
-            if now - last_invoke < sub.debounce_ms:
-                return
-            self._debounce_timers[handler_key] = now
+            # Store latest data
+            self._debounce_latest_data[handler_key] = data
+
+            # Cancel any pending task for this handler
+            if handler_key in self._debounce_tasks:
+                self._debounce_tasks[handler_key].cancel()
+
+            # Schedule new execution after debounce period
+            async def delayed_invoke() -> None:
+                await asyncio.sleep(sub.debounce_ms / 1000.0)
+                latest_data = self._debounce_latest_data.pop(handler_key, data)
+                await self._execute_handler(sub, latest_data)
+
+            self._debounce_tasks[handler_key] = asyncio.create_task(delayed_invoke())
+            return
+
+        # No debouncing - execute immediately
+        await self._execute_handler(sub, data)
+
+    async def _execute_handler(self, sub: Subscription, data: Any) -> None:
+        """Execute a handler with activation tracking."""
+        if sub.handler is None:
+            return
 
         # Create activation record
         activation = AgentActivation(

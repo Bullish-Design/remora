@@ -67,6 +67,7 @@ async def test_lsp_handlers_register_and_advertise_capabilities(isolated_lsp_ser
     expected_features = {
         "textDocument/didOpen",
         "textDocument/didSave",
+        "textDocument/didChange",
         "textDocument/didClose",
         "textDocument/hover",
         "textDocument/codeLens",

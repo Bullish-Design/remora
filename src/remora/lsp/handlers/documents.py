@@ -88,6 +88,25 @@ async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         logger.exception("Error in did_open handler")
 
 
+@server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)
+async def did_change(params: lsp.DidChangeTextDocumentParams) -> None:
+    """Debounced reparse on every edit — updates nodes + code lenses.
+
+    Does NOT emit ContentChangedEvent (that only fires on save).
+    Does NOT inject IDs or update edges (those happen on save only).
+    """
+    try:
+        uri = params.text_document.uri
+        if not params.content_changes:
+            return
+        # Full-sync: the last content change contains the full document text
+        text = params.content_changes[-1].text
+        logger.debug("did_change: scheduling reparse for %s (%d chars)", uri, len(text))
+        server.schedule_reparse(uri, text, delay_ms=500)
+    except Exception:
+        logger.exception("Error in did_change handler")
+
+
 @server.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
 async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
     try:

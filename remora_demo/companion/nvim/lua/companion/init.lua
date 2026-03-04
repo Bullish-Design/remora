@@ -75,6 +75,9 @@ end
 -- Sidebar panel
 -- =========================================================================
 
+-- Forward declaration for cursor update (defined below)
+local send_cursor_update
+
 --- Create or get the sidebar buffer.
 local function get_sidebar_buf()
     if M._sidebar_buf and vim.api.nvim_buf_is_valid(M._sidebar_buf) then
@@ -115,8 +118,12 @@ function M.open_sidebar()
     -- Go back to previous window
     vim.cmd("wincmd p")
     
-    -- Fetch initial content
-    M.refresh_sidebar()
+    -- Send initial cursor position so agents have context
+    send_cursor_update()
+    
+    -- Wait for agents to process, then fetch content
+    -- Debounce is 100ms + some processing time
+    vim.defer_fn(M.refresh_sidebar, 300)
     
     log("info", "Sidebar opened")
 end
@@ -150,19 +157,27 @@ local function update_sidebar_content(markdown)
 end
 
 --- Request sidebar content from LSP server.
+--- Sends cursor position first to ensure agents have latest context.
 function M.refresh_sidebar()
     local client = get_client({ silent = true })
     if not client then return end
     
-    client.request("$/companion/getSidebar", {}, function(err, result)
-        if err then
-            log("error", "Failed to get sidebar: %s", vim.inspect(err))
-            return
-        end
-        if result and result.markdown then
-            update_sidebar_content(result.markdown)
-        end
-    end)
+    -- Send cursor position first (agents need this to compose)
+    local ctx = cursor_context()
+    client.notify("$/companion/cursorMoved", ctx)
+    
+    -- Wait for agents to process (debounce 100ms + compose time)
+    vim.defer_fn(function()
+        client.request("$/companion/getSidebar", {}, function(err, result)
+            if err then
+                log("error", "Failed to get sidebar: %s", vim.inspect(err))
+                return
+            end
+            if result and result.markdown then
+                update_sidebar_content(result.markdown)
+            end
+        end)
+    end, 200)
 end
 
 -- =========================================================================
@@ -170,7 +185,7 @@ end
 -- =========================================================================
 
 --- Send cursor position to LSP server.
-local function send_cursor_update()
+send_cursor_update = function()
     local client = get_client({ silent = true })
     if not client then return end
     

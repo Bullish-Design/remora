@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field, ConfigDict
 
 from remora.core.agent_node import AgentNode
+from remora.core.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent, ScaffoldRequestEvent
 from remora.core.execution import ExecutionResult, execute_agent_turn
 from remora.core.tools.lsp import build_lsp_tools
 from remora.extensions import extension_matches, load_extensions
@@ -39,11 +40,12 @@ MAX_CHAIN_DEPTH = 10
 
 
 class Trigger(BaseModel):
-    model_config = ConfigDict(frozen=False)
+    model_config = ConfigDict(frozen=False, arbitrary_types_allowed=True)
 
     agent_id: str
     correlation_id: str
     context: dict = Field(default_factory=dict)
+    trigger_event: Any = None
 
 
 class _HeadlessDB:
@@ -206,14 +208,23 @@ class AgentRunner:
     async def run_from_event_store(self, event_store: Any) -> None:
         """Bridge EventStore.get_triggers() into the runner queue.
 
-        This allows the CLI ``swarm run`` command to feed subscription-matched
-        triggers into the same unified runner without the LSP server.
+        Consumes subscription-matched triggers from the EventStore trigger
+        queue and feeds them into the same ``self.trigger()`` path used by
+        manual LSP handler triggers.  Deduplication is handled naturally by
+        ``_check_cooldown()`` — if a handler already triggered the agent
+        within the cooldown window, the subscription trigger is suppressed.
+
+        In LSP mode this runs alongside ``run_forever()`` so that the
+        reactive loop is fully closed (Gap #1).
         """
+        # Wait for run_forever() to set _running before consuming triggers
+        while not self._running:
+            await asyncio.sleep(0.05)
         async for agent_id, event_id, event in event_store.get_triggers():
             if not self._running:
                 break
             correlation_id = getattr(event, "correlation_id", None) or self.server.generate_correlation_id()
-            await self.trigger(agent_id, correlation_id)
+            await self.trigger(agent_id, correlation_id, trigger_event=event)
 
     async def poll_command_queue(self) -> None:
         """Poll the command_queue table and dispatch commands."""
@@ -290,7 +301,9 @@ class AgentRunner:
         else:
             logger.warning("Unknown command type: %s", cmd_type)
 
-    async def trigger(self, agent_id: str, correlation_id: str, context: dict | None = None) -> None:
+    async def trigger(
+        self, agent_id: str, correlation_id: str, context: dict | None = None, trigger_event: Any = None
+    ) -> None:
         logger.info("AgentRunner.trigger: agent=%s corr=%s context=%r", agent_id, correlation_id, context)
 
         # In-memory cooldown check (ported from core runner)
@@ -318,14 +331,18 @@ class AgentRunner:
             return
 
         logger.info("AgentRunner.trigger: enqueuing trigger for %s", agent_id)
-        await self.queue.put(Trigger(agent_id=agent_id, correlation_id=correlation_id, context=context or {}))
+        await self.queue.put(
+            Trigger(
+                agent_id=agent_id, correlation_id=correlation_id, context=context or {}, trigger_event=trigger_event
+            )
+        )
 
     async def emit_error(self, agent_id: str, error: str, correlation_id: str) -> None:
-        from remora.lsp.server import emit_event
-
-        await emit_event(
-            LspAgentErrorEvent(agent_id=agent_id, error=error, correlation_id=correlation_id, timestamp=0.0)
-        )
+        event = LspAgentErrorEvent(agent_id=agent_id, error=error, correlation_id=correlation_id, timestamp=0.0)
+        try:
+            await self.server.emit_event(event)
+        except Exception:
+            logger.debug("emit_error: failed to emit event for %s", agent_id, exc_info=True)
 
     async def execute_turn(self, trigger: Trigger) -> None:
         """Execute a single agent turn.
@@ -356,6 +373,17 @@ class AgentRunner:
                 return
 
             logger.info("execute_turn: node found: %s (%s) file=%s", agent.name, agent.node_type, agent.file_path)
+
+            # Emit domain-level AgentStartEvent so projections populate
+            # last_trigger_event (Workstream E — Gap #11)
+            await self.server.event_store.append(
+                "swarm",
+                AgentStartEvent(
+                    graph_id="swarm",
+                    agent_id=agent_id,
+                    node_name=agent.name,
+                ),
+            )
 
             try:
                 agent = self.apply_extensions(agent)
@@ -439,6 +467,7 @@ class AgentRunner:
                     extra_tools=lsp_tools,
                     on_kernel_event=_on_kernel_event,
                     chat_history=chat_history,
+                    trigger_event=trigger.trigger_event,
                 )
 
                 # Emit final text response if present
@@ -454,7 +483,30 @@ class AgentRunner:
                         )
                     )
 
+                # Emit domain-level AgentCompleteEvent so projections
+                # populate last_completed_at (Workstream E — Gap #11)
+                tags = ("scaffold",) if isinstance(trigger.trigger_event, ScaffoldRequestEvent) else ()
+                await self.server.event_store.append(
+                    "swarm",
+                    AgentCompleteEvent(
+                        graph_id="swarm",
+                        agent_id=agent_id,
+                        result_summary=result.response_text[:200] if result.response_text else "",
+                        tags=tags,
+                    ),
+                )
+
             except Exception as e:
+                # Emit domain-level AgentErrorEvent so projections set
+                # status = 'error' (Workstream E — Gap #11)
+                await self.server.event_store.append(
+                    "swarm",
+                    AgentErrorEvent(
+                        graph_id="swarm",
+                        agent_id=agent_id,
+                        error=str(e),
+                    ),
+                )
                 await self.emit_error(agent_id, str(e), correlation_id)
             finally:
                 # Decrement depth tracking

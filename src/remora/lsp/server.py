@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import atexit
 import logging
 import time
@@ -37,10 +38,109 @@ class RemoraLanguageServer(LanguageServer):
         self._correlation_counter = 0
         self._injecting: set[str] = set()
         self.subscriptions = subscriptions
+        # Debounce timers for didChange reparse (Gap #12) and cursor updates (Gap #13)
+        self._reparse_timers: dict[str, asyncio.TimerHandle] = {}
+        self._cursor_timers: dict[str, asyncio.TimerHandle] = {}
 
     def generate_correlation_id(self) -> str:
         self._correlation_counter += 1
         return f"corr_{self._correlation_counter}_{uuid.uuid4().hex[:8]}"
+
+    def schedule_reparse(self, uri: str, text: str, delay_ms: int = 500) -> None:
+        """Schedule a debounced reparse for *uri*.
+
+        Any pending reparse for the same URI is cancelled first.  The actual
+        reparse is executed as an ``asyncio.Task`` after *delay_ms*
+        milliseconds of inactivity.
+        """
+        # Cancel previous timer for this URI
+        prev = self._reparse_timers.pop(uri, None)
+        if prev is not None:
+            prev.cancel()
+
+        loop = asyncio.get_event_loop()
+        handle = loop.call_later(
+            delay_ms / 1000.0,
+            lambda: asyncio.ensure_future(self._do_reparse(uri, text)),
+        )
+        self._reparse_timers[uri] = handle
+
+    async def _do_reparse(self, uri: str, text: str) -> None:
+        """Execute the actual debounced reparse for *uri*."""
+        from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
+
+        self._reparse_timers.pop(uri, None)
+        try:
+            old_agents = await self.event_store.list_nodes(file_path=uri) if self.event_store else []
+            old_dicts = [{"name": a.name, "node_type": a.node_type, "node_id": a.node_id} for a in old_agents]
+
+            new_dicts = self.watcher.parse_and_inject_ids(uri, text, old_dicts)
+            logger.debug("_do_reparse: %d nodes for %s", len(new_dicts), uri)
+
+            if self.event_store:
+                new_ids = {nd["node_id"] for nd in new_dicts}
+                old_ids = {a.node_id for a in old_agents}
+
+                for orphan_id in old_ids - new_ids:
+                    await self.event_store.append("nodes", NodeRemovedEvent(node_id=orphan_id))
+
+                for nd in new_dicts:
+                    event = NodeDiscoveredEvent(
+                        node_id=nd["node_id"],
+                        node_type=nd["node_type"],
+                        name=nd["name"],
+                        full_name=nd["full_name"],
+                        file_path=nd["file_path"],
+                        start_line=nd["start_line"],
+                        end_line=nd["end_line"],
+                        source_code=nd["source_code"],
+                        source_hash=nd["source_hash"],
+                        parent_id=nd["parent_id"],
+                        start_byte=nd.get("start_byte", 0),
+                        end_byte=nd.get("end_byte", 0),
+                    )
+                    await self.event_store.append("nodes", event)
+
+            await self.refresh_code_lenses()
+            await self.notify_agents_updated()
+        except Exception:
+            logger.exception("Error in _do_reparse for %s", uri)
+
+    def schedule_cursor_update(
+        self,
+        agent_id: str | None,
+        uri: str,
+        line: int,
+        delay_ms: int = 200,
+    ) -> None:
+        """Schedule a debounced cursor-focus update.
+
+        Cancels any pending cursor timer, then fires the actual DB update +
+        ``CursorFocusEvent`` emission after *delay_ms* of cursor stability.
+        """
+        prev = self._cursor_timers.pop(uri, None)
+        if prev is not None:
+            prev.cancel()
+
+        loop = asyncio.get_event_loop()
+        handle = loop.call_later(
+            delay_ms / 1000.0,
+            lambda: asyncio.ensure_future(self._do_cursor_update(agent_id, uri, line)),
+        )
+        self._cursor_timers[uri] = handle
+
+    async def _do_cursor_update(self, agent_id: str | None, uri: str, line: int) -> None:
+        """Execute the actual debounced cursor update."""
+        from remora.core.events import CursorFocusEvent
+
+        self._cursor_timers.pop(uri, None)
+        try:
+            await self.db.update_cursor_focus(agent_id, uri, line)
+            if self.event_store:
+                event = CursorFocusEvent(focused_agent_id=agent_id, file_path=uri, line=line)
+                await self.event_store.append("cursor", event)
+        except Exception:
+            logger.debug("Error in _do_cursor_update", exc_info=True)
 
     async def refresh_code_lenses(self) -> None:
         try:
