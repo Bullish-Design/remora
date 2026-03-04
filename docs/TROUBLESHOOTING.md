@@ -1,61 +1,72 @@
 # Troubleshooting
 
-This guide covers common failures, error codes, and where to look for diagnostics.
+Common failures, error types, and where to look for diagnostics.
 
 ## Quick Checks
 
-1. Verify configuration:
-   - Run `remora config` to inspect resolved values.
-   - Confirm `agents_dir` points to the bundle directory.
-2. Check inference server reachability:
-   - Validate `server.base_url` and network connectivity.
-3. Enable logs for more context:
-   - Set `event_stream.enabled: true` for JSONL events.
-   - Set `llm_log.enabled: true` for readable transcripts.
+1. **Verify configuration**: Check `remora.yaml` values. Key fields: `bundle_root`, `discovery_paths`, `model_base_url`.
+2. **Check inference server**: Validate `model_base_url` and network connectivity to the vLLM server.
+3. **Check agent discovery**: Run `remora swarm list` to confirm agents are being discovered from your source paths.
 
-## Error Codes
+## Error Types
 
-Remora uses structured error codes from `remora.errors`.
+Remora uses structured errors from `remora.core.errors`:
 
-| Code | Meaning | Typical Causes | Suggested Fix |
-| --- | --- | --- | --- |
-| `REMORA-CONFIG` | Configuration error | Missing config, invalid YAML, bad `agents_dir` | Fix config path or values |
-| `REMORA-DISCOVERY` | Discovery error | Missing query packs, unreadable files, parse issues | Verify queries or exclude bad files |
-| `REMORA-AGENT` | Bundle/tool error | Missing `bundle.yaml` or tool script | Check bundle layout |
-| `REMORA-EXEC` | Execution error | Agent run failure or tool crash | Inspect logs, retry or adjust tools |
+| Error Class | Meaning | Typical Causes | Suggested Fix |
+|---|---|---|---|
+| `ConfigError` | Configuration error | Missing config, invalid YAML, bad field values | Check `remora.yaml` structure and paths |
+| `DiscoveryError` | Discovery error | Missing tree-sitter queries, unreadable files | Verify `discovery_paths` and file permissions |
+| `ExecutionError` | Execution error | Agent run failure, tool crash, timeout | Inspect logs, check `max_turns` / `timeout_s` |
+| `WorkspaceError` | Workspace error | Cairn/AgentFS failure, permission issues | Check `.remora/` directory and Cairn availability |
 
 ## Common Scenarios
 
 ### Bundle Not Found
 
 Symptoms:
-- Warnings about missing bundles.
-- `REMORA-AGENT` during initialization.
+- Warnings about missing bundles during swarm start.
+- `ExecutionError` during agent initialization.
 
 Fixes:
-- Ensure `operations.*.subagent` points to a directory with `bundle.yaml`.
-- Confirm tool scripts exist in `agents/<op>/tools`.
+- Ensure `bundle_root` in `remora.yaml` points to the directory containing your bundles.
+- Confirm `bundle_mapping` maps node types to valid bundle YAML files.
+- Check that bundle directories contain `bundle.yaml` and the referenced tool scripts.
 
 ### No Nodes Discovered
 
 Symptoms:
-- Empty results or `No operations run` output.
+- `remora swarm list` shows no agents.
+- Empty results from `remora swarm start`.
 
 Fixes:
-- Verify the paths passed to `remora analyze`.
-- Confirm the query pack is available and matches the language.
+- Verify `discovery_paths` in `remora.yaml` points to directories with source code.
+- Check `discovery_languages` matches your codebase (e.g., `["python"]`).
+- Ensure tree-sitter parsers are installed for the target languages.
 
-### Event Stream Empty
+### Events Not Flowing
 
 Symptoms:
-- `remora-tui` shows no events.
+- Service endpoints return empty event streams.
+- Agents not triggering on emitted events.
 
 Fixes:
-- Ensure `event_stream.enabled` is true.
-- Verify the output path is writable.
+- Check that the EventStore is initialized: `.remora/events/events.db` should exist after `remora swarm start`.
+- Verify agent subscriptions match the emitted event types.
+- Check `remora swarm emit` with a known event type to test the pipeline.
+
+### Workspace Errors
+
+Symptoms:
+- `WorkspaceError` during agent execution.
+- Missing or inaccessible agent workspace directories.
+
+Fixes:
+- Verify `.remora/` directory is writable.
+- Check that Cairn (AgentFS via fsdantic) is available: `python -c "import fsdantic"`.
+- Check `.remora/stable.db` exists (created during reconciliation).
 
 ## Logging and Diagnostics
 
-- Event stream output: `event_stream.output`.
-- Control file: `event_stream.control_file` (used by `remora-tui`).
-- LLM transcripts: `llm_log.output`.
+- **EventStore**: Events are persisted to `.remora/events/events.db` (SQLite). Use `remora swarm emit` to test event flow.
+- **Service endpoints**: `GET /events` provides a live SSE stream for debugging. `GET /snapshot` shows current UI state.
+- **Python logging**: Standard `logging` module is used throughout. Set log level via environment or config to see detailed output.

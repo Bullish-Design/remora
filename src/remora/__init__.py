@@ -1,10 +1,10 @@
 """Remora public API surface."""
 
+from remora.core.agent_context import AgentContext
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.cairn_externals import CairnExternals
 from remora.core.config import (
     Config,
-    ConfigError,
     load_config,
     serialize_config,
 )
@@ -12,8 +12,6 @@ from remora.core.config import (
 from remora.core.discovery import (
     CSTNode,
     LANGUAGE_EXTENSIONS,
-    NodeType,
-    TreeSitterDiscoverer,
     compute_node_id,
     discover,
 )
@@ -22,7 +20,6 @@ from remora.core.errors import (
     DiscoveryError,
     ExecutionError,
     RemoraError,
-    SwarmError,
     WorkspaceError,
 )
 from remora.core.event_bus import EventBus, EventHandler
@@ -33,25 +30,26 @@ from remora.core.events import (
     AgentMessageEvent,
     AgentStartEvent,
     ContentChangedEvent,
+    FileSavedEvent,
     HumanInputRequestEvent,
     HumanInputResponseEvent,
     KernelEndEvent,
     KernelStartEvent,
+    ManualTriggerEvent,
     ModelRequestEvent,
     ModelResponseEvent,
+    NodeDiscoveredEvent,
+    NodeRemovedEvent,
     RemoraEvent,
     ToolCallEvent,
     ToolResultEvent,
     TurnCompleteEvent,
 )
-from remora.core.agent_state import AgentState
-from remora.core.agent_runner import AgentRunner, ExecutionContext
+from remora.lsp.runner import AgentRunner
 from remora.core.swarm_executor import SwarmExecutor
 from remora.core.subscriptions import Subscription, SubscriptionPattern, SubscriptionRegistry
-from remora.core.swarm_state import AgentMetadata, SwarmState
 from remora.core.reconciler import (
     get_agent_dir,
-    get_agent_state_path,
     get_agent_workspace_path,
     reconcile_on_startup,
 )
@@ -60,12 +58,12 @@ from remora.core.workspace import AgentWorkspace, CairnDataProvider
 from remora.utils import PathResolver, to_project_relative
 
 __all__ = [
+    "AgentContext",
     "Config",
     "ConfigError",
     "DiscoveryError",
     "ExecutionError",
     "RemoraError",
-    "SwarmError",
     "WorkspaceError",
     "load_config",
     "serialize_config",
@@ -74,12 +72,16 @@ __all__ = [
     "AgentMessageEvent",
     "AgentStartEvent",
     "ContentChangedEvent",
+    "FileSavedEvent",
     "HumanInputRequestEvent",
     "HumanInputResponseEvent",
     "KernelEndEvent",
     "KernelStartEvent",
+    "ManualTriggerEvent",
     "ModelRequestEvent",
     "ModelResponseEvent",
+    "NodeDiscoveredEvent",
+    "NodeRemovedEvent",
     "RemoraEvent",
     "ToolCallEvent",
     "ToolResultEvent",
@@ -87,14 +89,10 @@ __all__ = [
     "EventBus",
     "EventHandler",
     "EventStore",
-    "AgentState",
     "AgentRunner",
-    "ExecutionContext",
     "SwarmExecutor",
     "CSTNode",
     "LANGUAGE_EXTENSIONS",
-    "NodeType",
-    "TreeSitterDiscoverer",
     "compute_node_id",
     "discover",
     "AgentWorkspace",
@@ -107,10 +105,7 @@ __all__ = [
     "Subscription",
     "SubscriptionPattern",
     "SubscriptionRegistry",
-    "SwarmState",
-    "AgentMetadata",
     "get_agent_dir",
-    "get_agent_state_path",
     "get_agent_workspace_path",
     "reconcile_on_startup",
 ]

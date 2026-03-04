@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -209,6 +208,30 @@ async def health(request: Request) -> JSONResponse:
     )
 
 
+def create_app(state: ChatServiceState | None = None) -> Starlette:
+    """Create a Starlette app with dependency-injected state.
+
+    If *state* is not provided, the module-level singleton is used for
+    backward compatibility.
+    """
+    chat_state = state if state is not None else globals()["state"]
+
+    application = Starlette(routes=routes)
+    application.state.chat_state = chat_state
+
+    @application.on_event("startup")
+    async def startup_event():
+        logger.info("Chat service starting...")
+        try:
+            import cairn
+
+            logger.info("cairn %s: OK", getattr(cairn, "__version__", "unknown"))
+        except ImportError as e:
+            logger.error(f"cairn not available: {e}")
+
+    return application
+
+
 # Routes
 routes = [
     Route("/sessions", create_session, methods=["POST"]),
@@ -220,20 +243,7 @@ routes = [
     Route("/health", health, methods=["GET"]),
 ]
 
-app = Starlette(routes=routes)
-
-
-# Add startup event:
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Chat service starting...")
-
-    try:
-        from cairn import Cairn
-
-        logger.info("cairn: OK")
-    except ImportError as e:
-        logger.error(f"cairn not available: {e}")
+app = create_app()
 
 
 if __name__ == "__main__":

@@ -9,19 +9,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
-from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, Field
 
 from remora.utils import PathLike, normalize_path
 
 if TYPE_CHECKING:
     from remora.core.events import RemoraEvent
 
+logger = logging.getLogger(__name__)
 
-@dataclass
-class SubscriptionPattern:
+
+class SubscriptionPattern(BaseModel):
     """Pattern for matching events.
 
     All fields are optional. A None field means "match anything".
@@ -71,16 +74,15 @@ class SubscriptionPattern:
         return True
 
 
-@dataclass
-class Subscription:
+class Subscription(BaseModel):
     """A registered subscription."""
 
     id: int
     agent_id: str
     pattern: SubscriptionPattern
     is_default: bool = False
-    created_at: float = field(default_factory=time.time)
-    updated_at: float = field(default_factory=time.time)
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
 
 
 class SubscriptionRegistry:
@@ -88,16 +90,51 @@ class SubscriptionRegistry:
 
     Manages persistent subscriptions in SQLite and provides
     pattern matching for event routing.
+
+    Can operate in two modes:
+    - **Standalone**: pass ``db_path`` and the registry opens its own SQLite
+      connection and creates the subscriptions table.
+    - **Shared**: pass ``connection`` and ``lock`` from an ``EventStore``
+      instance.  The subscriptions table is assumed to already exist
+      (created by ``EventStore.initialize()``).
     """
 
-    def __init__(self, db_path: PathLike):
-        self._db_path = normalize_path(db_path)
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Any = None
-        self._lock = asyncio.Lock()
+    def __init__(
+        self,
+        db_path: PathLike | None = None,
+        *,
+        connection: Any = None,
+        lock: asyncio.Lock | None = None,
+    ):
+        # Shared-connection mode
+        if connection is not None:
+            self._db_path: Path | None = None
+            self._conn = connection
+            self._lock = lock or asyncio.Lock()
+            self._shared = True
+        else:
+            # Standalone mode (backward compat)
+            if db_path is None:
+                raise TypeError("Either db_path or connection must be provided")
+            self._db_path = normalize_path(db_path)
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn: Any = None
+            self._lock = asyncio.Lock()
+            self._shared = False
+
+        # In-memory cache: maps event_type -> list of (agent_id, SubscriptionPattern)
+        # None means cache is invalidated and must be rebuilt from DB.
+        self._cache: dict[str, list[tuple[str, SubscriptionPattern]]] | None = None
 
     async def initialize(self) -> None:
-        """Initialize the database and create tables."""
+        """Initialize the database and create tables.
+
+        No-op when using a shared connection (tables created by EventStore).
+        """
+        if self._shared:
+            # Tables already created by EventStore.initialize()
+            return
+
         async with self._lock:
             if self._conn is not None:
                 return
@@ -123,7 +160,7 @@ class SubscriptionRegistry:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_agent_id ON subscriptions(agent_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_is_default ON subscriptions(is_default)")
                 conn.commit()
-            
+
             await asyncio.to_thread(_init_db, self._conn)
 
     async def register(
@@ -137,7 +174,7 @@ class SubscriptionRegistry:
             await self.initialize()
 
         now = time.time()
-        pattern_json = json.dumps(asdict(pattern))
+        pattern_json = json.dumps(pattern.model_dump())
 
         def _exec(conn: Any) -> int:
             cursor = conn.execute(
@@ -151,6 +188,7 @@ class SubscriptionRegistry:
             return cursor.lastrowid
 
         lastrowid = await asyncio.to_thread(_exec, self._conn)
+        self._cache = None  # Invalidate cache
 
         return Subscription(
             id=lastrowid,
@@ -193,7 +231,9 @@ class SubscriptionRegistry:
             conn.commit()
             return cursor.rowcount
 
-        return await asyncio.to_thread(_exec, self._conn)
+        count = await asyncio.to_thread(_exec, self._conn)
+        self._cache = None  # Invalidate cache
+        return count
 
     async def unregister(self, subscription_id: int) -> bool:
         """Remove a specific subscription by ID."""
@@ -208,7 +248,9 @@ class SubscriptionRegistry:
             conn.commit()
             return cursor.rowcount > 0
 
-        return await asyncio.to_thread(_exec, self._conn)
+        removed = await asyncio.to_thread(_exec, self._conn)
+        self._cache = None  # Invalidate cache
+        return removed
 
     async def get_subscriptions(self, agent_id: str) -> list[Subscription]:
         """Get all subscriptions for an agent."""
@@ -241,12 +283,39 @@ class SubscriptionRegistry:
         return await asyncio.to_thread(_fetch, self._conn)
 
     async def get_matching_agents(self, event: RemoraEvent) -> list[str]:
-        """Get all agent IDs whose subscriptions match the event."""
-        import logging
-        logger = logging.getLogger(__name__)
+        """Get all agent IDs whose subscriptions match the event.
 
+        Uses an in-memory cache indexed by event_type for O(1) lookup.
+        The cache is rebuilt from DB on first call and after any mutation.
+        """
         if self._conn is None:
             await self.initialize()
+
+        if self._cache is None:
+            await self._rebuild_cache()
+
+        assert self._cache is not None
+        event_type = type(event).__name__
+
+        # Collect candidates: subscriptions indexed under this event_type + wildcards (key "")
+        candidates = self._cache.get(event_type, []) + self._cache.get("", [])
+
+        matching_agents: list[str] = []
+        seen_agents: set[str] = set()
+
+        for agent_id, pattern in candidates:
+            if agent_id not in seen_agents and pattern.matches(event):
+                matching_agents.append(agent_id)
+                seen_agents.add(agent_id)
+
+        return matching_agents
+
+    async def _rebuild_cache(self) -> None:
+        """Rebuild the in-memory subscription cache from the database.
+
+        Indexes subscriptions by event_type. Subscriptions with no event_type
+        filter (wildcards) are stored under the empty string key "".
+        """
 
         def _fetch(conn: Any) -> list[dict[str, Any]]:
             cursor = conn.execute("SELECT * FROM subscriptions ORDER BY id")
@@ -254,30 +323,31 @@ class SubscriptionRegistry:
 
         rows = await asyncio.to_thread(_fetch, self._conn)
 
-        event_to_agent = getattr(event, "to_agent", None)
-        logger.info(f"Matching event to_agent={event_to_agent} against {len(rows)} subscriptions")
-
-        matching_agents = []
-        seen_agents = set()
-
+        cache: dict[str, list[tuple[str, SubscriptionPattern]]] = {}
         for row in rows:
             pattern_data = json.loads(row["pattern_json"])
             pattern = SubscriptionPattern(**pattern_data)
+            agent_id = row["agent_id"]
+            entry = (agent_id, pattern)
 
-            # Log subscriptions that have to_agent matching
-            if pattern.to_agent and pattern.to_agent == event_to_agent:
-                logger.info(f"  Found matching subscription: agent={row['agent_id']} pattern.to_agent={pattern.to_agent}")
+            if pattern.event_types:
+                for et in pattern.event_types:
+                    cache.setdefault(et, []).append(entry)
+            else:
+                # Wildcard — no event_type filter, matches all event types
+                cache.setdefault("", []).append(entry)
 
-            if pattern.matches(event):
-                agent_id = row["agent_id"]
-                if agent_id not in seen_agents:
-                    matching_agents.append(agent_id)
-                    seen_agents.add(agent_id)
-
-        return matching_agents
+        self._cache = cache
 
     async def close(self) -> None:
-        """Close the database connection."""
+        """Close the database connection.
+
+        Skips closing when using a shared connection (owned by EventStore).
+        """
+        self._cache = None
+        if self._shared:
+            # Don't close shared connection — it's owned by EventStore
+            return
         if self._conn:
             self._conn.close()
             self._conn = None

@@ -1,34 +1,32 @@
 """Chat session wrapper for single-agent interactions."""
 
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Awaitable, cast, get_type_hints
+import inspect
+import json
 import time
 import uuid
+
+from pydantic import BaseModel, Field
 
 from remora.core.discovery import discover
 from remora.core.event_bus import EventBus
 from remora.core.cairn_bridge import CairnWorkspaceService
 from remora.core.config import Config
+from remora.core.kernel_factory import create_kernel
 from remora.core.workspace import AgentWorkspace
 from structured_agents import Tool
-
-from structured_agents.agent import get_response_parser
-from structured_agents.client import build_client
-from structured_agents.kernel import AgentKernel
-from structured_agents.models.adapter import ModelAdapter
-from structured_agents.types import Message as KernelMessage
+from structured_agents.types import Message as KernelMessage, ToolCall, ToolResult, ToolSchema
 
 
-@dataclass
-class Message:
+class Message(BaseModel):
     """A message in the conversation."""
 
     id: str
     role: str  # "user" or "assistant"
     content: str
     timestamp: float
-    tool_calls: list[dict] = field(default_factory=list)
+    tool_calls: list[dict] = Field(default_factory=list)
 
     @classmethod
     def user(cls, content: str) -> "Message":
@@ -50,21 +48,40 @@ class Message:
         )
 
 
-@dataclass
-class ChatConfig:
+class ChatConfig(BaseModel):
     """Configuration for a chat session."""
 
     workspace_path: str
     system_prompt: str
-    tool_presets: list[str] = field(default_factory=lambda: ["file_ops"])
-    model_name: str = "Qwen/Qwen3-4B-Instruct-2507-FP8"
-    model_base_url: str = "http://remora-server:8000/v1"
-    model_api_key: str = "EMPTY"
+    tool_presets: list[str] = Field(default_factory=lambda: ["file_ops"])
+    model_name: str = "Qwen/Qwen3-4B"
+    model_base_url: str = "http://localhost:8000/v1"
+    model_api_key: str = ""
     max_turns: int = 10
 
+    @classmethod
+    def from_config(
+        cls,
+        config: Config,
+        *,
+        workspace_path: str,
+        system_prompt: str,
+        tool_presets: list[str] | None = None,
+        max_turns: int = 10,
+    ) -> "ChatConfig":
+        """Create a ChatConfig from the canonical Config object."""
+        return cls(
+            workspace_path=workspace_path,
+            system_prompt=system_prompt,
+            tool_presets=tool_presets or ["file_ops"],
+            model_name=config.model_default,
+            model_base_url=config.model_base_url,
+            model_api_key=config.model_api_key,
+            max_turns=max_turns,
+        )
 
-@dataclass
-class AgentResponse:
+
+class AgentResponse(BaseModel):
     """Response from the agent."""
 
     message: Message
@@ -143,26 +160,14 @@ class ChatSession:
 
         # Build messages for kernel
         messages = [KernelMessage(role="system", content=self.config.system_prompt)]
-        messages += [KernelMessage(role=m.role, content=m.content) for m in self._history]
+        messages += [KernelMessage(role=cast(Any, m.role), content=m.content) for m in self._history]
         tool_schemas = [tool.schema for tool in self._tools]
 
         # Run agent
-        parser = get_response_parser(self.config.model_name)
-        adapter = ModelAdapter(
-            name=self.config.model_name,
-            response_parser=parser,
-        )
-        client = build_client(
-            {
-                "base_url": self.config.model_base_url,
-                "api_key": self.config.model_api_key or "EMPTY",
-                "model": self.config.model_name,
-            }
-        )
-
-        kernel = AgentKernel(
-            client=client,
-            adapter=adapter,
+        kernel = create_kernel(
+            model_name=self.config.model_name,
+            base_url=self.config.model_base_url,
+            api_key=self.config.model_api_key or "EMPTY",
             tools=self._tools,
             observer=self.event_bus,
         )
@@ -206,7 +211,74 @@ class ChatSession:
     async def close(self) -> None:
         """Clean up resources."""
         if self._workspace:
-            await self._workspace.cleanup()
+            await self._workspace.close()
+
+
+_PY_TYPE_TO_JSON: dict[type, str] = {
+    str: "string",
+    int: "integer",
+    float: "number",
+    bool: "boolean",
+}
+
+
+def _params_schema(func: Callable[..., Any]) -> dict[str, Any]:
+    """Build a JSON-Schema-style ``parameters`` dict from *func*'s signature."""
+    sig = inspect.signature(func)
+    hints = get_type_hints(func)
+
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+
+    for name, param in sig.parameters.items():
+        json_type = _PY_TYPE_TO_JSON.get(hints.get(name, str), "string")
+        properties[name] = {"type": json_type}
+        if param.default is inspect.Parameter.empty:
+            required.append(name)
+
+    schema: dict[str, Any] = {"type": "object", "properties": properties}
+    if required:
+        schema["required"] = required
+    return schema
+
+
+class FunctionTool:
+    """Wraps an async callable so it satisfies the ``Tool`` protocol."""
+
+    def __init__(self, func: Callable[..., Awaitable[Any]]) -> None:
+        self._func = func
+        self._schema = ToolSchema(
+            name=func.__name__,
+            description=func.__doc__ or func.__name__,
+            parameters=_params_schema(func),
+        )
+
+    @property
+    def schema(self) -> ToolSchema:
+        return self._schema
+
+    async def execute(
+        self,
+        arguments: dict[str, Any],
+        context: ToolCall | None = None,
+    ) -> ToolResult:
+        call_id = context.id if context else "unknown"
+        try:
+            result = await self._func(**arguments)
+            output = json.dumps(result) if not isinstance(result, str) else result
+            return ToolResult(
+                call_id=call_id,
+                name=self._schema.name,
+                output=output,
+                is_error=False,
+            )
+        except Exception as exc:
+            return ToolResult(
+                call_id=call_id,
+                name=self._schema.name,
+                output=str(exc),
+                is_error=True,
+            )
 
 
 def build_chat_tools(agent_workspace: AgentWorkspace, project_root: Path) -> list[Tool]:
@@ -249,10 +321,10 @@ def build_chat_tools(agent_workspace: AgentWorkspace, project_root: Path) -> lis
         ]
 
     return [
-        Tool.from_function(read_file),
-        Tool.from_function(write_file),
-        Tool.from_function(list_dir),
-        Tool.from_function(file_exists),
-        Tool.from_function(search_files),
-        Tool.from_function(discover_symbols),
+        FunctionTool(read_file),
+        FunctionTool(write_file),
+        FunctionTool(list_dir),
+        FunctionTool(file_exists),
+        FunctionTool(search_files),
+        FunctionTool(discover_symbols),
     ]

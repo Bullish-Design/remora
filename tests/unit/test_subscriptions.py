@@ -2,9 +2,11 @@
 
 import pytest
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from remora.core.events import AgentMessageEvent, ContentChangedEvent
 from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
+from remora.core.tools.swarm import SubscribeTool
 
 
 @pytest.fixture
@@ -141,3 +143,210 @@ async def test_pattern_matching_tags() -> None:
         content="test",
     )
     assert not pattern.matches(event_no_tags)
+
+
+class TestSubscribeToolPattern:
+    """Verify SubscribeTool does not self-reference the subscribing agent."""
+
+    @pytest.mark.asyncio
+    async def test_subscribe_tool_does_not_set_to_agent(self) -> None:
+        """SubscribeTool should NOT set to_agent=agent_id (the subscriber).
+
+        The to_agent field filters events by their *destination*. Setting it
+        to the subscribing agent's own ID would make the subscription only
+        match events explicitly addressed to that agent — which is already
+        covered by the default direct-message subscription.
+        """
+        captured_patterns: list[SubscriptionPattern] = []
+
+        async def fake_register(agent_id: str, pattern: SubscriptionPattern) -> None:
+            captured_patterns.append(pattern)
+
+        from remora.core.agent_context import AgentContext
+        from unittest.mock import AsyncMock
+
+        ctx = AgentContext(
+            agent_id="my-agent",
+            emit_event=AsyncMock(),
+            register_subscription=fake_register,
+            unsubscribe_subscription=AsyncMock(),
+            broadcast=AsyncMock(),
+            query_agents=AsyncMock(),
+        )
+        tool = SubscribeTool(ctx)
+
+        from structured_agents.types import ToolCall
+
+        ctx_call = ToolCall(id="call-1", name="subscribe", arguments={})
+        result = await tool.execute(
+            {"event_types": ["ContentChangedEvent"], "from_agents": ["other-agent"]},
+            ctx_call,
+        )
+
+        assert not result.is_error
+        assert len(captured_patterns) == 1
+        pattern = captured_patterns[0]
+        # to_agent must be None — not the subscribing agent's own ID
+        assert pattern.to_agent is None, (
+            f"SubscribeTool set to_agent={pattern.to_agent!r}, but should leave it None to avoid self-referencing"
+        )
+        assert pattern.event_types == ["ContentChangedEvent"]
+        assert pattern.from_agents == ["other-agent"]
+
+    @pytest.mark.asyncio
+    async def test_subscribe_tool_pattern_matches_external_events(self) -> None:
+        """A subscription from SubscribeTool should match events NOT addressed to the subscriber."""
+        captured_patterns: list[SubscriptionPattern] = []
+
+        async def fake_register(agent_id: str, pattern: SubscriptionPattern) -> None:
+            captured_patterns.append(pattern)
+
+        from remora.core.agent_context import AgentContext
+        from unittest.mock import AsyncMock
+
+        ctx = AgentContext(
+            agent_id="watcher-agent",
+            emit_event=AsyncMock(),
+            register_subscription=fake_register,
+            unsubscribe_subscription=AsyncMock(),
+            broadcast=AsyncMock(),
+            query_agents=AsyncMock(),
+        )
+        tool = SubscribeTool(ctx)
+
+        from structured_agents.types import ToolCall
+
+        ctx_call = ToolCall(id="call-2", name="subscribe", arguments={})
+        await tool.execute({"event_types": ["AgentMessageEvent"]}, ctx_call)
+
+        pattern = captured_patterns[0]
+        # An event sent from agent-A to agent-B should match (watcher subscribes to all AgentMessageEvents)
+        event = AgentMessageEvent(from_agent="agent-A", to_agent="agent-B", content="hi")
+        assert pattern.matches(event), (
+            "Subscription pattern from SubscribeTool should match events not addressed to the subscribing agent"
+        )
+
+
+class TestSubscriptionCache:
+    """Verify in-memory subscription cache for O(1) lookup."""
+
+    @pytest.mark.asyncio
+    async def test_cache_avoids_repeated_db_reads(self, temp_db: Path) -> None:
+        """After first get_matching_agents call, subsequent calls use cache (no DB read)."""
+        registry = SubscriptionRegistry(temp_db)
+        await registry.initialize()
+
+        await registry.register("agent-1", SubscriptionPattern(event_types=["ContentChangedEvent"]))
+        event = ContentChangedEvent(path="src/main.py")
+
+        # First call populates the cache
+        result1 = await registry.get_matching_agents(event)
+        assert "agent-1" in result1
+
+        # Second call should use cache — verify by checking _cache is populated
+        assert registry._cache is not None, "Cache should be populated after get_matching_agents"
+
+        # Cache should still return correct results
+        result2 = await registry.get_matching_agents(event)
+        assert result1 == result2
+
+        await registry.close()
+
+    @pytest.mark.asyncio
+    async def test_cache_invalidated_on_register(self, temp_db: Path) -> None:
+        """Registering a new subscription invalidates the cache."""
+        registry = SubscriptionRegistry(temp_db)
+        await registry.initialize()
+
+        await registry.register("agent-1", SubscriptionPattern(event_types=["ContentChangedEvent"]))
+        event = ContentChangedEvent(path="src/main.py")
+
+        # Populate cache
+        result1 = await registry.get_matching_agents(event)
+        assert "agent-1" in result1
+
+        # Register a new subscription — should invalidate cache
+        await registry.register("agent-2", SubscriptionPattern(event_types=["ContentChangedEvent"]))
+        assert registry._cache is None, "Cache should be invalidated after register"
+
+        # Next call re-populates cache with updated data
+        result2 = await registry.get_matching_agents(event)
+        assert "agent-1" in result2
+        assert "agent-2" in result2
+
+        await registry.close()
+
+    @pytest.mark.asyncio
+    async def test_cache_invalidated_on_unregister(self, temp_db: Path) -> None:
+        """Unregistering a subscription invalidates the cache."""
+        registry = SubscriptionRegistry(temp_db)
+        await registry.initialize()
+
+        sub = await registry.register("agent-1", SubscriptionPattern(event_types=["ContentChangedEvent"]))
+        event = ContentChangedEvent(path="src/main.py")
+
+        result1 = await registry.get_matching_agents(event)
+        assert "agent-1" in result1
+
+        await registry.unregister(sub.id)
+        assert registry._cache is None, "Cache should be invalidated after unregister"
+
+        result2 = await registry.get_matching_agents(event)
+        assert "agent-1" not in result2
+
+        await registry.close()
+
+    @pytest.mark.asyncio
+    async def test_cache_invalidated_on_unregister_all(self, temp_db: Path) -> None:
+        """unregister_all invalidates the cache."""
+        registry = SubscriptionRegistry(temp_db)
+        await registry.initialize()
+
+        await registry.register("agent-1", SubscriptionPattern(event_types=["ContentChangedEvent"]))
+        event = ContentChangedEvent(path="src/main.py")
+
+        await registry.get_matching_agents(event)  # Populate cache
+        assert registry._cache is not None
+
+        await registry.unregister_all("agent-1")
+        assert registry._cache is None, "Cache should be invalidated after unregister_all"
+
+        result = await registry.get_matching_agents(event)
+        assert "agent-1" not in result
+
+        await registry.close()
+
+    @pytest.mark.asyncio
+    async def test_cache_indexes_by_event_type(self, temp_db: Path) -> None:
+        """Cache should index subscriptions by event_type for efficient lookup."""
+        registry = SubscriptionRegistry(temp_db)
+        await registry.initialize()
+
+        # Register subscriptions for different event types
+        await registry.register("agent-1", SubscriptionPattern(event_types=["ContentChangedEvent"]))
+        await registry.register("agent-2", SubscriptionPattern(event_types=["AgentMessageEvent"]))
+        await registry.register("agent-3", SubscriptionPattern())  # wildcard — matches all
+
+        content_event = ContentChangedEvent(path="src/main.py")
+        msg_event = AgentMessageEvent(from_agent="a", to_agent="b", content="hi")
+
+        content_matches = await registry.get_matching_agents(content_event)
+        assert "agent-1" in content_matches
+        assert "agent-2" not in content_matches
+        assert "agent-3" in content_matches  # wildcard matches
+
+        msg_matches = await registry.get_matching_agents(msg_event)
+        assert "agent-1" not in msg_matches
+        assert "agent-2" in msg_matches
+        assert "agent-3" in msg_matches  # wildcard matches
+
+        await registry.close()
+
+
+def test_subscription_pattern_is_pydantic_model() -> None:
+    """SubscriptionPattern should be a Pydantic BaseModel, not a stdlib dataclass."""
+    from pydantic import BaseModel
+    from remora.core.subscriptions import Subscription
+
+    assert issubclass(SubscriptionPattern, BaseModel), "SubscriptionPattern should be a Pydantic BaseModel"
+    assert issubclass(Subscription, BaseModel), "Subscription should be a Pydantic BaseModel"

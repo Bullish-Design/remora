@@ -97,9 +97,7 @@ def render_dashboard(state: dict[str, Any], *, bundle_default: str = "") -> str:
 
     main_panel = Element(
         tag="div",
-        content=RawHTML(
-            graph_launcher_card + blocked_card + status_card + results_card + progress_card
-        ),
+        content=RawHTML(graph_launcher_card + blocked_card + status_card + results_card + progress_card),
         id="main-panel",
     ).render()
 
@@ -116,28 +114,4 @@ def render_dashboard(state: dict[str, Any], *, bundle_default: str = "") -> str:
     ).render()
 
 
-def render_tag(tag: str, content: str = "", **attrs: Any) -> str:
-    """Legacy function - prefer Element and components."""
-    class_ = attrs.pop("class_", None)
-    element_id = attrs.pop("id", None)
-    if "for_" in attrs:
-        attrs["for"] = attrs.pop("for_")
-    normalized: dict[str, Any] = {}
-    for key, value in attrs.items():
-        if value is None or value == "":
-            continue
-        if key.endswith("_") and key[:-1] in ("class", "for"):
-            key = key[:-1]
-        normalized[key] = value
-
-    return Element(
-        tag=tag,
-        content=RawHTML(content) if content else "",
-        class_=class_,
-        id=element_id,
-        attrs=normalized,
-        self_closing=not bool(content),
-    ).render()
-
-
-__all__ = ["render_dashboard", "render_tag"]
+__all__ = ["render_dashboard"]

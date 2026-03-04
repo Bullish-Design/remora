@@ -9,6 +9,10 @@ This directory hosts the vLLM server stack used by Remora. It exposes an OpenAI-
 - Tailscale installed on the server machine and dev machine
 - Tailscale auth key + Hugging Face token (if model is gated)
 
+## Current Model
+
+The server runs **Qwen/Qwen3-4B-Instruct-2507-FP8** with XML-based tool calling (`--tool-call-parser qwen3_xml`). See `entrypoint.sh` for the full vLLM command and flags.
+
 ## Bring-Up Commands
 
 ```bash
@@ -16,6 +20,8 @@ cd server
 docker compose up -d --build
 docker logs -f vllm-gemma
 ```
+
+> Note: The container name `vllm-gemma` is a historical artifact from the original FunctionGemma setup, retained in `docker-compose.yml`.
 
 ## Verify
 

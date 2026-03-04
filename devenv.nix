@@ -11,6 +11,8 @@
   packages = [
     pkgs.git
     pkgs.uv
+    pkgs.asciinema
+    pkgs.asciinema-agg
   ];
 
   # https://devenv.sh/languages/
@@ -54,7 +56,7 @@
       remora.setup({
         -- Use the demo LSP server (runs via python -m)
         cmd = { "remora-lsp" },
-        filetypes = { "python", "markdown" },
+        filetypes = { "python", "markdown", "toml" },
         root_markers = { ".remora", ".git", "pyproject.toml" },
         prefix = "<leader>r",
       })

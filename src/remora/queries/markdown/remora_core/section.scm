@@ -1,13 +1,23 @@
-; Capture Markdown sections (ATX headings)
+; Capture Markdown sections (heading + paragraphs + subsections)
+;
+; # Section
+; paragraph text...
+; ## Subsection
+; more text...
+
+(section
+  (atx_heading
+    (inline) @section.name)) @section.def
+
+; Capture individual headings (just the heading line)
 ;
 ; # Heading 1
 ; ## Heading 2
 ; ### Heading 3
-; etc.
 
 (atx_heading
-  (inline) @section.name
-) @section.def
+  (inline) @heading.name
+) @heading.def
 
 ; Capture fenced code blocks
 ; ```python

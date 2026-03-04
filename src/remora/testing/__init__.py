@@ -1,26 +1,8 @@
-"""Test utilities for Remora V2.
+"""Remora testing utilities.
 
-This module provides fakes for testing V2 components.
+Provides mock implementations of core interfaces for unit testing.
 """
 
-from remora.testing.fakes import (
-    FakeAsyncOpenAI,
-    FakeChatCompletions,
-    FakeCompletionChoice,
-    FakeCompletionMessage,
-    FakeCompletionResponse,
-    FakeGrailExecutor,
-    FakeToolCall,
-    FakeToolCallFunction,
-)
+from remora.testing.mock_workspace import MockWorkspace, MockKVStore
 
-__all__ = [
-    "FakeAsyncOpenAI",
-    "FakeChatCompletions",
-    "FakeCompletionChoice",
-    "FakeCompletionMessage",
-    "FakeCompletionResponse",
-    "FakeGrailExecutor",
-    "FakeToolCall",
-    "FakeToolCallFunction",
-]
+__all__ = ["MockWorkspace", "MockKVStore"]

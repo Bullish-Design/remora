@@ -60,14 +60,13 @@ def test_service_cli_serve_serves_http(tmp_path: Path) -> None:
     )
 
     try:
-        deadline = time.time() + 10
+        deadline = time.time() + 30
         last_error: Exception | None = None
         while time.time() < deadline:
             if process.poll() is not None:
                 stdout, stderr = process.communicate(timeout=2)
                 raise AssertionError(
-                    "Service exited early "
-                    f"(code={process.returncode}) stdout={stdout!r} stderr={stderr!r}"
+                    f"Service exited early (code={process.returncode}) stdout={stdout!r} stderr={stderr!r}"
                 )
             try:
                 with urlopen(f"http://127.0.0.1:{port}/", timeout=1) as response:

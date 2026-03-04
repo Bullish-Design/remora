@@ -1,7 +1,0 @@
-from grail import external, Input
-
-a: int = Input("a")
-b: int = Input("b")
-
-result = {"product": a * b, "a": a, "b": b}
-result

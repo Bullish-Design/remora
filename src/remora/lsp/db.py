@@ -11,8 +11,6 @@ from typing import ParamSpec, TypeVar
 
 import sqlite3
 
-from remora.lsp.models import ASTAgentNode, AgentEvent
-
 P = ParamSpec("P")
 R = TypeVar("R")
 
@@ -32,38 +30,52 @@ def async_db(fn):
 
 
 class RemoraDB:
-    def __init__(self, db_path: str = ".remora/indexer.db"):
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA synchronous=NORMAL")
-        self.conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
-        self._init_schema()
+    """LSP-specific database for proposals, edges, cursor focus, and commands.
+
+    Node state lives in EventStore (core). Event storage also lives in EventStore.
+    This DB holds LSP-specific operational state that doesn't belong in the
+    event-sourced core.
+
+    Can operate in two modes:
+    - **Standalone**: pass ``db_path`` and the DB opens its own SQLite
+      connection and creates tables.
+    - **Shared**: pass ``connection`` and ``lock`` from an ``EventStore``
+      instance.  Tables are assumed to already exist (created by
+      ``EventStore.initialize()``).
+    """
+
+    def __init__(
+        self,
+        db_path: str = ".remora/indexer.db",
+        *,
+        connection: sqlite3.Connection | None = None,
+        lock: object | None = None,
+    ):
+        if connection is not None:
+            # Shared-connection mode — tables already created by EventStore
+            self.db_path: Path | None = None
+            self.conn = connection
+            self.conn.row_factory = sqlite3.Row
+            self._lock = threading.Lock() if lock is None else threading.Lock()
+            self._shared = True
+        else:
+            # Standalone mode (backward compat)
+            self.db_path = Path(db_path)
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA synchronous=NORMAL")
+            self.conn.row_factory = sqlite3.Row
+            self._lock = threading.Lock()
+            self._shared = False
+            self._init_schema()
 
     def _init_schema(self):
         cursor = self.conn.cursor()
         cursor.executescript("""
-            CREATE TABLE IF NOT EXISTS nodes (
-                id TEXT PRIMARY KEY,
-                node_type TEXT NOT NULL,
-                name TEXT NOT NULL,
-                file_path TEXT NOT NULL,
-                start_line INTEGER,
-                end_line INTEGER,
-                start_col INTEGER DEFAULT 0,
-                end_col INTEGER DEFAULT 0,
-                source_code TEXT,
-                source_hash TEXT,
-                status TEXT DEFAULT 'active',
-                pending_proposal_id TEXT,
-                parent_id TEXT REFERENCES nodes(id)
-            );
-
             CREATE TABLE IF NOT EXISTS edges (
-                from_id TEXT NOT NULL REFERENCES nodes(id),
-                to_id TEXT NOT NULL REFERENCES nodes(id),
+                from_id TEXT NOT NULL,
+                to_id TEXT NOT NULL,
                 edge_type TEXT NOT NULL,
                 PRIMARY KEY (from_id, to_id, edge_type)
             );
@@ -76,174 +88,71 @@ class RemoraDB:
                 PRIMARY KEY (correlation_id, agent_id)
             );
 
-            CREATE TABLE IF NOT EXISTS events (
-                event_id TEXT PRIMARY KEY,
-                event_type TEXT NOT NULL,
-                timestamp REAL NOT NULL,
-                correlation_id TEXT,
-                agent_id TEXT,
-                payload JSON NOT NULL
-            );
-
             CREATE TABLE IF NOT EXISTS proposals (
                 proposal_id TEXT PRIMARY KEY,
-                agent_id TEXT NOT NULL REFERENCES nodes(id),
+                agent_id TEXT NOT NULL,
                 old_source TEXT NOT NULL,
                 new_source TEXT NOT NULL,
                 diff TEXT NOT NULL,
                 status TEXT DEFAULT 'pending',
-                created_at REAL NOT NULL
+                created_at REAL NOT NULL,
+                file_path TEXT
             );
 
-            CREATE INDEX IF NOT EXISTS idx_nodes_file ON nodes(file_path);
-            CREATE INDEX IF NOT EXISTS idx_events_correlation ON events(correlation_id);
-            CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent_id);
+            CREATE TABLE IF NOT EXISTS cursor_focus (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                agent_id TEXT,
+                file_path TEXT,
+                line INTEGER,
+                timestamp REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS command_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                command_type TEXT NOT NULL,
+                agent_id TEXT,
+                payload JSON NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at REAL NOT NULL,
+                processed_at REAL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_chain_correlation ON activation_chain(correlation_id);
         """)
         self.conn.commit()
+        self._migrate()
 
-    def _normalize_node(self, row: sqlite3.Row) -> dict:
-        data = dict(row)
-        if "id" in data:
-            data["remora_id"] = data.pop("id")
-        return data
+    def _migrate(self):
+        """Add columns that may be missing from older databases."""
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(proposals)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "file_path" not in columns:
+            cursor.execute("ALTER TABLE proposals ADD COLUMN file_path TEXT")
+            self.conn.commit()
+
+    # ── Cursor focus ──────────────────────────────────────────────────────
 
     @async_db
-    def upsert_nodes(self, nodes: list[ASTAgentNode]) -> None:
+    def update_cursor_focus(self, agent_id: str | None, file_path: str, line: int) -> None:
         cursor = self.conn.cursor()
-        for node in nodes:
-            cursor.execute(
-                """
-                INSERT OR REPLACE INTO nodes 
-                (id, node_type, name, file_path, start_line, end_line, start_col, end_col,
-                 source_code, source_hash, status, pending_proposal_id, parent_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    node.remora_id,
-                    node.node_type,
-                    node.name,
-                    node.file_path,
-                    node.start_line,
-                    node.end_line,
-                    node.start_col,
-                    node.end_col,
-                    node.source_code,
-                    node.source_hash,
-                    node.status,
-                    node.pending_proposal_id,
-                    node.parent_id,
-                ),
-            )
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO cursor_focus (id, agent_id, file_path, line, timestamp)
+            VALUES (1, ?, ?, ?, ?)
+        """,
+            (agent_id, file_path, line, time.time()),
+        )
         self.conn.commit()
 
-    @async_db
-    def get_node(self, node_id: str) -> dict | None:
+    def get_cursor_focus(self) -> dict | None:
+        """Read the current cursor focus (sync, for web server reads)."""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM nodes WHERE id = ?", (node_id,))
+        cursor.execute("SELECT agent_id, file_path, line, timestamp FROM cursor_focus WHERE id = 1")
         row = cursor.fetchone()
-        return self._normalize_node(row) if row else None
+        return dict(row) if row else None
 
-    @async_db
-    def get_nodes_for_file(self, uri: str) -> list[dict]:
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM nodes WHERE file_path = ?", (uri,))
-        return [self._normalize_node(row) for row in cursor.fetchall()]
-
-    @async_db
-    def get_node_at_position(self, uri: str, line: int, character: int) -> dict | None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT * FROM nodes 
-            WHERE file_path = ? AND start_line <= ? AND end_line >= ?
-            ORDER BY start_line DESC LIMIT 1
-        """,
-            (uri, line, line),
-        )
-        row = cursor.fetchone()
-        return self._normalize_node(row) if row else None
-
-    @async_db
-    def set_status(self, node_id: str, status: str) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute("UPDATE nodes SET status = ? WHERE id = ?", (status, node_id))
-        self.conn.commit()
-
-    @async_db
-    def set_pending_proposal(self, node_id: str, proposal_id: str | None) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute("UPDATE nodes SET pending_proposal_id = ? WHERE id = ?", (proposal_id, node_id))
-        self.conn.commit()
-
-    @async_db
-    def clear_pending_proposal(self, node_id: str) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute("UPDATE nodes SET pending_proposal_id = NULL, status = 'active' WHERE id = ?", (node_id,))
-        self.conn.commit()
-
-    @async_db
-    def get_recent_events(self, agent_id: str, limit: int = 5) -> list[AgentEvent]:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT * FROM events 
-            WHERE agent_id = ? 
-            ORDER BY timestamp DESC LIMIT ?
-        """,
-            (agent_id, limit),
-        )
-        events = []
-        for row in cursor.fetchall():
-            payload = json.loads(row["payload"])
-            payload["event_id"] = row["event_id"]
-            payload["event_type"] = row["event_type"]
-            payload["timestamp"] = row["timestamp"]
-            payload["correlation_id"] = row["correlation_id"]
-            payload["agent_id"] = row["agent_id"]
-            events.append(AgentEvent(**payload))
-        return events
-
-    @async_db
-    def store_event(self, event: AgentEvent) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO events (event_id, event_type, timestamp, correlation_id, agent_id, payload)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """,
-            (
-                event.event_id,
-                event.event_type,
-                event.timestamp,
-                event.correlation_id,
-                event.agent_id,
-                json.dumps(event.payload),
-            ),
-        )
-        self.conn.commit()
-
-    @async_db
-    def get_events_for_correlation(self, correlation_id: str) -> list[AgentEvent]:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT * FROM events 
-            WHERE correlation_id = ?
-            ORDER BY timestamp ASC
-        """,
-            (correlation_id,),
-        )
-        events = []
-        for row in cursor.fetchall():
-            payload = json.loads(row["payload"])
-            payload["event_id"] = row["event_id"]
-            payload["event_type"] = row["event_type"]
-            payload["timestamp"] = row["timestamp"]
-            payload["correlation_id"] = row["correlation_id"]
-            payload["agent_id"] = row["agent_id"]
-            events.append(AgentEvent(**payload))
-        return events
+    # ── Activation chain ──────────────────────────────────────────────────
 
     @async_db
     def add_to_chain(self, correlation_id: str, agent_id: str) -> None:
@@ -270,92 +179,63 @@ class RemoraDB:
         )
         return [row["agent_id"] for row in cursor.fetchall()]
 
+    # ── Edges ─────────────────────────────────────────────────────────────
+
     @async_db
-    def update_edges(self, nodes: list[ASTAgentNode]) -> None:
+    def update_edges(self, nodes: list[dict]) -> None:
         cursor = self.conn.cursor()
         for node in nodes:
-            if node.parent_id:
+            parent_id = node.get("parent_id")
+            node_id = node["node_id"]
+            if parent_id:
                 cursor.execute(
                     """
                     INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
                     VALUES (?, ?, 'parent_of')
                 """,
-                    (node.parent_id, node.remora_id),
+                    (parent_id, node_id),
                 )
-            for callee in node.callee_ids:
+            for callee in node.get("callee_ids", []):
                 cursor.execute(
                     """
                     INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
                     VALUES (?, ?, 'calls')
                 """,
-                    (node.remora_id, callee),
+                    (node_id, callee),
                 )
         self.conn.commit()
 
-    @async_db
-    def get_neighborhood(self, node_id: str, depth: int = 2) -> list[dict]:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            WITH RECURSIVE neighbors(from_id, to_id, edge_type, d) AS (
-                SELECT NULL, ?, 'self', 0
-                UNION ALL
-                SELECT e.from_id, e.to_id, e.edge_type, n.d + 1
-                FROM edges e
-                JOIN neighbors n ON e.from_id = n.to_id OR e.to_id = n.from_id
-                WHERE n.d < ?
-            )
-            SELECT DISTINCT id FROM nodes
-            WHERE id IN (SELECT from_id FROM neighbors) OR id IN (SELECT to_id FROM neighbors)
-        """,
-            (node_id, depth),
-        )
-        node_ids = [row["id"] for row in cursor.fetchall()]
-
-        if not node_ids:
-            return []
-
-        placeholders = ",".join("?" * len(node_ids))
-        cursor.execute(f"SELECT * FROM nodes WHERE id IN ({placeholders})", node_ids)
-        return [self._normalize_node(row) for row in cursor.fetchall()]
-
-    @async_db
-    def get_edges_for_nodes(self, node_ids: list[str]) -> list[dict]:
-        if not node_ids:
-            return []
-        cursor = self.conn.cursor()
-        placeholders = ",".join("?" * len(node_ids))
-        cursor.execute(
-            f"""
-            SELECT * FROM edges 
-            WHERE from_id IN ({placeholders}) AND to_id IN ({placeholders})
-        """,
-            node_ids + node_ids,
-        )
-        return [dict(row) for row in cursor.fetchall()]
+    # ── Proposals ─────────────────────────────────────────────────────────
 
     @async_db
     def get_proposals_for_file(self, file_path: str) -> list[dict]:
         cursor = self.conn.cursor()
         cursor.execute(
             """
-            SELECT p.*, n.file_path as node_file_path FROM proposals p
-            JOIN nodes n ON p.agent_id = n.id
-            WHERE n.file_path = ? AND p.status = 'pending'
+            SELECT * FROM proposals
+            WHERE file_path = ? AND status = 'pending'
         """,
             (file_path,),
         )
         return [dict(row) for row in cursor.fetchall()]
 
     @async_db
-    def store_proposal(self, proposal_id: str, agent_id: str, old_source: str, new_source: str, diff: str) -> None:
+    def store_proposal(
+        self,
+        proposal_id: str,
+        agent_id: str,
+        old_source: str,
+        new_source: str,
+        diff: str,
+        file_path: str = "",
+    ) -> None:
         cursor = self.conn.cursor()
         cursor.execute(
             """
-            INSERT INTO proposals (proposal_id, agent_id, old_source, new_source, diff, status, created_at)
-            VALUES (?, ?, ?, ?, ?, 'pending', ?)
+            INSERT INTO proposals (proposal_id, agent_id, old_source, new_source, diff, status, created_at, file_path)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
         """,
-            (proposal_id, agent_id, old_source, new_source, diff, time.time()),
+            (proposal_id, agent_id, old_source, new_source, diff, time.time(), file_path),
         )
         self.conn.commit()
 
@@ -372,5 +252,41 @@ class RemoraDB:
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    # ── Command queue ─────────────────────────────────────────────────────
+
+    def push_command(self, command_type: str, agent_id: str | None, payload: dict) -> int:
+        """Insert a command into the queue. Returns the command id."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO command_queue (command_type, agent_id, payload, status, created_at)
+            VALUES (?, ?, ?, 'pending', ?)
+            """,
+            (command_type, agent_id, json.dumps(payload), time.time()),
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def poll_commands(self, limit: int = 10) -> list[dict]:
+        """Read pending commands in FIFO order."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM command_queue WHERE status = 'pending' ORDER BY id ASC LIMIT ?",
+            (limit,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def mark_command_done(self, command_id: int) -> None:
+        """Mark a command as processed."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE command_queue SET status = 'done', processed_at = ? WHERE id = ?",
+            (time.time(), command_id),
+        )
+        self.conn.commit()
+
     def close(self) -> None:
+        if self._shared:
+            # Don't close shared connection — it's owned by EventStore
+            return
         self.conn.close()

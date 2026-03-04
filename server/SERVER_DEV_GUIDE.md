@@ -1,5 +1,7 @@
 # Server Development Guide (vLLM Refactor)
 
+> **Note:** This guide was written during the initial server setup with FunctionGemma. The server now runs **Qwen/Qwen3-4B-Instruct-2507-FP8** with `--tool-call-parser qwen3_xml`. See `entrypoint.sh` for the current configuration. The step-by-step workflow below remains valid for understanding the architecture.
+
 This guide breaks the server-side work into small, verifiable steps. Each step
 includes a quick test or verification so you can confirm progress before moving
 on. It also clarifies **which machine** runs each command and provides **Windows
@@ -118,7 +120,7 @@ Use the volume mounts and environment variables described in the refactor plan.
 
 Create `server/entrypoint.sh` with:
 
-- Base model: `google/functiongemma-270m-it`
+- Base model: `Qwen/Qwen3-4B-Instruct-2507-FP8` (originally `google/functiongemma-270m-it`)
 - `--enable-prefix-caching`
 - Commented Multi-LoRA block for future adapters
 

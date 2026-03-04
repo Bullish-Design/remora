@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping
 
 import grail
 from structured_agents.types import ToolCall, ToolSchema, ToolResult
 
+from remora.core.agent_context import AgentContext
 from remora.core.tools.swarm import SwarmTool, build_swarm_tools
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,57 @@ def _build_parameters(script: grail.GrailScript) -> dict[str, Any]:
     if required:
         schema["required"] = required
     return schema
+
+
+class GrailTool:
+    """Simple Grail tool wrapper for standalone use.
+
+    This is a simpler version of RemoraGrailTool that doesn't require
+    workspace context or file providers. Useful for testing and simple
+    integrations where externals/files aren't needed.
+
+    Replaces the GrailTool that was removed from structured-agents v0.4.0.
+    """
+
+    def __init__(
+        self,
+        script: grail.GrailScript,
+        *,
+        limits: grail.Limits | None = None,
+    ) -> None:
+        self._script = script
+        self._limits = limits
+        self._schema = ToolSchema(
+            name=getattr(script, "name", "grail_tool"),
+            description=script.__doc__ or f"Grail tool: {script.name}",
+            parameters=_build_parameters(script),
+        )
+
+    @property
+    def schema(self) -> ToolSchema:
+        return self._schema
+
+    async def execute(self, arguments: dict[str, Any], context: ToolCall | None) -> ToolResult:
+        call_id = context.id if context else ""
+        try:
+            result = await self._script.run(
+                inputs=arguments,
+                limits=self._limits,
+            )
+            output = json.dumps(result) if not isinstance(result, str) else result
+            return ToolResult(
+                call_id=call_id,
+                name=self._schema.name,
+                output=output,
+                is_error=False,
+            )
+        except Exception as exc:
+            return ToolResult(
+                call_id=call_id,
+                name=self._schema.name,
+                output=str(exc),
+                is_error=True,
+            )
 
 
 class RemoraGrailTool:
@@ -95,26 +147,31 @@ class RemoraGrailTool:
             )
 
 
-def build_virtual_fs(files: dict[str, str | bytes]) -> dict[str, str | bytes]:
+def build_virtual_fs(files: Mapping[str, str | bytes]) -> dict[str, str | bytes]:
     """Normalize file paths for Grail virtual filesystem."""
     virtual_fs: dict[str, str | bytes] = {}
     for path, content in files.items():
         normalized = path.replace("\\", "/").lstrip("/")
         virtual_fs[normalized] = content
-        virtual_fs[f"/{normalized}"] = content
     return virtual_fs
 
 
 def discover_grail_tools(
     agents_dir: Path,
     *,
-    externals: dict[str, Any],
+    context: AgentContext,
     files_provider: FilesProvider,
     limits: grail.Limits | None = None,
     grail_dir: str | Path | None = None,
 ) -> list[RemoraGrailTool | SwarmTool]:
-    """Discover and load .pym tools from a directory."""
-    tools: list[RemoraGrailTool] = []
+    """Discover and load .pym tools from a directory.
+
+    Grail scripts receive the flat externals dict (via ``context.as_externals()``)
+    because the Grail runtime expects ``dict[str, Any]``. Swarm tools receive the
+    typed ``AgentContext`` directly.
+    """
+    externals_dict = context.as_externals()
+    tools: list[RemoraGrailTool | SwarmTool] = []
     if not agents_dir.exists():
         logger.warning("Agents directory does not exist: %s", agents_dir)
         return tools
@@ -124,7 +181,7 @@ def discover_grail_tools(
             tools.append(
                 RemoraGrailTool(
                     pym_file,
-                    externals=externals,
+                    externals=externals_dict,
                     files_provider=files_provider,
                     limits=limits,
                     grail_dir=grail_dir,
@@ -135,10 +192,9 @@ def discover_grail_tools(
             logger.warning("Failed to load %s: %s", pym_file, exc)
             continue
 
-    if externals:
-        tools.extend(build_swarm_tools(externals))
+    tools.extend(build_swarm_tools(context))
 
     return tools
 
 
-__all__ = ["RemoraGrailTool", "build_virtual_fs", "discover_grail_tools"]
+__all__ = ["GrailTool", "RemoraGrailTool", "build_virtual_fs", "discover_grail_tools"]

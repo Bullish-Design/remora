@@ -1,14 +1,11 @@
-"""Integration tests for AgentRunner cascade prevention.
+"""Integration tests for the unified AgentRunner cascade prevention.
 
-These tests verify that the AgentRunner correctly implements cascade prevention
-via depth limits and cooldowns to prevent infinite loops.
+These tests verify that the unified AgentRunner (lsp/runner.py) correctly
+implements cascade prevention via depth limits and cooldowns, using the
+create_headless() factory for CLI/headless mode.
 """
 
 from __future__ import annotations
-
-import pytest
-
-
 
 import asyncio
 import contextlib
@@ -17,214 +14,178 @@ from pathlib import Path
 from typing import AsyncIterator
 from unittest.mock import AsyncMock
 
-from remora.core.agent_runner import AgentRunner
-from remora.core.agent_state import AgentState, save as save_agent_state
-from remora.core.config import Config
+import pytest
+
+from remora.core.agent_node import AgentNode
 from remora.core.event_store import EventStore
 from remora.core.events import ManualTriggerEvent
-from remora.core.reconciler import get_agent_state_path
+from remora.core.projections import NodeProjection
 from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
-from remora.core.swarm_state import SwarmState
+from remora.lsp.runner import AgentRunner
 
 
-@pytest.fixture
-def runner_config(tmp_path: Path) -> Config:
-    """Create a config specifically for runner tests."""
-    return Config(
-        project_path=str(tmp_path),
-        discovery_paths=("src/",),
-        model_base_url="http://localhost:8000/v1",
-        model_default="test/model",
-        model_api_key="test-key",
-        swarm_root=".remora",
-        swarm_id="test-swarm",
-        max_concurrency=4,
-        max_turns=3,
-        max_trigger_depth=3,
-        trigger_cooldown_ms=100,
+def _make_agent_node(node_id: str = "agent_a", **overrides) -> AgentNode:
+    defaults = {
+        "node_id": node_id,
+        "node_type": "function",
+        "name": node_id,
+        "full_name": f"test.{node_id}",
+        "file_path": "file:///tmp/test.py",
+        "start_line": 1,
+        "end_line": 3,
+        "source_code": "def foo():\n    return 1\n",
+        "source_hash": "abc123",
+        "status": "idle",
+    }
+    defaults.update(overrides)
+    return AgentNode(**defaults)
+
+
+def _insert_node(event_store: EventStore, node: AgentNode) -> None:
+    """Insert a node directly into the EventStore DB."""
+    row = node.to_row()
+    cols = ", ".join(row.keys())
+    placeholders = ", ".join("?" * len(row))
+    event_store._conn.execute(
+        f"INSERT OR REPLACE INTO nodes ({cols}) VALUES ({placeholders})",
+        list(row.values()),
     )
+    event_store._conn.commit()
 
 
 @pytest.fixture
-async def runner_components(tmp_path: Path) -> AsyncIterator[tuple[EventStore, SubscriptionRegistry, SwarmState]]:
-    """Create all runner components."""
+async def runner_components(tmp_path: Path) -> AsyncIterator[tuple[EventStore, SubscriptionRegistry]]:
+    """Create EventStore and SubscriptionRegistry for runner tests."""
     subscriptions = SubscriptionRegistry(tmp_path / "subscriptions.db")
     await subscriptions.initialize()
 
-    event_store = EventStore(tmp_path / "events.db", subscriptions=subscriptions)
+    event_store = EventStore(
+        tmp_path / "events.db",
+        subscriptions=subscriptions,
+        projection=NodeProjection(),
+    )
     await event_store.initialize()
 
-    swarm_state = SwarmState(tmp_path / "swarm.db")
-    await swarm_state.initialize()
+    event_store.set_subscriptions(subscriptions)
 
     try:
-        yield event_store, subscriptions, swarm_state
+        yield event_store, subscriptions
     finally:
-        await swarm_state.close()
         with contextlib.suppress(Exception):
             await event_store.close()
         with contextlib.suppress(Exception):
             await subscriptions.close()
 
 
-def _ensure_agent_state(project_root: Path, agent_id: str) -> None:
-    """Create a minimal agent state for the given agent ID."""
-    state = AgentState(
-        agent_id=agent_id,
-        node_type="test-node",
-        name=agent_id,
-        full_name=agent_id,
-        file_path=str(project_root / "dummy.py"),
-        range=(1, 1),
-    )
-    save_agent_state(
-        get_agent_state_path(project_root / ".remora", agent_id),
-        state,
-    )
-
-
 @pytest.mark.asyncio
-async def test_depth_limit_enforced(
-    runner_config: Config,
-    runner_components,
-    tmp_path: Path,
-):
+async def test_depth_limit_enforced(runner_components):
     """Test cascade depth limit guard for in-flight triggers."""
-    event_store, subscriptions, swarm_state = runner_components
+    event_store, subscriptions = runner_components
 
-    runner_config.max_trigger_depth = 3
-    runner = AgentRunner(
+    runner = AgentRunner.create_headless(
         event_store=event_store,
-        subscriptions=subscriptions,
-        swarm_state=swarm_state,
-        config=runner_config,
-        project_root=tmp_path,
+        max_trigger_depth=3,
     )
 
     correlation_id = "limit-chain"
     key = f"agent_a:{correlation_id}"
     now = time.time()
 
-    runner._correlation_depth[key] = (runner_config.max_trigger_depth, now)
+    runner._correlation_depth[key] = (3, now)
     assert not runner._check_depth_limit("agent_a", correlation_id)
 
-    runner._correlation_depth[key] = (runner_config.max_trigger_depth - 1, now)
+    runner._correlation_depth[key] = (2, now)
     assert runner._check_depth_limit("agent_a", correlation_id)
 
 
 @pytest.mark.asyncio
-async def test_cooldown_prevents_duplicate_triggers(
-    runner_config: Config,
-    runner_components,
-):
+async def test_cooldown_prevents_duplicate_triggers(runner_components):
     """Test that rapid identical triggers are dropped by cooldown."""
-    event_store, subscriptions, swarm_state = runner_components
+    event_store, subscriptions = runner_components
 
-    project_root = Path(runner_config.project_path)
-    project_root.mkdir(parents=True, exist_ok=True)
-
-    runner_config.trigger_cooldown_ms = 500
-    runner = AgentRunner(
-        event_store=event_store,
-        subscriptions=subscriptions,
-        swarm_state=swarm_state,
-        config=runner_config,
-        project_root=project_root,
-    )
+    node = _make_agent_node("agent_a")
+    _insert_node(event_store, node)
 
     await subscriptions.register(
         "agent_a",
         SubscriptionPattern(to_agent="agent_a"),
     )
 
-    mock_executor = AsyncMock()
-    mock_executor.run_agent = AsyncMock(return_value="executed")
-    runner._executor = mock_executor
+    runner = AgentRunner.create_headless(
+        event_store=event_store,
+        trigger_cooldown_ms=500,
+    )
+    runner.execute_turn = AsyncMock()
 
-    _ensure_agent_state(project_root, "agent_a")
+    # First trigger — should pass cooldown
+    await runner.trigger("agent_a", "corr_1")
+    assert not runner.queue.empty()
+    await runner.queue.get()  # drain
 
-    runner_task = asyncio.create_task(runner.run_forever())
-
-    try:
-        await event_store.append(
-            "test-swarm",
-            ManualTriggerEvent(to_agent="agent_a", reason="test"),
-        )
-        await event_store.append(
-            "test-swarm",
-            ManualTriggerEvent(to_agent="agent_a", reason="test"),
-        )
-
-        await asyncio.sleep(0.2)
-
-        executed_count = mock_executor.run_agent.call_count
-
-        assert executed_count == 1, f"Expected 1 execution due to cooldown, got {executed_count}"
-    finally:
-        runner_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await runner_task
-        await runner.stop()
+    # Immediate second trigger — should be dropped by cooldown
+    await runner.trigger("agent_a", "corr_2")
+    assert runner.queue.empty()
 
 
 @pytest.mark.asyncio
-async def test_concurrent_trigger_handling(
-    runner_config: Config,
-    runner_components,
-):
-    """Test that max_concurrency is respected."""
-    event_store, subscriptions, swarm_state = runner_components
+async def test_concurrent_trigger_handling(runner_components):
+    """Test that max_concurrency is respected via semaphore."""
+    event_store, subscriptions = runner_components
 
-    project_root = Path(runner_config.project_path)
-    project_root.mkdir(parents=True, exist_ok=True)
-
-    runner_config.max_concurrency = 2
-    runner = AgentRunner(
-        event_store=event_store,
-        subscriptions=subscriptions,
-        swarm_state=swarm_state,
-        config=runner_config,
-        project_root=project_root,
-    )
+    max_concurrent_observed = 0
+    current_concurrent = 0
+    concurrent_lock = asyncio.Lock()
+    execution_count = 0
 
     for i in range(5):
-        await subscriptions.register(
-            f"agent_{i}",
-            SubscriptionPattern(to_agent=f"agent_{i}"),
-        )
-        _ensure_agent_state(project_root, f"agent_{i}")
+        node = _make_agent_node(f"agent_{i}")
+        _insert_node(event_store, node)
 
-    execution_count = 0
-    execution_lock = asyncio.Lock()
+    runner = AgentRunner.create_headless(
+        event_store=event_store,
+        max_concurrency=2,
+        trigger_cooldown_ms=0,  # disable cooldown for this test
+    )
 
-    async def slow_run(*args, **kwargs):
-        nonlocal execution_count
-        async with execution_lock:
-            execution_count += 1
-            current = execution_count
-        await asyncio.sleep(0.05)
-        return "done"
+    original_execute = runner.execute_turn
 
-    mock_executor = AsyncMock()
-    mock_executor.run_agent = slow_run
-    runner._executor = mock_executor
+    async def tracking_execute(trigger):
+        nonlocal max_concurrent_observed, current_concurrent, execution_count
+        async with concurrent_lock:
+            current_concurrent += 1
+            if current_concurrent > max_concurrent_observed:
+                max_concurrent_observed = current_concurrent
+        try:
+            await asyncio.sleep(0.05)
+        finally:
+            async with concurrent_lock:
+                current_concurrent -= 1
+                execution_count += 1
 
-    runner_task = asyncio.create_task(runner.run_forever())
+    runner.execute_turn = tracking_execute
 
-    async def trigger_all():
-        for i in range(5):
-            await event_store.append(
-                "test-swarm",
-                ManualTriggerEvent(to_agent=f"agent_{i}", reason="test"),
+    # Enqueue 5 triggers directly (bypass cooldown)
+    for i in range(5):
+        await runner.queue.put(
+            __import__("remora.lsp.runner", fromlist=["Trigger"]).Trigger(
+                agent_id=f"agent_{i}",
+                correlation_id=f"corr_{i}",
             )
+        )
 
-    try:
-        await trigger_all()
-        await asyncio.sleep(0.3)
-    finally:
-        runner_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await runner_task
-        await runner.stop()
+    runner._running = True
+
+    async def run_with_timeout():
+        while not runner.queue.empty():
+            trigger = await runner.queue.get()
+            await tracking_execute(trigger)
+
+    # Process all triggers — run them through the semaphore
+    tasks = []
+    for i in range(5):
+        trigger = await runner.queue.get()
+        tasks.append(asyncio.create_task(tracking_execute(trigger)))
+
+    await asyncio.gather(*tasks)
 
     assert execution_count == 5

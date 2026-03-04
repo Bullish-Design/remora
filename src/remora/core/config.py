@@ -8,13 +8,17 @@ Remora uses two configuration levels:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+import os
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from remora.utils import PathLike, normalize_path
+from remora.core.errors import ConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +38,10 @@ DEFAULT_IGNORE_PATTERNS: tuple[str, ...] = (
 )
 
 
-@dataclass(slots=True)
-class Config:
+class Config(BaseSettings):
     """Flat Remora configuration for swarm-only mode."""
+
+    model_config = SettingsConfigDict(env_prefix="REMORA_")
 
     project_path: str = "."
     discovery_paths: tuple[str, ...] = ("src/",)
@@ -44,8 +49,8 @@ class Config:
     discovery_max_workers: int = 4
 
     bundle_root: str = "agents"
-    bundle_mapping: dict[str, str] = field(default_factory=dict)
-    bundle_mapping_tools: dict[str, str] = field(default_factory=dict)
+    bundle_mapping: dict[str, str] = Field(default_factory=dict)
+    bundle_mapping_tools: dict[str, str] = Field(default_factory=dict)
 
     model_base_url: str = "http://localhost:8000/v1"
     model_default: str = "Qwen/Qwen3-4B"
@@ -59,6 +64,7 @@ class Config:
     timeout_s: float = 300.0
     max_trigger_depth: int = 5
     trigger_cooldown_ms: int = 1000
+    chat_history_limit: int = 5
 
     workspace_ignore_patterns: tuple[str, ...] = DEFAULT_IGNORE_PATTERNS
     workspace_ignore_dotfiles: bool = True
@@ -72,6 +78,10 @@ def load_config(path: PathLike | None = None) -> Config:
     if path is None:
         path = _find_config_file()
 
+    if path is None:
+        logger.info("No config file found, using defaults")
+        return Config()
+
     config_path = normalize_path(path)
 
     if not config_path.exists():
@@ -82,15 +92,16 @@ def load_config(path: PathLike | None = None) -> Config:
         with open(config_path) as f:
             data = yaml.safe_load(f) or {}
     except yaml.YAMLError as e:
-        from remora.core.errors import ConfigError
-
         raise ConfigError(f"Invalid YAML in {config_path}: {e}")
 
     return _build_config(data)
 
 
-def _find_config_file() -> Path:
-    """Search for remora.yaml in current and parent directories."""
+def _find_config_file() -> Path | None:
+    """Search for remora.yaml in current and parent directories.
+
+    Returns None if no config file is found.
+    """
     current = Path.cwd()
 
     for directory in [current] + list(current.parents):
@@ -100,60 +111,51 @@ def _find_config_file() -> Path:
         if (directory / "pyproject.toml").exists():
             break
 
-    return current / "remora.yaml"
+    return None
 
 
-def _build_config(data: dict[str, Any]) -> Config:
-    """Build Config from dictionary data."""
-    if "discovery_paths" in data and isinstance(data["discovery_paths"], list):
-        data["discovery_paths"] = tuple(data["discovery_paths"])
-    if "discovery_languages" in data and isinstance(data["discovery_languages"], list):
-        data["discovery_languages"] = tuple(data["discovery_languages"])
-    if "workspace_ignore_patterns" in data and isinstance(data["workspace_ignore_patterns"], list):
-        data["workspace_ignore_patterns"] = tuple(data["workspace_ignore_patterns"])
-    return Config(**data)
+# Regex for ${VAR:-default} and ${VAR} patterns
+_ENV_PATTERN = re.compile(r"\$\{([^}:]+)(?::-((?:[^}\\]|\\.)*)?)?\}")
 
 
-def serialize_config(config: Config) -> dict[str, Any]:
-    """Serialize the configuration to a dictionary."""
+def _expand_env_value(value: str) -> str:
+    """Expand ``${VAR:-default}`` and ``${VAR}`` in a single string."""
 
-    def normalize(value: Any) -> Any:
-        if isinstance(value, tuple):
-            return [normalize(item) for item in value]
-        if isinstance(value, list):
-            return [normalize(item) for item in value]
-        if isinstance(value, dict):
-            return {key: normalize(item) for key, item in value.items()}
-        return value
+    def _replace(m: re.Match) -> str:
+        var_name = m.group(1)
+        default = m.group(2) if m.group(2) is not None else ""
+        return os.environ.get(var_name, default)
 
-    data = {
-        "project_path": config.project_path,
-        "discovery_paths": normalize(config.discovery_paths),
-        "discovery_languages": normalize(config.discovery_languages),
-        "discovery_max_workers": config.discovery_max_workers,
-        "bundle_root": config.bundle_root,
-        "bundle_mapping": normalize(config.bundle_mapping),
-        "bundle_mapping_tools": normalize(config.bundle_mapping_tools),
-        "model_base_url": config.model_base_url,
-        "model_default": config.model_default,
-        "model_api_key": config.model_api_key,
-        "swarm_root": config.swarm_root,
-        "swarm_id": config.swarm_id,
-        "max_concurrency": config.max_concurrency,
-        "max_turns": config.max_turns,
-        "truncation_limit": config.truncation_limit,
-        "timeout_s": config.timeout_s,
-        "max_trigger_depth": config.max_trigger_depth,
-        "trigger_cooldown_ms": config.trigger_cooldown_ms,
-        "workspace_ignore_patterns": normalize(config.workspace_ignore_patterns),
-        "workspace_ignore_dotfiles": config.workspace_ignore_dotfiles,
-        "nvim_enabled": config.nvim_enabled,
-        "nvim_socket": config.nvim_socket,
-    }
+    return _ENV_PATTERN.sub(_replace, value)
+
+
+def _expand_env_vars(data: Any) -> Any:
+    """Recursively expand shell-style env vars in a parsed YAML structure."""
+    if isinstance(data, str):
+        return _expand_env_value(data)
+    if isinstance(data, dict):
+        return {k: _expand_env_vars(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_expand_env_vars(item) for item in data]
     return data
 
 
-from remora.core.errors import ConfigError
+def _build_config(data: dict[str, Any]) -> Config:
+    """Build Config from dictionary data.
+
+    Pydantic handles list-to-tuple coercion automatically.
+    Shell-style ``${VAR:-default}`` patterns in string values are expanded.
+    """
+    expanded = _expand_env_vars(data)
+    return Config(**expanded)
+
+
+def serialize_config(config: Config) -> dict[str, Any]:
+    """Serialize the configuration to a dictionary.
+
+    Uses mode='json' so tuples become lists (YAML/JSON compatible).
+    """
+    return config.model_dump(mode="json")
 
 
 __all__ = [

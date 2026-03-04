@@ -43,7 +43,11 @@ class EventKind(str, Enum):
 
 
 def _to_jsonable(value: Any) -> Any:
-    if is_dataclass(value):
+    if isinstance(value, Enum):
+        return value.value
+    if hasattr(value, "model_dump"):
+        return _to_jsonable(value.model_dump())
+    if is_dataclass(value) and not isinstance(value, type):
         return _to_jsonable(asdict(value))
     if isinstance(value, dict):
         return {str(key): _to_jsonable(val) for key, val in value.items()}
@@ -88,8 +92,10 @@ def _event_kind(event: StructuredEvent | RemoraEvent) -> EventKind:
 
 
 def _event_payload(event: StructuredEvent | RemoraEvent) -> dict[str, Any]:
-    if is_dataclass(event):
-        payload: dict[str, Any] = asdict(event)
+    if hasattr(event, "model_dump"):
+        payload: dict[str, Any] = event.model_dump()
+    elif is_dataclass(event):
+        payload = asdict(event)
     elif hasattr(event, "__dict__"):
         payload = dict(vars(event))
     else:
@@ -105,6 +111,7 @@ class UiStateProjector:
     blocked: dict[str, dict[str, Any]] = field(default_factory=dict)
     agent_states: dict[str, dict[str, Any]] = field(default_factory=dict)
     results: list[dict[str, Any]] = field(default_factory=list)
+    _seen_agents: set[str] = field(default_factory=set)
     total_agents: int = 0
     completed_agents: int = 0
     failed_agents: int = 0
@@ -129,7 +136,8 @@ class UiStateProjector:
                 "state": "started",
                 "name": event.node_name or event.agent_id,
             }
-            if self.total_agents == 0:
+            if event.agent_id not in self._seen_agents:
+                self._seen_agents.add(event.agent_id)
                 self.total_agents += 1
 
         elif isinstance(event, HumanInputRequestEvent):
@@ -187,6 +195,7 @@ class UiStateProjector:
         self.blocked.clear()
         self.agent_states.clear()
         self.results.clear()
+        self._seen_agents.clear()
         self.total_agents = 0
         self.completed_agents = 0
         self.failed_agents = 0

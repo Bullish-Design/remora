@@ -39,9 +39,7 @@ class EventItem(Component):
         ]
 
         if agent_id:
-            parts.append(
-                Element(tag="span", content=f"@{agent_id}", class_="event-agent").render()
-            )
+            parts.append(Element(tag="span", content=f"@{agent_id}", class_="event-agent").render())
 
         return Element(
             tag="div",
@@ -112,10 +110,7 @@ class AgentStatusList(Component):
                 empty_message="No agents started yet",
             ).render()
 
-        items = [
-            AgentStatusItem(agent_id, info)
-            for agent_id, info in self.agent_states.items()
-        ]
+        items = [AgentStatusItem(agent_id, info) for agent_id, info in self.agent_states.items()]
         return List(
             items=items,
             id="agent-status",
@@ -138,10 +133,7 @@ class BlockedAgentCard(Component):
         key = f"{agent_id}:{question}".replace(":", "_").replace(" ", "_")
 
         if options:
-            options_html = "".join(
-                Element(tag="option", content=opt, attrs={"value": opt}).render()
-                for opt in options
-            )
+            options_html = "".join(Element(tag="option", content=opt, attrs={"value": opt}).render() for opt in options)
             input_html = Element(
                 tag="select",
                 content=RawHTML(options_html),
@@ -157,7 +149,7 @@ class BlockedAgentCard(Component):
                 self_closing=True,
             ).render()
 
-        escaped_request_id = request_id.replace("'", "\\'")
+        escaped_request_id = html.escape(request_id, quote=True)
         button_html = Element(
             tag="button",
             content="Submit",
@@ -189,7 +181,7 @@ class BlockedAgentCard(Component):
 
         question_el = Element(
             tag="div",
-            content=question,
+            content=html.escape(question),
             class_="question",
         ).render()
 
@@ -300,8 +292,7 @@ class GraphLauncher(Component):
             recent_panel = Element(
                 tag="div",
                 content=RawHTML(
-                    Element(tag="div", content="Recent targets", class_="recent-label").render()
-                    + recent_buttons
+                    Element(tag="div", content="Recent targets", class_="recent-label").render() + recent_buttons
                 ),
                 class_="recent-targets",
             ).render()

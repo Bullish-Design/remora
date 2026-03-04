@@ -10,13 +10,14 @@ import hashlib
 import importlib.resources
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Iterator
 
+import yaml
 import tree_sitter
 from tree_sitter import Language, Parser, QueryCursor, Query
+
+from pydantic import BaseModel, ConfigDict
 
 from remora.utils import PathLike, normalize_path
 
@@ -42,13 +43,14 @@ LANGUAGE_EXTENSIONS: dict[str, str] = {
 # ============================================================================
 
 
-@dataclass(frozen=True, slots=True)
-class CSTNode:
+class CSTNode(BaseModel):
     """A concrete syntax tree node discovered from source code.
 
     Immutable data object representing a discovered code element.
     The node_id is deterministic based on file path, name, and position.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     node_id: str
     node_type: str  # "function", "class", "file", "section", "table"
@@ -62,6 +64,13 @@ class CSTNode:
     end_byte: int
 
     def __hash__(self) -> int:
+        """Hash only by node_id — intentional override.
+
+        Pydantic frozen models hash ALL fields by default, but CSTNode
+        identity is defined solely by node_id.  Two nodes with the same
+        node_id but different text (e.g. after an edit) must hash equally.
+        DO NOT REMOVE this override.
+        """
         return hash(self.node_id)
 
 
@@ -81,7 +90,7 @@ def _get_query_dir() -> Path:
 
     This correctly resolves the path regardless of installation method.
     """
-    return Path(importlib.resources.files("remora")) / "queries"
+    return Path(importlib.resources.files("remora")) / "queries"  # type: ignore[arg-type]
 
 
 def _load_queries(language: str, query_pack: str = "remora_core") -> str | None:
@@ -120,6 +129,9 @@ def _get_parser(language: str) -> Parser | None:
 
 NAME_CAPTURE_SUFFIXES = (".name", ".lang")
 
+# Captures that are handled by language-specific post-processing, not the generic pipeline.
+_POSTPROCESS_CAPTURES = frozenset({"frontmatter.def"})
+
 
 def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
     """Parse a single file and extract nodes using tree-sitter queries."""
@@ -156,6 +168,8 @@ def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
     for node, capture_name in captures:
         if capture_name.endswith(NAME_CAPTURE_SUFFIXES):
             continue  # Skip name-only captures
+        if capture_name in _POSTPROCESS_CAPTURES:
+            continue  # Handled by language-specific post-processing
 
         node_type = capture_name.split(".", 1)[0]
         name = _extract_name(node, captures)
@@ -174,6 +188,10 @@ def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
         )
         nodes.append(cst_node)
 
+    # Markdown post-processing: create note/todo-note from frontmatter
+    if language == "markdown":
+        nodes = _postprocess_markdown(file_path, content, captures, nodes)
+
     # Always include file-level node
     if not any(n.node_type == "file" for n in nodes):
         nodes.insert(0, _create_file_node(file_path, content))
@@ -181,10 +199,66 @@ def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
     return nodes
 
 
+def _postprocess_markdown(
+    file_path: Path,
+    content: str,
+    captures: list[tuple[tree_sitter.Node, str]],
+    nodes: list[CSTNode],
+) -> list[CSTNode]:
+    """Create note/todo-note CSTNode from YAML frontmatter if present."""
+    # Find frontmatter capture
+    frontmatter_node = None
+    for node, capture_name in captures:
+        if capture_name == "frontmatter.def":
+            frontmatter_node = node
+            break
+
+    if frontmatter_node is None:
+        return nodes
+
+    # Parse YAML from frontmatter text (strip --- delimiters)
+    raw_text = content[frontmatter_node.start_byte : frontmatter_node.end_byte]
+    yaml_text = raw_text.strip().removeprefix("---").removesuffix("---").strip()
+
+    metadata: dict = {}
+    try:
+        parsed = yaml.safe_load(yaml_text)
+        if isinstance(parsed, dict):
+            metadata = parsed
+    except yaml.YAMLError:
+        logger.debug("Could not parse frontmatter YAML in %s", file_path)
+
+    # Determine node type: "todo" if type: todo, otherwise "note"
+    fm_type = str(metadata.get("type", "note")).lower()
+    node_type = "todo" if fm_type == "todo" else "note"
+
+    # Determine name: frontmatter title, fallback to filename
+    name = str(metadata.get("title", file_path.name))
+
+    line_count = content.count("\n") + 1 if content else 1
+    byte_length = len(content.encode("utf-8")) if content else 0
+
+    note_node = CSTNode(
+        node_id=compute_node_id(str(file_path), name, 1, line_count),
+        node_type=node_type,
+        name=name,
+        full_name=f"{node_type}:{name}",
+        file_path=str(file_path),
+        text=content,
+        start_line=1,
+        end_line=line_count,
+        start_byte=0,
+        end_byte=byte_length,
+    )
+    nodes.insert(0, note_node)
+
+    return nodes
+
+
 def _collect_captures(query: tree_sitter.Query, root: tree_sitter.Node) -> list[tuple[tree_sitter.Node, str]]:
     """Collect captures with compatibility across tree-sitter versions."""
     try:
-        captures = query.captures(root)
+        captures = query.captures(root)  # type: ignore[attr-defined]
     except AttributeError:
         cursor = QueryCursor(query)
         captures = cursor.captures(root)
@@ -194,16 +268,29 @@ def _collect_captures(query: tree_sitter.Query, root: tree_sitter.Node) -> list[
         for name, nodes in captures.items():
             for node in nodes:
                 flat.append((node, name))
+        # Dict-branch groups by capture name, not document position.
+        # Sort by start position to restore document order.
+        flat.sort(key=lambda pair: (pair[0].start_point[0], pair[0].start_point[1]))
         return flat
 
     return list(captures)
 
 
+def _is_ancestor(ancestor: tree_sitter.Node, descendant: tree_sitter.Node) -> bool:
+    """Check if *ancestor* is an ancestor of *descendant* (walking up parents)."""
+    current = descendant.parent
+    while current is not None:
+        if current.id == ancestor.id:
+            return True
+        current = current.parent
+    return False
+
+
 def _extract_name(node: tree_sitter.Node, captures: list) -> str:
     """Extract the name for a captured node."""
-    # Look for corresponding .name capture
+    # Look for corresponding .name capture — walk ancestors, not just direct parent.
     for n, name in captures:
-        if name.endswith(NAME_CAPTURE_SUFFIXES) and n.parent == node:
+        if name.endswith(NAME_CAPTURE_SUFFIXES) and _is_ancestor(node, n):
             return n.text.decode() if n.text else "unknown"
 
     # Try common child names
@@ -302,9 +389,14 @@ def _detect_language(file_path: Path) -> str | None:
     return LANGUAGE_EXTENSIONS.get(file_path.suffix.lower())
 
 
-def _walk_directory(directory: Path) -> Iterator[Path]:
+def _walk_directory(
+    directory: Path,
+    *,
+    ignore_patterns: set[str] | None = None,
+) -> Iterator[Path]:
     """Recursively walk directory, skipping hidden and common ignore patterns."""
-    ignore_patterns = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox"}
+    if ignore_patterns is None:
+        ignore_patterns = {".git", ".venv", "venv", "node_modules", "__pycache__", ".tox"}
 
     for item in directory.iterdir():
         if item.name.startswith(".") or item.name in ignore_patterns:
@@ -312,7 +404,7 @@ def _walk_directory(directory: Path) -> Iterator[Path]:
         if item.is_file():
             yield item
         elif item.is_dir():
-            yield from _walk_directory(item)
+            yield from _walk_directory(item, ignore_patterns=ignore_patterns)
 
 
 def parse_file(file_path: PathLike) -> list[CSTNode]:
@@ -326,40 +418,103 @@ def parse_file(file_path: PathLike) -> list[CSTNode]:
     return _parse_file(path_obj, language)
 
 
-class NodeType(str, Enum):
-    FILE = "file"
-    CLASS = "class"
-    FUNCTION = "function"
-    METHOD = "method"
-    SECTION = "section"
-    TABLE = "table"
+def parse_content(file_path: str, content: str, language: str | None = None) -> list[CSTNode]:
+    """Parse text content and return CSTNode list.
 
+    Like ``_parse_file()`` but accepts content directly instead of reading
+    from disk.  Used by the LSP path where content comes from the editor.
 
-class TreeSitterDiscoverer:
-    """Compatibility wrapper that exposes the old API."""
+    Args:
+        file_path: File path (or URI) — used for node IDs and language detection.
+        content: The text content to parse.
+        language: Explicit language name (e.g. "python").  Auto-detected from
+            file extension if ``None``.
 
-    def __init__(
-        self,
-        root_dirs: list[PathLike],
-        language: str | None = None,
-        query_pack: str = "remora_core",
-        node_types: list[NodeType | str] | None = None,
-        max_workers: int = 4,
-    ) -> None:
-        self._paths = [normalize_path(p) for p in root_dirs]
-        self._language = language
-        self._query_pack = query_pack
-        self._node_types = [nt.value if isinstance(nt, NodeType) else nt for nt in node_types] if node_types else None
-        self._max_workers = max_workers
+    Returns:
+        List of CSTNode objects representing discovered code elements.
+    """
+    path_obj = Path(file_path)
 
-    def discover(self) -> list[CSTNode]:
-        languages: list[str] | None = [self._language] if self._language else None
-        return discover(
-            paths=self._paths,
-            languages=languages,
-            node_types=self._node_types,
-            max_workers=self._max_workers,
+    if language is None:
+        language = _detect_language(path_obj)
+
+    if language is None:
+        return [_create_file_node_from_content(file_path, content)]
+
+    parser = _get_parser(language)
+    if parser is None:
+        return [_create_file_node_from_content(file_path, content)]
+
+    tree = parser.parse(content.encode())
+
+    # Load and apply queries
+    query_text = _load_queries(language)
+    if query_text is None:
+        return [_create_file_node_from_content(file_path, content)]
+
+    try:
+        lang_module = __import__(f"tree_sitter_{language}")
+        lang = Language(lang_module.language())
+        query = Query(lang, query_text)
+    except Exception as e:
+        logger.warning("Query error for %s: %s", language, e)
+        return [_create_file_node_from_content(file_path, content)]
+
+    # Extract matches
+    nodes: list[CSTNode] = []
+    captures = _collect_captures(query, tree.root_node)
+
+    for node, capture_name in captures:
+        if capture_name.endswith(NAME_CAPTURE_SUFFIXES):
+            continue
+        if capture_name in _POSTPROCESS_CAPTURES:
+            continue
+
+        node_type = capture_name.split(".", 1)[0]
+        name = _extract_name(node, captures)
+
+        cst_node = CSTNode(
+            node_id=compute_node_id(file_path, name, node.start_point[0] + 1, node.end_point[0] + 1),
+            node_type=node_type,
+            name=name,
+            full_name=f"{node_type}:{name}",
+            file_path=file_path,
+            text=content[node.start_byte : node.end_byte],
+            start_line=node.start_point[0] + 1,
+            end_line=node.end_point[0] + 1,
+            start_byte=node.start_byte,
+            end_byte=node.end_byte,
         )
+        nodes.append(cst_node)
+
+    # Markdown post-processing: create note/todo-note from frontmatter
+    if language == "markdown":
+        nodes = _postprocess_markdown(path_obj, content, captures, nodes)
+
+    # Always include file-level node
+    if not any(n.node_type == "file" for n in nodes):
+        nodes.insert(0, _create_file_node_from_content(file_path, content))
+
+    return nodes
+
+
+def _create_file_node_from_content(file_path: str, content: str) -> CSTNode:
+    """Create a file-level CSTNode from in-memory content (no disk I/O)."""
+    path_obj = Path(file_path)
+    line_count = content.count("\n") + 1 if content else 1
+    byte_length = len(content.encode("utf-8")) if content else 0
+    return CSTNode(
+        node_id=compute_node_id(file_path, path_obj.name, 1, line_count),
+        node_type="file",
+        name=path_obj.name,
+        full_name=path_obj.name,
+        file_path=file_path,
+        text=content,
+        start_line=1,
+        end_line=line_count,
+        start_byte=0,
+        end_byte=byte_length,
+    )
 
 
 __all__ = [
@@ -367,7 +522,6 @@ __all__ = [
     "compute_node_id",
     "discover",
     "LANGUAGE_EXTENSIONS",
-    "NodeType",
-    "TreeSitterDiscoverer",
+    "parse_content",
     "parse_file",
 ]

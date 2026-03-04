@@ -1,8 +1,8 @@
 [project]
 name = "remora"
 version = "0.4.12"
-description = "Local code analysis and enhancement with FunctionGemma subagents."
-readme = "docs/CONCEPT.md"
+description = "Reactive swarm agent framework with event-driven architecture."
+readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "MIT" }
 
@@ -18,22 +18,24 @@ dependencies = [
   "pyyaml>=6",
   "watchfiles>=0.21",
   "uvicorn>=0.23",
-  "structured-agents>=0.3.4",
+  "structured-agents>=0.4.0",
   "grail>=3.0.0",
-  "cairn",
-  "fsdantic>=0.2.0",
+  "cairn>=0.2.1",
+  "fsdantic>=0.3.1",
   "pydantic>=2.0",
+  "pydantic-settings>=2.0",
   "starlette>=0.30",
   "datastar-py>=0.1",
   "tree-sitter>=0.20",
   "tree-sitter-python>=0.23",
   "tree-sitter-toml",
   "tree-sitter-markdown",
-  "structured-agents[grammar,vllm]>=0.3",
+  "structured-agents[grammar,vllm]>=0.4.0",
   "openai>=1.0",
   "fastapi>=0.133.1",
   "pygls",
   "lsprotocol",
+  "rustworkx>=0.17.1",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +43,12 @@ frontend = [
 #  "stario>=0.1.0",
   "uvicorn>=0.23",
   "httpx>=0.27",
+]
+
+companion = [
+  "sqlite-vec>=0.1",
+  "sentence-transformers>=2.2",
+  "jinja2>=3.1",
 ]
 
 dev = [
@@ -62,9 +70,9 @@ dev = [
 #]
 
 [tool.uv.sources]
-fsdantic = { git = "https://github.com/Bullish-Design/fsdantic.git" }
-cairn = { git = "https://github.com/Bullish-Design/cairn.git" }
-structured-agents = { git = "https://github.com/Bullish-Design/structured-agents.git", rev = "main"}
+fsdantic = { git = "https://github.com/Bullish-Design/fsdantic.git", tag = "v0.3.1" }
+cairn = { git = "https://github.com/Bullish-Design/cairn.git", tag = "v0.2.1" }
+structured-agents = { git = "https://github.com/Bullish-Design/structured-agents.git", tag = "v0.4.0" }
 grail = { git = "https://github.com/Bullish-Design/grail.git", rev = "main" }
 
 [project.scripts]
@@ -72,6 +80,8 @@ remora = "remora.cli:main"
 remora-index = "remora.indexer.cli:main"
 remora-lsp = "remora.lsp:main"
 remora-demo = "remora_demo.__main__:main"
+remora-web = "remora_demo.web.__main__:main"
+companion-lsp = "remora_demo.companion.lsp:main"
 
 #[project.urls]
 #homepage = "https://github.com/Bullish-Design/template-py"
@@ -80,6 +90,11 @@ remora-demo = "remora_demo.__main__:main"
 [build-system]
 requires = ["hatchling>=1.18"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "types-pyyaml>=6.0.12.20250915",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/remora", "scripts", "remora_demo"]

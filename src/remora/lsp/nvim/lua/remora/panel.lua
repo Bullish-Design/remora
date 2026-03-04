@@ -1,7 +1,8 @@
-local n = require("nui-components")
+-- remora/panel.lua — Right-side vsplit agent panel
+-- Shows the agent at cursor: header, tools (collapsible), chat history, input.
+
 local Line = require("nui.line")
-local Renderer = require("nui-components.renderer")
-local Signal = require("nui-components.signal")
+local log = require("remora.log")
 
 local M = {}
 
@@ -9,19 +10,28 @@ local M = {}
 -- State
 -- ---------------------------------------------------------------------------
 
-M.state = Signal.create({
-    expanded = false,
-    selected_agent = nil,
-    agents = {},        -- { [id] = { id, name, status, parent_id } }
-    events = {},        -- list, newest first
-    active_tab = "state",
-    is_open = false,
-})
+M._chat_win = nil    -- window id for the chat/header buffer
+M._chat_buf = nil    -- buffer id for chat content
+M._input_win = nil   -- window id for the input line
+M._input_buf = nil   -- buffer id for the input line
+M._agent = nil       -- current agent dict {id, name, node_type, status, ...}
+M._tools = {}        -- list of {name, description}
+M._events = {}       -- list of event dicts (chronological)
+M._show_tools = false -- tools section collapsed by default
+M._ns = vim.api.nvim_create_namespace("remora_panel")
+M._augroup = nil     -- autocmd group id
 
-M.renderer = nil
+-- Callbacks set by init.lua
+M._exec_command = nil   -- function(command, arguments)
+M._cursor_context = nil -- function() -> {uri, line}
+M._get_client = nil     -- function() -> client or nil
+
+-- Debounce state for cursor-driven refresh
+M._debounce_timer = nil
+M._debounce_ms = 300    -- ms to wait after last CursorHold/BufEnter
 
 -- ---------------------------------------------------------------------------
--- Icon / highlight tables
+-- Highlight groups
 -- ---------------------------------------------------------------------------
 
 local status_icons = {
@@ -39,6 +49,7 @@ local status_hls = {
 }
 
 local event_icons = {
+    AgentTextResponse = " ",
     AgentStartEvent = " ",
     AgentCompleteEvent = " ",
     AgentErrorEvent = " ",
@@ -47,306 +58,426 @@ local event_icons = {
     RewriteRejectedEvent = " ",
     HumanChatEvent = " ",
     AgentMessageEvent = " ",
+    ToolResultEvent = " ",
 }
 
 local event_hls = {
+    AgentTextResponse = "RemoraAgent",
     AgentStartEvent = "DiagnosticInfo",
     AgentCompleteEvent = "DiagnosticOk",
     AgentErrorEvent = "DiagnosticError",
     RewriteProposalEvent = "DiagnosticWarn",
     RewriteAppliedEvent = "DiagnosticOk",
     RewriteRejectedEvent = "DiagnosticError",
-    HumanChatEvent = "Title",
+    HumanChatEvent = "RemoraUser",
     AgentMessageEvent = "Comment",
+    ToolResultEvent = "RemoraToolCall",
 }
 
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
 
-local function get_selected_agent()
-    local selected = M.state.selected_agent:get_value()
-    if not selected then return nil end
-    return M.state.agents:get_value()[selected]
+--- Sanitize a string: strip newlines (NuiLine crashes on them).
+local function sanitize(s)
+    if not s then return "" end
+    return (tostring(s):gsub("\n", " "):gsub("\r", ""))
 end
 
 local function format_time(timestamp)
-    if not timestamp then return "" end
-    return os.date("%H:%M:%S", timestamp)
+    if not timestamp or timestamp == 0 then return "" end
+    return os.date("%H:%M:%S", math.floor(timestamp))
+end
+
+--- Check if a window is valid.
+local function win_valid(win)
+    return win and vim.api.nvim_win_is_valid(win)
+end
+
+--- Check if a buffer is valid.
+local function buf_valid(buf)
+    return buf and vim.api.nvim_buf_is_valid(buf)
+end
+
+--- Delete any leftover buffer with the given name (from a previous session).
+local function wipe_named_buf(name)
+    local ok, nr = pcall(vim.fn.bufnr, name)
+    if ok and nr ~= -1 then
+        pcall(vim.api.nvim_buf_delete, nr, { force = true })
+    end
 end
 
 -- ---------------------------------------------------------------------------
--- Line builders  (return tables of NuiLine for n.paragraph)
+-- Rendering — build lines and set them on the chat buffer
 -- ---------------------------------------------------------------------------
 
---- Build lines for the collapsed agent-icon sidebar.
-local function build_agent_icon_lines()
-    local agents = M.state.agents:get_value()
+--- Build all display lines as {text, highlights} pairs.
+--- Returns a list of NuiLine objects.
+local function build_lines()
     local lines = {}
-    for _, agent in pairs(agents) do
-        local icon = status_icons[agent.status] or "?"
-        local hl = status_hls[agent.status] or "Normal"
-        local line = Line()
-        line:append(icon, hl)
-        line:append(" " .. (agent.name or agent.id), hl)
-        table.insert(lines, line)
-    end
-    if #lines == 0 then
-        local line = Line()
-        line:append("No agents", "Comment")
-        table.insert(lines, line)
-    end
-    return lines
-end
 
---- Build lines for the agent header (shown when expanded).
-local function build_header_lines()
-    local agent = get_selected_agent()
-    local lines = {}
-    if not agent then
-        local line = Line()
-        line:append("No agent selected", "Comment")
-        table.insert(lines, line)
-        return lines
-    end
+    -- ── Header ──────────────────────────────────────────────────
+    if M._agent then
+        local sep = Line()
+        sep:append("─── Agent ───────────────────────", "Comment")
+        table.insert(lines, sep)
 
-    local title = Line()
-    title:append(agent.name or agent.id, "Title")
-    table.insert(lines, title)
+        local title = Line()
+        local icon = status_icons[M._agent.status] or "?"
+        local hl = status_hls[M._agent.status] or "Normal"
+        title:append(icon, hl)
+        title:append(" " .. sanitize(M._agent.name or "unnamed"), "Title")
+        table.insert(lines, title)
 
-    local status_line = Line()
-    local hl = status_hls[agent.status] or "Normal"
-    local icon = status_icons[agent.status] or "?"
-    status_line:append(icon .. " " .. (agent.status or "unknown"), hl)
-    status_line:append("  ID: " .. agent.id, "Comment")
-    table.insert(lines, status_line)
+        local info = Line()
+        info:append("  Type: ", "Comment")
+        info:append(sanitize(M._agent.node_type or "?"))
+        info:append("  Status: ", "Comment")
+        info:append(sanitize(M._agent.status or "?"), hl)
+        table.insert(lines, info)
 
-    local parent_line = Line()
-    parent_line:append("Parent: " .. (agent.parent_id or "none"), "Comment")
-    table.insert(lines, parent_line)
+        local loc = Line()
+        loc:append("  Lines: ", "Comment")
+        loc:append(tostring(M._agent.start_line or "?") .. "-" .. tostring(M._agent.end_line or "?"))
+        table.insert(lines, loc)
 
-    return lines
-end
-
---- Build lines for the State tab.
-local function build_state_lines()
-    local agent = get_selected_agent()
-    if not agent then
-        local line = Line()
-        line:append("Select an agent to see details.", "Comment")
-        return { line }
-    end
-    local lines = {}
-    local s = Line()
-    s:append("Status: " .. (agent.status or "unknown"), "Comment")
-    table.insert(lines, s)
-
-    local r = Line()
-    r:append("Range: " .. (agent.range or "unknown"), "Comment")
-    table.insert(lines, r)
-    return lines
-end
-
---- Build lines for the Events tab.
-local function build_event_lines()
-    local events = M.state.events:get_value()
-    if #events == 0 then
-        local line = Line()
-        line:append("No events yet.", "Comment")
-        return { line }
+        -- Blank separator
+        table.insert(lines, Line())
+    else
+        local noagent = Line()
+        noagent:append("No agent at cursor", "Comment")
+        table.insert(lines, noagent)
+        table.insert(lines, Line())
     end
 
-    local lines = {}
-    for i, ev in ipairs(events) do
-        if i > 30 then break end  -- cap display
-        local icon = event_icons[ev.event_type] or "?"
-        local hl = event_hls[ev.event_type] or "Normal"
-        local line = Line()
-        line:append(icon, hl)
-        line:append(" " .. (ev.summary or ev.event_type), hl)
-        local ts = format_time(ev.timestamp)
-        if ts ~= "" then
-            line:append("  " .. ts, "Comment")
-        end
-        table.insert(lines, line)
+    -- ── Tools (collapsible) ─────────────────────────────────────
+    local tools_header = Line()
+    if M._show_tools then
+        tools_header:append("▼ Tools (" .. #M._tools .. ")", "Title")
+    else
+        tools_header:append("▶ Tools (" .. #M._tools .. ")  [t to toggle]", "Comment")
+    end
+    table.insert(lines, tools_header)
 
-        -- Show diff snippet for rewrite proposals
-        if ev.event_type == "RewriteProposalEvent" and ev.diff then
-            for _, diff_line in ipairs(vim.split(ev.diff, "\n")) do
-                local dl = Line()
-                dl:append("  " .. diff_line, "DiffText")
-                table.insert(lines, dl)
+    if M._show_tools then
+        if #M._tools == 0 then
+            local none = Line()
+            none:append("  (none)", "Comment")
+            table.insert(lines, none)
+        else
+            for _, tool in ipairs(M._tools) do
+                local tl = Line()
+                tl:append("  " .. sanitize(tool.name), "Function")
+                if tool.description and tool.description ~= "" then
+                    tl:append(" — " .. sanitize(tool.description), "Comment")
+                end
+                table.insert(lines, tl)
             end
         end
     end
-    return lines
-end
+    table.insert(lines, Line())
 
---- Build lines for the Chat tab.
-local function build_chat_lines()
-    local events = M.state.events:get_value()
-    local lines = {}
-    for _, ev in ipairs(events) do
-        if ev.event_type == "HumanChatEvent" or ev.event_type == "AgentMessageEvent" then
-            local is_human = ev.event_type == "HumanChatEvent"
-            local prefix = is_human and "You: " or "Agent: "
-            local hl = is_human and "Title" or "Comment"
-            local line = Line()
-            line:append(prefix, hl)
-            line:append(ev.message or ev.summary or "")
-            table.insert(lines, line)
+    -- ── Chat history ────────────────────────────────────────────
+    local chat_sep = Line()
+    chat_sep:append("─── Chat ────────────────────────", "Comment")
+    table.insert(lines, chat_sep)
+
+    if #M._events == 0 then
+        local empty = Line()
+        empty:append("  No messages yet. Type below to chat.", "Comment")
+        table.insert(lines, empty)
+    else
+        for _, ev in ipairs(M._events) do
+            local etype = ev.event_type or ""
+            local icon = event_icons[etype] or "  "
+            local hl = event_hls[etype] or "Normal"
+
+            if etype == "HumanChatEvent" then
+                -- User message
+                local header = Line()
+                header:append(icon, hl)
+                header:append("You", "RemoraUser")
+                local ts = format_time(ev.timestamp)
+                if ts ~= "" then
+                    header:append("  " .. ts, "Comment")
+                end
+                table.insert(lines, header)
+
+                local msg = (ev.payload and ev.payload.message)
+                    or (ev.payload and ev.payload.content)
+                    or ev.summary or ""
+                for _, text_line in ipairs(vim.split(msg, "\n")) do
+                    local ml = Line()
+                    ml:append("  " .. text_line, "RemoraUserText")
+                    table.insert(lines, ml)
+                end
+                table.insert(lines, Line())
+
+            elseif etype == "AgentTextResponse" then
+                -- LLM response
+                local header = Line()
+                header:append(icon, hl)
+                header:append("Agent", "RemoraAgent")
+                local ts = format_time(ev.timestamp)
+                if ts ~= "" then
+                    header:append("  " .. ts, "Comment")
+                end
+                table.insert(lines, header)
+
+                local content = (ev.payload and ev.payload.content) or ev.summary or ""
+                for _, text_line in ipairs(vim.split(content, "\n")) do
+                    local ml = Line()
+                    ml:append("  " .. text_line, "RemoraAgentText")
+                    table.insert(lines, ml)
+                end
+                table.insert(lines, Line())
+
+            elseif etype == "AgentErrorEvent" then
+                local el = Line()
+                el:append(icon, hl)
+                el:append(sanitize(ev.summary or "Error"), hl)
+                table.insert(lines, el)
+                table.insert(lines, Line())
+
+            elseif etype == "RewriteProposalEvent" then
+                local pl = Line()
+                pl:append(icon, hl)
+                pl:append("Rewrite proposal", hl)
+                local ts = format_time(ev.timestamp)
+                if ts ~= "" then
+                    pl:append("  " .. ts, "Comment")
+                end
+                table.insert(lines, pl)
+
+                -- Show diff if available
+                local diff = ev.payload and ev.payload.diff or ev.diff
+                if diff then
+                    for _, dl in ipairs(vim.split(diff, "\n")) do
+                        local dline = Line()
+                        if dl:sub(1, 1) == "+" then
+                            dline:append("  " .. dl, "DiffAdd")
+                        elseif dl:sub(1, 1) == "-" then
+                            dline:append("  " .. dl, "DiffDelete")
+                        else
+                            dline:append("  " .. dl, "Comment")
+                        end
+                        table.insert(lines, dline)
+                    end
+                end
+                table.insert(lines, Line())
+
+            elseif etype == "AgentMessageEvent" then
+                -- Inter-agent message
+                local header = Line()
+                header:append(icon, hl)
+                local from = (ev.payload and ev.payload.from_agent) or "unknown"
+                local to = (ev.payload and ev.payload.to_agent) or "unknown"
+                -- Show direction relative to current agent
+                if M._agent and to == M._agent.id then
+                    header:append("From: ", "Comment")
+                    header:append(sanitize(from), "Function")
+                else
+                    header:append("To: ", "Comment")
+                    header:append(sanitize(to), "Function")
+                end
+                local ts = format_time(ev.timestamp)
+                if ts ~= "" then
+                    header:append("  " .. ts, "Comment")
+                end
+                table.insert(lines, header)
+
+                local msg = (ev.payload and ev.payload.message) or ev.summary or ""
+                for _, text_line in ipairs(vim.split(msg, "\n")) do
+                    local ml = Line()
+                    ml:append("  " .. text_line, "Comment")
+                    table.insert(lines, ml)
+                end
+                table.insert(lines, Line())
+
+            elseif etype == "ToolResultEvent" then
+                -- Tool call result — compact, greyed out
+                local tool_name = (ev.payload and ev.payload.tool_name) or "tool"
+                local target = (ev.payload and ev.payload.target_id) or ""
+                local ts = format_time(ev.timestamp)
+
+                local tl = Line()
+                tl:append("  " .. icon, "RemoraToolCall")
+                tl:append(sanitize(tool_name), "RemoraToolCall")
+                if target ~= "" then
+                    tl:append("(" .. sanitize(target) .. ")", "RemoraToolCall")
+                end
+                if ts ~= "" then
+                    tl:append("  " .. ts, "RemoraToolCall")
+                end
+                table.insert(lines, tl)
+
+                -- Show result summary on next line if available
+                local result_text = (ev.payload and ev.payload.result_summary) or ""
+                if result_text ~= "" then
+                    local rl = Line()
+                    rl:append("    -> " .. sanitize(result_text), "RemoraToolCall")
+                    table.insert(lines, rl)
+                end
+
+            else
+                -- Generic event
+                local gl = Line()
+                gl:append(icon, hl)
+                gl:append(sanitize(ev.summary or etype), hl)
+                local ts = format_time(ev.timestamp)
+                if ts ~= "" then
+                    gl:append("  " .. ts, "Comment")
+                end
+                table.insert(lines, gl)
+            end
         end
     end
-    if #lines == 0 then
-        local line = Line()
-        line:append("No messages yet.", "Comment")
-        table.insert(lines, line)
-    end
+
+    -- ── Help line ───────────────────────────────────────────────
+    table.insert(lines, Line())
+    local help = Line()
+    help:append("[q] close  [t] tools  [<CR>] send message", "Comment")
+    table.insert(lines, help)
+
     return lines
 end
 
--- ---------------------------------------------------------------------------
--- Component tree
--- ---------------------------------------------------------------------------
+--- Render lines into the chat buffer.
+local function render()
+    if not buf_valid(M._chat_buf) then return end
 
-function M.create_panel()
-    local state = M.state
+    local nui_lines = build_lines()
 
-    -- Map signal values to lines for paragraphs.
-    -- The `hidden` prop accepts a signal value, so collapsed/expanded is driven
-    -- directly by the `expanded` signal.
+    -- Convert NuiLine objects to plain strings for nvim_buf_set_lines
+    local plain = {}
+    for _, line in ipairs(nui_lines) do
+        table.insert(plain, line:content())
+    end
 
-    local collapsed_hidden = state.expanded  -- hidden when expanded == true
-    local expanded_hidden = state.expanded:dup():negate()  -- hidden when expanded == false
+    vim.api.nvim_set_option_value("modifiable", true, { buf = M._chat_buf })
+    vim.api.nvim_buf_set_lines(M._chat_buf, 0, -1, false, plain)
 
-    -- Which tab is active? Drive tab visibility via active_tab signal.
-    local state_tab_hidden = state.active_tab:dup():map(function(t) return t ~= "state" end)
-    local events_tab_hidden = state.active_tab:dup():map(function(t) return t ~= "events" end)
-    local chat_tab_hidden = state.active_tab:dup():map(function(t) return t ~= "chat" end)
+    -- Apply highlights via NuiLine
+    vim.api.nvim_buf_clear_namespace(M._chat_buf, M._ns, 0, -1)
+    for i, line in ipairs(nui_lines) do
+        line:highlight(M._chat_buf, M._ns, i) -- NuiLine:highlight is 1-based
+    end
 
-    return n.rows(
-        -- ── Collapsed view: agent icon list ──────────────────────
-        n.paragraph({
-            id = "agent_list",
-            hidden = collapsed_hidden,
-            lines = build_agent_icon_lines(),
-            border_label = "Agents",
-            border_style = "rounded",
-            flex = 1,
-        }),
+    vim.api.nvim_set_option_value("modifiable", false, { buf = M._chat_buf })
 
-        -- ── Expanded view ────────────────────────────────────────
-        n.rows(
-            { hidden = expanded_hidden, flex = 1 },
-
-            -- Header
-            n.paragraph({
-                id = "agent_header",
-                lines = build_header_lines(),
-                border_label = "Agent",
-                border_style = "rounded",
-                size = 5,
-            }),
-
-            -- Tab bar (buttons)
-            n.columns(
-                { size = 1 },
-                n.button({
-                    id = "tab_state",
-                    label = " State ",
-                    on_press = function()
-                        state.active_tab = "state"
-                    end,
-                    is_active = n.is_active_factory(state.active_tab)("state"),
-                }),
-                n.button({
-                    id = "tab_events",
-                    label = " Events ",
-                    on_press = function()
-                        state.active_tab = "events"
-                    end,
-                    is_active = n.is_active_factory(state.active_tab)("events"),
-                }),
-                n.button({
-                    id = "tab_chat",
-                    label = " Chat ",
-                    on_press = function()
-                        state.active_tab = "chat"
-                    end,
-                    is_active = n.is_active_factory(state.active_tab)("chat"),
-                })
-            ),
-
-            -- State tab content
-            n.paragraph({
-                id = "tab_state_content",
-                hidden = state_tab_hidden,
-                lines = build_state_lines(),
-                flex = 1,
-            }),
-
-            -- Events tab content
-            n.paragraph({
-                id = "tab_events_content",
-                hidden = events_tab_hidden,
-                lines = build_event_lines(),
-                flex = 1,
-            }),
-
-            -- Chat tab content
-            n.rows(
-                { hidden = chat_tab_hidden, flex = 1 },
-                n.paragraph({
-                    id = "tab_chat_messages",
-                    lines = build_chat_lines(),
-                    flex = 1,
-                }),
-                n.text_input({
-                    id = "chat_input",
-                    border_label = "Message",
-                    border_style = "rounded",
-                    placeholder = "Message agent...",
-                    size = 1,
-                    autofocus = true,
-                    on_change = function(value, component)
-                        -- Store current value for submit
-                        M._pending_chat = value
-                    end,
-                })
-            ),
-
-            -- Help line
-            n.paragraph({
-                id = "help_line",
-                lines = "[Esc] close  [Tab] navigate  [1] state  [2] events  [3] chat",
-                size = 1,
-            })
-        )
-    )
+    -- Scroll chat to bottom
+    if win_valid(M._chat_win) then
+        local count = vim.api.nvim_buf_line_count(M._chat_buf)
+        pcall(vim.api.nvim_win_set_cursor, M._chat_win, { count, 0 })
+    end
 end
 
 -- ---------------------------------------------------------------------------
--- Refresh paragraph content (called when state changes)
+-- Fetch agent data from server
 -- ---------------------------------------------------------------------------
 
-local function update_paragraphs()
-    if not M.renderer then return end
-
-    local function update_component(id, lines)
-        local comp = M.renderer:get_component_by_id(id)
-        if not comp then return end
-        -- Props are read-only via metatable; use rawset to bypass.
-        pcall(function()
-            rawset(comp._private.props, "lines", lines)
-            comp:redraw()
-        end)
+--- Request agent panel data from the server and re-render.
+--- If agent_id changes, clear events and re-render. If same agent, just update.
+local function fetch_agent_data()
+    if not M._cursor_context or not M._get_client then
+        log.warn("panel.fetch_agent_data: no cursor_context or get_client callback")
+        return
     end
 
-    update_component("agent_list", build_agent_icon_lines())
-    update_component("agent_header", build_header_lines())
-    update_component("tab_state_content", build_state_lines())
-    update_component("tab_events_content", build_event_lines())
-    update_component("tab_chat_messages", build_chat_lines())
+    local client = M._get_client()
+    if not client then
+        log.debug("panel.fetch_agent_data: no LSP client")
+        return
+    end
+
+    local ctx = M._cursor_context()
+    log.info("panel.fetch_agent_data: requesting for %s:%d", ctx.uri, ctx.line)
+
+    client.request("workspace/executeCommand", {
+        command = "remora.getAgentPanel",
+        arguments = { ctx },
+    }, function(err, result)
+        if err then
+            log.error("panel.fetch_agent_data: error: %s", vim.inspect(err))
+            return
+        end
+        if not result then
+            -- No agent at cursor
+            vim.schedule(function()
+                local changed = M._agent ~= nil
+                M._agent = nil
+                M._tools = {}
+                if changed then
+                    M._events = {}
+                end
+                render()
+            end)
+            return
+        end
+
+        vim.schedule(function()
+            local new_agent = result.agent
+            local old_id = M._agent and M._agent.id
+            local new_id = new_agent and new_agent.id
+
+            if old_id ~= new_id then
+                -- Agent changed — replace everything
+                M._agent = new_agent
+                M._tools = result.tools or {}
+                M._events = result.events or {}
+                log.info("panel.fetch_agent_data: agent changed to %s (%s), %d tools, %d events",
+                    tostring(new_id), tostring(new_agent and new_agent.name),
+                    #M._tools, #M._events)
+            else
+                -- Same agent — update metadata but keep accumulated live events
+                M._agent = new_agent
+                M._tools = result.tools or {}
+                -- Don't replace events — we may have newer live events
+            end
+            render()
+        end)
+    end)
+end
+
+-- ---------------------------------------------------------------------------
+-- Send chat message
+-- ---------------------------------------------------------------------------
+
+local function send_message()
+    if not buf_valid(M._input_buf) then return end
+    if not M._agent then
+        log.warn("panel.send_message: no agent selected")
+        return
+    end
+
+    local lines = vim.api.nvim_buf_get_lines(M._input_buf, 0, -1, false)
+    local text = vim.fn.join(lines, "\n")
+    text = vim.trim(text)
+    if text == "" then return end
+
+    log.info("panel.send_message: sending to agent %s: %s", M._agent.id, text:sub(1, 100))
+
+    -- Immediately append to local events for instant feedback
+    table.insert(M._events, {
+        event_type = "HumanChatEvent",
+        agent_id = M._agent.id,
+        timestamp = os.time(),
+        summary = text:sub(1, 200),
+        payload = { message = text, to_agent = M._agent.id },
+    })
+    render()
+
+    -- Clear input
+    vim.api.nvim_buf_set_lines(M._input_buf, 0, -1, false, { "" })
+
+    -- Send to server
+    local client = M._get_client and M._get_client()
+    if client then
+        client.notify("$/remora/submitInput", {
+            agent_id = M._agent.id,
+            input = text,
+        })
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -354,136 +485,219 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.open()
-    if M.renderer then
+    log.info("panel.open: called")
+    if win_valid(M._chat_win) then
+        log.info("panel.open: already open")
         return
     end
 
-    M.renderer = Renderer.create({
-        width = 60,
-        height = 30,
-        position = "50%",
-        relative = "editor",
-        keymap = {
-            close = "<Esc>",
-            focus_next = "<Tab>",
-            focus_prev = "<S-Tab>",
-        },
-        on_unmount = function()
-            M.renderer = nil
-            M.state.is_open = false
+    -- Remember which window to return to
+    local origin_win = vim.api.nvim_get_current_win()
+
+    -- Clean up any stale named buffers from a previous session
+    wipe_named_buf("remora://panel")
+    wipe_named_buf("remora://input")
+
+    -- Create both buffers first (before any window manipulation)
+    M._chat_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_option_value("buftype", "nofile", { buf = M._chat_buf })
+    vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = M._chat_buf })
+    vim.api.nvim_set_option_value("swapfile", false, { buf = M._chat_buf })
+    vim.api.nvim_set_option_value("filetype", "remora-panel", { buf = M._chat_buf })
+    vim.api.nvim_buf_set_name(M._chat_buf, "remora://panel")
+
+    M._input_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_option_value("buftype", "nofile", { buf = M._input_buf })
+    vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = M._input_buf })
+    vim.api.nvim_set_option_value("swapfile", false, { buf = M._input_buf })
+    vim.api.nvim_set_option_value("filetype", "remora-input", { buf = M._input_buf })
+    vim.api.nvim_buf_set_name(M._input_buf, "remora://input")
+
+    -- Open the chat buffer in a right-edge vertical split.
+    local width = math.max(40, math.floor(vim.o.columns * 0.25))
+    vim.cmd("botright vsplit")
+    M._chat_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(M._chat_win, M._chat_buf)
+    vim.api.nvim_win_set_width(M._chat_win, width)
+
+    -- Chat window options
+    vim.api.nvim_set_option_value("number", false, { win = M._chat_win })
+    vim.api.nvim_set_option_value("relativenumber", false, { win = M._chat_win })
+    vim.api.nvim_set_option_value("signcolumn", "no", { win = M._chat_win })
+    vim.api.nvim_set_option_value("wrap", true, { win = M._chat_win })
+    vim.api.nvim_set_option_value("linebreak", true, { win = M._chat_win })
+    vim.api.nvim_set_option_value("cursorline", false, { win = M._chat_win })
+    vim.api.nvim_set_option_value("winfixwidth", true, { win = M._chat_win })
+
+    -- Open the input buffer in a horizontal split below chat (~1/5 of panel)
+    vim.cmd("belowright split")
+    M._input_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(M._input_win, M._input_buf)
+    local input_height = math.max(5, math.floor(vim.o.lines * 0.20))
+    vim.api.nvim_win_set_height(M._input_win, input_height)
+
+    -- Input window options
+    vim.api.nvim_set_option_value("number", false, { win = M._input_win })
+    vim.api.nvim_set_option_value("relativenumber", false, { win = M._input_win })
+    vim.api.nvim_set_option_value("signcolumn", "no", { win = M._input_win })
+    vim.api.nvim_set_option_value("wrap", true, { win = M._input_win })
+    vim.api.nvim_set_option_value("winfixheight", true, { win = M._input_win })
+    vim.api.nvim_set_option_value("winbar", " Message agent...", { win = M._input_win })
+
+    -- ── Keymaps ─────────────────────────────────────────────────
+
+    -- Chat buffer keymaps
+    vim.keymap.set("n", "q", function() M.close() end, { buffer = M._chat_buf, desc = "Close remora panel" })
+    vim.keymap.set("n", "t", function()
+        M._show_tools = not M._show_tools
+        render()
+    end, { buffer = M._chat_buf, desc = "Toggle tools" })
+
+    -- Input buffer keymaps
+    vim.keymap.set("i", "<CR>", function()
+        send_message()
+    end, { buffer = M._input_buf, desc = "Send message" })
+    vim.keymap.set("n", "<CR>", function()
+        send_message()
+    end, { buffer = M._input_buf, desc = "Send message" })
+    vim.keymap.set("n", "q", function() M.close() end, { buffer = M._input_buf, desc = "Close remora panel" })
+
+    -- ── Autocmds ────────────────────────────────────────────────
+
+    M._augroup = vim.api.nvim_create_augroup("RemoraPanel", { clear = true })
+
+    -- Auto-refresh when cursor moves to a different agent (debounced)
+    vim.api.nvim_create_autocmd({ "CursorHold", "BufEnter" }, {
+        group = M._augroup,
+        callback = function(ev)
+            -- Only trigger for non-panel buffers
+            if ev.buf == M._chat_buf or ev.buf == M._input_buf then return end
+            -- Only trigger for supported file types (skip mini.files, help, etc.)
+            local ft = vim.api.nvim_get_option_value("filetype", { buf = ev.buf })
+            if ft ~= "python" and ft ~= "markdown" and ft ~= "toml" then return end
+            -- Only if panel is still open
+            if not win_valid(M._chat_win) then return end
+            -- Debounce: cancel pending timer and start a new one
+            if M._debounce_timer then
+                M._debounce_timer:stop()
+                M._debounce_timer:close()
+            end
+            M._debounce_timer = vim.uv.new_timer()
+            M._debounce_timer:start(M._debounce_ms, 0, vim.schedule_wrap(function()
+                if M._debounce_timer then
+                    M._debounce_timer:stop()
+                    M._debounce_timer:close()
+                    M._debounce_timer = nil
+                end
+                if win_valid(M._chat_win) then
+                    fetch_agent_data()
+                end
+            end))
         end,
     })
 
-    M.renderer:render(function()
-        return M.create_panel()
-    end)
-    M.state.is_open = true
-
-    -- Add global keymaps for tab switching & chat submit
-    M.renderer:add_mappings({
-        {
-            mode = { "n" },
-            key = "1",
-            handler = function() M.state.active_tab = "state" end,
-        },
-        {
-            mode = { "n" },
-            key = "2",
-            handler = function() M.state.active_tab = "events" end,
-        },
-        {
-            mode = { "n" },
-            key = "3",
-            handler = function() M.state.active_tab = "chat" end,
-        },
-        {
-            mode = { "n" },
-            key = "e",
-            handler = function()
-                M.state.expanded = not M.state.expanded:get_value()
-            end,
-        },
-        {
-            mode = { "i" },
-            key = "<C-CR>",
-            handler = function()
-                local value = M._pending_chat
-                if value and value ~= "" then
-                    local agent = get_selected_agent()
-                    if agent then
-                        vim.lsp.buf_notify(0, "$/remora/submitInput", {
-                            agent_id = agent.id,
-                            input = value,
-                        })
-                        M._pending_chat = ""
-                        -- Clear the text input
-                        local input = M.renderer:get_component_by_id("chat_input")
-                        if input and input.bufnr and vim.api.nvim_buf_is_valid(input.bufnr) then
-                            vim.api.nvim_buf_set_lines(input.bufnr, 0, -1, false, { "" })
-                        end
-                    end
-                end
-            end,
-        },
+    -- Clean up if either panel window is closed externally
+    vim.api.nvim_create_autocmd("WinClosed", {
+        group = M._augroup,
+        callback = function(ev)
+            local closed_win = tonumber(ev.match)
+            if closed_win == M._chat_win or closed_win == M._input_win then
+                vim.schedule(function() M._cleanup() end)
+            end
+        end,
     })
+
+    -- Initial render with placeholder
+    render()
+
+    -- Return focus to origin window
+    if vim.api.nvim_win_is_valid(origin_win) then
+        vim.api.nvim_set_current_win(origin_win)
+    end
+
+    -- Fetch data for current cursor position
+    fetch_agent_data()
+
+    log.info("panel.open: done, chat_win=%d input_win=%d", M._chat_win, M._input_win)
+end
+
+function M._cleanup()
+    log.info("panel._cleanup: called")
+
+    if M._debounce_timer then
+        M._debounce_timer:stop()
+        M._debounce_timer:close()
+        M._debounce_timer = nil
+    end
+
+    if M._augroup then
+        pcall(vim.api.nvim_del_augroup_by_id, M._augroup)
+        M._augroup = nil
+    end
+
+    -- Close windows if still valid
+    if win_valid(M._input_win) then
+        pcall(vim.api.nvim_win_close, M._input_win, true)
+    end
+    if win_valid(M._chat_win) then
+        pcall(vim.api.nvim_win_close, M._chat_win, true)
+    end
+
+    M._chat_win = nil
+    M._chat_buf = nil
+    M._input_win = nil
+    M._input_buf = nil
 end
 
 function M.close()
-    if not M.renderer then
-        return
-    end
-    M.renderer:close()
-    M.renderer = nil
-    M.state.is_open = false
-end
-
-function M.toggle_panel()
-    if M.renderer then
-        M.close()
-    else
-        M.open()
-    end
+    log.info("panel.close: called")
+    M._cleanup()
 end
 
 function M.is_open()
-    return M.state.is_open:get_value()
+    return win_valid(M._chat_win)
 end
 
 -- ---------------------------------------------------------------------------
--- External API  (called from init.lua LSP handlers)
+-- External API (called from init.lua)
 -- ---------------------------------------------------------------------------
 
-function M.add_event(event)
-    local events = vim.deepcopy(M.state.events:get_value())
-    table.insert(events, 1, event)
-    if #events > 50 then
-        table.remove(events)
+--- Handle a live event from $/remora/event.
+--- Only appends if the event matches the current agent.
+function M.on_event(event)
+    if not event then return end
+    log.info("panel.on_event: type=%s agent=%s",
+        tostring(event.event_type), tostring(event.agent_id))
+
+    -- Only show events for the current agent (as sender or receiver)
+    if not M._agent then
+        log.debug("panel.on_event: ignoring (no agent)")
+        return
     end
-    M.state.events = events
-    update_paragraphs()
+    local agent_id = M._agent.id
+    local to_agent = event.payload and event.payload.to_agent
+    if event.agent_id ~= agent_id and to_agent ~= agent_id then
+        log.debug("panel.on_event: ignoring (agent mismatch: event.agent_id=%s to_agent=%s current=%s)",
+            tostring(event.agent_id), tostring(to_agent), agent_id)
+        return
+    end
+
+    -- Avoid duplicate HumanChatEvent (we already appended locally on send)
+    if event.event_type == "HumanChatEvent" then
+        log.debug("panel.on_event: skipping HumanChatEvent (already shown locally)")
+        return
+    end
+
+    table.insert(M._events, event)
+    render()
 end
 
-function M.select_agent(agent_id)
-    local agents = M.state.agents:get_value()
-    if agents[agent_id] then
-        M.state.selected_agent = agent_id
-        M.state.expanded = true
-        update_paragraphs()
-    end
-end
-
-function M.update_agents(agent_list)
-    local mapping = {}
-    for _, agent in ipairs(agent_list or {}) do
-        mapping[agent.remora_id] = {
-            id = agent.remora_id,
-            name = agent.name,
-            status = agent.status,
-            parent_id = agent.parent_id,
-        }
-    end
-    M.state.agents = mapping
-    update_paragraphs()
+--- Configure callbacks. Called once from init.lua setup.
+function M.configure(opts)
+    M._exec_command = opts.exec_command
+    M._cursor_context = opts.cursor_context
+    M._get_client = opts.get_client
+    log.info("panel.configure: callbacks set")
 end
 
 return M

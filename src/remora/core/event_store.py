@@ -18,7 +18,9 @@ from remora.utils import PathLike, normalize_path
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from remora.core.agent_node import AgentNode
     from remora.core.event_bus import EventBus
+    from remora.core.projections import NodeProjection
     from remora.core.subscriptions import SubscriptionRegistry
 
 
@@ -30,6 +32,7 @@ class EventStore:
         db_path: PathLike,
         subscriptions: "SubscriptionRegistry | None" = None,
         event_bus: "EventBus | None" = None,
+        projection: "NodeProjection | None" = None,
     ):
         self._db_path = normalize_path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,6 +40,7 @@ class EventStore:
         self._lock = asyncio.Lock()
         self._subscriptions = subscriptions
         self._event_bus = event_bus
+        self._projection = projection
         self._trigger_queue: asyncio.Queue[tuple[str, int, RemoraEvent]] | None = None
 
     def set_subscriptions(self, subscriptions: "SubscriptionRegistry") -> None:
@@ -60,6 +64,10 @@ class EventStore:
                 check_same_thread=False,
             )
             self._conn.row_factory = sqlite3.Row
+
+            # Enable WAL mode for better concurrent read/write performance
+            await asyncio.to_thread(self._conn.execute, "PRAGMA journal_mode=WAL")
+            await asyncio.to_thread(self._conn.execute, "PRAGMA synchronous=NORMAL")
 
             await asyncio.to_thread(
                 self._conn.executescript,
@@ -91,6 +99,114 @@ class EventStore:
                 """,
             )
 
+            await asyncio.to_thread(
+                self._conn.executescript,
+                """
+                CREATE TABLE IF NOT EXISTS nodes (
+                    node_id         TEXT PRIMARY KEY,
+                    node_type       TEXT NOT NULL,
+                    name            TEXT NOT NULL,
+                    full_name       TEXT NOT NULL,
+                    file_path       TEXT NOT NULL,
+                    start_line      INTEGER NOT NULL,
+                    end_line        INTEGER NOT NULL,
+                    start_byte      INTEGER NOT NULL DEFAULT 0,
+                    end_byte        INTEGER NOT NULL DEFAULT 0,
+                    source_code     TEXT NOT NULL,
+                    source_hash     TEXT NOT NULL,
+                    parent_id       TEXT,
+                    caller_ids      TEXT NOT NULL DEFAULT '[]',
+                    callee_ids      TEXT NOT NULL DEFAULT '[]',
+                    status          TEXT NOT NULL DEFAULT 'idle',
+                    last_trigger_event TEXT NOT NULL DEFAULT '',
+                    last_completed_at  REAL,
+                    extension_name  TEXT,
+                    custom_system_prompt TEXT NOT NULL DEFAULT '',
+                    mounted_workspaces TEXT NOT NULL DEFAULT '[]',
+                    extra_tools     TEXT NOT NULL DEFAULT '[]',
+                    extra_subscriptions TEXT NOT NULL DEFAULT '[]'
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_nodes_file_path ON nodes(file_path);
+                CREATE INDEX IF NOT EXISTS idx_nodes_parent_id ON nodes(parent_id);
+                CREATE INDEX IF NOT EXISTS idx_nodes_node_type ON nodes(node_type);
+                """,
+            )
+
+            # Subscriptions table (shared with SubscriptionRegistry)
+            await asyncio.to_thread(
+                self._conn.executescript,
+                """
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT NOT NULL,
+                    pattern_json TEXT NOT NULL,
+                    is_default INTEGER NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_agent_id
+                ON subscriptions(agent_id);
+
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_is_default
+                ON subscriptions(is_default);
+                """,
+            )
+
+            # RemoraDB operational tables (shared with RemoraDB)
+            await asyncio.to_thread(
+                self._conn.executescript,
+                """
+                CREATE TABLE IF NOT EXISTS edges (
+                    from_id TEXT NOT NULL,
+                    to_id TEXT NOT NULL,
+                    edge_type TEXT NOT NULL,
+                    PRIMARY KEY (from_id, to_id, edge_type)
+                );
+
+                CREATE TABLE IF NOT EXISTS activation_chain (
+                    correlation_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    depth INTEGER NOT NULL,
+                    timestamp REAL NOT NULL,
+                    PRIMARY KEY (correlation_id, agent_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS proposals (
+                    proposal_id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    old_source TEXT NOT NULL,
+                    new_source TEXT NOT NULL,
+                    diff TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at REAL NOT NULL,
+                    file_path TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS cursor_focus (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    agent_id TEXT,
+                    file_path TEXT,
+                    line INTEGER,
+                    timestamp REAL
+                );
+
+                CREATE TABLE IF NOT EXISTS command_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    command_type TEXT NOT NULL,
+                    agent_id TEXT,
+                    payload JSON NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at REAL NOT NULL,
+                    processed_at REAL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_chain_correlation
+                ON activation_chain(correlation_id);
+                """,
+            )
+
             await self._migrate_routing_fields()
 
             if self._subscriptions is not None:
@@ -98,6 +214,7 @@ class EventStore:
 
     async def _migrate_routing_fields(self) -> None:
         """Add routing fields to existing tables."""
+        assert self._conn is not None, "_migrate_routing_fields called before connection"
         cursor = await asyncio.to_thread(
             self._conn.execute,
             "PRAGMA table_info(events)",
@@ -125,6 +242,36 @@ class EventStore:
                 "ALTER TABLE events ADD COLUMN tags TEXT",
             )
 
+        # Migrate nodes table: add start_byte/end_byte for existing DBs
+        cursor = await asyncio.to_thread(
+            self._conn.execute,
+            "PRAGMA table_info(nodes)",
+        )
+        node_columns = {row["name"] for row in cursor.fetchall()}
+
+        if "start_byte" not in node_columns:
+            await asyncio.to_thread(
+                self._conn.execute,
+                "ALTER TABLE nodes ADD COLUMN start_byte INTEGER NOT NULL DEFAULT 0",
+            )
+        if "end_byte" not in node_columns:
+            await asyncio.to_thread(
+                self._conn.execute,
+                "ALTER TABLE nodes ADD COLUMN end_byte INTEGER NOT NULL DEFAULT 0",
+            )
+
+        # Migrate proposals table: add file_path for existing DBs
+        cursor = await asyncio.to_thread(
+            self._conn.execute,
+            "PRAGMA table_info(proposals)",
+        )
+        proposal_columns = {row["name"] for row in cursor.fetchall()}
+        if "file_path" not in proposal_columns:
+            await asyncio.to_thread(
+                self._conn.execute,
+                "ALTER TABLE proposals ADD COLUMN file_path TEXT",
+            )
+
     async def append(
         self,
         graph_id: str,
@@ -136,7 +283,10 @@ class EventStore:
         if self._conn is None:
             raise RuntimeError("EventStore not initialized")
 
-        event_type = type(event).__name__
+        # Prefer the model's event_type field (e.g. "HumanChatEvent") over
+        # the Python class name (e.g. "LspHumanChatEvent") so panel.lua can
+        # match on the canonical event_type string.
+        event_type = getattr(event, "event_type", None) or type(event).__name__
         payload = self._serialize_event(event)
         timestamp = getattr(event, "timestamp", time.time())
         created_at = time.time()
@@ -156,8 +306,15 @@ class EventStore:
                 """,
                 (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json),
             )
-            await asyncio.to_thread(self._conn.commit)
             event_id = cursor.lastrowid or 0
+
+            # Project event into materialized views (e.g. nodes table)
+            # within the SAME transaction as the event INSERT
+            follow_ups: list[RemoraEvent] = []
+            if self._projection is not None:
+                follow_ups = await asyncio.to_thread(self._projection.apply, self._conn, event)
+
+            await asyncio.to_thread(self._conn.commit)
 
         if self._trigger_queue is not None and self._subscriptions is not None:
             matching_agents = await self._subscriptions.get_matching_agents(event)
@@ -173,6 +330,12 @@ class EventStore:
 
         if self._event_bus is not None:
             await self._event_bus.emit(event)
+
+        # Re-append follow-up events produced by the projection (e.g.
+        # ScaffoldRequestEvent when a stub node is discovered).  These are
+        # appended as separate events after the original transaction commits.
+        for follow_up in follow_ups:
+            await self.append(graph_id, follow_up)
 
         return event_id
 
@@ -234,21 +397,131 @@ class EventStore:
             rows = await asyncio.to_thread(cursor.fetchall)
 
         for row in rows:
-            tags = row["tags"]
-            if tags:
-                tags = json.loads(tags)
-            yield {
-                "id": row["id"],
-                "graph_id": row["graph_id"],
-                "event_type": row["event_type"],
-                "payload": json.loads(row["payload"]),
-                "timestamp": row["timestamp"],
-                "created_at": row["created_at"],
-                "from_agent": row["from_agent"],
-                "to_agent": row["to_agent"],
-                "correlation_id": row["correlation_id"],
-                "tags": tags,
-            }
+            yield self._row_to_dict(row)
+
+    async def get_recent_events(
+        self,
+        agent_id: str,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Get recent events involving an agent (as sender or recipient).
+
+        Returns dicts ordered newest-first (DESC by timestamp).
+        """
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        query = """
+            SELECT * FROM events
+            WHERE from_agent = ? OR to_agent = ?
+            ORDER BY timestamp DESC, id DESC
+            LIMIT ?
+        """
+        async with self._lock:
+            cursor = await asyncio.to_thread(
+                self._conn.execute,
+                query,
+                (agent_id, agent_id, limit),
+            )
+            rows = await asyncio.to_thread(cursor.fetchall)
+
+        return [self._row_to_dict(row) for row in rows]
+
+    async def get_events_for_correlation(
+        self,
+        correlation_id: str,
+    ) -> list[dict[str, Any]]:
+        """Get all events for a correlation chain, ordered chronologically (ASC)."""
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        query = """
+            SELECT * FROM events
+            WHERE correlation_id = ?
+            ORDER BY timestamp ASC, id ASC
+        """
+        async with self._lock:
+            cursor = await asyncio.to_thread(
+                self._conn.execute,
+                query,
+                (correlation_id,),
+            )
+            rows = await asyncio.to_thread(cursor.fetchall)
+
+        return [self._row_to_dict(row) for row in rows]
+
+    def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
+        """Convert a SQLite Row to a standard event dict.
+
+        The payload column stores the full ``model_dump()`` of the event, so
+        all model fields (``message``, ``content``, ``tool_name``, …) live at
+        the top level of that blob.  To reconstruct an event dict that
+        panel.lua can render we:
+
+        1. Use the stored model ``event_type`` (e.g. ``"HumanChatEvent"``)
+           instead of the DB column which may contain the Python class name
+           (e.g. ``"LspHumanChatEvent"``).
+
+        2. Promote model-specific fields into a ``payload`` sub-dict so that
+           ``ev.payload.message``, ``ev.payload.content``, etc. work in Lua.
+        """
+        tags = row["tags"]
+        if tags:
+            tags = json.loads(tags)
+
+        stored = json.loads(row["payload"])  # full model_dump()
+
+        # Prefer the event_type from the serialised model (handles both old
+        # events stored with the Python class name and new ones).
+        event_type = stored.get("event_type") or row["event_type"]
+
+        # Top-level metadata keys that should NOT go into the payload sub-dict
+        _META_KEYS = {
+            "event_id",
+            "event_type",
+            "timestamp",
+            "correlation_id",
+            "agent_id",
+            "summary",
+            "payload",
+            "from_agent",
+            "to_agent",
+            "tags",
+            "graph_id",
+            "created_at",
+            "id",
+        }
+
+        # Build the nested payload from model-specific fields (message,
+        # content, tool_name, diff, proposal_id, feedback, target_id, …).
+        # If the stored model already had a non-empty ``payload`` dict (e.g.
+        # AgentTextResponse sets payload={"content": ...}), merge those too.
+        nested_payload: dict[str, Any] = {}
+        original_payload = stored.get("payload")
+        if isinstance(original_payload, dict) and original_payload:
+            nested_payload.update(original_payload)
+
+        for key, value in stored.items():
+            if key not in _META_KEYS and value not in (None, "", {}, []):
+                nested_payload[key] = value
+
+        return {
+            "id": row["id"],
+            "graph_id": row["graph_id"],
+            "event_type": event_type,
+            "payload": nested_payload,
+            "summary": stored.get("summary", ""),
+            "timestamp": row["timestamp"],
+            "created_at": row["created_at"],
+            "from_agent": row["from_agent"],
+            "to_agent": row["to_agent"],
+            "correlation_id": row["correlation_id"],
+            "tags": tags,
+        }
 
     async def get_graph_ids(
         self,
@@ -330,6 +603,131 @@ class EventStore:
             await asyncio.to_thread(self._conn.commit)
             return cursor.rowcount
 
+    async def get_node(self, node_id: str) -> "AgentNode | None":
+        """Get a single AgentNode by ID from the nodes table."""
+        from remora.core.agent_node import AgentNode
+
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        def _fetch(conn: sqlite3.Connection) -> sqlite3.Row | None:
+            cursor = conn.execute("SELECT * FROM nodes WHERE node_id = ?", (node_id,))
+            return cursor.fetchone()
+
+        row = await asyncio.to_thread(_fetch, self._conn)
+        if row is None:
+            return None
+        return AgentNode.from_row(row)
+
+    async def list_nodes(
+        self,
+        *,
+        file_path: str | None = None,
+        node_type: str | None = None,
+        columns: list[str] | None = None,
+    ) -> "list[AgentNode]":
+        """List AgentNodes with optional filters.
+
+        Args:
+            file_path: Filter by file path.
+            node_type: Filter by node type.
+            columns: If provided, only SELECT these columns (optimization to
+                     avoid fetching large source_code blobs).  When *columns*
+                     is ``None`` (the default), ``SELECT *`` is used and full
+                     ``AgentNode`` objects are returned.
+        """
+        from remora.core.agent_node import AgentNode
+
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        col_clause = ", ".join(columns) if columns else "*"
+        query = f"SELECT {col_clause} FROM nodes"
+        params: list[str] = []
+        conditions: list[str] = []
+
+        if file_path:
+            conditions.append("file_path = ?")
+            params.append(file_path)
+        if node_type:
+            conditions.append("node_type = ?")
+            params.append(node_type)
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY file_path, start_line"
+
+        def _fetch(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+            cursor = conn.execute(query, params)
+            return cursor.fetchall()
+
+        rows = await asyncio.to_thread(_fetch, self._conn)
+        return [AgentNode.from_row(row) for row in rows]
+
+    async def get_node_at_position(
+        self,
+        file_path: str,
+        line: int,
+    ) -> "AgentNode | None":
+        """Get the narrowest AgentNode containing the given line in a file."""
+        from remora.core.agent_node import AgentNode
+
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        def _fetch(conn: sqlite3.Connection) -> sqlite3.Row | None:
+            cursor = conn.execute(
+                """SELECT * FROM nodes
+                   WHERE file_path = ? AND start_line <= ? AND end_line >= ?
+                   ORDER BY (end_line - start_line) ASC
+                   LIMIT 1""",
+                (file_path, line, line),
+            )
+            return cursor.fetchone()
+
+        row = await asyncio.to_thread(_fetch, self._conn)
+        if row is None:
+            return None
+        return AgentNode.from_row(row)
+
+    async def set_node_status(self, node_id: str, status: str) -> None:
+        """Update the status field of a node directly."""
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        async with self._lock:
+            await asyncio.to_thread(
+                self._conn.execute,
+                "UPDATE nodes SET status = ? WHERE node_id = ?",
+                (status, node_id),
+            )
+            await asyncio.to_thread(self._conn.commit)
+
+    async def remove_nodes_for_file(self, file_path: str) -> int:
+        """Remove all nodes for a given file path. Returns count removed."""
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        async with self._lock:
+            cursor = await asyncio.to_thread(
+                self._conn.execute,
+                "DELETE FROM nodes WHERE file_path = ?",
+                (file_path,),
+            )
+            await asyncio.to_thread(self._conn.commit)
+            return cursor.rowcount
+
     async def close(self) -> None:
         """Close the database connection."""
         if self._conn:
@@ -340,7 +738,10 @@ class EventStore:
 
     def _serialize_event(self, event: StructuredEvent | RemoraEvent) -> str:
         """Serialize an event to JSON."""
-        if is_dataclass(event):
+        if hasattr(event, "model_dump"):
+            # Pydantic model (e.g. LSP AgentEvent subclasses)
+            data = event.model_dump()
+        elif is_dataclass(event):
             data = asdict(event)
         elif hasattr(event, "__dict__"):
             data = dict(vars(event))

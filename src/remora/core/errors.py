@@ -24,12 +24,6 @@ class DiscoveryError(RemoraError):
     pass
 
 
-class GraphError(RemoraError):
-    """Error in graph construction or validation."""
-
-    pass
-
-
 class ExecutionError(RemoraError):
     """Error during agent execution."""
 
@@ -42,18 +36,10 @@ class WorkspaceError(RemoraError):
     pass
 
 
-class SwarmError(RemoraError):
-    """Error in swarm operations."""
-
-    pass
-
-
 __all__ = [
     "RemoraError",
     "ConfigError",
     "DiscoveryError",
-    "GraphError",
     "ExecutionError",
     "WorkspaceError",
-    "SwarmError",
 ]

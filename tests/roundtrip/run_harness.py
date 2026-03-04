@@ -26,11 +26,14 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from remora.core.discovery import NodeType, discover
+from remora.core.discovery import discover
 
 HARNESS_DIR = Path(__file__).resolve().parent
 INPUT_DIR = HARNESS_DIR / "input"
 OUTPUT_DIR = HARNESS_DIR / "output"
+
+# Valid node types for CLI filtering
+_NODE_TYPES = ["file", "class", "function", "method", "section", "table"]
 
 
 def main() -> None:
@@ -38,7 +41,7 @@ def main() -> None:
     parser.add_argument(
         "--node-type",
         action="append",
-        choices=[nt.value for nt in NodeType],
+        choices=_NODE_TYPES,
         help="Filter by node type (can specify multiple). Default: all types.",
     )
     parser.add_argument(
@@ -75,7 +78,9 @@ def main() -> None:
         print(f"-- {input_file.name} ", end="")
 
         try:
-            nodes = discover([input_file], languages=["python"], node_types=list(filter_types) if filter_types else None)
+            nodes = discover(
+                [input_file], languages=["python"], node_types=list(filter_types) if filter_types else None
+            )
 
             if not nodes:
                 out_path = OUTPUT_DIR / f"{stem}_out"

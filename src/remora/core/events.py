@@ -1,14 +1,22 @@
-"""Unified event types for Remora.
+"""Unified domain event types for the Remora core runtime.
 
-All events are frozen dataclasses that can be pattern-matched.
+All events are frozen Pydantic models that can be pattern-matched.
 Re-exports structured-agents events for unified event handling.
+
+The LSP layer (``remora.lsp.models``) defines a separate set of event
+classes with the ``Lsp`` prefix (``LspAgentEvent``, ``LspAgentMessageEvent``,
+``LspAgentErrorEvent``, etc.).  Those are LSP protocol events stored in the
+LSP DB for diagnostics, proposals, and editor notifications.  The events
+in *this* module are **domain events** stored in the ``EventStore`` and
+used for subscriptions, routing, and the core execution pipeline.
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict, Field
 
 # Re-export structured-agents events
 from structured_agents.events import (
@@ -27,39 +35,49 @@ if TYPE_CHECKING:
 
 
 # ============================================================================
+# Base
+# ============================================================================
+
+
+class _FrozenEvent(BaseModel):
+    """Common base with frozen config for all Remora events."""
+
+    model_config = ConfigDict(frozen=True)
+
+
+# ============================================================================
 # Agent-Level Events
 # ============================================================================
 
 
-@dataclass(frozen=True, slots=True)
-class AgentStartEvent:
+class AgentStartEvent(_FrozenEvent):
     """Emitted when an agent begins execution."""
 
     graph_id: str
     agent_id: str
     node_name: str
-    timestamp: float = field(default_factory=time.time)
+    trigger_event_type: str = ""
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class AgentCompleteEvent:
+class AgentCompleteEvent(_FrozenEvent):
     """Emitted when an agent completes successfully."""
 
     graph_id: str
     agent_id: str
     result_summary: str
     response: str = ""  # Full response content for display
-    timestamp: float = field(default_factory=time.time)
+    tags: tuple[str, ...] = ()  # Enables chained agent workflows (e.g. ("scaffold",))
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class AgentErrorEvent:
+class AgentErrorEvent(_FrozenEvent):
     """Emitted when an agent fails."""
 
     graph_id: str
     agent_id: str
     error: str
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
 # ============================================================================
@@ -67,8 +85,7 @@ class AgentErrorEvent:
 # ============================================================================
 
 
-@dataclass(frozen=True, slots=True)
-class HumanInputRequestEvent:
+class HumanInputRequestEvent(_FrozenEvent):
     """Agent is blocked waiting for human input."""
 
     graph_id: str
@@ -76,16 +93,15 @@ class HumanInputRequestEvent:
     request_id: str
     question: str
     options: tuple[str, ...] | None = None
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class HumanInputResponseEvent:
+class HumanInputResponseEvent(_FrozenEvent):
     """Human has responded to an input request."""
 
     request_id: str
     response: str
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
 # ============================================================================
@@ -93,42 +109,96 @@ class HumanInputResponseEvent:
 # ============================================================================
 
 
-@dataclass(frozen=True, slots=True)
-class AgentMessageEvent:
+class AgentMessageEvent(_FrozenEvent):
     """Message sent between agents."""
 
     from_agent: str
     to_agent: str
     content: str
-    tags: list[str] = field(default_factory=list)
+    tags: tuple[str, ...] = ()
     correlation_id: str | None = None
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class FileSavedEvent:
+class FileSavedEvent(_FrozenEvent):
     """A file was saved to disk."""
 
     path: str
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class ContentChangedEvent:
+class ContentChangedEvent(_FrozenEvent):
     """File content was modified."""
 
     path: str
     diff: str | None = None
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
-@dataclass(frozen=True, slots=True)
-class ManualTriggerEvent:
+class CursorFocusEvent(_FrozenEvent):
+    """Cursor moved to focus on a specific agent (debounced)."""
+
+    focused_agent_id: str | None
+    file_path: str
+    line: int
+    timestamp: float = Field(default_factory=time.time)
+
+
+class ManualTriggerEvent(_FrozenEvent):
     """Manual trigger to start an agent."""
 
     to_agent: str
     reason: str
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
+
+
+# ============================================================================
+# Node Lifecycle Events (for EventLog projection -> nodes table)
+# ============================================================================
+
+
+class NodeDiscoveredEvent(_FrozenEvent):
+    """Emitted when a code node is discovered or re-discovered."""
+
+    node_id: str
+    node_type: str
+    name: str
+    full_name: str
+    file_path: str
+    start_line: int
+    end_line: int
+    source_code: str
+    source_hash: str
+    parent_id: str | None = None
+    start_byte: int = 0
+    end_byte: int = 0
+    timestamp: float = Field(default_factory=time.time)
+
+
+class ScaffoldRequestEvent(_FrozenEvent):
+    """Emitted when a scaffold node is created and needs initialization.
+
+    Triggers the scaffold lifecycle: the node gathers context from its
+    parent/siblings and fills itself in via rewrite_self().
+
+    ``to_agent`` is set to ``node_id`` so that the existing direct-message
+    subscription (``SubscriptionPattern(to_agent=agent_id)``) routes this
+    event to the correct agent without needing a separate subscription.
+    """
+
+    node_id: str
+    to_agent: str  # same as node_id — enables subscription routing
+    node_type: str
+    parent_id: str | None = None
+    intent: str = ""  # Optional human-provided hint (e.g. "HTTP client class")
+    timestamp: float = Field(default_factory=time.time)
+
+
+class NodeRemovedEvent(_FrozenEvent):
+    """Emitted when a code node is no longer found in source."""
+
+    node_id: str
+    timestamp: float = Field(default_factory=time.time)
 
 
 # ============================================================================
@@ -149,7 +219,13 @@ RemoraEvent = (
     AgentMessageEvent
     | FileSavedEvent
     | ContentChangedEvent
+    | CursorFocusEvent
     | ManualTriggerEvent
+    |
+    # Node lifecycle events
+    NodeDiscoveredEvent
+    | ScaffoldRequestEvent
+    | NodeRemovedEvent
     |
     # Re-exported structured-agents events
     KernelStartEvent
@@ -172,7 +248,12 @@ __all__ = [
     "AgentMessageEvent",
     "FileSavedEvent",
     "ContentChangedEvent",
+    "CursorFocusEvent",
     "ManualTriggerEvent",
+    # Node lifecycle events
+    "NodeDiscoveredEvent",
+    "ScaffoldRequestEvent",
+    "NodeRemovedEvent",
     # Re-exports
     "KernelStartEvent",
     "KernelEndEvent",
