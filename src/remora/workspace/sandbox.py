@@ -106,8 +106,8 @@ class DockerRuntime(ContainerRuntime):
         if not network:
             cmd.extend(["--network", "none"])
 
-        # Security
-        cmd.append("--no-new-privileges")
+        # Security: prevent privilege escalation
+        cmd.extend(["--security-opt", "no-new-privileges"])
         if read_only:
             cmd.append("--read-only")
 

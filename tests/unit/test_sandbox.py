@@ -344,7 +344,9 @@ class TestDockerRuntime:
             assert "256m" in cmd
             assert "--network" in cmd
             assert "none" in cmd
-            assert "--no-new-privileges" in cmd
+            assert "--security-opt" in cmd
+            sec_idx = list(cmd).index("--security-opt")
+            assert cmd[sec_idx + 1] == "no-new-privileges"
             assert "python:3.12-slim" in cmd
             assert "python" in cmd
 

@@ -76,7 +76,7 @@
 ## Phase 6: Container Sandbox — DONE
 - [x] `src/remora/workspace/sandbox.py` — clean design: `WorkspaceSandbox`, `SandboxConfig`, `ExecutionResult`, `ContainerRuntime`, `DockerRuntime`
 - [x] No cairn dependency in sandbox module — materialization is caller's responsibility
-- [x] `tests/unit/test_sandbox.py` — 29/29 tests passing (rewritten for clean design, no `patch()` of cairn internals)
+- [x] `tests/unit/test_sandbox.py` — 33/33 tests passing (rewritten for clean design, no `patch()` of cairn internals)
 - [x] `src/remora/cli/workspace.py` — `sandbox` CLI command (handles cairn materialize → sandbox exec → optional sync-back)
 - [x] `src/remora/workspace/__init__.py` — sandbox exports added
 
@@ -91,6 +91,20 @@
 
 ---
 
+## Phase 8: Sandbox Container Image — DONE
+- [x] `sandbox/Dockerfile` — lightweight `python:3.13-slim` based image with pytest, mypy, ruff pre-installed
+- [x] `sandbox/entrypoint.sh` — simple entrypoint that runs commands in /workspace
+- [x] `sandbox/build.sh` — docker build wrapper script
+- [x] Image builds in ~50 seconds (replaced slow Nix-based approach)
+- [x] Works air-gapped (`--network none`), read-only filesystem (`--read-only`), and with workspace volume mounts
+- [x] Fixed `DockerRuntime` — changed `--no-new-privileges` to `--security-opt no-new-privileges` (compatible with Docker versions that don't support the shorthand)
+- [x] Added `read_only` parameter to `ContainerRuntime.run()` and `DockerRuntime.run()`
+- [x] Default image changed from `python:3.12-slim` to `remora-sandbox:latest`
+- [x] `tests/unit/test_sandbox.py` — 33/33 unit tests passing
+- [x] `tests/integration/test_sandbox_container.py` — 17/17 integration tests passing (real Docker, skipped if image not built)
+
+---
+
 **Test Summary:**
 - fsdantic: 320/321 passing (1 pre-existing version assertion test)
 - Cairn: 48/49 passing (1 pre-existing grail.GrailExecutionError test)
@@ -98,10 +112,13 @@
   - orchestrator: 12/13 (1 pre-existing)
   - workspace manager: 5/5
   - concurrency: 11/11
-- Remora: 152 new tests passing across cairn-enhancement test files:
-  - sandbox: 29/29
+- Remora unit tests: 156 passing across cairn-enhancement test files:
+  - sandbox: 33/33
   - validation: 21/21
   - workspace sync: 24/24
   - workspace CLI: 13/13
   - protocols: 30/30
   - state manager: 35/35
+- Remora integration tests: 17 passing (sandbox container)
+  - DockerRuntime integration: 7/7
+  - WorkspaceSandbox integration: 10/10
