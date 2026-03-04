@@ -294,6 +294,17 @@ Beyond Grail scripts, agents have access to context-dependent tools:
 
 These are wired through the `AgentContext` passed to the executor.
 
+## Workspaces
+
+### CairnWorkspaceService (`remora.core.cairn_bridge`)
+
+Manages stable and per-agent workspaces backed by Cairn (AgentFS):
+
+- **Stable workspace**: `.remora/stable.db` -- a synced snapshot of the project files, used as the base layer.
+- **Agent workspaces**: `.remora/agents/<id>/workspace.db` -- per-agent copy-on-write workspaces layered on top of the stable workspace.
+
+This provides isolation: each agent can read/write files without affecting the project or other agents. Changes can be reviewed and merged back via proposals.
+
 ## The LSP Layer
 
 The `RemoraLanguageServer` (based on pygls) provides:
