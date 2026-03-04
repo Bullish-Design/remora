@@ -24,6 +24,7 @@ class TestScaffoldRequestEventCreate:
     def test_create_minimal(self):
         event = ScaffoldRequestEvent(
             node_id="nd_abc123",
+            to_agent="nd_abc123",
             node_type="class",
             parent_id="nd_parent1",
         )
@@ -36,6 +37,7 @@ class TestScaffoldRequestEventCreate:
     def test_create_with_intent(self):
         event = ScaffoldRequestEvent(
             node_id="nd_abc123",
+            to_agent="nd_abc123",
             node_type="function",
             parent_id="nd_parent1",
             intent="HTTP client for external API",
@@ -45,6 +47,7 @@ class TestScaffoldRequestEventCreate:
     def test_create_with_no_parent(self):
         event = ScaffoldRequestEvent(
             node_id="nd_abc123",
+            to_agent="nd_abc123",
             node_type="file",
             parent_id=None,
         )
@@ -54,6 +57,7 @@ class TestScaffoldRequestEventCreate:
         before = time.time()
         event = ScaffoldRequestEvent(
             node_id="nd_abc123",
+            to_agent="nd_abc123",
             node_type="class",
             parent_id=None,
         )
@@ -63,6 +67,7 @@ class TestScaffoldRequestEventCreate:
     def test_explicit_timestamp(self):
         event = ScaffoldRequestEvent(
             node_id="nd_abc123",
+            to_agent="nd_abc123",
             node_type="class",
             parent_id=None,
             timestamp=1234567890.0,
@@ -80,6 +85,7 @@ class TestScaffoldRequestEventFrozen:
     def test_cannot_mutate_node_id(self):
         event = ScaffoldRequestEvent(
             node_id="nd_abc123",
+            to_agent="nd_abc123",
             node_type="class",
             parent_id=None,
         )
@@ -89,6 +95,7 @@ class TestScaffoldRequestEventFrozen:
     def test_cannot_mutate_intent(self):
         event = ScaffoldRequestEvent(
             node_id="nd_abc123",
+            to_agent="nd_abc123",
             node_type="class",
             parent_id=None,
             intent="original",
@@ -106,6 +113,7 @@ class TestScaffoldRequestEventPydantic:
     def test_model_dump_returns_dict(self):
         event = ScaffoldRequestEvent(
             node_id="nd_abc123",
+            to_agent="nd_abc123",
             node_type="class",
             parent_id="nd_parent1",
             intent="test intent",
@@ -121,6 +129,7 @@ class TestScaffoldRequestEventPydantic:
     def test_model_dump_roundtrip(self):
         event = ScaffoldRequestEvent(
             node_id="nd_abc123",
+            to_agent="nd_abc123",
             node_type="function",
             parent_id="nd_parent1",
             intent="helper function",
@@ -137,6 +146,7 @@ class TestScaffoldRequestEventInUnion:
         # RemoraEvent is a Union type — ScaffoldRequestEvent should be one of its members
         event = ScaffoldRequestEvent(
             node_id="nd_abc123",
+            to_agent="nd_abc123",
             node_type="class",
             parent_id=None,
         )

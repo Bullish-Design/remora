@@ -317,6 +317,7 @@ class TestScaffoldRequestTrigger:
         # Step 3: Emit ScaffoldRequestEvent
         scaffold_event = ScaffoldRequestEvent(
             node_id="fn:new_func",
+            to_agent="fn:new_func",
             node_type="function",
             parent_id="file:new_module",
             intent="Implement a helper function for data transformation",
@@ -353,6 +354,7 @@ class TestScaffoldRequestTrigger:
         # Emit ScaffoldRequestEvent — monitor should NOT be triggered
         scaffold_event = ScaffoldRequestEvent(
             node_id="fn:some_func",
+            to_agent="fn:some_func",
             node_type="function",
         )
         await event_store.append("swarm", scaffold_event)
@@ -418,6 +420,7 @@ class TestScaffoldFullLifecycle:
         # 5. Emit ScaffoldRequestEvent
         scaffold_event = ScaffoldRequestEvent(
             node_id="fn:process_data",
+            to_agent="fn:process_data",
             node_type="function",
             parent_id="file:service",
             intent="Process incoming data from the API",

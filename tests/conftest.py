@@ -7,6 +7,7 @@ and only mock the LLM layer.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,24 @@ import pytest
 from remora.core.config import Config
 from remora.core.event_store import EventStore
 from remora.core.subscriptions import SubscriptionRegistry
+
+
+# ---------------------------------------------------------------------------
+# Real-time test progress hooks (helps identify hangs)
+# ---------------------------------------------------------------------------
+_test_start_times: dict[str, float] = {}
+
+
+def pytest_runtest_logstart(nodeid: str, location: tuple) -> None:
+    _test_start_times[nodeid] = time.monotonic()
+    print(f"\n>>> START: {nodeid}", flush=True)
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    if report.when == "call":
+        elapsed = time.monotonic() - _test_start_times.get(report.nodeid, time.monotonic())
+        status = "PASS" if report.passed else ("FAIL" if report.failed else "SKIP")
+        print(f">>> {status}: {report.nodeid} ({elapsed:.2f}s)", flush=True)
 
 
 @pytest.fixture

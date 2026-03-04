@@ -6,18 +6,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from remora_demo.companion.agents.analyzers import ConnectionFinder
+from remora_demo.companion.agents.analyzers import (
+    ConnectionFinder,
+    QuestionGenerator,
+    TaskInferrer,
+)
 from remora_demo.companion.agents.base import InMemoryWorkspace, WorkspaceInterface
 from remora_demo.companion.agents.composers import SidebarComposer
-from remora_demo.companion.agents.extractors import ContextExtractor
+from remora_demo.companion.agents.extractors import ContextExtractor, EditSummarizer
 from remora_demo.companion.agents.searchers import EmbeddingSearcher
 from remora_demo.companion.agents.sensors import (
     CursorTracker,
     EditTracker,
+    FileWatcher,
+    FileWatcherConfig,
     SessionClock,
 )
 from remora_demo.companion.indexing import IndexConfig, Indexer
-from remora_demo.companion.models.events import CursorMoved, PathChanged
+from remora_demo.companion.models.events import ContentEdited, CursorMoved, FileChanged, PathChanged
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +72,16 @@ class CompanionRuntime:
         # Sensors
         self._cursor_tracker: CursorTracker | None = None
         self._edit_tracker: EditTracker | None = None
+        self._file_watcher: FileWatcher | None = None
         self._session_clock: SessionClock | None = None
 
         # Agents
         self._context_extractor: ContextExtractor | None = None
+        self._edit_summarizer: EditSummarizer | None = None
         self._embedding_searcher: EmbeddingSearcher | None = None
         self._connection_finder: ConnectionFinder | None = None
+        self._task_inferrer: TaskInferrer | None = None
+        self._question_generator: QuestionGenerator | None = None
         self._sidebar_composer: SidebarComposer | None = None
 
     @property
@@ -108,16 +118,22 @@ class CompanionRuntime:
         # Initialize sensors
         self._cursor_tracker = CursorTracker()
         self._edit_tracker = EditTracker()
+        self._file_watcher = FileWatcher(FileWatcherConfig(watch_path=self.config.workspace_path))
         self._session_clock = SessionClock()
 
         # Initialize agents
         self._context_extractor = ContextExtractor(self.workspace)
+        self._edit_summarizer = EditSummarizer(self.workspace)
         self._embedding_searcher = EmbeddingSearcher(self.workspace, self.indexer)
         self._connection_finder = ConnectionFinder(self.workspace)
+        self._task_inferrer = TaskInferrer(self.workspace)
+        self._question_generator = QuestionGenerator(self.workspace)
         self._sidebar_composer = SidebarComposer(self.workspace)
 
         # Wire up event flow
         self._cursor_tracker.on_event(self._on_cursor_event)
+        self._edit_tracker.on_event(self._on_content_edited_event)
+        self._file_watcher.on_event(self._on_file_changed)
 
         # Set up workspace listeners for agent-to-agent communication
         if isinstance(self.workspace, InMemoryWorkspace):
@@ -125,6 +141,7 @@ class CompanionRuntime:
 
         # Start background tasks
         await self._cursor_tracker.start_linger_detection()
+        await self._file_watcher.start()
         await self._session_clock.start()
 
         self._running = True
@@ -141,6 +158,8 @@ class CompanionRuntime:
             await self._cursor_tracker.stop()
         if self._edit_tracker:
             await self._edit_tracker.stop()
+        if self._file_watcher:
+            await self._file_watcher.stop()
         if self._session_clock:
             await self._session_clock.stop()
         if self._indexer:
@@ -155,6 +174,16 @@ class CompanionRuntime:
         if self._context_extractor:
             await self._context_extractor.handle_event(event)
 
+    async def _on_content_edited_event(self, event: ContentEdited) -> None:
+        """Handle content edited events from edit tracker sensor."""
+        if self._edit_summarizer:
+            await self._edit_summarizer.on_content_edited(event)
+
+    async def _on_file_changed(self, event: FileChanged) -> None:
+        """Handle file change events from file watcher sensor."""
+        logger.debug("File changed: %s (%s)", event.path, event.kind)
+        # Could trigger re-indexing or notify other agents in the future
+
     async def _on_path_change(self, change: PathChanged) -> None:
         """Handle workspace path changes for agent-to-agent communication."""
         # Forward to embedding searcher
@@ -164,6 +193,17 @@ class CompanionRuntime:
         # Forward to connection finder
         if self._connection_finder and change.path.startswith("/companion/search/"):
             await self._connection_finder.handle_path_change(change)
+
+        # Forward to task inferrer (watches context changes)
+        if self._task_inferrer and change.path.startswith("/companion/context/"):
+            await self._task_inferrer.on_context_change(change)
+
+        # Forward to question generator (watches context and connections)
+        if self._question_generator:
+            if change.path.startswith("/companion/context/"):
+                await self._question_generator.on_context_change(change)
+            elif change.path.startswith("/companion/analysis/connections/"):
+                await self._question_generator.on_connection_change(change)
 
         # Forward to sidebar composer
         if self._sidebar_composer:
@@ -213,8 +253,11 @@ class CompanionRuntime:
 
         for agent in [
             self._context_extractor,
+            self._edit_summarizer,
             self._embedding_searcher,
             self._connection_finder,
+            self._task_inferrer,
+            self._question_generator,
             self._sidebar_composer,
         ]:
             if agent:

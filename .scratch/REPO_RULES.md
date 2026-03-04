@@ -16,6 +16,13 @@ These are **in addition to** the universal coding standards in CRITICAL_RULES.
 
 **All commands must run through `devenv shell --`.** See `.scratch/skills/devenv-skill.md` for full details.
 
+**CRITICAL: Before the first test run in every session, ALWAYS sync dependencies:**
+```bash
+devenv shell -- uv sync --extra dev
+```
+
+**NEVER use `uv pip install`. ALWAYS use `uv sync`.**
+
 ```bash
 devenv shell -- pytest tests/unit/test_lsp_graph.py -v
 devenv shell -- ruff check src/

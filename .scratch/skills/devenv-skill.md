@@ -15,12 +15,14 @@ devenv shell -- <command>
 Do NOT:
 - Run `python`, `pytest`, `mypy`, `ruff`, or any other tool directly from the system PATH.
 - Use `uv run` outside the devenv shell.
+- Use `uv pip install` — **NEVER use `uv pip`**. Always use `uv sync`.
 - Use `/path/to/.devenv/state/venv/bin/python` directly.
 - Assume the system Python or any globally installed tool is correct.
 
 Do:
+- **ALWAYS run `devenv shell -- uv sync --extra dev` before the first test run in every session.** The venv may be stale after compaction or system changes. This is non-negotiable.
 - Always prefix with `devenv shell --`.
-- Install dev dependencies with `devenv shell -- uv sync --extra dev` if pytest or other dev tools are missing.
+- Use `uv sync --extra dev` (not `uv pip install`) for dependency management.
 
 ---
 

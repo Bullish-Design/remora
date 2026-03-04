@@ -6,7 +6,8 @@ scripts/training_examples/**
 .remora/**
 agents/**
 **/**.db**
-
+**/**.cast
+**/**.gif
 
 # Personal Dev Environment:
 .devenv/**

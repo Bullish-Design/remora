@@ -26,7 +26,7 @@ async def test_event_store_append_and_replay(tmp_path: Path) -> None:
 
     records = [record async for record in store.replay("graph-1")]
     assert records[0]["event_type"] == "AgentStartEvent"
-    assert records[0]["payload"]["graph_id"] == "graph-1"
+    assert records[0]["graph_id"] == "graph-1"
 
     graphs = await store.get_graph_ids()
     assert graphs[0]["graph_id"] == "graph-1"

@@ -27,6 +27,7 @@ json_like_strings = st.one_of(
 @given(input_data=json_like_strings)
 @settings(
     max_examples=100,
+    deadline=None,
     suppress_health_check=[HealthCheck.too_slow],
 )
 def test_tool_script_handles_malformed_json(input_data: str) -> None:

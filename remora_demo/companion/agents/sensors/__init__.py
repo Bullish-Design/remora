@@ -8,6 +8,10 @@ from remora_demo.companion.agents.sensors.edit_tracker import (
     EditTracker,
     EditTrackerConfig,
 )
+from remora_demo.companion.agents.sensors.file_watcher import (
+    FileWatcher,
+    FileWatcherConfig,
+)
 from remora_demo.companion.agents.sensors.session_clock import (
     SessionClock,
     SessionClockConfig,
@@ -18,6 +22,8 @@ __all__ = [
     "CursorTrackerConfig",
     "EditTracker",
     "EditTrackerConfig",
+    "FileWatcher",
+    "FileWatcherConfig",
     "SessionClock",
     "SessionClockConfig",
 ]

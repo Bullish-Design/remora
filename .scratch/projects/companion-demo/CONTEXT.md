@@ -8,16 +8,15 @@
 
 ## Current State
 
-**Phase:** CORE DEMO COMPLETE ✅
+**Phase:** ANALYZER AGENTS COMPLETE
 
-**Last action:** Implemented all core components:
-- LSP server (`lsp/server.py`)
-- Neovim plugin (`nvim/lua/companion/init.lua`)
-- ConnectionFinder analyzer
-- Timeline web visualization
-- E2E test script
-
-**All tests passing.**
+**Last action (Session 9):**
+- Built `task_inferrer` agent — detects exploration, debugging, doc writing, focused coding patterns from nav history
+- Built `question_generator` agent — generates contextual questions from connections (test/doc/similar/reference) and context (function/class/heading)
+- Both agents fully tested (10 tests each, all passing)
+- Both registered in `analyzers/__init__.py` and wired into `CompanionRuntime`
+- All 121 companion unit tests passing, 0 regressions
+- The sidebar composer already reads from `/companion/analysis/inferred_task` and `/companion/analysis/questions/*`, so the full pipeline now flows end-to-end
 
 ---
 
@@ -38,14 +37,12 @@
 
 1. **LSP Server** (`companion-lsp`): Receives cursor notifications, manages runtime
 2. **Neovim Plugin**: Sends cursor on `CursorHold`, displays sidebar panel
-3. **Agent Cascade**: cursor → context → search → connections → sidebar
+3. **Agent Cascade**: cursor -> context -> search -> connections -> sidebar
 4. **Timeline Visualization**: Web UI showing agent activations
-5. **All Core Agents**:
-   - Sensors: cursor_tracker, edit_tracker, session_clock
-   - Extractors: context_extractor
-   - Searchers: embedding_searcher
-   - Analyzers: connection_finder
-   - Composers: sidebar_composer
+5. **Demo Harness** (`remora_demo/companion/demo/`): Headless scripted demo with asciicast/GIF recording
+6. **E2E Scenarios** (`e2e/scenarios/`): 3 companion scenarios (sidebar, connections, pipeline)
+7. **All Core Agents**: cursor_tracker, edit_tracker, session_clock, context_extractor, embedding_searcher, connection_finder, task_inferrer, question_generator, sidebar_composer
+8. **Unit tests**: 121 passing, 0 failing
 
 ---
 
@@ -53,33 +50,56 @@
 
 | File | Purpose |
 |------|---------|
-| `runtime.py` | CompanionRuntime - wires all agents |
-| `lsp/server.py` | LSP server for Neovim integration |
-| `nvim/lua/companion/init.lua` | Neovim plugin |
-| `agents/analyzers/connection_finder.py` | Magic connection agent |
-| `timeline/server.py` | Debug web visualization |
-| `test_e2e.py` | E2E test script |
+| `remora_demo/companion/runtime.py` | CompanionRuntime - wires all agents |
+| `remora_demo/companion/lsp/server.py` | LSP server for Neovim integration |
+| `remora_demo/companion/nvim/lua/companion/init.lua` | Neovim plugin |
+| `remora_demo/companion/demo/harness.py` | DemoHarness - scripted scenario runner |
+| `remora_demo/companion/demo/renderer.py` | TerminalRenderer - split-pane view |
+| `remora_demo/companion/demo/recording.py` | AsciicastWriter - asciicast v2 / GIF |
+| `remora_demo/companion/demo/scenarios.py` | DemoScenario/DemoStep dataclasses |
+| `e2e/scenarios/companion_pipeline.py` | Full pipeline e2e with GIF narration |
+| `e2e/scenarios/companion_sidebar.py` | Sidebar update e2e scenario |
+| `e2e/scenarios/companion_connections.py` | Connection detection e2e scenario |
+| `remora_demo/companion/agents/analyzers/task_inferrer.py` | TaskInferrer - pattern-based task inference |
+| `remora_demo/companion/agents/analyzers/question_generator.py` | QuestionGenerator - contextual questions |
+| `tests/companion/test_task_inferrer.py` | 10 tests for TaskInferrer |
+| `tests/companion/test_question_generator.py` | 10 tests for QuestionGenerator |
+| `tests/companion/test_harness.py` | 10 tests for DemoHarness |
+| `tests/companion/test_recording.py` | 33 tests for AsciicastWriter |
+| `tests/companion/test_renderer.py` | Tests for TerminalRenderer |
+| `tests/companion/test_scenarios.py` | Tests for DemoScenario |
+
+---
+
+## test_harness.py Mock Strategy
+
+The 2 `TestHarnessRunWithMockedRuntime` tests import the runtime module at the top:
+```python
+import remora_demo.companion.runtime as _runtime_mod
+```
+Then use `patch.object(_runtime_mod, "CompanionRuntime", ...)` to mock. This requires `sqlite_vec` to be available, so tests MUST run with `--extra companion`:
+```bash
+devenv shell -- bash -c "uv run --extra companion --extra dev python -m pytest tests/companion/ -v --timeout=30 --no-cov --no-header"
+```
 
 ---
 
 ## Commands
 
 ```bash
+# Run companion unit tests (requires extras)
+devenv shell -- bash -c "uv run --extra companion --extra dev python -m pytest tests/companion/ -v --timeout=30 --no-cov --no-header"
+
+# Run GIF-recording pipeline e2e (requires tmux, nv2, companion-lsp)
+devenv shell -- python -m e2e.run --scenario companion_pipeline --gif
+
+# Run all e2e companion scenarios
+devenv shell -- python -m e2e.run --scenario companion_sidebar
+devenv shell -- python -m e2e.run --scenario companion_connections
+devenv shell -- python -m e2e.run --scenario companion_pipeline --gif
+
 # Install dependencies
-devenv shell -- uv sync --extra companion
-
-# Quick test
-devenv shell -- uv run python -c "
-from remora_demo.companion.lsp import CompanionLanguageServer
-from remora_demo.companion.agents.analyzers import ConnectionFinder
-print('All imports OK!')
-"
-
-# Start LSP server
-companion-lsp --workspace . --debug
-
-# Run E2E tests (slow - loads embedding model)
-devenv shell -- uv run python -m remora_demo.companion.test_e2e
+devenv shell -- uv sync --extra companion --extra dev
 ```
 
 ---
@@ -87,10 +107,10 @@ devenv shell -- uv run python -m remora_demo.companion.test_e2e
 ## What's Left (Nice to Have)
 
 1. **Performance**: Embedding model loading is slow (~60s)
-2. **More analyzers**: task_inferrer, question_generator
-3. **Vault integration**: Auto-write sidebar to Obsidian
-4. **WebSocket updates**: Real-time timeline without polling
-5. **Web clipper**: Browser extension for clipping notes
+2. **Vault integration**: Auto-write sidebar to Obsidian
+3. **WebSocket updates**: Real-time timeline without polling
+4. **Web clipper**: Browser extension for clipping notes
+5. **More agents**: claim_checker, session_summarizer, vault_writer, term_extractor
 
 ---
 

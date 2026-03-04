@@ -25,6 +25,7 @@ from e2e.scenarios.query_agents import QueryAgentsScenario
 # Companion demo scenarios
 from e2e.scenarios.companion_sidebar import CompanionSidebarScenario
 from e2e.scenarios.companion_connections import CompanionConnectionsScenario
+from e2e.scenarios.companion_pipeline import CompanionPipelineScenario
 
 ALL_SCENARIOS: dict[str, type] = {
     "startup": StartupScenario,
@@ -48,6 +49,7 @@ ALL_SCENARIOS: dict[str, type] = {
     # Companion demo
     "companion_sidebar": CompanionSidebarScenario,
     "companion_connections": CompanionConnectionsScenario,
+    "companion_pipeline": CompanionPipelineScenario,
 }
 
 __all__ = [
@@ -73,4 +75,5 @@ __all__ = [
     # Companion demo
     "CompanionSidebarScenario",
     "CompanionConnectionsScenario",
+    "CompanionPipelineScenario",
 ]

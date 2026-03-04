@@ -30,7 +30,6 @@ async def test_real_vllm_tool_calling():
     try:
         from structured_agents import (
             AgentKernel,
-            ConstraintPipeline,
             NullObserver,
             ToolSchema,
             get_response_parser,
@@ -95,7 +94,7 @@ async def test_real_vllm_tool_calling():
     kernel = AgentKernel(
         client=client,
         response_parser=response_parser,
-        constraint_pipeline=ConstraintPipeline.no_constraints(),
+        constraint_pipeline=None,
         observer=NullObserver(),
         tools=tools,
     )
@@ -127,7 +126,6 @@ async def test_real_vllm_grail_tool_execution(tmp_path: Path):
     try:
         from structured_agents import (
             AgentKernel,
-            ConstraintPipeline,
             NullObserver,
             get_response_parser,
         )
@@ -173,7 +171,7 @@ a + b
     kernel = AgentKernel(
         client=client,
         response_parser=response_parser,
-        constraint_pipeline=ConstraintPipeline.no_constraints(),
+        constraint_pipeline=None,
         observer=NullObserver(),
         tools=tools,
     )

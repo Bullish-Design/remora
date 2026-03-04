@@ -55,9 +55,9 @@ The Companion demo is now functional with all core components implemented and te
 
 | Task | Status | Notes |
 |------|--------|-------|
-| 4.1 task_inferrer agent | Pending | Pattern detection |
+| 4.1 task_inferrer agent | ✅ Complete | Pattern detection, 4 heuristics, 10 tests |
 | 4.2 connection_finder agent | ✅ Complete | Test/doc/concept connections |
-| 4.3 question_generator agent | Pending | |
+| 4.3 question_generator agent | ✅ Complete | Context/connection questions, 10 tests |
 | 4.4 claim_checker agent | Pending | Prose only |
 
 ## Phase 5: Composers
@@ -101,6 +101,23 @@ The Companion demo is now functional with all core components implemented and te
 ---
 
 ## Change Log
+
+### 2026-03-03 (Session 9)
+
+- Created `agents/analyzers/task_inferrer.py` — infers user task from navigation patterns (exploration, debugging, doc writing, focused coding)
+- Created `agents/analyzers/question_generator.py` — generates contextual questions from connections and context
+- Created `tests/companion/test_task_inferrer.py` — 10 tests, all passing
+- Created `tests/companion/test_question_generator.py` — 10 tests, all passing
+- Registered both in `agents/analyzers/__init__.py`
+- Wired both into `CompanionRuntime` (routing, initialization, activation tracking)
+- All 121 companion tests passing, 0 regressions
+
+### 2026-03-03 (Sessions 4-8)
+
+- Session 4-5: Created demo harness (`demo/harness.py`, `demo/renderer.py`, `demo/recording.py`, `demo/scenarios.py`)
+- Session 6: Created asciicast/GIF recording infrastructure
+- Session 7: Created E2E scenarios (`e2e/scenarios/companion_sidebar.py`, `companion_connections.py`, `companion_pipeline.py`)
+- Session 8: Fixed 2 pre-existing `test_harness.py` failures (patch.object mock strategy), 101 tests passing
 
 ### 2026-03-03 (Session 3 - Current)
 
