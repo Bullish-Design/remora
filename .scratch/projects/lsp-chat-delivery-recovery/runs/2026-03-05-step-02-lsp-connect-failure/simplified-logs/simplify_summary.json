@@ -1,0 +1,29 @@
+{
+  "files": [
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/server-2026-03-05_105316.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-02-lsp-connect-failure/simplified-logs/server-2026-03-05_105316.simplified.log",
+      "total_lines": 1849,
+      "kept_lines": 382,
+      "dropped_lines": 1467,
+      "dropped_by_pattern": {
+        "Event NodeDiscoveredEvent .* matched 0 agents: \\[\\]": 489,
+        "EventBus\\.emit: NodeDiscoveredEvent agent_id=None": 489,
+        "EventBus\\.emit: 0 handlers for NodeDiscoveredEvent": 489
+      }
+    },
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/client-2026-03-05_112250.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-02-lsp-connect-failure/simplified-logs/client-2026-03-05_112250.simplified.log",
+      "total_lines": 358,
+      "kept_lines": 358,
+      "dropped_lines": 0,
+      "dropped_by_pattern": {}
+    }
+  ],
+  "totals": {
+    "total_lines": 2207,
+    "kept_lines": 740,
+    "dropped_lines": 1467
+  }
+}

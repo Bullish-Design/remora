@@ -11,7 +11,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -30,6 +29,7 @@ POLL_INTERVAL = 0.3  # seconds between capture-pane polls
 SESSION_PREFIX = "remora-e2e"
 
 OUTPUT_DIR = Path(__file__).parent / "output"
+LOG_DIR = Path(__file__).parent.parent / ".remora" / "logs"
 
 # The demo project that scenarios open in nv2
 DEMO_PROJECT = Path(__file__).parent.parent / "remora_demo" / "project"
@@ -180,6 +180,7 @@ class TmuxDriver:
     session_name: str = ""
     cols: int = DEFAULT_COLS
     rows: int = DEFAULT_ROWS
+    pipe_log_path: Path | None = None  # Optional path to capture all tmux output
     _started: bool = field(default=False, init=False, repr=False)
 
     def start(self, working_dir: str | Path | None = None) -> None:
@@ -205,6 +206,22 @@ class TmuxDriver:
         if result.returncode != 0:
             raise TmuxError(f"Failed to create tmux session: {result.stderr}")
         self._started = True
+
+        # Enable pipe-pane to capture all output to a log file
+        if self.pipe_log_path:
+            self.pipe_log_path.parent.mkdir(parents=True, exist_ok=True)
+            # Use -o flag to open the pipe, append all output to the log file
+            pipe_cmd = [
+                "tmux",
+                "pipe-pane",
+                "-t",
+                self.session_name,
+                "-o",
+                f"cat >> {self.pipe_log_path}",
+            ]
+            result = subprocess.run(pipe_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise TmuxError(f"Failed to enable pipe-pane: {result.stderr}")
 
     def send_keys(self, keys: str, *, enter: bool = True) -> None:
         """Send keystrokes to the tmux session.
@@ -368,6 +385,15 @@ class TmuxDriver:
         after the test completes or fails.
         """
         if self._started:
+            # Disable pipe-pane to flush all output before killing
+            if self.pipe_log_path:
+                subprocess.run(
+                    ["tmux", "pipe-pane", "-t", self.session_name],
+                    capture_output=True,
+                    text=True,
+                )
+                time.sleep(0.1)  # Brief pause to ensure flush completes
+
             # First, send SIGTERM to all processes in the session by killing the pane
             # This is more thorough than just killing the session
             subprocess.run(
@@ -589,8 +615,43 @@ class ScenarioResult:
     success: bool
     cast_path: Path | None = None
     gif_path: Path | None = None
+    log_path: Path | None = None  # Path to tmux output log
     error: str | None = None
     duration: float = 0.0
+
+
+def _copy_recent_lsp_logs(*, start_wallclock: float) -> list[Path]:
+    """Copy recent client/server logs from demo workspace into the real log dir."""
+    demo_logs_dir = DEMO_PROJECT / ".remora" / "logs"
+    if not demo_logs_dir.exists():
+        return []
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    copied: list[Path] = []
+    for log_file in sorted(demo_logs_dir.glob("*.log"), key=lambda p: p.stat().st_mtime):
+        name = log_file.name
+        if not (name.startswith("server-") or name.startswith("client-")):
+            continue
+        if log_file.stat().st_mtime < start_wallclock:
+            continue
+        dest_path = LOG_DIR / name
+        try:
+            shutil.copy2(log_file, dest_path)
+            copied.append(dest_path)
+        except Exception:
+            # Don't fail scenario execution if debug-log copy fails.
+            continue
+    return copied
+
+
+def _select_primary_lsp_log(copied_logs: list[Path]) -> Path | None:
+    """Choose the most useful copied LSP log to display in result output."""
+    if not copied_logs:
+        return None
+    server_logs = [path for path in copied_logs if path.name.startswith("server-")]
+    if server_logs:
+        return server_logs[-1]
+    return copied_logs[-1]
 
 
 def run_scenario(
@@ -609,12 +670,15 @@ def run_scenario(
         working_dir: Working directory for the tmux session.
     """
     start_time = time.monotonic()
+    start_wallclock = time.time()  # For comparing with file mtimes
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     cast_path = OUTPUT_DIR / f"{scenario.name}_{stamp}.cast"
-    driver = TmuxDriver()
+    tmux_log_path = LOG_DIR / f"e2e-{scenario.name}_{stamp}-tmux.log"
+    driver = TmuxDriver(pipe_log_path=tmux_log_path)
     recorder = AsciinemaRecorder(output_path=cast_path) if record else None
     guard = DemoProjectGuard()
     guard.save()
+    lsp_log_path = None
 
     try:
         driver.start(working_dir=working_dir)
@@ -633,11 +697,16 @@ def run_scenario(
         if gif and result_path:
             gif_path = cast_to_gif(result_path)
 
+        # Copy recent LSP client/server logs from demo workspace to real log dir.
+        copied_lsp_logs = _copy_recent_lsp_logs(start_wallclock=start_wallclock)
+        lsp_log_path = _select_primary_lsp_log(copied_lsp_logs)
+
         return ScenarioResult(
             scenario_name=scenario.name,
             success=True,
             cast_path=result_path,
             gif_path=gif_path,
+            log_path=lsp_log_path or tmux_log_path,  # Prefer LSP log, fall back to tmux
             duration=time.monotonic() - start_time,
         )
 
@@ -649,9 +718,14 @@ def run_scenario(
             except Exception:
                 pass
 
+        # Copy recent LSP client/server logs even on failure.
+        copied_lsp_logs = _copy_recent_lsp_logs(start_wallclock=start_wallclock)
+        lsp_log_path = _select_primary_lsp_log(copied_lsp_logs)
+
         return ScenarioResult(
             scenario_name=scenario.name,
             success=False,
+            log_path=lsp_log_path or tmux_log_path,  # Prefer LSP log, fall back to tmux
             error=str(e),
             duration=time.monotonic() - start_time,
         )

@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-import shutil
+import os
+import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-# Use relative imports since we're in e2e/tests/
-import sys
-
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from e2e.harness import (
-    TmuxDriver,
     DemoProjectGuard,
+    TmuxDriver,
+    _copy_recent_lsp_logs,
 )
 
 
@@ -161,3 +161,48 @@ class TestDemoProjectGuard:
             with DemoProjectGuard(files=[], clear_state=True):
                 # State should be cleared on entry
                 assert not (remora_dir / "indexer.db").exists()
+
+
+class TestLogCopying:
+    """Tests for copying demo LSP logs into the real log directory."""
+
+    def test_copy_recent_logs_copies_client_and_server(self, tmp_path: Path) -> None:
+        demo_project = tmp_path / "demo"
+        demo_logs = demo_project / ".remora" / "logs"
+        real_logs = tmp_path / "real-logs"
+        demo_logs.mkdir(parents=True)
+        real_logs.mkdir(parents=True)
+
+        old_server = demo_logs / "server-2026-03-05_100000.log"
+        new_server = demo_logs / "server-2026-03-05_120000.log"
+        new_client = demo_logs / "client-2026-03-05_120000.log"
+        ignored_misc = demo_logs / "random.log"
+        old_server.write_text("old")
+        new_server.write_text("new-server")
+        new_client.write_text("new-client")
+        ignored_misc.write_text("misc")
+
+        now = time.time()
+        start_wallclock = now - 5
+        old_mtime = now - 20
+        new_mtime = now - 1
+        for path, mtime in (
+            (old_server, old_mtime),
+            (new_server, new_mtime),
+            (new_client, new_mtime),
+            (ignored_misc, new_mtime),
+        ):
+            path.touch()
+            os.utime(path, (mtime, mtime))
+
+        with patch("e2e.harness.DEMO_PROJECT", demo_project), patch("e2e.harness.LOG_DIR", real_logs):
+            copied = _copy_recent_lsp_logs(
+                start_wallclock=start_wallclock,
+            )
+
+        copied_names = sorted(path.name for path in copied)
+        assert copied_names == ["client-2026-03-05_120000.log", "server-2026-03-05_120000.log"]
+        assert (real_logs / "client-2026-03-05_120000.log").read_text() == "new-client"
+        assert (real_logs / "server-2026-03-05_120000.log").read_text() == "new-server"
+        assert not (real_logs / "server-2026-03-05_100000.log").exists()
+        assert not (real_logs / "random.log").exists()

@@ -14,9 +14,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from e2e.harness import OUTPUT_DIR, run_scenario, ScenarioResult, cleanup_stale_sessions
+from e2e.harness import LOG_DIR, OUTPUT_DIR, ScenarioResult, cleanup_stale_sessions, run_scenario
 from e2e.scenarios import ALL_SCENARIOS
-
 
 # The demo project root — nv2 should open files from here
 DEMO_PROJECT = Path(__file__).parent.parent / "remora_demo" / "project"
@@ -63,6 +62,8 @@ def list_scenarios() -> None:
 def print_result(result: ScenarioResult) -> None:
     status = "PASS" if result.success else "FAIL"
     print(f"  [{status}] {result.scenario_name} ({result.duration:.1f}s)")
+    if result.log_path:
+        print(f"         Log:       {result.log_path}")
     if result.cast_path:
         print(f"         Recording: {result.cast_path}")
     if result.gif_path:
@@ -89,14 +90,20 @@ def main() -> int:
     else:
         scenario_names = list(ALL_SCENARIOS.keys())
 
-    # Ensure output directory exists
+    # Ensure output directories exist
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-    print(f"E2E Demo Test Runner")
+    print("E2E Demo Test Runner")
     print(f"  Recording:  {'disabled' if args.no_record else 'enabled'}")
     print(f"  GIF:        {'yes' if args.gif else 'no'}")
     print(f"  Scenarios:  {', '.join(scenario_names)}")
     print(f"  Output:     {OUTPUT_DIR}")
+    print(f"  Logs:       {LOG_DIR}")
+    print()
+    print(f"Tip: LSP client/server logs will be copied to {LOG_DIR}/")
+    print("     To monitor all logs in real-time:")
+    print(f"     tail -f {LOG_DIR}/server-*.log {LOG_DIR}/client-*.log {LOG_DIR}/e2e-*.log")
     print()
 
     results: list[ScenarioResult] = []

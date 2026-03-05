@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
-
-# Add parent to path for imports
-import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -125,7 +123,7 @@ class TestNvimKeysFocusCodeBuffer:
 
         nv = NvimKeys(driver)
 
-        with patch.object(nv, "raw") as mock_raw:
+        with patch.object(nv, "raw"):
             result = nv.focus_code_buffer(expected_text="def ")
 
         assert "def load_config" in result
@@ -233,3 +231,76 @@ class TestNvimKeysOpenWithPanel:
         mock_panel.assert_called_once()
         mock_right.assert_called_once_with(delay=0.3)
         mock_left.assert_called_once_with(delay=0.3)
+
+
+class TestNvimKeysChatSubmit:
+    """Tests for deterministic chat submit helpers."""
+
+    def test_submit_chat_message_happy_path(self) -> None:
+        """Should wait for prompt, submit Enter, and verify history update."""
+        driver = MagicMock()
+        nv = NvimKeys(driver)
+
+        with (
+            patch.object(nv, "wait_for_chat_prompt") as mock_prompt,
+            patch.object(nv, "keys") as mock_keys,
+            patch.object(nv, "raw") as mock_raw,
+            patch.object(nv, "wait_for_chat_history_message") as mock_history,
+        ):
+            mock_history.return_value = "history content"
+            result = nv.submit_chat_message("what do you do?")
+
+        mock_prompt.assert_called_once_with(prompt_text="Message to agent:", timeout=10.0)
+        mock_keys.assert_called_once_with("what do you do?", enter=False, delay=0.3)
+        assert mock_raw.call_args_list == [
+            call("Enter", delay=1.0),
+            call("Escape", delay=0.3),
+        ]
+        mock_history.assert_called_once_with(
+            "what do you do?",
+            timeout=10.0,
+            empty_marker="No messages yet.",
+        )
+        assert result == "history content"
+
+    def test_submit_chat_message_can_skip_escape(self) -> None:
+        """Should avoid Escape when exit_insert is disabled."""
+        driver = MagicMock()
+        nv = NvimKeys(driver)
+
+        with (
+            patch.object(nv, "wait_for_chat_prompt"),
+            patch.object(nv, "keys"),
+            patch.object(nv, "raw") as mock_raw,
+            patch.object(nv, "wait_for_chat_history_message") as mock_history,
+        ):
+            mock_history.return_value = "history content"
+            nv.submit_chat_message("hello", exit_insert=False)
+
+        mock_raw.assert_called_once_with("Enter", delay=1.0)
+
+    def test_wait_for_chat_history_message_requires_empty_marker_to_clear(self) -> None:
+        """Should not pass while 'No messages yet' is still visible."""
+        driver = MagicMock()
+        driver.capture_pane.side_effect = [
+            "No messages yet. Type below to chat.\nhello",
+            "You\nhello",
+        ]
+        nv = NvimKeys(driver)
+
+        with patch("e2e.keys.time.sleep") as mock_sleep:
+            result = nv.wait_for_chat_history_message("hello", timeout=1.0)
+
+        assert "No messages yet." not in result
+        mock_sleep.assert_called_once()
+
+    def test_wait_for_chat_history_message_times_out(self) -> None:
+        """Should raise AssertionError with pane context on timeout."""
+        driver = MagicMock()
+        driver.capture_pane.return_value = "No messages yet. Type below to chat.\nhello"
+        nv = NvimKeys(driver)
+
+        with pytest.raises(AssertionError) as exc_info:
+            nv.wait_for_chat_history_message("hello", timeout=0.0)
+
+        assert "No messages yet." in str(exc_info.value)

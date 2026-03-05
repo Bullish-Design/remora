@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import time
+
 from lsprotocol import types as lsp
 
-from remora.lsp.models import LspRewriteAppliedEvent, LspRewriteRejectedEvent
+from remora.lsp.models import LspRewriteAppliedEvent
 from remora.lsp.server import emit_event, logger, server
+
+RESOLVE_AGENT_TIMEOUT_SECONDS = 2.0
 
 
 async def _resolve_agent(ls, args) -> str | None:
@@ -21,8 +26,36 @@ async def _resolve_agent(ls, args) -> str | None:
     if not ls.event_store:
         logger.warning("_resolve_agent: no event_store available")
         return None
-    logger.info("_resolve_agent: querying EventStore for node at %s:%s", uri, line)
-    agent = await ls.event_store.get_node_at_position(uri, line)
+    logger.info(
+        "_resolve_agent: get_node_at_position START uri=%s line=%s timeout_s=%.2f",
+        uri,
+        line,
+        RESOLVE_AGENT_TIMEOUT_SECONDS,
+    )
+    start = time.monotonic()
+    try:
+        agent = await asyncio.wait_for(
+            ls.event_store.get_node_at_position(uri, line),
+            timeout=RESOLVE_AGENT_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        duration_ms = (time.monotonic() - start) * 1000
+        logger.error(
+            "_resolve_agent: get_node_at_position TIMEOUT uri=%s line=%s duration_ms=%.1f timeout_s=%.2f",
+            uri,
+            line,
+            duration_ms,
+            RESOLVE_AGENT_TIMEOUT_SECONDS,
+        )
+        raise
+    duration_ms = (time.monotonic() - start) * 1000
+    logger.info(
+        "_resolve_agent: get_node_at_position END uri=%s line=%s duration_ms=%.1f found=%s",
+        uri,
+        line,
+        duration_ms,
+        bool(agent),
+    )
     if agent:
         logger.info("_resolve_agent: FOUND agent %s (%s) at %s:%s", agent.node_id, agent.name, uri, line)
         return agent.node_id
@@ -47,7 +80,17 @@ async def cmd_get_agent_panel(ls, *args) -> dict | None:
         if not ls.event_store:
             return None
 
+        logger.info("cmd_get_agent_panel: get_node_at_position START uri=%s line=%s", uri, line)
+        read_start = time.monotonic()
         agent = await ls.event_store.get_node_at_position(uri, line)
+        read_duration_ms = (time.monotonic() - read_start) * 1000
+        logger.info(
+            "cmd_get_agent_panel: get_node_at_position END uri=%s line=%s duration_ms=%.1f found=%s",
+            uri,
+            line,
+            read_duration_ms,
+            bool(agent),
+        )
         if not agent:
             logger.info("cmd_get_agent_panel: no agent at %s:%s", uri, line)
             return None
@@ -63,7 +106,16 @@ async def cmd_get_agent_panel(ls, *args) -> dict | None:
             ]
 
         # Get recent events (newest first from EventStore, reverse for chronological display)
+        logger.info("cmd_get_agent_panel: get_recent_events START agent=%s limit=50", agent.node_id)
+        events_start = time.monotonic()
         events = await ls.event_store.get_recent_events(agent.node_id, limit=50)
+        events_duration_ms = (time.monotonic() - events_start) * 1000
+        logger.info(
+            "cmd_get_agent_panel: get_recent_events END agent=%s duration_ms=%.1f count=%d",
+            agent.node_id,
+            events_duration_ms,
+            len(events),
+        )
         event_dicts = list(reversed(events))
 
         result = {
@@ -108,6 +160,14 @@ async def cmd_chat(ls, *args) -> None:
             {"agent_id": agent_id, "prompt": "Message to agent:"},
         )
         logger.info("cmd_chat: requestInput sent")
+    except TimeoutError:
+        logger.warning("cmd_chat: agent resolution timed out")
+        ls.window_show_message(
+            lsp.ShowMessageParams(
+                type=lsp.MessageType.Error,
+                message="Timed out resolving agent at cursor. Please retry.",
+            )
+        )
     except Exception:
         logger.exception("Error in remora.chat")
 
@@ -127,6 +187,14 @@ async def cmd_request_rewrite(ls, *args) -> None:
         ls.protocol.notify(
             "$/remora/requestInput",
             {"agent_id": agent_id, "prompt": "What should this code do?"},
+        )
+    except TimeoutError:
+        logger.warning("cmd_request_rewrite: agent resolution timed out")
+        ls.window_show_message(
+            lsp.ShowMessageParams(
+                type=lsp.MessageType.Error,
+                message="Timed out resolving agent at cursor. Please retry.",
+            )
         )
     except Exception:
         logger.exception("Error in remora.requestRewrite")

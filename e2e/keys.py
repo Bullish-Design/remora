@@ -46,6 +46,12 @@ NAV_KEY_DELAY = 0.15
 # Delay for LSP startup after opening a file
 LSP_STARTUP_DELAY = 3.0
 
+# Delay after pressing Enter to submit chat input
+CHAT_SUBMIT_DELAY = 1.0
+
+# Poll interval while waiting for chat history updates
+CHAT_HISTORY_POLL = 0.2
+
 
 # ---------------------------------------------------------------------------
 # NvimKeys — the single interface scenarios use for all keystrokes
@@ -283,18 +289,74 @@ class NvimKeys:
     def wait_for_chat_prompt(
         self,
         *,
-        prompt_text: str = "Message agent",
+        prompt_text: str = "Message to agent:",
         timeout: float = 10.0,
     ) -> str:
         """Wait for the chat input prompt to appear after leader_chat().
-
-        The prompt text varies depending on panel width but always starts
-        with "Message agent" (e.g., "Message agent...", "Message to agent:").
 
         Returns the pane content where the prompt was found.
         Raises TimeoutError if the prompt doesn't appear (e.g., LSP not running).
         """
         return self.driver.wait_for_text(prompt_text, timeout=timeout)
+
+    def wait_for_chat_history_message(
+        self,
+        text: str,
+        *,
+        timeout: float = 10.0,
+        poll: float = CHAT_HISTORY_POLL,
+        empty_marker: str = "No messages yet.",
+    ) -> str:
+        """Wait until a sent message is visible in history (not just input).
+
+        This prevents false-passes where text appears only in the input box
+        without a real submit.
+        """
+        deadline = time.monotonic() + timeout
+        last_content = ""
+
+        while time.monotonic() < deadline:
+            content = self.driver.capture_pane()
+            last_content = content
+            if text in content and empty_marker not in content:
+                return content
+            time.sleep(poll)
+
+        raise AssertionError(
+            f"Timed out waiting for submitted chat history message {text!r}; "
+            f"'{empty_marker}' never cleared.\nLast pane content:\n{last_content}"
+        )
+
+    def submit_chat_message(
+        self,
+        text: str,
+        *,
+        prompt_text: str = "Message to agent:",
+        prompt_timeout: float = 10.0,
+        type_delay: float = 0.3,
+        submit_delay: float = CHAT_SUBMIT_DELAY,
+        exit_insert: bool = True,
+        message_timeout: float = 10.0,
+    ) -> str:
+        """Submit a chat message via the active request-input prompt.
+
+        Sequence:
+        1. Wait for prompt (`$/remora/requestInput` path active)
+        2. Type text
+        3. Press Enter to submit
+        4. Optionally press Escape for normal-mode leader mappings
+        5. Verify history updated and empty-state marker cleared
+        """
+        self.wait_for_chat_prompt(prompt_text=prompt_text, timeout=prompt_timeout)
+        self.keys(text, enter=False, delay=type_delay)
+        self.raw("Enter", delay=submit_delay)
+        if exit_insert:
+            self.raw("Escape", delay=MODE_SWITCH_DELAY)
+        return self.wait_for_chat_history_message(
+            text,
+            timeout=message_timeout,
+            empty_marker="No messages yet.",
+        )
 
     # ------------------------------------------------------------------
     # Focus helpers

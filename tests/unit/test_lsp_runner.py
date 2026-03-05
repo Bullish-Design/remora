@@ -153,6 +153,33 @@ class TestExecuteTurn:
         # RemoraDB.get_node should NOT be called
         mock_server.db.get_node.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_execute_agent_turn_timeout_emits_error(self, runner, event_store):
+        """execute_turn should surface a timeout as an agent error and recover to idle."""
+        from remora.lsp.runner import Trigger
+
+        trigger = Trigger(agent_id="rm_abc12", correlation_id="corr_timeout")
+
+        async def _slow_execute(*args: Any, **kwargs: Any):
+            await asyncio.sleep(0.05)
+
+        with (
+            patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock),
+            patch("remora.lsp.server.emit_event", new_callable=AsyncMock),
+            patch("remora.lsp.runner.EXECUTE_AGENT_TURN_TIMEOUT_SECONDS", 0.01),
+            patch("remora.lsp.runner.execute_agent_turn", new=AsyncMock(side_effect=_slow_execute)),
+            patch.object(runner, "emit_error", new_callable=AsyncMock) as mock_emit_error,
+        ):
+            await runner.execute_turn(trigger)
+
+        mock_emit_error.assert_awaited_once()
+        _, error_message, _ = mock_emit_error.await_args.args
+        assert "timed out" in error_message
+
+        node = await event_store.get_node("rm_abc12")
+        assert node is not None
+        assert node.status == "idle"
+
 
 class TestApplyExtensions:
     """Test apply_extensions uses core AgentExtension."""

@@ -1,0 +1,81 @@
+{
+  "files": [
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/client-2026-03-05_092508.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-01-interactive-scan-gate/simplified-logs/client-2026-03-05_092508.simplified.log",
+      "total_lines": 113,
+      "kept_lines": 113,
+      "dropped_lines": 0,
+      "dropped_by_pattern": {}
+    },
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/client-2026-03-05_093938.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-01-interactive-scan-gate/simplified-logs/client-2026-03-05_093938.simplified.log",
+      "total_lines": 251,
+      "kept_lines": 251,
+      "dropped_lines": 0,
+      "dropped_by_pattern": {}
+    },
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/client-2026-03-05_094526.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-01-interactive-scan-gate/simplified-logs/client-2026-03-05_094526.simplified.log",
+      "total_lines": 227,
+      "kept_lines": 227,
+      "dropped_lines": 0,
+      "dropped_by_pattern": {}
+    },
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/client-2026-03-05_105301.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-01-interactive-scan-gate/simplified-logs/client-2026-03-05_105301.simplified.log",
+      "total_lines": 140,
+      "kept_lines": 140,
+      "dropped_lines": 0,
+      "dropped_by_pattern": {}
+    },
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/server-2026-03-05_092528.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-01-interactive-scan-gate/simplified-logs/server-2026-03-05_092528.simplified.log",
+      "total_lines": 1891,
+      "kept_lines": 379,
+      "dropped_lines": 1512,
+      "dropped_by_pattern": {
+        "Event NodeDiscoveredEvent .* matched 0 agents: \\[\\]": 504,
+        "EventBus\\.emit: NodeDiscoveredEvent agent_id=None": 504,
+        "EventBus\\.emit: 0 handlers for NodeDiscoveredEvent": 504
+      }
+    },
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/server-2026-03-05_094004.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-01-interactive-scan-gate/simplified-logs/server-2026-03-05_094004.simplified.log",
+      "total_lines": 165,
+      "kept_lines": 165,
+      "dropped_lines": 0,
+      "dropped_by_pattern": {}
+    },
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/server-2026-03-05_094547.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-01-interactive-scan-gate/simplified-logs/server-2026-03-05_094547.simplified.log",
+      "total_lines": 359,
+      "kept_lines": 359,
+      "dropped_lines": 0,
+      "dropped_by_pattern": {}
+    },
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/server-2026-03-05_105316.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-01-interactive-scan-gate/simplified-logs/server-2026-03-05_105316.simplified.log",
+      "total_lines": 1849,
+      "kept_lines": 382,
+      "dropped_lines": 1467,
+      "dropped_by_pattern": {
+        "Event NodeDiscoveredEvent .* matched 0 agents: \\[\\]": 489,
+        "EventBus\\.emit: NodeDiscoveredEvent agent_id=None": 489,
+        "EventBus\\.emit: 0 handlers for NodeDiscoveredEvent": 489
+      }
+    }
+  ],
+  "totals": {
+    "total_lines": 4995,
+    "kept_lines": 2016,
+    "dropped_lines": 2979
+  }
+}

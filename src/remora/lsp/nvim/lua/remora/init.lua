@@ -101,6 +101,7 @@ function M.setup(opts)
 
     --- Attempt to explicitly start the remora client for the current buffer.
     --- Useful when the initial FileType-triggered start races with server lock release.
+    --- Also used for proactive startup before the first file is opened.
     --- @param reason string
     local function kick_lsp_start(reason)
         local config = vim.lsp.config["remora"] or lsp_config
@@ -111,6 +112,14 @@ function M.setup(opts)
 
         local cfg = vim.deepcopy(config)
         cfg.name = "remora"
+        -- Ensure startup can resolve a workspace root even from an unnamed buffer.
+        if not cfg.root_dir then
+            local cwd = (vim.uv and vim.uv.cwd()) or (vim.loop and vim.loop.cwd()) or vim.fn.getcwd()
+            if cwd and cwd ~= "" then
+                cfg.root_dir = cwd
+                log.info("kick_lsp_start(%s): using root_dir=%s", reason, cwd)
+            end
+        end
         local ok, client_id = pcall(vim.lsp.start, cfg, { bufnr = vim.api.nvim_get_current_buf() })
         if not ok then
             log.warn("kick_lsp_start(%s): vim.lsp.start failed: %s", reason, tostring(client_id))
@@ -120,43 +129,87 @@ function M.setup(opts)
         return client_id ~= nil
     end
 
-    --- Read owner pid from .remora/lsp.pid if present.
-    --- @return integer|nil
-    local function read_lock_owner_pid()
+    --- Read lock-owner metadata from .remora/lsp.pid if present.
+    --- Format:
+    ---  line 1: pid
+    ---  line 2: heartbeat epoch ms (new) or seconds (legacy)
+    --- @return {pid: integer|nil, heartbeat_ms: integer|nil}
+    local function read_lock_owner_metadata()
         local cwd = (vim.uv and vim.uv.cwd()) or (vim.loop and vim.loop.cwd()) or vim.fn.getcwd()
         if not cwd or cwd == "" then
-            return nil
+            return { pid = nil, heartbeat_ms = nil }
         end
         local pid_path = cwd .. "/.remora/lsp.pid"
         local ok, lines = pcall(vim.fn.readfile, pid_path)
         if not ok or not lines or #lines == 0 then
-            return nil
+            return { pid = nil, heartbeat_ms = nil }
         end
         local pid = tonumber(vim.trim(lines[1] or ""))
-        return pid
+        local heartbeat_ms = nil
+        if lines[2] ~= nil then
+            local raw = tonumber(vim.trim(lines[2] or ""))
+            if raw then
+                -- Legacy format stored whole seconds.
+                heartbeat_ms = raw < 10000000000 and (raw * 1000) or raw
+            end
+        end
+        return { pid = pid, heartbeat_ms = heartbeat_ms }
     end
 
     --- Build a user-facing lock hint string when lock metadata exists.
     --- @return string|nil
     local function lock_owner_hint()
-        local pid = read_lock_owner_pid()
+        local owner = read_lock_owner_metadata()
+        local pid = owner.pid
         if not pid then
             return nil
         end
 
         local uv = vim.uv or vim.loop
         local alive = uv and uv.fs_stat and uv.fs_stat("/proc/" .. tostring(pid)) ~= nil
-        if alive then
-            return string.format("another workspace lock owner exists (pid=%d)", pid)
+        if not alive then
+            return string.format("stale lock metadata found (pid=%d)", pid)
         end
-        return string.format("stale lock metadata found (pid=%d)", pid)
+
+        local stale_ms = tonumber(vim.env.REMORA_LSP_STALE_OWNER_MS or "45000") or 45000
+        local now_ms = math.floor(os.time() * 1000)
+        local heartbeat_ms = owner.heartbeat_ms
+        if heartbeat_ms ~= nil then
+            local age_ms = math.max(0, now_ms - heartbeat_ms)
+            if age_ms > stale_ms then
+                return string.format("lock owner alive but stale heartbeat (pid=%d age=%.1fs)", pid, age_ms / 1000.0)
+            end
+            return string.format("another workspace lock owner exists (pid=%d heartbeat_age=%.1fs)", pid, age_ms / 1000.0)
+        end
+
+        return string.format("lock owner exists but heartbeat unknown (pid=%d)", pid)
     end
 
     --- State for tracking connection attempts
     local connection_state = {
         waiting = false,
         notified = false,
+        autostart_attempted = false,
     }
+
+    --- Proactively start remora-lsp without waiting for first file open.
+    --- Runs once per Neovim session and is safe to call repeatedly.
+    --- @param reason string
+    local function autostart_lsp(reason)
+        if connection_state.autostart_attempted then
+            log.debug("autostart_lsp(%s): already attempted", reason)
+            return
+        end
+        connection_state.autostart_attempted = true
+
+        if get_client({ silent = true }) then
+            log.info("autostart_lsp(%s): client already available", reason)
+            return
+        end
+
+        local started = kick_lsp_start(reason)
+        log.info("autostart_lsp(%s): start_requested=%s", reason, tostring(started))
+    end
 
     --- Get client with retry/polling for startup race condition.
     --- Shows user feedback while waiting for LSP to become ready.
@@ -353,16 +406,33 @@ function M.setup(opts)
 
     vim.lsp.handlers["$/remora/requestInput"] = function(_, result)
         log.info("HANDLER $/remora/requestInput: result=%s", vim.inspect(result))
+        local panel_open = panel.is_open()
+        local panel_agent_id = panel._agent and panel._agent.id or nil
+        local requested_agent_id = result and result.agent_id or nil
+        local input_win_valid = panel._input_win and vim.api.nvim_win_is_valid(panel._input_win) or false
+        log.info(
+            "HANDLER $/remora/requestInput: routing panel_open=%s panel_agent=%s requested_agent=%s input_win_valid=%s",
+            tostring(panel_open),
+            tostring(panel_agent_id),
+            tostring(requested_agent_id),
+            tostring(input_win_valid)
+        )
 
         -- If the panel is open and showing this agent, route to panel input
-        if panel.is_open() and panel._agent
-            and result.agent_id and result.agent_id == panel._agent.id then
+        if panel_open and panel._agent
+            and requested_agent_id and requested_agent_id == panel._agent.id then
             log.info("HANDLER $/remora/requestInput: panel is open for this agent, focusing input")
-            if panel._input_win and vim.api.nvim_win_is_valid(panel._input_win) then
+            if input_win_valid then
                 vim.api.nvim_set_current_win(panel._input_win)
                 vim.cmd("startinsert")
+                log.info("HANDLER $/remora/requestInput: panel input focused; waiting for Enter submit")
+                return
             end
-            return
+            log.warn("HANDLER $/remora/requestInput: agent matched but input window invalid; falling back to vim.ui.input")
+        elseif panel_open then
+            log.info("HANDLER $/remora/requestInput: panel open but agent mismatch; using vim.ui.input fallback")
+        else
+            log.info("HANDLER $/remora/requestInput: panel closed; using vim.ui.input fallback")
         end
 
         -- Fallback: use vim.ui.input
@@ -477,6 +547,18 @@ function M.setup(opts)
             log.close()
         end,
     })
+
+    -- Proactive startup so chat/panel commands can work before opening a file.
+    vim.schedule(function()
+        autostart_lsp("setup-autostart")
+    end)
+    vim.api.nvim_create_autocmd("VimEnter", {
+        once = true,
+        callback = function()
+            autostart_lsp("vimenter-autostart")
+        end,
+    })
+    log.info("M.setup: proactive autostart registered")
 
     log.info("M.setup: COMPLETE")
 end

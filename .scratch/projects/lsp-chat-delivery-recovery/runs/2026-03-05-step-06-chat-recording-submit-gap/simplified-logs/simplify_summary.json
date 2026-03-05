@@ -1,0 +1,49 @@
+{
+  "files": [
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/client-2026-03-05_124557.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-06-chat-recording-submit-gap/simplified-logs/client-2026-03-05_124557.simplified.log",
+      "total_lines": 247,
+      "kept_lines": 247,
+      "dropped_lines": 0,
+      "dropped_by_pattern": {}
+    },
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/client-2026-03-05_124927.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-06-chat-recording-submit-gap/simplified-logs/client-2026-03-05_124927.simplified.log",
+      "total_lines": 238,
+      "kept_lines": 238,
+      "dropped_lines": 0,
+      "dropped_by_pattern": {}
+    },
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/server-2026-03-05_124608.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-06-chat-recording-submit-gap/simplified-logs/server-2026-03-05_124608.simplified.log",
+      "total_lines": 141,
+      "kept_lines": 60,
+      "dropped_lines": 81,
+      "dropped_by_pattern": {
+        "Event NodeDiscoveredEvent .* matched 0 agents: \\[\\]": 27,
+        "EventBus\\.emit: NodeDiscoveredEvent agent_id=None": 27,
+        "EventBus\\.emit: 0 handlers for NodeDiscoveredEvent": 27
+      }
+    },
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/server-2026-03-05_124938.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-chat-delivery-recovery/runs/2026-03-05-step-06-chat-recording-submit-gap/simplified-logs/server-2026-03-05_124938.simplified.log",
+      "total_lines": 138,
+      "kept_lines": 57,
+      "dropped_lines": 81,
+      "dropped_by_pattern": {
+        "Event NodeDiscoveredEvent .* matched 0 agents: \\[\\]": 27,
+        "EventBus\\.emit: NodeDiscoveredEvent agent_id=None": 27,
+        "EventBus\\.emit: 0 handlers for NodeDiscoveredEvent": 27
+      }
+    }
+  ],
+  "totals": {
+    "total_lines": 764,
+    "kept_lines": 602,
+    "dropped_lines": 162
+  }
+}

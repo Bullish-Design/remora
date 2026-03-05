@@ -12,9 +12,10 @@ These are **in addition to** the universal coding standards in CRITICAL_RULES.
 
 ---
 
-## devenv.sh Environment (MANDATORY)
+## devenv.sh Environment (MANDATORY for execution/testing)
 
-**All commands must run through `devenv shell --`.** See `.scratch/skills/devenv-skill.md` for full details.
+Use `devenv shell --` for commands that execute project code or tooling (tests, scripts, linters, formatters, dependency sync, app/runtime commands).  
+You do **not** need `devenv shell --` for routine read-only shell inspection commands (e.g. `ls`, `cat`, `rg`, `git log`, `git show`).
 
 **CRITICAL: Before the first test run in every session, ALWAYS sync dependencies:**
 ```bash
@@ -28,8 +29,7 @@ devenv shell -- pytest tests/unit/test_lsp_graph.py -v
 devenv shell -- ruff check src/
 devenv shell -- uv sync --extra dev
 ```
-
-Never run `python`, `pytest`, `uv run`, or any tool directly from the system PATH.
+For scripts/tests/tooling, never run `python`, `pytest`, `uv run`, or similar directly from system PATH.
 
 ---
 
@@ -73,7 +73,7 @@ Remora is a reactive agent swarm system where code nodes (functions, classes, me
 ## Test Suite
 
 ```
-python -m pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q
+devenv shell -- python -m pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q
 ```
 
 Known pre-existing failures:

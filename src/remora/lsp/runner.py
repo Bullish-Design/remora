@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("remora.lsp.runner")
 
 MAX_CHAIN_DEPTH = 10
+EXECUTE_AGENT_TURN_TIMEOUT_SECONDS = 30.0
 
 
 # ---------------------------------------------------------------------------
@@ -362,11 +363,25 @@ class AgentRunner:
         self._correlation_depth[depth_key] = (current_depth + 1, time.time())
 
         async with self._semaphore:
+            status_start = time.monotonic()
             await self.server.event_store.set_node_status(agent_id, "running")
+            logger.info(
+                "execute_turn: set_node_status(running) END agent=%s duration_ms=%.1f",
+                agent_id,
+                (time.monotonic() - status_start) * 1000,
+            )
             await refresh_code_lenses()
             await self.server.db.add_to_chain(correlation_id, agent_id)
 
+            node_read_start = time.monotonic()
             agent = await self.server.event_store.get_node(agent_id)
+            node_read_ms = (time.monotonic() - node_read_start) * 1000
+            logger.info(
+                "execute_turn: get_node END agent=%s duration_ms=%.1f found=%s",
+                agent_id,
+                node_read_ms,
+                bool(agent),
+            )
             if not agent:
                 logger.error("execute_turn: node %s not found in EventStore!", agent_id)
                 await self.emit_error(agent_id, "Node not found", correlation_id)
@@ -390,8 +405,14 @@ class AgentRunner:
 
                 # Build chat history from correlation events
                 chat_history: list[dict[str, str]] = []
+                events_read_start = time.monotonic()
                 events = await self.server.event_store.get_events_for_correlation(correlation_id)
-                logger.info("execute_turn: %d events for correlation %s", len(events), correlation_id)
+                logger.info(
+                    "execute_turn: get_events_for_correlation END corr=%s duration_ms=%.1f count=%d",
+                    correlation_id,
+                    (time.monotonic() - events_read_start) * 1000,
+                    len(events),
+                )
                 for event in events:
                     event_type = event["event_type"]
                     payload = event.get("payload", {})
@@ -459,17 +480,46 @@ class AgentRunner:
                         )
                     )
 
-                result = await execute_agent_turn(
-                    node=agent,
-                    config=self.config,
-                    event_store=self.server.event_store,
-                    subscriptions=getattr(self.server, "subscriptions", None),
-                    swarm_id="swarm",
-                    project_root=project_root,
-                    extra_tools=lsp_tools,
-                    on_kernel_event=_on_kernel_event,
-                    chat_history=chat_history,
-                    trigger_event=trigger.trigger_event,
+                exec_start = time.monotonic()
+                logger.info(
+                    "execute_turn: execute_agent_turn START agent=%s corr=%s timeout_s=%.1f",
+                    agent_id,
+                    correlation_id,
+                    EXECUTE_AGENT_TURN_TIMEOUT_SECONDS,
+                )
+                try:
+                    result = await asyncio.wait_for(
+                        execute_agent_turn(
+                            node=agent,
+                            config=self.config,
+                            event_store=self.server.event_store,
+                            subscriptions=getattr(self.server, "subscriptions", None),
+                            swarm_id="swarm",
+                            project_root=project_root,
+                            extra_tools=lsp_tools,
+                            on_kernel_event=_on_kernel_event,
+                            chat_history=chat_history,
+                            trigger_event=trigger.trigger_event,
+                        ),
+                        timeout=EXECUTE_AGENT_TURN_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError:
+                    duration_ms = (time.monotonic() - exec_start) * 1000
+                    logger.error(
+                        "execute_turn: execute_agent_turn TIMEOUT agent=%s corr=%s duration_ms=%.1f timeout_s=%.1f",
+                        agent_id,
+                        correlation_id,
+                        duration_ms,
+                        EXECUTE_AGENT_TURN_TIMEOUT_SECONDS,
+                    )
+                    raise RuntimeError(
+                        f"execute_agent_turn timed out after {EXECUTE_AGENT_TURN_TIMEOUT_SECONDS:.1f}s"
+                    ) from None
+                logger.info(
+                    "execute_turn: execute_agent_turn END agent=%s corr=%s duration_ms=%.1f",
+                    agent_id,
+                    correlation_id,
+                    (time.monotonic() - exec_start) * 1000,
                 )
 
                 # Emit final text response if present
