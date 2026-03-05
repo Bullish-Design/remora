@@ -74,9 +74,21 @@ Active investigation has advanced through step-08. Step-07 deterministic chat-su
     - `devenv shell -- python -m e2e.run --scenario startup --no-record`
     - `devenv shell -- python -m e2e.run --scenario chat --no-record`
   - implementation artifact: `runs/2026-03-05-step-08-lock-owner-lifecycle-hardening/IMPLEMENTATION_REPORT.md`.
+- Step-09 startup autoconnect hardening + orphan-parent reclaim (2026-03-05 14:26-14:31):
+  - `src/remora/lsp/nvim/lua/remora/init.lua` now runs a background startup connect loop (`ensure_autostart_connected`) with throttled `kick_lsp_start` calls, so attach retries continue without user commands.
+  - lock hint parsing now reads `.remora/lsp.pid` parent pid metadata and surfaces orphan-owner hints.
+  - `src/remora/lsp/__init__.py` now treats lock owners as reclaimable when recorded parent pid is dead/orphaned (even if owner heartbeat is fresh), reducing startup stalls behind orphaned servers.
+  - new unit test added: `test_workspace_lock_reclaims_owner_with_dead_recorded_parent`.
+  - validation:
+    - `devenv shell -- pytest tests/unit/test_lsp_lock_owner.py -q` PASS
+    - `devenv shell -- nv2 --headless remora_demo/companion/demo/harness.py ...` returned `REMORA_CLIENTS=1` without issuing `RemoraChat`.
+  - caveat: `e2e.run --scenario startup --no-record` still appears to false-pass on plugin init notifications; it did not prove client attach in this run.
 - Skill updates:
   - `.scratch/skills/lsp-chat-recovery-loop/SKILL.md` now requires cast analysis when marker validation fails.
   - hypothesis/next-step templates now include cast evidence fields.
 
 ## Next Task
-Run one manual real Neovim validation loop against ISSUE_001 to confirm lock-owner hardening resolves the prior `pid=250354` startup blockage pattern without manual process cleanup.
+Run one manual real Neovim validation loop to confirm:
+1) remora client is attached before first command,
+2) no lingering `remora-lsp` orphan process remains after exiting Neovim,
+3) chat + panel cursor-follow still function while background scan is active.

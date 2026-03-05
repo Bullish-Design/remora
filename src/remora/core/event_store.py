@@ -12,8 +12,9 @@ import sqlite3
 import subprocess
 import threading
 import time
+from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, is_dataclass
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from structured_agents.events import Event as StructuredEvent
 
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 _LOCK_RETRY_MAX_ATTEMPTS = 10
 _LOCK_RETRY_BASE_SECONDS = 0.05
 _LOCK_RETRY_CAP_SECONDS = 1.5
+_NOISY_EVENT_TYPES = frozenset({"NodeDiscoveredEvent", "ScaffoldRequestEvent"})
+_T = TypeVar("_T")
 
 if TYPE_CHECKING:
     from remora.core.agent_node import AgentNode
@@ -39,9 +42,9 @@ class EventStore:
     def __init__(
         self,
         db_path: PathLike,
-        subscriptions: "SubscriptionRegistry | None" = None,
-        event_bus: "EventBus | None" = None,
-        projection: "NodeProjection | None" = None,
+        subscriptions: SubscriptionRegistry | None = None,
+        event_bus: EventBus | None = None,
+        projection: NodeProjection | None = None,
     ):
         self._db_path = normalize_path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,13 +56,13 @@ class EventStore:
         self._projection = projection
         self._trigger_queue: asyncio.Queue[tuple[str, int, RemoraEvent]] | None = None
 
-    def set_subscriptions(self, subscriptions: "SubscriptionRegistry") -> None:
+    def set_subscriptions(self, subscriptions: SubscriptionRegistry) -> None:
         """Set the subscription registry for trigger matching."""
         self._subscriptions = subscriptions
         if self._trigger_queue is None:
             self._trigger_queue = asyncio.Queue()
 
-    def set_event_bus(self, event_bus: "EventBus") -> None:
+    def set_event_bus(self, event_bus: EventBus) -> None:
         """Set the event bus for UI updates."""
         self._event_bus = event_bus
 
@@ -286,6 +289,85 @@ class EventStore:
             "holder_pids": holders,
         }
 
+    def _begin_immediate_with_recovery(self, op_name: str) -> None:
+        """Start a write transaction, recovering from stale in-transaction state."""
+        assert self._conn is not None
+        if self._conn.in_transaction:
+            logger.error(
+                "%s: write connection already in_transaction before BEGIN IMMEDIATE; forcing rollback; diagnostics=%s",
+                op_name,
+                self._lock_diagnostics(),
+            )
+            try:
+                self._conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                logger.warning(
+                    "%s: rollback during stale transaction recovery failed; continuing",
+                    op_name,
+                    exc_info=True,
+                )
+        self._conn.execute("BEGIN IMMEDIATE")
+
+    async def _run_locked_write_with_retries(self, op_name: str, op: Callable[[], _T]) -> _T:
+        """Run write op under the store lock with lock retries and cancel-safe completion."""
+        max_attempts = _LOCK_RETRY_MAX_ATTEMPTS
+        for attempt in range(max_attempts):
+            try:
+                async with self._lock:
+                    write_task = asyncio.create_task(asyncio.to_thread(op))
+                    try:
+                        return await asyncio.shield(write_task)
+                    except asyncio.CancelledError:
+                        logger.warning(
+                            "%s: cancelled while write thread is in-flight; waiting for completion before releasing lock",
+                            op_name,
+                        )
+                        try:
+                            await write_task
+                        except Exception:
+                            logger.warning(
+                                "%s: in-flight write failed after cancellation",
+                                op_name,
+                                exc_info=True,
+                            )
+                        raise
+            except sqlite3.OperationalError as exc:
+                if self._is_locked_error(exc) and attempt < max_attempts - 1:
+                    delay = self._retry_delay_seconds(attempt)
+                    if attempt in (0, max_attempts - 2):
+                        logger.warning(
+                            "%s: database locked (attempt %d/%d), retrying in %.2fs; diagnostics=%s",
+                            op_name,
+                            attempt + 1,
+                            max_attempts,
+                            delay,
+                            self._lock_diagnostics(),
+                        )
+                    else:
+                        logger.warning(
+                            "%s: database locked (attempt %d/%d), retrying in %.2fs...",
+                            op_name,
+                            attempt + 1,
+                            max_attempts,
+                            delay,
+                        )
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+
+        raise RuntimeError(f"{op_name}: unreachable retry exhaustion")
+
+    def _log_event_routing(self, event_type: str, to_agent: str | None, matching_agents: list[str]) -> None:
+        """Emit high-volume routing logs at DEBUG while keeping user-facing events at INFO."""
+        log_fn = logger.debug if event_type in _NOISY_EVENT_TYPES else logger.info
+        log_fn(
+            "Event %s to_agent=%s matched %d agents: %s",
+            event_type,
+            to_agent,
+            len(matching_agents),
+            matching_agents,
+        )
+
     async def _migrate_routing_fields(self) -> None:
         """Add routing fields to existing tables."""
         assert self._conn is not None, "_migrate_routing_fields called before connection"
@@ -367,7 +449,7 @@ class EventStore:
 
         def _do_append() -> tuple[int, list[RemoraEvent]]:
             assert self._conn is not None
-            self._conn.execute("BEGIN IMMEDIATE")
+            self._begin_immediate_with_recovery("append")
             try:
                 with contextlib.closing(self._conn.execute(
                     """
@@ -389,44 +471,13 @@ class EventStore:
                 raise
 
         # Retry with jittered exponential backoff.
-        # IMPORTANT: Lock is released before sleeping to allow other queries to proceed.
-        max_attempts = _LOCK_RETRY_MAX_ATTEMPTS
-        for attempt in range(max_attempts):
-            try:
-                async with self._lock:
-                    event_id, follow_ups = await asyncio.to_thread(_do_append)
-                break
-            except sqlite3.OperationalError as exc:
-                if self._is_locked_error(exc) and attempt < max_attempts - 1:
-                    delay = self._retry_delay_seconds(attempt)
-                    if attempt in (0, max_attempts - 2):
-                        logger.warning(
-                            "append: database locked (attempt %d/%d), retrying in %.2fs; diagnostics=%s",
-                            attempt + 1,
-                            max_attempts,
-                            delay,
-                            self._lock_diagnostics(),
-                        )
-                    else:
-                        logger.warning(
-                            "append: database locked (attempt %d/%d), retrying in %.2fs...",
-                            attempt + 1,
-                            max_attempts,
-                            delay,
-                        )
-                    await asyncio.sleep(delay)
-                else:
-                    raise
+        # IMPORTANT: lock is held until the in-flight write thread completes,
+        # even if caller cancellation arrives (timeout via wait_for).
+        event_id, follow_ups = await self._run_locked_write_with_retries("append", _do_append)
 
         if self._trigger_queue is not None and self._subscriptions is not None:
             matching_agents = await self._subscriptions.get_matching_agents(event)
-            logger.info(
-                "Event %s to_agent=%s matched %d agents: %s",
-                event_type,
-                to_agent,
-                len(matching_agents),
-                matching_agents,
-            )
+            self._log_event_routing(event_type, to_agent, matching_agents)
             for agent_id in matching_agents:
                 await self._trigger_queue.put((agent_id, event_id, event))
 
@@ -474,7 +525,7 @@ class EventStore:
 
         def _do_batch_append() -> tuple[list[int], list[RemoraEvent]]:
             assert self._conn is not None
-            self._conn.execute("BEGIN IMMEDIATE")
+            self._begin_immediate_with_recovery("batch_append")
             try:
                 event_ids: list[int] = []
                 all_follow_ups: list[RemoraEvent] = []
@@ -498,47 +549,14 @@ class EventStore:
                 self._conn.execute("ROLLBACK")
                 raise
 
-        # IMPORTANT: Lock is released before sleeping to allow other queries to proceed.
-        max_attempts = _LOCK_RETRY_MAX_ATTEMPTS
-        for attempt in range(max_attempts):
-            try:
-                async with self._lock:
-                    event_ids, follow_ups = await asyncio.to_thread(_do_batch_append)
-                break
-            except sqlite3.OperationalError as exc:
-                if self._is_locked_error(exc) and attempt < max_attempts - 1:
-                    delay = self._retry_delay_seconds(attempt)
-                    if attempt in (0, max_attempts - 2):
-                        logger.warning(
-                            "batch_append: database locked (attempt %d/%d), retrying in %.2fs; diagnostics=%s",
-                            attempt + 1,
-                            max_attempts,
-                            delay,
-                            self._lock_diagnostics(),
-                        )
-                    else:
-                        logger.warning(
-                            "batch_append: database locked (attempt %d/%d), retrying in %.2fs...",
-                            attempt + 1,
-                            max_attempts,
-                            delay,
-                        )
-                    await asyncio.sleep(delay)
-                else:
-                    raise
+        event_ids, follow_ups = await self._run_locked_write_with_retries("batch_append", _do_batch_append)
 
         # Process triggers and bus notifications for each event
         for idx, (_, _, _, _, _, to_agent, _, _, event) in enumerate(prepared):
             event_type = getattr(event, "event_type", None) or type(event).__name__
             if self._trigger_queue is not None and self._subscriptions is not None:
                 matching_agents = await self._subscriptions.get_matching_agents(event)
-                logger.info(
-                    "Event %s to_agent=%s matched %d agents: %s",
-                    event_type,
-                    to_agent,
-                    len(matching_agents),
-                    matching_agents,
-                )
+                self._log_event_routing(event_type, to_agent, matching_agents)
                 for agent_id in matching_agents:
                     await self._trigger_queue.put((agent_id, event_ids[idx], event))
 
@@ -818,7 +836,7 @@ class EventStore:
         async with self._lock:
             return await asyncio.to_thread(_delete)
 
-    async def get_node(self, node_id: str) -> "AgentNode | None":
+    async def get_node(self, node_id: str) -> AgentNode | None:
         """Get a single AgentNode by ID from the nodes table.
 
         Uses the dedicated read connection to avoid blocking on write operations.
@@ -847,7 +865,7 @@ class EventStore:
         file_path: str | None = None,
         node_type: str | None = None,
         columns: list[str] | None = None,
-    ) -> "list[AgentNode]":
+    ) -> list[AgentNode]:
         """List AgentNodes with optional filters.
 
         Uses the dedicated read connection to avoid blocking on write operations.
@@ -897,7 +915,7 @@ class EventStore:
         self,
         file_path: str,
         line: int,
-    ) -> "AgentNode | None":
+    ) -> AgentNode | None:
         """Get the narrowest AgentNode containing the given line in a file.
 
         Uses the dedicated read connection to avoid blocking on write operations.

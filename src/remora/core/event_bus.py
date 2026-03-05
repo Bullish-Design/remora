@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -18,6 +18,7 @@ from structured_agents.events import Event as StructuredEvent
 from remora.core.events import RemoraEvent
 
 logger = logging.getLogger(__name__)
+_NOISY_EVENT_NAMES = frozenset({"NodeDiscoveredEvent", "ScaffoldRequestEvent"})
 
 EventHandler = Callable[[Any], Any]
 
@@ -38,7 +39,8 @@ class EventBus:
         event_type = type(event)
         event_name = event_type.__name__
         agent_id = getattr(event, "agent_id", None) or getattr(event, "to_agent", None)
-        logger.info(f"EventBus.emit: {event_name} agent_id={agent_id}")
+        log_fn = logger.debug if event_name in _NOISY_EVENT_NAMES else logger.info
+        log_fn(f"EventBus.emit: {event_name} agent_id={agent_id}")
 
         handlers: list[EventHandler] = []
 
@@ -47,7 +49,7 @@ class EventBus:
                 handlers.extend(registered_handlers)
 
         handlers.extend(self._all_handlers)
-        logger.info(f"EventBus.emit: {len(handlers)} handlers for {event_name}")
+        log_fn(f"EventBus.emit: {len(handlers)} handlers for {event_name}")
 
         for handler in handlers:
             try:

@@ -110,3 +110,53 @@ def test_workspace_lock_does_not_reclaim_fresh_owner(monkeypatch: pytest.MonkeyP
         lock.acquire()
 
     assert terminated["count"] == 0
+
+
+def test_workspace_lock_reclaims_owner_with_dead_recorded_parent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lock = _WorkspaceProcessLock(
+        lock_path=tmp_path / "lsp.lock",
+        pid_path=tmp_path / "lsp.pid",
+        stale_owner_ms=60_000,
+    )
+
+    calls = {"attempts": 0, "terminated": 0}
+
+    def fake_try_flock(_handle) -> bool:
+        calls["attempts"] += 1
+        return calls["attempts"] > 1
+
+    def fake_read_owner() -> _LockOwnerMetadata:
+        # Fresh heartbeat, but recorded parent process is gone.
+        return _LockOwnerMetadata(pid=9001, heartbeat_ms=9_990, parent_pid=1234)
+
+    def fake_now_ms() -> int:
+        return 10_000
+
+    def fake_is_alive(pid: int) -> bool:
+        # Owner process is alive; parent process is dead.
+        return pid == 9001
+
+    def fake_matches_workspace(_pid: int) -> bool:
+        return True
+
+    def fake_terminate(_pid: int) -> bool:
+        calls["terminated"] += 1
+        return True
+
+    monkeypatch.setattr(lock, "_try_flock", fake_try_flock)
+    monkeypatch.setattr(lock, "_read_owner_metadata", fake_read_owner)
+    monkeypatch.setattr(lock, "_now_ms", fake_now_ms)
+    monkeypatch.setattr(lock, "_is_process_alive", fake_is_alive)
+    monkeypatch.setattr(lock, "_process_matches_workspace", fake_matches_workspace)
+    monkeypatch.setattr(lock, "_terminate_stale_owner", fake_terminate)
+
+    try:
+        lock.acquire()
+    finally:
+        lock.release()
+
+    assert calls["terminated"] == 1
+    assert calls["attempts"] == 2

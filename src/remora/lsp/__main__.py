@@ -201,7 +201,7 @@ def main(
 
         scan_pause_window_seconds = 3.0
         scan_pause_sleep_seconds = 0.1
-        scan_append_timeout_seconds = 1.5
+        scan_append_slow_warning_seconds = 1.5
         scan_append_chunk_size = 32
         scan_update_edges_timeout_seconds = 1.0
 
@@ -287,22 +287,7 @@ def main(
                             await _pause_for_user_activity()
                             append_start = time.monotonic()
                             try:
-                                await asyncio.wait_for(
-                                    server.event_store.batch_append("lsp", chunk),
-                                    timeout=scan_append_timeout_seconds,
-                                )
-                            except TimeoutError:
-                                append_duration_ms = (time.monotonic() - append_start) * 1000
-                                log.warning(
-                                    "_background_scan: batch_append TIMEOUT file=%s chunk_start=%d chunk_size=%d duration_ms=%.1f timeout_s=%.1f",
-                                    fpath,
-                                    idx,
-                                    len(chunk),
-                                    append_duration_ms,
-                                    scan_append_timeout_seconds,
-                                )
-                                timed_out = True
-                                break
+                                await server.event_store.batch_append("lsp", chunk)
                             except Exception:
                                 log.warning(
                                     "_background_scan: failed to batch append chunk file=%s chunk_start=%d chunk_size=%d",
@@ -313,6 +298,16 @@ def main(
                                 )
                                 timed_out = True
                                 break
+                            append_duration_ms = (time.monotonic() - append_start) * 1000
+                            if append_duration_ms > scan_append_slow_warning_seconds * 1000:
+                                log.warning(
+                                    "_background_scan: batch_append SLOW file=%s chunk_start=%d chunk_size=%d duration_ms=%.1f warn_threshold_s=%.1f",
+                                    fpath,
+                                    idx,
+                                    len(chunk),
+                                    append_duration_ms,
+                                    scan_append_slow_warning_seconds,
+                                )
                             await asyncio.sleep(0)
                         if timed_out:
                             continue

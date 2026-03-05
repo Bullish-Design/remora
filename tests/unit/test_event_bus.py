@@ -1,10 +1,11 @@
 import asyncio
+import logging
 
 import pytest
 from structured_agents.events import ModelResponseEvent, ToolCallEvent, ToolResultEvent
 
 from remora.core.event_bus import EventBus
-from remora.core.events import RemoraEvent
+from remora.core.events import RemoraEvent, ScaffoldRequestEvent
 
 
 @pytest.mark.asyncio
@@ -79,3 +80,22 @@ async def test_wait_for_predicate_matching_event() -> None:
 
     assert result.output_preview == "ok"
     assert result.tool_name == "read_file"
+
+
+@pytest.mark.asyncio
+async def test_emit_noisy_events_log_at_debug(caplog: pytest.LogCaptureFixture) -> None:
+    bus = EventBus()
+    caplog.set_level(logging.DEBUG, logger="remora.core.event_bus")
+
+    await bus.emit(
+        ScaffoldRequestEvent(
+            node_id="rm_stub",
+            to_agent="rm_stub",
+            node_type="function",
+        )
+    )
+
+    debug_messages = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
+    info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+    assert any("EventBus.emit: ScaffoldRequestEvent" in msg for msg in debug_messages)
+    assert not any("EventBus.emit: ScaffoldRequestEvent" in msg for msg in info_messages)

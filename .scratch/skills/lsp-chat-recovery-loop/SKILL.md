@@ -27,6 +27,7 @@ Before log analysis, run an e2e scenario that exercises the desired behavior.
 - For chat-delivery issues, default to `chat`.
 - For panel-only issues, default to `panel_nav`.
 - For startup/attach issues, default to `startup`.
+- `startup` can false-pass on UI/init notifications without proving an attached remora client; always pair startup investigations with the `nv2 --headless` attach probe below.
 - If no existing scenario exercises the failure path, create one new scenario and register it in `e2e/scenarios/__init__.py`.
 
 ### Required artifact
@@ -54,6 +55,16 @@ For chat-delivery investigations, require:
 If these markers are missing, treat the scenario as non-validating and either:
 1. adjust scenario usage (timing/focus), or
 2. create a new scenario that deterministically exercises submit path.
+
+For startup/attach investigations, do not rely on `startup` scenario PASS alone.
+Require a direct headless client-attach probe:
+
+```bash
+devenv shell -- nv2 --headless remora_demo/companion/demo/harness.py \
+  "+lua vim.defer_fn(function() local clients=vim.lsp.get_clients({name='remora'}); print('REMORA_CLIENTS=' .. tostring(#clients)); vim.cmd('qa!') end, 10000)"
+```
+
+Treat `REMORA_CLIENTS=0` as a startup failure even if `e2e.run --scenario startup` reports PASS.
 
 Then run the same scenario with recording enabled and inspect the newest `.cast`:
 

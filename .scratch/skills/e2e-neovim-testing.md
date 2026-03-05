@@ -425,6 +425,18 @@ python -m e2e.run --no-record
 python -m e2e.run --scenario chat --gif
 ```
 
+### Startup Attach Validation (Required)
+
+`python -m e2e.run --scenario startup` can pass without proving a live remora client attach.
+For startup regressions, always run this direct headless probe and require `REMORA_CLIENTS>=1`:
+
+```bash
+devenv shell -- nv2 --headless remora_demo/companion/demo/harness.py \
+  "+lua vim.defer_fn(function() local clients=vim.lsp.get_clients({name='remora'}); print('REMORA_CLIENTS=' .. tostring(#clients)); vim.cmd('qa!') end, 10000)"
+```
+
+If output contains `REMORA_CLIENTS=0`, treat startup as failed regardless of scenario PASS.
+
 ### Output
 
 Recordings are saved to `e2e/output/`:

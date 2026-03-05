@@ -23,6 +23,7 @@
 - [x] Implement deterministic e2e chat submit helper and remove false-positive `chat` passes.
 - [x] Proactively autostart remora LSP on setup/VimEnter (no first-file-open dependency).
 - [x] Implement lock-owner lifecycle hardening (heartbeat, stale-owner reclaim, signal cleanup, parent watchdog) for ISSUE_001.
+- [x] Harden autostart connect loop + lock-owner orphan-parent reclaim (startup no longer dependent on first chat command).
 - [ ] Validate lock-owner hardening in manual real Neovim run (previous `pid=250354` failure pattern).
 - [ ] Re-run baseline and compare deltas.
 

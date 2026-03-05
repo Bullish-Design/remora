@@ -43,6 +43,7 @@ def _env_int(name: str, default: int) -> int:
 class _LockOwnerMetadata:
     pid: int | None
     heartbeat_ms: int | None
+    parent_pid: int | None = None
 
 
 @dataclass
@@ -110,10 +111,11 @@ class _WorkspaceProcessLock:
         try:
             lines = self.pid_path.read_text(encoding="utf-8").splitlines()
         except Exception:
-            return _LockOwnerMetadata(pid=None, heartbeat_ms=None)
+            return _LockOwnerMetadata(pid=None, heartbeat_ms=None, parent_pid=None)
 
         pid: int | None = None
         heartbeat_ms: int | None = None
+        parent_pid: int | None = None
         if lines:
             try:
                 pid = int(lines[0].strip())
@@ -126,7 +128,12 @@ class _WorkspaceProcessLock:
                 heartbeat_ms = raw * 1000 if raw < 10_000_000_000 else raw
             except Exception:
                 heartbeat_ms = None
-        return _LockOwnerMetadata(pid=pid, heartbeat_ms=heartbeat_ms)
+        if len(lines) > 2:
+            try:
+                parent_pid = int(lines[2].strip())
+            except Exception:
+                parent_pid = None
+        return _LockOwnerMetadata(pid=pid, heartbeat_ms=heartbeat_ms, parent_pid=parent_pid)
 
     def _is_process_alive(self, pid: int) -> bool:
         try:
@@ -161,6 +168,12 @@ class _WorkspaceProcessLock:
             return False
         if not self._process_matches_workspace(pid):
             return False
+        parent_pid = owner.parent_pid
+        if parent_pid is not None:
+            if parent_pid <= 1:
+                return True
+            if not self._is_process_alive(parent_pid):
+                return True
         age_ms = self._heartbeat_age_ms(owner)
         if age_ms is None:
             return True
@@ -203,6 +216,10 @@ class _WorkspaceProcessLock:
         age_ms = self._heartbeat_age_ms(owner)
         if not self._is_process_alive(owner.pid):
             return f"{message} (stale metadata pid={owner.pid})"
+        if owner.parent_pid is not None and owner.parent_pid > 1 and not self._is_process_alive(owner.parent_pid):
+            return f"{message} (pid={owner.pid}, orphaned parent pid={owner.parent_pid})"
+        if owner.parent_pid is not None and owner.parent_pid <= 1:
+            return f"{message} (pid={owner.pid}, orphaned parent pid={owner.parent_pid})"
         if age_ms is not None and age_ms > self.stale_owner_ms:
             return f"{message} (pid={owner.pid}, stale heartbeat age_ms={age_ms})"
         return f"{message} (pid={owner.pid})"

@@ -55,6 +55,24 @@ function M.setup(opts)
         end
     end
 
+    -- Hidden bootstrap buffer used to force LSP start when no supported file
+    -- is open yet at startup.
+    local bootstrap_buf = nil
+
+    local function cleanup_bootstrap_buf()
+        if not bootstrap_buf or not vim.api.nvim_buf_is_valid(bootstrap_buf) then
+            bootstrap_buf = nil
+            return
+        end
+        local wins = vim.fn.win_findbuf(bootstrap_buf)
+        if #wins > 0 then
+            return
+        end
+        pcall(vim.api.nvim_buf_delete, bootstrap_buf, { force = true })
+        log.debug("cleanup_bootstrap_buf: deleted bootstrap buffer=%d", bootstrap_buf)
+        bootstrap_buf = nil
+    end
+
     local function setup_highlights()
         -- Status highlights
         vim.api.nvim_set_hl(0, "RemoraActive", { fg = "#a6e3a1" })
@@ -96,6 +114,7 @@ function M.setup(opts)
         end
         local client = clients[1]
         log.info("get_client: using client id=%d name=%s", client.id, client.name)
+        cleanup_bootstrap_buf()
         return client
     end
 
@@ -103,7 +122,23 @@ function M.setup(opts)
     --- Useful when the initial FileType-triggered start races with server lock release.
     --- Also used for proactive startup before the first file is opened.
     --- @param reason string
+    local last_kick_ns = 0
+    local min_kick_interval_ms = tonumber(vim.env.REMORA_LSP_KICK_MIN_MS or "200") or 200
     local function kick_lsp_start(reason)
+        local uv = vim.uv or vim.loop
+        if uv and uv.hrtime then
+            local now_ns = uv.hrtime()
+            if last_kick_ns > 0 and (now_ns - last_kick_ns) < (min_kick_interval_ms * 1000000) then
+                log.debug(
+                    "kick_lsp_start(%s): throttled (min_interval_ms=%d)",
+                    reason,
+                    min_kick_interval_ms
+                )
+                return false
+            end
+            last_kick_ns = now_ns
+        end
+
         local config = vim.lsp.config["remora"] or lsp_config
         if not config then
             log.warn("kick_lsp_start(%s): missing remora lsp config", reason)
@@ -120,12 +155,58 @@ function M.setup(opts)
                 log.info("kick_lsp_start(%s): using root_dir=%s", reason, cwd)
             end
         end
-        local ok, client_id = pcall(vim.lsp.start, cfg, { bufnr = vim.api.nvim_get_current_buf() })
+
+        local start_buf = vim.api.nvim_get_current_buf()
+        local start_ft = vim.bo[start_buf].filetype
+        if not matching_fts[start_ft] then
+            for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+                if vim.api.nvim_buf_is_loaded(buf) and matching_fts[vim.bo[buf].filetype] then
+                    start_buf = buf
+                    start_ft = vim.bo[buf].filetype
+                    break
+                end
+            end
+        end
+
+        if not matching_fts[start_ft] then
+            if not bootstrap_buf or not vim.api.nvim_buf_is_valid(bootstrap_buf) then
+                local created = vim.api.nvim_create_buf(false, false)
+                if created and created > 0 then
+                    bootstrap_buf = created
+                    pcall(vim.api.nvim_set_option_value, "bufhidden", "wipe", { buf = bootstrap_buf })
+                    pcall(vim.api.nvim_set_option_value, "swapfile", false, { buf = bootstrap_buf })
+                    local bootstrap_ft = lsp_config.filetypes[1] or "python"
+                    pcall(vim.api.nvim_set_option_value, "filetype", bootstrap_ft, { buf = bootstrap_buf })
+                    local root_dir = cfg.root_dir or ((vim.uv and vim.uv.cwd()) or vim.fn.getcwd())
+                    if root_dir and root_dir ~= "" then
+                        pcall(vim.api.nvim_buf_set_name, bootstrap_buf, root_dir .. "/.remora/.remora_lsp_bootstrap.py")
+                    end
+                    log.info(
+                        "kick_lsp_start(%s): created bootstrap buffer=%d ft=%s",
+                        reason,
+                        bootstrap_buf,
+                        bootstrap_ft
+                    )
+                end
+            end
+            if bootstrap_buf and vim.api.nvim_buf_is_valid(bootstrap_buf) then
+                start_buf = bootstrap_buf
+                start_ft = vim.bo[bootstrap_buf].filetype
+            end
+        end
+
+        local ok, client_id = pcall(vim.lsp.start, cfg, { bufnr = start_buf })
         if not ok then
             log.warn("kick_lsp_start(%s): vim.lsp.start failed: %s", reason, tostring(client_id))
             return false
         end
-        log.info("kick_lsp_start(%s): vim.lsp.start returned %s", reason, tostring(client_id))
+        log.info(
+            "kick_lsp_start(%s): vim.lsp.start returned %s (buf=%d ft=%s)",
+            reason,
+            tostring(client_id),
+            start_buf,
+            tostring(start_ft)
+        )
         return client_id ~= nil
     end
 
@@ -133,19 +214,21 @@ function M.setup(opts)
     --- Format:
     ---  line 1: pid
     ---  line 2: heartbeat epoch ms (new) or seconds (legacy)
-    --- @return {pid: integer|nil, heartbeat_ms: integer|nil}
+    ---  line 3: parent pid (new)
+    --- @return {pid: integer|nil, heartbeat_ms: integer|nil, parent_pid: integer|nil}
     local function read_lock_owner_metadata()
         local cwd = (vim.uv and vim.uv.cwd()) or (vim.loop and vim.loop.cwd()) or vim.fn.getcwd()
         if not cwd or cwd == "" then
-            return { pid = nil, heartbeat_ms = nil }
+            return { pid = nil, heartbeat_ms = nil, parent_pid = nil }
         end
         local pid_path = cwd .. "/.remora/lsp.pid"
         local ok, lines = pcall(vim.fn.readfile, pid_path)
         if not ok or not lines or #lines == 0 then
-            return { pid = nil, heartbeat_ms = nil }
+            return { pid = nil, heartbeat_ms = nil, parent_pid = nil }
         end
         local pid = tonumber(vim.trim(lines[1] or ""))
         local heartbeat_ms = nil
+        local parent_pid = nil
         if lines[2] ~= nil then
             local raw = tonumber(vim.trim(lines[2] or ""))
             if raw then
@@ -153,7 +236,10 @@ function M.setup(opts)
                 heartbeat_ms = raw < 10000000000 and (raw * 1000) or raw
             end
         end
-        return { pid = pid, heartbeat_ms = heartbeat_ms }
+        if lines[3] ~= nil then
+            parent_pid = tonumber(vim.trim(lines[3] or ""))
+        end
+        return { pid = pid, heartbeat_ms = heartbeat_ms, parent_pid = parent_pid }
     end
 
     --- Build a user-facing lock hint string when lock metadata exists.
@@ -174,6 +260,16 @@ function M.setup(opts)
         local stale_ms = tonumber(vim.env.REMORA_LSP_STALE_OWNER_MS or "45000") or 45000
         local now_ms = math.floor(os.time() * 1000)
         local heartbeat_ms = owner.heartbeat_ms
+        local parent_pid = owner.parent_pid
+        if parent_pid ~= nil then
+            if parent_pid <= 1 then
+                return string.format("lock owner appears orphaned (pid=%d parent=%d)", pid, parent_pid)
+            end
+            local parent_alive = uv and uv.fs_stat and uv.fs_stat("/proc/" .. tostring(parent_pid)) ~= nil
+            if not parent_alive then
+                return string.format("lock owner appears orphaned (pid=%d parent=%d dead)", pid, parent_pid)
+            end
+        end
         if heartbeat_ms ~= nil then
             local age_ms = math.max(0, now_ms - heartbeat_ms)
             if age_ms > stale_ms then
@@ -190,25 +286,76 @@ function M.setup(opts)
         waiting = false,
         notified = false,
         autostart_attempted = false,
+        autostart_retrying = false,
+        autostart_retry_attempt = 0,
+        autostart_retry_max_attempts = tonumber(vim.env.REMORA_LSP_AUTOSTART_RETRY_MAX or "60") or 60,
     }
+
+    --- Keep trying to connect in the background so startup does not depend on
+    --- the first user command to trigger retry logic.
+    --- @param reason string
+    local function ensure_autostart_connected(reason)
+        if get_client({ silent = true }) then
+            connection_state.autostart_retrying = false
+            connection_state.autostart_retry_attempt = 0
+            log.info("ensure_autostart_connected(%s): client already available", reason)
+            return
+        end
+
+        if connection_state.autostart_retrying then
+            log.debug("ensure_autostart_connected(%s): retry loop already running", reason)
+            return
+        end
+
+        connection_state.autostart_retrying = true
+        connection_state.autostart_retry_attempt = 0
+        local max_attempts = connection_state.autostart_retry_max_attempts
+        local base_delay_ms = 120
+
+        local function poll()
+            if get_client({ silent = true }) then
+                connection_state.autostart_retrying = false
+                log.info(
+                    "ensure_autostart_connected: connected after %d startup retries",
+                    connection_state.autostart_retry_attempt
+                )
+                return
+            end
+
+            connection_state.autostart_retry_attempt = connection_state.autostart_retry_attempt + 1
+            local attempt = connection_state.autostart_retry_attempt
+            if attempt > max_attempts then
+                connection_state.autostart_retrying = false
+                log.warn(
+                    "ensure_autostart_connected: gave up after %d retries",
+                    max_attempts
+                )
+                return
+            end
+
+            if attempt == 1 or attempt % 3 == 0 then
+                kick_lsp_start(string.format("autostart-retry-%d", attempt))
+            end
+
+            local delay = math.min(1000, math.floor(base_delay_ms * (1.35 ^ (attempt - 1))))
+            vim.defer_fn(poll, delay)
+        end
+
+        local started = kick_lsp_start(reason)
+        log.info("ensure_autostart_connected(%s): start_requested=%s", reason, tostring(started))
+        vim.defer_fn(poll, base_delay_ms)
+    end
 
     --- Proactively start remora-lsp without waiting for first file open.
     --- Runs once per Neovim session and is safe to call repeatedly.
     --- @param reason string
     local function autostart_lsp(reason)
-        if connection_state.autostart_attempted then
-            log.debug("autostart_lsp(%s): already attempted", reason)
-            return
+        if not connection_state.autostart_attempted then
+            connection_state.autostart_attempted = true
+        else
+            log.debug("autostart_lsp(%s): startup already attempted; ensuring connection", reason)
         end
-        connection_state.autostart_attempted = true
-
-        if get_client({ silent = true }) then
-            log.info("autostart_lsp(%s): client already available", reason)
-            return
-        end
-
-        local started = kick_lsp_start(reason)
-        log.info("autostart_lsp(%s): start_requested=%s", reason, tostring(started))
+        ensure_autostart_connected(reason)
     end
 
     --- Get client with retry/polling for startup race condition.
