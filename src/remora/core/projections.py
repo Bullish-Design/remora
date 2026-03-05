@@ -10,7 +10,7 @@ import logging
 import re
 import sqlite3
 from dataclasses import asdict, is_dataclass
-from typing import Any, Type
+from typing import Any
 
 from remora.core.events import (
     AgentCompleteEvent,
@@ -19,7 +19,6 @@ from remora.core.events import (
     NodeDiscoveredEvent,
     NodeRemovedEvent,
     RemoraEvent,
-    ScaffoldRequestEvent,
 )
 from remora.extensions import extension_matches
 
@@ -83,16 +82,17 @@ def _dataclass_default(obj: Any) -> Any:
 class NodeProjection:
     """Projects events into the `nodes` table."""
 
-    def __init__(self, extension_configs: list[Type] | None = None):
+    def __init__(self, extension_configs: list[type] | None = None):
         self._extension_configs = extension_configs or []
 
     def apply(self, conn: sqlite3.Connection, event: RemoraEvent) -> list[RemoraEvent]:
         """Apply a single event to the nodes table.
 
         Returns a (possibly empty) list of follow-up events that should be
-        appended after the current transaction commits.  For example, when a
-        stub node is discovered the projection returns a
-        ``ScaffoldRequestEvent`` so that the scaffold lifecycle is triggered.
+        appended after the current transaction commits.
+
+        Note: projection-originated scaffold follow-ups are currently disabled.
+        See `_project_node_discovered()` for details and rationale.
         """
         if isinstance(event, NodeDiscoveredEvent):
             return self._project_node_discovered(conn, event)
@@ -107,7 +107,34 @@ class NodeProjection:
         return []
 
     def _project_node_discovered(self, conn: sqlite3.Connection, event: NodeDiscoveredEvent) -> list[RemoraEvent]:
-        is_stub = _is_stub(event.source_code)
+        """Project a discovered node into the read model.
+
+        Temporary behavior override (2026-03-05):
+        scaffold/stub detection is intentionally disabled in this path.
+
+        Why:
+        - `_is_stub()` relies on regex patterns that can exhibit pathological
+          backtracking on some multiline non-Python content (for example,
+          markdown code-block nodes discovered from docs).
+        - In production logs this manifested as ~10s stalls inside
+          `EventStore.batch_append()` for a single `NodeDiscoveredEvent`.
+        - Direct benchmark on a real offending payload (`node_id=rm_7m9iybrl`,
+          `source_len=1340`) reproduced ~13s per `_is_stub()` call.
+        - Because projection runs inside the active write transaction, this
+          CPU stall appears as a scanner freeze and extends write-lock hold
+          time, harming responsiveness.
+
+        Operational tradeoff while disabled:
+        - Newly discovered nodes are always stored with `status='idle'`.
+        - Automatic projection-originated `ScaffoldRequestEvent` follow-ups are
+          suppressed.
+        - Explicit scaffold flows that emit `ScaffoldRequestEvent` directly
+          (for example, `spawn_child`) still function.
+
+        TODO:
+        Re-enable scaffold detection after replacing the regex approach with a
+        bounded-time implementation (AST/token-based or strictly linear checks).
+        """
         row: dict[str, Any] = {
             "node_id": event.node_id,
             "node_type": event.node_type,
@@ -123,7 +150,7 @@ class NodeProjection:
             "parent_id": event.parent_id,
             "caller_ids": "[]",
             "callee_ids": "[]",
-            "status": "scaffold" if is_stub else "idle",
+            "status": "idle",
             "last_trigger_event": "",
             "last_completed_at": None,
             "extension_name": None,
@@ -155,9 +182,9 @@ class NodeProjection:
         cols = ", ".join(row.keys())
         placeholders = ", ".join("?" * len(row))
         # Upsert: on conflict, update mutable fields.
-        # Status is updated to match the new source_code (scaffold if stub, idle otherwise),
-        # but ONLY when the current status is idle or scaffold.  Running/error status is
-        # preserved — a re-discovery during agent execution must not clobber lifecycle state.
+        # Status updates to 'idle' when current status is idle/scaffold.
+        # Running/error status is preserved so re-discovery does not clobber
+        # active lifecycle state.
         conn.execute(
             f"""INSERT INTO nodes ({cols}) VALUES ({placeholders})
                 ON CONFLICT(node_id) DO UPDATE SET
@@ -185,24 +212,6 @@ class NodeProjection:
             """,
             list(row.values()),
         )
-
-        # Emit ScaffoldRequestEvent follow-up when the node is actually in
-        # 'scaffold' status after the upsert.  The CASE in the upsert
-        # preserves running/error status, so we query the actual result.
-        if is_stub:
-            actual = conn.execute(
-                "SELECT status FROM nodes WHERE node_id = ?",
-                (event.node_id,),
-            ).fetchone()
-            if actual and actual["status"] == "scaffold":
-                return [
-                    ScaffoldRequestEvent(
-                        node_id=event.node_id,
-                        to_agent=event.node_id,
-                        node_type=event.node_type,
-                        parent_id=event.parent_id,
-                    )
-                ]
         return []
 
     def _project_node_removed(self, conn: sqlite3.Connection, event: NodeRemovedEvent) -> None:

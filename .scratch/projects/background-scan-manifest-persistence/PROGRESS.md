@@ -33,11 +33,12 @@
 - [ ] Restart validation with real logs (`skipped_unchanged` reflects persisted entries)
 - [ ] Full real scan completion validation (`_background_scan: COMPLETE`)
 
-## Phase 5: Implement Fix #2 (Aggressive Preemption) — PENDING
-- [ ] Reduce chunk size from 32 → 8 events
-- [ ] Change `asyncio.sleep(0)` → `asyncio.sleep(0.05)` between chunks
-- [ ] Add pause check BEFORE every chunk (not just at file boundaries)
-- [ ] Test interactive operations during active scan
+## Phase 5: Implement Fix #2 (Aggressive Preemption) — COMPLETE
+- [x] Reduce chunk size from 32 → 8 events
+- [x] Change `asyncio.sleep(0)` → `asyncio.sleep(0.05)` between chunks
+- [x] Keep pause check before every chunk
+- [x] Add regression test for preemption settings (chunking + pause window + sleep cadence)
+- [ ] Manual interactive validation during active scan
 
 ## Phase 6: Implement Fix #3 (Skip Unchanged Events) — PENDING
 - [ ] Compare old_nodes vs new nodes by source_hash
@@ -58,6 +59,19 @@
 - [ ] Monitor chat submit: reaches `on_input_submitted` handler
 - [ ] Measure scan time: second startup <30s vs first startup 3-4min
 - [ ] Check SQLite WAL size: should stay <1MB after checkpoint
+
+## Phase 9: Offline Scan Tooling — COMPLETE
+- [x] Add standalone scan script: `scripts/scan_repo.py`
+- [x] Script performs full parse + EventStore/edge updates (not manifest-only)
+- [x] Script writes incremental `scan-manifest.json` updates
+- [x] Script writes lock/status file: `.remora/scan-manifest.lock`
+- [x] Add tqdm progress bars (overall repository + per-file event progress)
+- [x] Add verbose diagnostics logging (file + stderr, per-phase/per-chunk timings)
+- [x] Validate script CLI/help and lint
+- [x] Add deep per-event diagnostics in `EventStore.batch_append` (payload/source sizes + phase timing breakdown)
+- [x] Validate deep logging on `browser_demo` scan and confirm slow phase localizes to projection path
+- [x] Reproduce slow path directly: `_is_stub` on problematic markdown `code_block` source takes ~13s/call
+- [x] Temporary mitigation: disable projection stub detection/follow-up scaffold emission to remove regex stall from scan path
 
 ## Abort Conditions
 If three consecutive fix attempts fail to achieve "Definition of Done":

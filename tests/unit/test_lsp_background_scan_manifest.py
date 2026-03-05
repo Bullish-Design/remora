@@ -65,6 +65,7 @@ class _FakeServer:
         self.runner = None
         self._features: dict[str, object] = {}
         self.notify_calls = 0
+        self.user_activity_windows: list[float] = []
 
     def feature(self, uri):
         def _decorator(fn):
@@ -74,7 +75,7 @@ class _FakeServer:
         return _decorator
 
     def user_recently_active(self, window_seconds: float) -> bool:
-        _ = window_seconds
+        self.user_activity_windows.append(window_seconds)
         return False
 
     async def notify_agents_updated(self) -> None:
@@ -93,6 +94,55 @@ class _FakeRunner:
 
     async def run_from_event_store(self, _event_store) -> None:
         await asyncio.Future()
+
+
+class _SimpleDB:
+    async def update_edges(self, _nodes) -> None:
+        return None
+
+
+class _ChunkTrackingEventStore:
+    def __init__(self) -> None:
+        self.chunk_sizes: list[int] = []
+
+    async def list_nodes(self, file_path: str):
+        _ = file_path
+        return []
+
+    async def batch_append(self, source: str, events: list[object]) -> None:
+        _ = source
+        self.chunk_sizes.append(len(events))
+
+    async def checkpoint_wal(self, mode: str) -> None:
+        _ = mode
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class _ManyNodesWatcher:
+    def parse_and_inject_ids(self, uri: str, text: str, _old_nodes: list[dict]) -> list[dict]:
+        _ = text
+        nodes: list[dict] = []
+        for idx in range(20):
+            node_id = f"{uri}#{idx}"
+            nodes.append(
+                {
+                    "node_id": node_id,
+                    "node_type": "function",
+                    "name": f"fn_{idx}",
+                    "full_name": f"fn_{idx}",
+                    "file_path": uri,
+                    "start_line": idx + 1,
+                    "end_line": idx + 1,
+                    "source_code": f"def fn_{idx}(): pass",
+                    "source_hash": f"hash:{node_id}",
+                    "start_byte": 0,
+                    "end_byte": 0,
+                }
+            )
+        return nodes
 
 
 @pytest.mark.asyncio
@@ -138,6 +188,61 @@ async def test_background_scan_saves_partial_manifest_before_completion(
     assert manifest_path.exists()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert len(manifest) >= 10
+
+    for task in scheduled_tasks:
+        if task is not scan_task and not task.done():
+            task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_background_scan_uses_aggressive_preemption_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "one_file.py").write_text("def only_fn():\n    return 1\n", encoding="utf-8")
+
+    event_store = _ChunkTrackingEventStore()
+    fake_server = _FakeServer(str(tmp_path), _SimpleDB())
+    fake_server.event_store = event_store
+    fake_server.watcher = _ManyNodesWatcher()
+
+    import remora.lsp.__main__ as lsp_main_mod
+    import remora.lsp.runner as runner_mod
+
+    recorded_sleep_delays: list[float] = []
+    original_sleep = asyncio.sleep
+
+    async def _capture_sleep(delay: float):
+        recorded_sleep_delays.append(delay)
+        await original_sleep(0)
+
+    monkeypatch.setattr(lsp_main_mod, "_setup_logging", lambda: logging.getLogger("test"))
+    monkeypatch.setattr(lsp_main_mod, "_get_server", lambda: fake_server)
+    monkeypatch.setattr(runner_mod, "AgentRunner", _FakeRunner)
+    monkeypatch.setattr("remora.core.config.load_config", lambda path=None: Config())
+    monkeypatch.setattr(asyncio, "sleep", _capture_sleep)
+
+    with pytest.raises(_StopSentinel):
+        lsp_main_mod.main(event_store=event_store)
+
+    scheduled_tasks: list[asyncio.Task] = []
+
+    def _capture_ensure_future(coro):
+        task = asyncio.create_task(coro)
+        scheduled_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(asyncio, "ensure_future", _capture_ensure_future)
+    initialized_handler = fake_server._features[lsp.INITIALIZED]
+    await initialized_handler(lsp.InitializedParams())
+
+    scan_task = next(t for t in scheduled_tasks if t.get_coro().__name__ == "_background_scan")
+    await asyncio.wait_for(scan_task, timeout=5.0)
+
+    assert event_store.chunk_sizes == [8, 8, 4]
+    assert 0.05 in recorded_sleep_delays
+    assert fake_server.user_activity_windows
+    assert set(fake_server.user_activity_windows) == {5.0}
+    assert fake_server.notify_calls == 1
 
     for task in scheduled_tasks:
         if task is not scan_task and not task.done():

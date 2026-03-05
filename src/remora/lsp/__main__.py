@@ -205,10 +205,10 @@ def main(
         py_files = list(_iter_source_files(root_path))
         log.info("_background_scan: found %d source files in %s (skip-dirs pruned)", len(py_files), root)
 
-        scan_pause_window_seconds = 3.0
+        scan_pause_window_seconds = 5.0
         scan_pause_sleep_seconds = 0.1
         scan_append_slow_warning_seconds = 1.5
-        scan_append_chunk_size = 32
+        scan_append_chunk_size = 8
         scan_update_edges_timeout_seconds = 1.0
 
         async def _pause_for_user_activity() -> None:
@@ -325,7 +325,7 @@ def main(
                                     append_duration_ms,
                                     scan_append_slow_warning_seconds,
                                 )
-                            await asyncio.sleep(0)
+                            await asyncio.sleep(0.05)
                         if timed_out:
                             continue
                 await _pause_for_user_activity()

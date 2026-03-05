@@ -160,3 +160,91 @@ Current baseline state check from START_HERE:
 Remaining work:
 - Manual Neovim startup/interrupt/restart validation in real harness logs.
 - Decide whether Fix #2 preemption tuning is still needed after real validation.
+
+## 2026-03-05 Fix #2 Update
+
+Implemented aggressive scan preemption tuning in `src/remora/lsp/__main__.py`:
+- `scan_append_chunk_size`: 32 -> 8
+- `scan_pause_window_seconds`: 3.0 -> 5.0
+- Per-chunk yield: `await asyncio.sleep(0)` -> `await asyncio.sleep(0.05)`
+
+Added regression coverage in `tests/unit/test_lsp_background_scan_manifest.py`:
+- New test verifies chunked `batch_append` calls are `[8, 8, 4]` for a 20-node file.
+- Verifies per-chunk `0.05` yield occurs.
+- Verifies user-activity pause window is 5.0s.
+
+Validation run after Fix #2:
+- `devenv shell -- pytest tests/unit/test_lsp_background_scan_manifest.py -q` (pass)
+- `devenv shell -- pytest tests/unit/test_llm_config.py -q` (pass)
+- `devenv shell -- ruff check src/remora/lsp/__main__.py tests/unit/test_lsp_background_scan_manifest.py` (pass)
+
+Next required validation:
+- Real manual Neovim run after Fix #2 to confirm panel timeout regression is resolved.
+
+## 2026-03-05 Offline Scan Script Update
+
+Added a standalone overnight scan script at `scripts/scan_repo.py`.
+
+Purpose:
+- Run the full repository scan out-of-band (during downtime) without Neovim.
+- Populate EventStore + edge DB and persist `scan-manifest.json` incrementally.
+- Produce a lock/status artifact for operators: `.remora/scan-manifest.lock`.
+
+Behavior summary:
+- Uses the same supported suffixes/skip-dir logic as `_background_scan`.
+- Reuses AST parsing + node ID preservation via `ASTWatcher.parse_and_inject_ids`.
+- Emits `NodeDiscoveredEvent`/`NodeRemovedEvent` through `EventStore.batch_append`.
+- Updates edges via `RemoraDB.update_edges`.
+- Saves manifest atomically every `--manifest-save-interval` files (default 10).
+- Shows tqdm bars:
+  - repository-level files progress
+  - per-file event chunk progress
+
+Validation completed:
+- `devenv shell -- ruff check scripts/scan_repo.py` (pass)
+- `devenv shell -- python scripts/scan_repo.py --help` (pass)
+
+Logging instrumentation update:
+- Added high-detail scan logging to `scripts/scan_repo.py` with:
+  - stderr + logfile output (`--log-level`, `--log-file`)
+  - per-file phase logs (`read`, `list_nodes`, `parse`, `batch_append`, `update_edges`)
+  - per-chunk timing logs + slow-operation warnings
+  - lock file heartbeat/phase updates for in-flight visibility
+- Added `--slow-operation-seconds` tuning flag.
+- Smoke-tested on a temp repo with `--log-level DEBUG` (full run completed).
+
+## 2026-03-05 EventStore Batch-Append Deep Logging Update
+
+Added deeper instrumentation inside `EventStore.batch_append` in `src/remora/core/event_store.py`:
+- Per-event prep/serialization logs with `payload_bytes` and `source_len`.
+- Per-event `event start`/`event end` logs with `insert_ms`, `projection_ms`, and `total_ms`.
+- `event SLOW` warnings that include event identity + payload/source sizes + phase breakdown.
+- Batch tx summary now includes `total_insert_ms`, `total_projection_ms`, and `commit_ms`.
+
+Validation:
+- `devenv shell -- ruff check src/remora/core/event_store.py` (pass)
+- `devenv shell -- remora-scan-repo --root browser_demo --log-level DEBUG --slow-operation-seconds 0.1` (pass)
+
+Current diagnosis from latest full-repo log (`scan-repo-2026-03-05_162556.log`):
+- Slow point is not `BEGIN IMMEDIATE` lock acquisition.
+- Slow point is `projection.apply()` for a `NodeDiscoveredEvent` in `docs/EventBased_Concept.md` (chunk 6/47, idx 1/8, ~10.25s).
+- This localizes the stall to projection code path (`NodeProjection._project_node_discovered`) rather than SQLite writer lock contention.
+
+Benchmark confirmation on the exact slow node payload:
+- Queried `events.db` for `node_id=rm_7m9iybrl` (`node_type=code_block`, `source_len=1340`).
+- Direct timing (`devenv shell -- python -c ...`) of `_is_stub(source_code)`:
+  - call #1: `13031.6ms`
+  - call #2: `12859.7ms`
+- This reproduces the observed 10s scan stalls and confirms pathological regex performance in `_is_stub` is the dominant bottleneck for this case.
+
+## 2026-03-05 Temporary Mitigation: Disable Projection Stub Detection
+
+Per user request, scaffold/stub detection in projection was disabled to unblock scan throughput immediately:
+- `NodeProjection._project_node_discovered()` no longer calls `_is_stub()`.
+- Discovered nodes are now projected with `status='idle'`.
+- Projection no longer emits follow-up `ScaffoldRequestEvent` on discovered stubs.
+- Added detailed rationale docstring in `src/remora/core/projections.py` documenting the measured regex pathological behavior and re-enable criteria.
+
+Validation:
+- `devenv shell -- ruff check src/remora/core/projections.py` (pass)
+- `devenv shell -- remora-scan-repo --root browser_demo --log-level INFO` (pass)

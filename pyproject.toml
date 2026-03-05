@@ -81,6 +81,7 @@ embeddy = { path = "../embeddy" }
 remora = "remora.cli:main"
 remora-index = "remora.indexer.cli:main"
 remora-lsp = "remora.lsp:main"
+remora-scan-repo = "scripts.scan_repo:main"
 remora-demo = "remora_demo.__main__:main"
 remora-web = "remora_demo.web.__main__:main"
 companion-lsp = "remora_demo.companion.lsp:main"

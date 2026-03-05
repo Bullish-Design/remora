@@ -1,0 +1,23 @@
+{
+  "current_file": "tests/test_store.py",
+  "current_file_index": 16,
+  "duration_seconds": 0.051,
+  "emitted_events": 0,
+  "events_db_path": "/home/andrew/Documents/Projects/remora/browser_demo/.remora/events/events.db",
+  "failed_files": 0,
+  "finished_at": 1772746589.5498805,
+  "indexer_db_path": "/home/andrew/Documents/Projects/remora/browser_demo/.remora/indexer.db",
+  "last_heartbeat_at": 1772746589.5499132,
+  "log_path": "/home/andrew/Documents/Projects/remora/browser_demo/.remora/logs/scan-repo-2026-03-05_163629.log",
+  "manifest_entries": 16,
+  "manifest_path": "/home/andrew/Documents/Projects/remora/browser_demo/.remora/scan-manifest.json",
+  "parsed_files": 0,
+  "phase": "complete",
+  "pid": 684423,
+  "root": "/home/andrew/Documents/Projects/remora/browser_demo",
+  "skipped_unchanged": 16,
+  "started_at": 1772746589.49899,
+  "status": "completed",
+  "total_files": 16,
+  "total_nodes": 0
+}
