@@ -323,7 +323,19 @@ class EventStore:
                 raise
 
         async with self._lock:
-            event_id, follow_ups = await asyncio.to_thread(_do_append)
+            for attempt in range(3):
+                try:
+                    event_id, follow_ups = await asyncio.to_thread(_do_append)
+                    break
+                except sqlite3.OperationalError as exc:
+                    if "database is locked" in str(exc) and attempt < 2:
+                        logger.warning(
+                            "append: database locked (attempt %d/3), retrying...",
+                            attempt + 1,
+                        )
+                        await asyncio.sleep(0.1 * (attempt + 1))
+                    else:
+                        raise
 
         if self._trigger_queue is not None and self._subscriptions is not None:
             matching_agents = await self._subscriptions.get_matching_agents(event)

@@ -56,7 +56,7 @@ class RemoraDB:
             self.db_path: Path | None = None
             self.conn = connection
             self.conn.row_factory = sqlite3.Row
-            self._lock = threading.Lock() if lock is None else threading.Lock()
+            self._lock = lock if lock is not None else threading.Lock()
             self._shared = True
         else:
             # Standalone mode (backward compat)

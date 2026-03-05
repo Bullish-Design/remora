@@ -83,6 +83,9 @@ def main(
     log.debug("Runner module loaded in %.1fms", (time.monotonic() - t0) * 1000)
 
     server.event_store = event_store
+    # Reset the asyncio.Lock so it binds to THIS event loop (pygls)
+    if event_store is not None:
+        event_store._lock = asyncio.Lock()
     server.subscriptions = subscriptions
 
     log.debug("Creating AgentRunner ...")
@@ -189,31 +192,38 @@ def main(
                     old_ids = {n["node_id"] for n in old_nodes}
                     new_ids = {n["node_id"] for n in nodes}
                     for node_dict in nodes:
-                        await server.event_store.append(
-                            "lsp",
-                            NodeDiscoveredEvent(
-                                node_id=node_dict["node_id"],
-                                node_type=node_dict["node_type"],
-                                name=node_dict["name"],
-                                full_name=node_dict.get("full_name", node_dict["name"]),
-                                file_path=node_dict["file_path"],
-                                start_line=node_dict["start_line"],
-                                end_line=node_dict["end_line"],
-                                source_code=node_dict["source_code"],
-                                source_hash=node_dict["source_hash"],
-                                parent_id=node_dict.get("parent_id"),
-                                start_byte=node_dict.get("start_byte", 0),
-                                end_byte=node_dict.get("end_byte", 0),
-                            ),
-                        )
+                        try:
+                            await server.event_store.append(
+                                "lsp",
+                                NodeDiscoveredEvent(
+                                    node_id=node_dict["node_id"],
+                                    node_type=node_dict["node_type"],
+                                    name=node_dict["name"],
+                                    full_name=node_dict.get("full_name", node_dict["name"]),
+                                    file_path=node_dict["file_path"],
+                                    start_line=node_dict["start_line"],
+                                    end_line=node_dict["end_line"],
+                                    source_code=node_dict["source_code"],
+                                    source_hash=node_dict["source_hash"],
+                                    parent_id=node_dict.get("parent_id"),
+                                    start_byte=node_dict.get("start_byte", 0),
+                                    end_byte=node_dict.get("end_byte", 0),
+                                ),
+                            )
+                        except Exception:
+                            log.warning("_background_scan: failed to append node %s", node_dict["node_id"], exc_info=True)
                     for removed_id in old_ids - new_ids:
-                        await server.event_store.append(
-                            "lsp",
-                            NodeRemovedEvent(node_id=removed_id, file_path=uri),
-                        )
+                        try:
+                            await server.event_store.append(
+                                "lsp",
+                                NodeRemovedEvent(node_id=removed_id, file_path=uri),
+                            )
+                        except Exception:
+                            log.warning("_background_scan: failed to remove node %s in %s", removed_id, fpath, exc_info=True)
                 await server.db.update_edges(nodes)
                 count += len(nodes)
                 parsed += 1
+                await asyncio.sleep(0)  # yield to event loop
                 log.debug("_background_scan: parsed %s -> %d nodes", fpath.relative_to(root_path), len(nodes))
             except Exception:
                 log.warning("_background_scan: failed to parse %s", fpath, exc_info=True)

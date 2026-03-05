@@ -23,7 +23,13 @@ class LazyGraph:
         # Nodes connection — EventStore DB (if available)
         self._nodes_conn: sqlite3.Connection | None = None
         if event_store_db_path:
-            self._nodes_conn = sqlite3.connect(event_store_db_path, check_same_thread=False)
+            self._nodes_conn = sqlite3.connect(
+                event_store_db_path,
+                timeout=15.0,
+                check_same_thread=False,
+                isolation_level=None,
+            )
+            self._nodes_conn.execute("PRAGMA journal_mode=WAL")
             self._nodes_conn.row_factory = sqlite3.Row
 
         self._lock = threading.Lock()
