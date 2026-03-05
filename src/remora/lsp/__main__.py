@@ -12,8 +12,8 @@ from lsprotocol import types as lsp
 
 def _setup_logging() -> logging.Logger:
     """Configure logging to stderr AND a timestamped file in .remora/logs/."""
-    from pathlib import Path
     from datetime import datetime
+    from pathlib import Path
 
     # Stderr handler (stdout is reserved for LSP protocol)
     stderr_handler = logging.StreamHandler(sys.stderr)
@@ -127,6 +127,7 @@ def main(
         block emit_event operations.
         """
         from pathlib import Path
+
         from pygls.uris import from_fs_path
 
         # Brief initial delay to let user operations proceed first
@@ -198,6 +199,18 @@ def main(
         py_files = list(_iter_source_files(root_path))
         log.info("_background_scan: found %d source files in %s (skip-dirs pruned)", len(py_files), root)
 
+        scan_pause_window_seconds = 3.0
+        scan_pause_sleep_seconds = 0.1
+        scan_append_timeout_seconds = 1.5
+        scan_append_chunk_size = 32
+        scan_update_edges_timeout_seconds = 1.0
+
+        async def _pause_for_user_activity() -> None:
+            nonlocal scan_pauses
+            while server.user_recently_active(window_seconds=scan_pause_window_seconds):
+                scan_pauses += 1
+                await asyncio.sleep(scan_pause_sleep_seconds)
+
         existing_manifest = _load_manifest()
         next_manifest: dict[str, dict[str, int]] = {}
         count = 0
@@ -214,9 +227,7 @@ def main(
                     skipped_unchanged += 1
                     continue
 
-                while server.user_recently_active(window_seconds=2.0):
-                    scan_pauses += 1
-                    await asyncio.sleep(0.25)
+                await _pause_for_user_activity()
 
                 text = fpath.read_text(encoding="utf-8", errors="replace")
                 uri = from_fs_path(str(fpath))
@@ -267,13 +278,57 @@ def main(
                             NodeRemovedEvent(node_id=removed_id, file_path=uri)
                         )
 
-                    # Append all events for this file in one transaction
+                    # Append events in small chunks so user-triggered operations
+                    # can preempt scan writes quickly.
                     if batch_events:
-                        try:
-                            await server.event_store.batch_append("lsp", batch_events)
-                        except Exception:
-                            log.warning("_background_scan: failed to batch append %d events for %s", len(batch_events), fpath, exc_info=True)
-                await server.db.update_edges(nodes)
+                        timed_out = False
+                        for idx in range(0, len(batch_events), scan_append_chunk_size):
+                            chunk = batch_events[idx : idx + scan_append_chunk_size]
+                            await _pause_for_user_activity()
+                            append_start = time.monotonic()
+                            try:
+                                await asyncio.wait_for(
+                                    server.event_store.batch_append("lsp", chunk),
+                                    timeout=scan_append_timeout_seconds,
+                                )
+                            except TimeoutError:
+                                append_duration_ms = (time.monotonic() - append_start) * 1000
+                                log.warning(
+                                    "_background_scan: batch_append TIMEOUT file=%s chunk_start=%d chunk_size=%d duration_ms=%.1f timeout_s=%.1f",
+                                    fpath,
+                                    idx,
+                                    len(chunk),
+                                    append_duration_ms,
+                                    scan_append_timeout_seconds,
+                                )
+                                timed_out = True
+                                break
+                            except Exception:
+                                log.warning(
+                                    "_background_scan: failed to batch append chunk file=%s chunk_start=%d chunk_size=%d",
+                                    fpath,
+                                    idx,
+                                    len(chunk),
+                                    exc_info=True,
+                                )
+                                timed_out = True
+                                break
+                            await asyncio.sleep(0)
+                        if timed_out:
+                            continue
+                await _pause_for_user_activity()
+                try:
+                    await asyncio.wait_for(
+                        server.db.update_edges(nodes),
+                        timeout=scan_update_edges_timeout_seconds,
+                    )
+                except TimeoutError:
+                    log.warning(
+                        "_background_scan: update_edges TIMEOUT file=%s timeout_s=%.1f",
+                        fpath,
+                        scan_update_edges_timeout_seconds,
+                    )
+                    continue
                 count += len(nodes)
                 parsed += 1
                 # Brief delay between files to reduce SQLite write contention.

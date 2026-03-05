@@ -5,8 +5,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
-from remora.core.agent_node import AgentNode
 from tests.unit.conftest import make_node as _make_node
 
 
@@ -70,3 +68,43 @@ async def test_cursor_moved_uses_node_id_not_remora_id(mock_server):
 
     # The agent_id passed to schedule_cursor_update should be node.node_id
     mock_server.schedule_cursor_update.assert_called_once_with("rm_xyz789", "/tmp/test.py", 3, delay_ms=200)
+
+
+@pytest.mark.asyncio()
+async def test_input_submitted_emits_and_triggers_runner(mock_server):
+    """Chat submit should emit HumanChatEvent then trigger runner."""
+    mock_server.generate_correlation_id.return_value = "corr_test_1"
+    mock_server.runner = AsyncMock()
+    mock_server.runner.trigger = AsyncMock()
+
+    from remora.lsp import notifications
+
+    with patch.object(notifications, "emit_event", new_callable=AsyncMock) as mock_emit:
+        await notifications.on_input_submitted({"agent_id": "rm_agent", "input": "hello"})
+
+    mock_emit.assert_awaited_once()
+    mock_server.runner.trigger.assert_awaited_once_with("rm_agent", "corr_test_1")
+
+
+@pytest.mark.asyncio()
+async def test_input_submitted_emit_timeout_skips_runner(
+    mock_server: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """If emit_event stalls, handler should timeout and not trigger runner."""
+    mock_server.generate_correlation_id.return_value = "corr_test_2"
+    mock_server.runner = AsyncMock()
+    mock_server.runner.trigger = AsyncMock()
+
+    from remora.lsp import notifications
+
+    monkeypatch.setattr(notifications, "SUBMIT_EMIT_EVENT_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(notifications, "SUBMIT_RUNNER_TRIGGER_TIMEOUT_SECONDS", 0.05)
+
+    async def _slow_emit(_event):
+        await __import__("asyncio").sleep(0.2)
+
+    with patch.object(notifications, "emit_event", new=AsyncMock(side_effect=_slow_emit)):
+        await notifications.on_input_submitted({"agent_id": "rm_agent", "input": "hello"})
+
+    mock_server.runner.trigger.assert_not_awaited()

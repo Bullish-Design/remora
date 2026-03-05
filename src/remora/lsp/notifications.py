@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import time
+
+from lsprotocol import types as lsp
+
 from remora.lsp.models import LspHumanChatEvent, LspRewriteRejectedEvent
 from remora.lsp.server import emit_event, logger, server
+
+SUBMIT_EMIT_EVENT_TIMEOUT_SECONDS = 2.0
+SUBMIT_RUNNER_TRIGGER_TIMEOUT_SECONDS = 2.0
 
 
 @server.feature("$/remora/cursorMoved")
@@ -55,16 +63,81 @@ async def on_input_submitted(params: dict) -> None:
 
             correlation_id = server.generate_correlation_id()
             logger.debug("on_input_submitted: correlation_id=%s", correlation_id)
-            await emit_event(
-                LspHumanChatEvent(
-                    agent_id=agent_id, to_agent=agent_id, message=message, correlation_id=correlation_id, timestamp=0.0
+            emit_start = time.monotonic()
+            logger.info(
+                "on_input_submitted: emit_event START agent=%s corr=%s timeout_s=%.2f",
+                agent_id,
+                correlation_id,
+                SUBMIT_EMIT_EVENT_TIMEOUT_SECONDS,
+            )
+            try:
+                await asyncio.wait_for(
+                    emit_event(
+                        LspHumanChatEvent(
+                            agent_id=agent_id,
+                            to_agent=agent_id,
+                            message=message,
+                            correlation_id=correlation_id,
+                            timestamp=0.0,
+                        )
+                    ),
+                    timeout=SUBMIT_EMIT_EVENT_TIMEOUT_SECONDS,
                 )
+            except TimeoutError:
+                emit_duration_ms = (time.monotonic() - emit_start) * 1000
+                logger.error(
+                    "on_input_submitted: emit_event TIMEOUT agent=%s corr=%s duration_ms=%.1f timeout_s=%.2f",
+                    agent_id,
+                    correlation_id,
+                    emit_duration_ms,
+                    SUBMIT_EMIT_EVENT_TIMEOUT_SECONDS,
+                )
+                try:
+                    server.window_show_message(
+                        lsp.ShowMessageParams(
+                            type=lsp.MessageType.Warning,
+                            message="Remora is busy processing workspace scan; chat submit timed out. Please retry.",
+                        )
+                    )
+                except Exception:
+                    logger.debug("on_input_submitted: failed to show timeout warning", exc_info=True)
+                return
+            emit_duration_ms = (time.monotonic() - emit_start) * 1000
+            logger.info(
+                "on_input_submitted: emit_event END agent=%s corr=%s duration_ms=%.1f",
+                agent_id,
+                correlation_id,
+                emit_duration_ms,
             )
             logger.info("on_input_submitted: HumanChatEvent emitted")
 
             if server.runner:
                 logger.info("on_input_submitted: triggering runner for agent=%s corr=%s", agent_id, correlation_id)
-                await server.runner.trigger(agent_id, correlation_id)
+                trigger_start = time.monotonic()
+                try:
+                    await asyncio.wait_for(
+                        server.runner.trigger(agent_id, correlation_id),
+                        timeout=SUBMIT_RUNNER_TRIGGER_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError:
+                    trigger_duration_ms = (time.monotonic() - trigger_start) * 1000
+                    logger.error(
+                        "on_input_submitted: runner trigger TIMEOUT agent=%s corr=%s duration_ms=%.1f timeout_s=%.2f",
+                        agent_id,
+                        correlation_id,
+                        trigger_duration_ms,
+                        SUBMIT_RUNNER_TRIGGER_TIMEOUT_SECONDS,
+                    )
+                    try:
+                        server.window_show_message(
+                            lsp.ShowMessageParams(
+                                type=lsp.MessageType.Warning,
+                                message="Remora runner is busy; your chat was queued but response may be delayed.",
+                            )
+                        )
+                    except Exception:
+                        logger.debug("on_input_submitted: failed to show runner timeout warning", exc_info=True)
+                    return
                 logger.info("on_input_submitted: runner triggered successfully")
             else:
                 logger.error("on_input_submitted: NO RUNNER on server!")

@@ -9,6 +9,8 @@ from remora.lsp.models import LspRewriteAppliedEvent
 from remora.lsp.server import emit_event, logger, server
 
 RESOLVE_AGENT_TIMEOUT_SECONDS = 2.0
+GET_PANEL_NODE_TIMEOUT_SECONDS = 1.0
+GET_PANEL_EVENTS_TIMEOUT_SECONDS = 1.5
 
 
 async def _resolve_agent(ls, args) -> str | None:
@@ -80,9 +82,28 @@ async def cmd_get_agent_panel(ls, *args) -> dict | None:
         if not ls.event_store:
             return None
 
-        logger.info("cmd_get_agent_panel: get_node_at_position START uri=%s line=%s", uri, line)
+        logger.info(
+            "cmd_get_agent_panel: get_node_at_position START uri=%s line=%s timeout_s=%.2f",
+            uri,
+            line,
+            GET_PANEL_NODE_TIMEOUT_SECONDS,
+        )
         read_start = time.monotonic()
-        agent = await ls.event_store.get_node_at_position(uri, line)
+        try:
+            agent = await asyncio.wait_for(
+                ls.event_store.get_node_at_position(uri, line),
+                timeout=GET_PANEL_NODE_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            read_duration_ms = (time.monotonic() - read_start) * 1000
+            logger.warning(
+                "cmd_get_agent_panel: get_node_at_position TIMEOUT uri=%s line=%s duration_ms=%.1f timeout_s=%.2f",
+                uri,
+                line,
+                read_duration_ms,
+                GET_PANEL_NODE_TIMEOUT_SECONDS,
+            )
+            return {"error": "Timed out resolving agent at cursor"}
         read_duration_ms = (time.monotonic() - read_start) * 1000
         logger.info(
             "cmd_get_agent_panel: get_node_at_position END uri=%s line=%s duration_ms=%.1f found=%s",
@@ -106,9 +127,26 @@ async def cmd_get_agent_panel(ls, *args) -> dict | None:
             ]
 
         # Get recent events (newest first from EventStore, reverse for chronological display)
-        logger.info("cmd_get_agent_panel: get_recent_events START agent=%s limit=50", agent.node_id)
+        logger.info(
+            "cmd_get_agent_panel: get_recent_events START agent=%s limit=50 timeout_s=%.2f",
+            agent.node_id,
+            GET_PANEL_EVENTS_TIMEOUT_SECONDS,
+        )
         events_start = time.monotonic()
-        events = await ls.event_store.get_recent_events(agent.node_id, limit=50)
+        try:
+            events = await asyncio.wait_for(
+                ls.event_store.get_recent_events(agent.node_id, limit=50),
+                timeout=GET_PANEL_EVENTS_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            events_duration_ms = (time.monotonic() - events_start) * 1000
+            logger.warning(
+                "cmd_get_agent_panel: get_recent_events TIMEOUT agent=%s duration_ms=%.1f timeout_s=%.2f",
+                agent.node_id,
+                events_duration_ms,
+                GET_PANEL_EVENTS_TIMEOUT_SECONDS,
+            )
+            return {"error": "Timed out loading panel events"}
         events_duration_ms = (time.monotonic() - events_start) * 1000
         logger.info(
             "cmd_get_agent_panel: get_recent_events END agent=%s duration_ms=%.1f count=%d",

@@ -30,6 +30,13 @@ M._get_client = nil     -- function() -> client or nil
 M._debounce_timer = nil
 M._debounce_ms = 300    -- ms to wait after last CursorHold/BufEnter
 
+-- Request timeout state for panel fetches
+M._request_seq = 0
+M._request_inflight = nil
+M._request_timeout_ms = 1500
+M._request_timeout_timer = nil
+M._last_fetch_error = nil
+
 -- ---------------------------------------------------------------------------
 -- Highlight groups
 -- ---------------------------------------------------------------------------
@@ -107,6 +114,14 @@ local function wipe_named_buf(name)
     end
 end
 
+local function clear_request_timeout_timer()
+    if M._request_timeout_timer then
+        M._request_timeout_timer:stop()
+        M._request_timeout_timer:close()
+        M._request_timeout_timer = nil
+    end
+end
+
 -- ---------------------------------------------------------------------------
 -- Rendering — build lines and set them on the chat buffer
 -- ---------------------------------------------------------------------------
@@ -147,6 +162,16 @@ local function build_lines()
         local noagent = Line()
         noagent:append("No agent at cursor", "Comment")
         table.insert(lines, noagent)
+        if M._request_inflight then
+            local loading = Line()
+            loading:append("  Resolving agent...", "Comment")
+            table.insert(lines, loading)
+        end
+        if M._last_fetch_error then
+            local fetch_err = Line()
+            fetch_err:append("  " .. sanitize(M._last_fetch_error), "DiagnosticWarn")
+            table.insert(lines, fetch_err)
+        end
         table.insert(lines, Line())
     end
 
@@ -389,13 +414,49 @@ local function do_fetch_agent_data(client)
 
     local ctx = M._cursor_context()
     log.info("panel.do_fetch_agent_data: requesting for %s:%d", ctx.uri, ctx.line)
+    M._request_seq = M._request_seq + 1
+    local request_id = M._request_seq
+    M._request_inflight = request_id
+    clear_request_timeout_timer()
+    M._request_timeout_timer = vim.uv.new_timer()
+    M._request_timeout_timer:start(M._request_timeout_ms, 0, vim.schedule_wrap(function()
+        if M._request_inflight ~= request_id then
+            return
+        end
+        M._request_inflight = nil
+        M._last_fetch_error = string.format(
+            "Panel request timed out at line %d; server may be busy.",
+            ctx.line or -1
+        )
+        log.warn("panel.do_fetch_agent_data: TIMEOUT request_id=%d uri=%s line=%d", request_id, ctx.uri, ctx.line)
+        render()
+    end))
 
     client.request("workspace/executeCommand", {
         command = "remora.getAgentPanel",
         arguments = { ctx },
     }, function(err, result)
+        if M._request_inflight ~= request_id then
+            log.debug("panel.do_fetch_agent_data: stale response ignored request_id=%d", request_id)
+            return
+        end
+        M._request_inflight = nil
+        clear_request_timeout_timer()
+
         if err then
             log.error("panel.do_fetch_agent_data: error: %s", vim.inspect(err))
+            M._last_fetch_error = "Panel request failed; check LSP logs."
+            vim.schedule(function()
+                render()
+            end)
+            return
+        end
+        if result and result.error then
+            log.warn("panel.do_fetch_agent_data: server timeout/error: %s", tostring(result.error))
+            M._last_fetch_error = tostring(result.error)
+            vim.schedule(function()
+                render()
+            end)
             return
         end
         if not result then
@@ -404,6 +465,7 @@ local function do_fetch_agent_data(client)
                 local changed = M._agent ~= nil
                 M._agent = nil
                 M._tools = {}
+                M._last_fetch_error = nil
                 if changed then
                     M._events = {}
                 end
@@ -422,6 +484,7 @@ local function do_fetch_agent_data(client)
                 M._agent = new_agent
                 M._tools = result.tools or {}
                 M._events = result.events or {}
+                M._last_fetch_error = nil
                 log.info("panel.do_fetch_agent_data: agent changed to %s (%s), %d tools, %d events",
                     tostring(new_id), tostring(new_agent and new_agent.name),
                     #M._tools, #M._events)
@@ -429,6 +492,7 @@ local function do_fetch_agent_data(client)
                 -- Same agent — update metadata but keep accumulated live events
                 M._agent = new_agent
                 M._tools = result.tools or {}
+                M._last_fetch_error = nil
                 -- Merge server events with live events we already have
                 local server_ids = {}
                 for _, ev in ipairs(result.events or {}) do
@@ -472,11 +536,14 @@ local function fetch_agent_data(use_retry)
     -- No client yet — maybe use retry
     if use_retry and M._get_client_with_retry then
         log.info("panel.fetch_agent_data: no client, using retry")
+        M._last_fetch_error = "Waiting for LSP connection..."
         M._get_client_with_retry({ callback = do_fetch_agent_data })
         return
     end
 
     log.debug("panel.fetch_agent_data: no LSP client")
+    M._last_fetch_error = "LSP not connected yet."
+    render()
 end
 
 --- Wrapper for autocmd use (no retry, silent failure).
@@ -492,6 +559,11 @@ local function send_message()
     if not buf_valid(M._input_buf) then return end
     if not M._agent then
         log.warn("panel.send_message: no agent selected")
+        if M._request_inflight then
+            vim.notify("[Remora] Panel is still resolving agent data; please retry in a moment.", vim.log.levels.WARN)
+        elseif M._last_fetch_error then
+            vim.notify("[Remora] " .. M._last_fetch_error, vim.log.levels.WARN)
+        end
         return
     end
 
@@ -674,6 +746,9 @@ function M._cleanup()
         M._debounce_timer:close()
         M._debounce_timer = nil
     end
+    clear_request_timeout_timer()
+    M._request_inflight = nil
+    M._last_fetch_error = nil
 
     if M._augroup then
         pcall(vim.api.nvim_del_augroup_by_id, M._augroup)
