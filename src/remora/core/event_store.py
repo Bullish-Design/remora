@@ -63,6 +63,7 @@ class EventStore:
                 str(self._db_path),
                 timeout=15.0,
                 check_same_thread=False,
+                isolation_level=None,
             )
             self._conn.row_factory = sqlite3.Row
 
@@ -300,6 +301,7 @@ class EventStore:
 
         def _do_append() -> tuple[int, list[RemoraEvent]]:
             assert self._conn is not None
+            self._conn.execute("BEGIN IMMEDIATE")
             try:
                 cursor = self._conn.execute(
                     """
@@ -314,10 +316,10 @@ class EventStore:
                 if self._projection is not None:
                     f_ups = self._projection.apply(self._conn, event)
 
-                self._conn.commit()
+                self._conn.execute("COMMIT")
                 return ev_id, f_ups
             except Exception:
-                self._conn.rollback()
+                self._conn.execute("ROLLBACK")
                 raise
 
         async with self._lock:
@@ -607,7 +609,6 @@ class EventStore:
                 "DELETE FROM events WHERE graph_id = ?",
                 (graph_id,),
             )
-            await asyncio.to_thread(self._conn.commit)
             return cursor.rowcount
 
     async def get_node(self, node_id: str) -> "AgentNode | None":
@@ -723,7 +724,6 @@ class EventStore:
                 "UPDATE nodes SET status = ? WHERE node_id = ?",
                 (status, node_id),
             )
-            await asyncio.to_thread(self._conn.commit)
 
     async def remove_nodes_for_file(self, file_path: str) -> int:
         """Remove all nodes for a given file path. Returns count removed."""
@@ -738,7 +738,6 @@ class EventStore:
                 "DELETE FROM nodes WHERE file_path = ?",
                 (file_path,),
             )
-            await asyncio.to_thread(self._conn.commit)
             return cursor.rowcount
 
     async def close(self) -> None:

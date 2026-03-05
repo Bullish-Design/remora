@@ -145,6 +145,7 @@ class SubscriptionRegistry:
                 str(self._db_path),
                 timeout=15.0,
                 check_same_thread=False,
+                isolation_level=None,
             )
             self._conn.row_factory = sqlite3.Row
 
@@ -163,7 +164,6 @@ class SubscriptionRegistry:
                 )
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_agent_id ON subscriptions(agent_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_is_default ON subscriptions(is_default)")
-                conn.commit()
 
             await asyncio.to_thread(_init_db, self._conn)
 
@@ -188,7 +188,6 @@ class SubscriptionRegistry:
                 """,
                 (agent_id, pattern_json, 1 if is_default else 0, now, now),
             )
-            conn.commit()
             return cursor.lastrowid
 
         async with self._lock:
@@ -234,7 +233,6 @@ class SubscriptionRegistry:
                 "DELETE FROM subscriptions WHERE agent_id = ?",
                 (agent_id,),
             )
-            conn.commit()
             return cursor.rowcount
 
         async with self._lock:
@@ -253,7 +251,6 @@ class SubscriptionRegistry:
                 "DELETE FROM subscriptions WHERE id = ?",
                 (subscription_id,),
             )
-            conn.commit()
             return cursor.rowcount > 0
 
         async with self._lock:

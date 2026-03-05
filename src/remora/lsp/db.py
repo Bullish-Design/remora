@@ -62,7 +62,7 @@ class RemoraDB:
             # Standalone mode (backward compat)
             self.db_path = Path(db_path)
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.conn = sqlite3.connect(str(self.db_path), timeout=15.0, check_same_thread=False)
+            self.conn = sqlite3.connect(str(self.db_path), timeout=15.0, check_same_thread=False, isolation_level=None)
             self.conn.execute("PRAGMA journal_mode=WAL")
             self.conn.execute("PRAGMA synchronous=NORMAL")
             self.conn.row_factory = sqlite3.Row
@@ -119,7 +119,6 @@ class RemoraDB:
 
             CREATE INDEX IF NOT EXISTS idx_chain_correlation ON activation_chain(correlation_id);
         """)
-        self.conn.commit()
         self._migrate()
 
     def _migrate(self):
@@ -129,7 +128,6 @@ class RemoraDB:
         columns = {row[1] for row in cursor.fetchall()}
         if "file_path" not in columns:
             cursor.execute("ALTER TABLE proposals ADD COLUMN file_path TEXT")
-            self.conn.commit()
 
     # ── Cursor focus ──────────────────────────────────────────────────────
 
@@ -143,7 +141,6 @@ class RemoraDB:
         """,
             (agent_id, file_path, line, time.time()),
         )
-        self.conn.commit()
 
     def get_cursor_focus(self) -> dict | None:
         """Read the current cursor focus (sync, for web server reads)."""
@@ -164,7 +161,6 @@ class RemoraDB:
         """,
             (correlation_id, agent_id, time.time()),
         )
-        self.conn.commit()
 
     @async_db
     def get_activation_chain(self, correlation_id: str) -> list[str]:
@@ -184,26 +180,31 @@ class RemoraDB:
     @async_db
     def update_edges(self, nodes: list[dict]) -> None:
         cursor = self.conn.cursor()
-        for node in nodes:
-            parent_id = node.get("parent_id")
-            node_id = node["node_id"]
-            if parent_id:
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
-                    VALUES (?, ?, 'parent_of')
-                """,
-                    (parent_id, node_id),
-                )
-            for callee in node.get("callee_ids", []):
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
-                    VALUES (?, ?, 'calls')
-                """,
-                    (node_id, callee),
-                )
-        self.conn.commit()
+        cursor.execute("BEGIN IMMEDIATE")
+        try:
+            for node in nodes:
+                parent_id = node.get("parent_id")
+                node_id = node["node_id"]
+                if parent_id:
+                    cursor.execute(
+                        """
+                        INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
+                        VALUES (?, ?, 'parent_of')
+                    """,
+                        (parent_id, node_id),
+                    )
+                for callee in node.get("callee_ids", []):
+                    cursor.execute(
+                        """
+                        INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
+                        VALUES (?, ?, 'calls')
+                    """,
+                        (node_id, callee),
+                    )
+            cursor.execute("COMMIT")
+        except Exception:
+            cursor.execute("ROLLBACK")
+            raise
 
     # ── Proposals ─────────────────────────────────────────────────────────
 
@@ -237,13 +238,11 @@ class RemoraDB:
         """,
             (proposal_id, agent_id, old_source, new_source, diff, time.time(), file_path),
         )
-        self.conn.commit()
 
     @async_db
     def update_proposal_status(self, proposal_id: str, status: str) -> None:
         cursor = self.conn.cursor()
         cursor.execute("UPDATE proposals SET status = ? WHERE proposal_id = ?", (status, proposal_id))
-        self.conn.commit()
 
     @async_db
     def get_proposal(self, proposal_id: str) -> dict | None:
@@ -264,7 +263,6 @@ class RemoraDB:
             """,
             (command_type, agent_id, json.dumps(payload), time.time()),
         )
-        self.conn.commit()
         return cursor.lastrowid
 
     def poll_commands(self, limit: int = 10) -> list[dict]:
@@ -283,7 +281,6 @@ class RemoraDB:
             "UPDATE command_queue SET status = 'done', processed_at = ? WHERE id = ?",
             (time.time(), command_id),
         )
-        self.conn.commit()
 
     def close(self) -> None:
         if self._shared:
