@@ -99,6 +99,59 @@ function M.setup(opts)
         return client
     end
 
+    --- Attempt to explicitly start the remora client for the current buffer.
+    --- Useful when the initial FileType-triggered start races with server lock release.
+    --- @param reason string
+    local function kick_lsp_start(reason)
+        local config = vim.lsp.config["remora"] or lsp_config
+        if not config then
+            log.warn("kick_lsp_start(%s): missing remora lsp config", reason)
+            return false
+        end
+
+        local cfg = vim.deepcopy(config)
+        cfg.name = "remora"
+        local ok, client_id = pcall(vim.lsp.start, cfg, { bufnr = vim.api.nvim_get_current_buf() })
+        if not ok then
+            log.warn("kick_lsp_start(%s): vim.lsp.start failed: %s", reason, tostring(client_id))
+            return false
+        end
+        log.info("kick_lsp_start(%s): vim.lsp.start returned %s", reason, tostring(client_id))
+        return client_id ~= nil
+    end
+
+    --- Read owner pid from .remora/lsp.pid if present.
+    --- @return integer|nil
+    local function read_lock_owner_pid()
+        local cwd = (vim.uv and vim.uv.cwd()) or (vim.loop and vim.loop.cwd()) or vim.fn.getcwd()
+        if not cwd or cwd == "" then
+            return nil
+        end
+        local pid_path = cwd .. "/.remora/lsp.pid"
+        local ok, lines = pcall(vim.fn.readfile, pid_path)
+        if not ok or not lines or #lines == 0 then
+            return nil
+        end
+        local pid = tonumber(vim.trim(lines[1] or ""))
+        return pid
+    end
+
+    --- Build a user-facing lock hint string when lock metadata exists.
+    --- @return string|nil
+    local function lock_owner_hint()
+        local pid = read_lock_owner_pid()
+        if not pid then
+            return nil
+        end
+
+        local uv = vim.uv or vim.loop
+        local alive = uv and uv.fs_stat and uv.fs_stat("/proc/" .. tostring(pid)) ~= nil
+        if alive then
+            return string.format("another workspace lock owner exists (pid=%d)", pid)
+        end
+        return string.format("stale lock metadata found (pid=%d)", pid)
+    end
+
     --- State for tracking connection attempts
     local connection_state = {
         waiting = false,
@@ -134,12 +187,17 @@ function M.setup(opts)
                 log.info("get_client_with_retry: starting retry loop, showing 'Connecting' message")
             end
         end
+        kick_lsp_start("initial-no-client")
 
         local function poll()
             attempt = attempt + 1
             log.debug("get_client_with_retry: attempt %d/%d", attempt, max_attempts)
 
             local c = get_client({ silent = true })
+            if not c and (attempt == 1 or attempt % 5 == 0) then
+                kick_lsp_start(string.format("retry-%d", attempt))
+                c = get_client({ silent = true })
+            end
             if c then
                 connection_state.waiting = false
                 if connection_state.notified then
@@ -157,8 +215,16 @@ function M.setup(opts)
                 connection_state.waiting = false
                 connection_state.notified = false
                 log.warn("get_client_with_retry: gave up after %d attempts", max_attempts)
+                local hint = lock_owner_hint()
+                if hint then
+                    log.warn("get_client_with_retry: lock hint: %s", hint)
+                end
                 if not opts.silent then
-                    vim.notify("[Remora] LSP not available — try opening a Python/Markdown/TOML file", vim.log.levels.WARN)
+                    local message = "[Remora] LSP not available — try opening a Python/Markdown/TOML file"
+                    if hint then
+                        message = message .. " (" .. hint .. ")"
+                    end
+                    vim.notify(message, vim.log.levels.WARN)
                 end
                 if opts.callback then
                     opts.callback(nil)
