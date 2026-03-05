@@ -38,6 +38,7 @@ class EventStore:
         self._db_path = normalize_path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
+        self._read_conn: sqlite3.Connection | None = None  # Separate connection for reads (no lock needed)
         self._lock = asyncio.Lock()
         self._subscriptions = subscriptions
         self._event_bus = event_bus
@@ -74,6 +75,19 @@ class EventStore:
             # Enable WAL mode for better concurrent read/write performance
             await asyncio.to_thread(self._conn.execute, "PRAGMA journal_mode=WAL")
             await asyncio.to_thread(self._conn.execute, "PRAGMA synchronous=NORMAL")
+
+            # Create a separate read-only connection for queries.
+            # With WAL mode, readers don't block writers and vice versa,
+            # so this connection can be used without acquiring _lock.
+            self._read_conn = await asyncio.to_thread(
+                sqlite3.connect,
+                str(self._db_path),
+                timeout=2.0,
+                check_same_thread=False,
+            )
+            self._read_conn.row_factory = sqlite3.Row
+            # Mark read connection as read-only via query_only pragma
+            await asyncio.to_thread(self._read_conn.execute, "PRAGMA query_only=ON")
 
             await asyncio.to_thread(
                 self._conn.executescript,
@@ -323,25 +337,26 @@ class EventStore:
         # Retry with exponential backoff. With a 2s connection timeout and 5 attempts,
         # worst-case wait is ~2s + 0.5s + 2s + 1s + 2s + 2s + 2s + 4s = ~15.5s total,
         # but typical successful retry happens much faster.
+        # IMPORTANT: Lock is released before sleeping to allow other queries to proceed.
         max_attempts = 5
-        async with self._lock:
-            for attempt in range(max_attempts):
-                try:
+        for attempt in range(max_attempts):
+            try:
+                async with self._lock:
                     event_id, follow_ups = await asyncio.to_thread(_do_append)
-                    break
-                except sqlite3.OperationalError as exc:
-                    if "database is locked" in str(exc) and attempt < max_attempts - 1:
-                        # Exponential backoff: 0.5s, 1s, 2s, 4s
-                        delay = 0.5 * (2 ** attempt)
-                        logger.warning(
-                            "append: database locked (attempt %d/%d), retrying in %.1fs...",
-                            attempt + 1,
-                            max_attempts,
-                            delay,
-                        )
-                        await asyncio.sleep(delay)
-                    else:
-                        raise
+                break
+            except sqlite3.OperationalError as exc:
+                if "database is locked" in str(exc) and attempt < max_attempts - 1:
+                    # Exponential backoff: 0.5s, 1s, 2s, 4s
+                    delay = 0.5 * (2 ** attempt)
+                    logger.warning(
+                        "append: database locked (attempt %d/%d), retrying in %.1fs...",
+                        attempt + 1,
+                        max_attempts,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise
 
         if self._trigger_queue is not None and self._subscriptions is not None:
             matching_agents = await self._subscriptions.get_matching_agents(event)
@@ -423,24 +438,25 @@ class EventStore:
                 self._conn.execute("ROLLBACK")
                 raise
 
+        # IMPORTANT: Lock is released before sleeping to allow other queries to proceed.
         max_attempts = 5
-        async with self._lock:
-            for attempt in range(max_attempts):
-                try:
+        for attempt in range(max_attempts):
+            try:
+                async with self._lock:
                     event_ids, follow_ups = await asyncio.to_thread(_do_batch_append)
-                    break
-                except sqlite3.OperationalError as exc:
-                    if "database is locked" in str(exc) and attempt < max_attempts - 1:
-                        delay = 0.5 * (2 ** attempt)
-                        logger.warning(
-                            "batch_append: database locked (attempt %d/%d), retrying in %.1fs...",
-                            attempt + 1,
-                            max_attempts,
-                            delay,
-                        )
-                        await asyncio.sleep(delay)
-                    else:
-                        raise
+                break
+            except sqlite3.OperationalError as exc:
+                if "database is locked" in str(exc) and attempt < max_attempts - 1:
+                    delay = 0.5 * (2 ** attempt)
+                    logger.warning(
+                        "batch_append: database locked (attempt %d/%d), retrying in %.1fs...",
+                        attempt + 1,
+                        max_attempts,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise
 
         # Process triggers and bus notifications for each event
         for idx, (_, _, _, _, _, to_agent, _, _, event) in enumerate(prepared):
@@ -533,11 +549,12 @@ class EventStore:
     ) -> list[dict[str, Any]]:
         """Get recent events involving an agent (as sender or recipient).
 
+        Uses the dedicated read connection to avoid blocking on write operations.
         Returns dicts ordered newest-first (DESC by timestamp).
         """
-        if self._conn is None:
+        if self._read_conn is None:
             await self.initialize()
-        if self._conn is None:
+        if self._read_conn is None:
             raise RuntimeError("EventStore not initialized")
 
         query = """
@@ -547,12 +564,12 @@ class EventStore:
             LIMIT ?
         """
         def _fetch() -> list[sqlite3.Row]:
-            assert self._conn is not None
-            with contextlib.closing(self._conn.execute(query, (agent_id, agent_id, limit))) as cursor:
+            assert self._read_conn is not None
+            with contextlib.closing(self._read_conn.execute(query, (agent_id, agent_id, limit))) as cursor:
                 return cursor.fetchall()
 
-        async with self._lock:
-            rows = await asyncio.to_thread(_fetch)
+        # No lock needed for reads with WAL mode
+        rows = await asyncio.to_thread(_fetch)
 
         return [self._row_to_dict(row) for row in rows]
 
@@ -560,10 +577,13 @@ class EventStore:
         self,
         correlation_id: str,
     ) -> list[dict[str, Any]]:
-        """Get all events for a correlation chain, ordered chronologically (ASC)."""
-        if self._conn is None:
+        """Get all events for a correlation chain, ordered chronologically (ASC).
+
+        Uses the dedicated read connection to avoid blocking on write operations.
+        """
+        if self._read_conn is None:
             await self.initialize()
-        if self._conn is None:
+        if self._read_conn is None:
             raise RuntimeError("EventStore not initialized")
 
         query = """
@@ -572,12 +592,12 @@ class EventStore:
             ORDER BY timestamp ASC, id ASC
         """
         def _fetch() -> list[sqlite3.Row]:
-            assert self._conn is not None
-            with contextlib.closing(self._conn.execute(query, (correlation_id,))) as cursor:
+            assert self._read_conn is not None
+            with contextlib.closing(self._read_conn.execute(query, (correlation_id,))) as cursor:
                 return cursor.fetchall()
 
-        async with self._lock:
-            rows = await asyncio.to_thread(_fetch)
+        # No lock needed for reads with WAL mode
+        rows = await asyncio.to_thread(_fetch)
 
         return [self._row_to_dict(row) for row in rows]
 
@@ -730,21 +750,24 @@ class EventStore:
             return await asyncio.to_thread(_delete)
 
     async def get_node(self, node_id: str) -> "AgentNode | None":
-        """Get a single AgentNode by ID from the nodes table."""
+        """Get a single AgentNode by ID from the nodes table.
+
+        Uses the dedicated read connection to avoid blocking on write operations.
+        """
         from remora.core.agent_node import AgentNode
 
-        if self._conn is None:
+        if self._read_conn is None:
             await self.initialize()
-        if self._conn is None:
+        if self._read_conn is None:
             raise RuntimeError("EventStore not initialized")
 
         def _fetch(conn: sqlite3.Connection) -> sqlite3.Row | None:
             with contextlib.closing(conn.execute("SELECT * FROM nodes WHERE node_id = ?", (node_id,))) as cursor:
                 return cursor.fetchone()
 
-        async with self._lock:
-            row = await asyncio.to_thread(_fetch, self._conn)
-            
+        # No lock needed for reads with WAL mode
+        row = await asyncio.to_thread(_fetch, self._read_conn)
+
         if row is None:
             return None
         return AgentNode.from_row(row)
@@ -758,6 +781,8 @@ class EventStore:
     ) -> "list[AgentNode]":
         """List AgentNodes with optional filters.
 
+        Uses the dedicated read connection to avoid blocking on write operations.
+
         Args:
             file_path: Filter by file path.
             node_type: Filter by node type.
@@ -768,9 +793,9 @@ class EventStore:
         """
         from remora.core.agent_node import AgentNode
 
-        if self._conn is None:
+        if self._read_conn is None:
             await self.initialize()
-        if self._conn is None:
+        if self._read_conn is None:
             raise RuntimeError("EventStore not initialized")
 
         col_clause = ", ".join(columns) if columns else "*"
@@ -794,9 +819,9 @@ class EventStore:
             with contextlib.closing(conn.execute(query, params)) as cursor:
                 return cursor.fetchall()
 
-        async with self._lock:
-            rows = await asyncio.to_thread(_fetch, self._conn)
-            
+        # No lock needed for reads with WAL mode
+        rows = await asyncio.to_thread(_fetch, self._read_conn)
+
         return [AgentNode.from_row(row) for row in rows]
 
     async def get_node_at_position(
@@ -804,12 +829,17 @@ class EventStore:
         file_path: str,
         line: int,
     ) -> "AgentNode | None":
-        """Get the narrowest AgentNode containing the given line in a file."""
+        """Get the narrowest AgentNode containing the given line in a file.
+
+        Uses the dedicated read connection to avoid blocking on write operations.
+        With WAL mode, this read doesn't need the lock since readers and writers
+        don't block each other.
+        """
         from remora.core.agent_node import AgentNode
 
-        if self._conn is None:
+        if self._read_conn is None:
             await self.initialize()
-        if self._conn is None:
+        if self._read_conn is None:
             raise RuntimeError("EventStore not initialized")
 
         def _fetch(conn: sqlite3.Connection) -> sqlite3.Row | None:
@@ -822,9 +852,9 @@ class EventStore:
             )) as cursor:
                 return cursor.fetchone()
 
-        async with self._lock:
-            row = await asyncio.to_thread(_fetch, self._conn)
-            
+        # No lock needed for reads with WAL mode
+        row = await asyncio.to_thread(_fetch, self._read_conn)
+
         if row is None:
             return None
         return AgentNode.from_row(row)
