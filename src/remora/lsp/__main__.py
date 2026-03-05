@@ -113,9 +113,18 @@ def main(
         asyncio.ensure_future(_background_scan())
 
     async def _background_scan() -> None:
-        """Walk workspace for *.py files, parse each, and populate the DB."""
+        """Walk workspace for *.py files, parse each, and populate the DB.
+
+        The scan runs with a brief delay between files to reduce SQLite write
+        contention with user operations (chat, panel queries).  SQLite only
+        allows one writer at a time, so continuous batch_append calls would
+        block emit_event operations.
+        """
         from pathlib import Path
         from pygls.uris import from_fs_path
+
+        # Brief initial delay to let user operations proceed first
+        await asyncio.sleep(0.5)
 
         log.info("_background_scan: starting")
         root = server.workspace.root_path
@@ -225,7 +234,9 @@ def main(
                 await server.db.update_edges(nodes)
                 count += len(nodes)
                 parsed += 1
-                await asyncio.sleep(0)  # yield to event loop
+                # Brief delay between files to reduce SQLite write contention.
+                # This allows user operations (chat, panel) to acquire write locks.
+                await asyncio.sleep(0.05)
                 log.debug("_background_scan: parsed %s -> %d nodes", fpath.relative_to(root_path), len(nodes))
             except Exception:
                 log.warning("_background_scan: failed to parse %s", fpath, exc_info=True)

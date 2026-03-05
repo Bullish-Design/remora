@@ -60,13 +60,13 @@ class EventStore:
         async with self._lock:
             if self._conn is not None:
                 return
-            # Use a short timeout (2s) so we fail fast and can retry more quickly.
-            # The longer 15s timeout was causing 15-second waits on each attempt
-            # when the database was locked by concurrent operations.
+            # Use a very short timeout (100ms) so we fail fast and can retry quickly.
+            # SQLite write contention is expected during background scan, so we
+            # want operations to fail/retry quickly rather than blocking.
             self._conn = await asyncio.to_thread(
                 sqlite3.connect,
                 str(self._db_path),
-                timeout=2.0,
+                timeout=0.1,
                 check_same_thread=False,
                 isolation_level=None,
             )
@@ -334,11 +334,11 @@ class EventStore:
                 self._conn.execute("ROLLBACK")
                 raise
 
-        # Retry with exponential backoff. With a 2s connection timeout and 5 attempts,
-        # worst-case wait is ~2s + 0.5s + 2s + 1s + 2s + 2s + 2s + 4s = ~15.5s total,
-        # but typical successful retry happens much faster.
+        # Retry with fast exponential backoff. With a 100ms connection timeout and
+        # 10 attempts, worst-case wait is about 2.5s total, and most operations
+        # succeed quickly since the background scan now yields between files.
         # IMPORTANT: Lock is released before sleeping to allow other queries to proceed.
-        max_attempts = 5
+        max_attempts = 10
         for attempt in range(max_attempts):
             try:
                 async with self._lock:
@@ -346,10 +346,10 @@ class EventStore:
                 break
             except sqlite3.OperationalError as exc:
                 if "database is locked" in str(exc) and attempt < max_attempts - 1:
-                    # Exponential backoff: 0.5s, 1s, 2s, 4s
-                    delay = 0.5 * (2 ** attempt)
+                    # Fast exponential backoff: 50ms, 100ms, 200ms, 400ms, ...
+                    delay = 0.05 * (2 ** attempt)
                     logger.warning(
-                        "append: database locked (attempt %d/%d), retrying in %.1fs...",
+                        "append: database locked (attempt %d/%d), retrying in %.2fs...",
                         attempt + 1,
                         max_attempts,
                         delay,
@@ -439,7 +439,7 @@ class EventStore:
                 raise
 
         # IMPORTANT: Lock is released before sleeping to allow other queries to proceed.
-        max_attempts = 5
+        max_attempts = 10
         for attempt in range(max_attempts):
             try:
                 async with self._lock:
@@ -447,9 +447,10 @@ class EventStore:
                 break
             except sqlite3.OperationalError as exc:
                 if "database is locked" in str(exc) and attempt < max_attempts - 1:
-                    delay = 0.5 * (2 ** attempt)
+                    # Fast exponential backoff: 50ms, 100ms, 200ms, 400ms, ...
+                    delay = 0.05 * (2 ** attempt)
                     logger.warning(
-                        "batch_append: database locked (attempt %d/%d), retrying in %.1fs...",
+                        "batch_append: database locked (attempt %d/%d), retrying in %.2fs...",
                         attempt + 1,
                         max_attempts,
                         delay,
