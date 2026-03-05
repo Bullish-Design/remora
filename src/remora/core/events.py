@@ -205,6 +205,12 @@ class NodeRemovedEvent(_FrozenEvent):
 # Union Type for Pattern Matching
 # ============================================================================
 
+# ============================================================================
+# Union Type for Pattern Matching
+# ============================================================================
+
+from remora.companion.events import CompanionEvent
+
 RemoraEvent = (
     # Agent events
     AgentStartEvent
@@ -235,6 +241,9 @@ RemoraEvent = (
     | ModelRequestEvent
     | ModelResponseEvent
     | TurnCompleteEvent
+    |
+    # Companion events
+    CompanionEvent
 )
 
 __all__ = [
@@ -262,6 +271,8 @@ __all__ = [
     "ModelRequestEvent",
     "ModelResponseEvent",
     "TurnCompleteEvent",
+    # Companion events
+    "CompanionEvent",
     # Union type
     "RemoraEvent",
 ]

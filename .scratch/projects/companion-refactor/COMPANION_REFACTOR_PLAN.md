@@ -275,7 +275,7 @@ class CompanionHandlerBase:
 ```
 
 This gives each handler:
-- Persistent SQLite-backed storage across restarts
+- Persistent Cairn-backed storage across restarts
 - Ability to organize historical insights, cache analysis, build collections
 - Full isolation from other handlers' workspaces
 
