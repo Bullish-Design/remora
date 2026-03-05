@@ -59,10 +59,13 @@ class EventStore:
         async with self._lock:
             if self._conn is not None:
                 return
+            # Use a short timeout (2s) so we fail fast and can retry more quickly.
+            # The longer 15s timeout was causing 15-second waits on each attempt
+            # when the database was locked by concurrent operations.
             self._conn = await asyncio.to_thread(
                 sqlite3.connect,
                 str(self._db_path),
-                timeout=15.0,
+                timeout=2.0,
                 check_same_thread=False,
                 isolation_level=None,
             )
@@ -317,18 +320,26 @@ class EventStore:
                 self._conn.execute("ROLLBACK")
                 raise
 
+        # Retry with exponential backoff. With a 2s connection timeout and 5 attempts,
+        # worst-case wait is ~2s + 0.5s + 2s + 1s + 2s + 2s + 2s + 4s = ~15.5s total,
+        # but typical successful retry happens much faster.
+        max_attempts = 5
         async with self._lock:
-            for attempt in range(3):
+            for attempt in range(max_attempts):
                 try:
                     event_id, follow_ups = await asyncio.to_thread(_do_append)
                     break
                 except sqlite3.OperationalError as exc:
-                    if "database is locked" in str(exc) and attempt < 2:
+                    if "database is locked" in str(exc) and attempt < max_attempts - 1:
+                        # Exponential backoff: 0.5s, 1s, 2s, 4s
+                        delay = 0.5 * (2 ** attempt)
                         logger.warning(
-                            "append: database locked (attempt %d/3), retrying...",
+                            "append: database locked (attempt %d/%d), retrying in %.1fs...",
                             attempt + 1,
+                            max_attempts,
+                            delay,
                         )
-                        await asyncio.sleep(0.1 * (attempt + 1))
+                        await asyncio.sleep(delay)
                     else:
                         raise
 
@@ -354,6 +365,106 @@ class EventStore:
             await self.append(graph_id, follow_up)
 
         return event_id
+
+    async def batch_append(
+        self,
+        graph_id: str,
+        events: list[StructuredEvent | RemoraEvent],
+    ) -> list[int]:
+        """Append multiple events in a single transaction for better performance.
+
+        Returns a list of event IDs corresponding to the input events.
+        """
+        if not events:
+            return []
+
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        # Pre-process all events
+        prepared: list[tuple[str, str, float, float, str | None, str | None, str | None, str | None, StructuredEvent | RemoraEvent]] = []
+        for event in events:
+            event_type = getattr(event, "event_type", None) or type(event).__name__
+            payload = self._serialize_event(event)
+            timestamp = getattr(event, "timestamp", time.time())
+            created_at = time.time()
+            from_agent = getattr(event, "from_agent", None)
+            to_agent = getattr(event, "to_agent", None)
+            correlation_id = getattr(event, "correlation_id", None)
+            tags = getattr(event, "tags", None)
+            tags_json = json.dumps(tags) if tags else None
+            prepared.append((event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json, event))
+
+        def _do_batch_append() -> tuple[list[int], list[RemoraEvent]]:
+            assert self._conn is not None
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                event_ids: list[int] = []
+                all_follow_ups: list[RemoraEvent] = []
+                for event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json, event in prepared:
+                    with contextlib.closing(self._conn.execute(
+                        """
+                        INSERT INTO events (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json),
+                    )) as cursor:
+                        event_ids.append(cursor.lastrowid or 0)
+
+                    if self._projection is not None:
+                        f_ups = self._projection.apply(self._conn, event)
+                        all_follow_ups.extend(f_ups)
+
+                self._conn.execute("COMMIT")
+                return event_ids, all_follow_ups
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+
+        max_attempts = 5
+        async with self._lock:
+            for attempt in range(max_attempts):
+                try:
+                    event_ids, follow_ups = await asyncio.to_thread(_do_batch_append)
+                    break
+                except sqlite3.OperationalError as exc:
+                    if "database is locked" in str(exc) and attempt < max_attempts - 1:
+                        delay = 0.5 * (2 ** attempt)
+                        logger.warning(
+                            "batch_append: database locked (attempt %d/%d), retrying in %.1fs...",
+                            attempt + 1,
+                            max_attempts,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        raise
+
+        # Process triggers and bus notifications for each event
+        for idx, (_, _, _, _, _, to_agent, _, _, event) in enumerate(prepared):
+            event_type = getattr(event, "event_type", None) or type(event).__name__
+            if self._trigger_queue is not None and self._subscriptions is not None:
+                matching_agents = await self._subscriptions.get_matching_agents(event)
+                logger.info(
+                    "Event %s to_agent=%s matched %d agents: %s",
+                    event_type,
+                    to_agent,
+                    len(matching_agents),
+                    matching_agents,
+                )
+                for agent_id in matching_agents:
+                    await self._trigger_queue.put((agent_id, event_ids[idx], event))
+
+            if self._event_bus is not None:
+                await self._event_bus.emit(event)
+
+        # Process follow-up events
+        for follow_up in follow_ups:
+            await self.append(graph_id, follow_up)
+
+        return event_ids
 
     async def get_triggers(self) -> AsyncIterator[tuple[str, int, RemoraEvent]]:
         """Iterate over event triggers for matched subscriptions."""

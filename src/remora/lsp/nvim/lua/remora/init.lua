@@ -78,6 +78,7 @@ function M.setup(opts)
     -- -----------------------------------------------------------------------
 
     --- Get the first active remora LSP client, or nil.
+    --- @param opts? {silent?: boolean}
     local function get_client(opts)
         opts = opts or {}
         local clients = vim.lsp.get_clients({ name = "remora", bufnr = 0 })
@@ -98,43 +99,147 @@ function M.setup(opts)
         return client
     end
 
+    --- State for tracking connection attempts
+    local connection_state = {
+        waiting = false,
+        notified = false,
+    }
+
+    --- Get client with retry/polling for startup race condition.
+    --- Shows user feedback while waiting for LSP to become ready.
+    --- @param opts? {silent?: boolean, max_attempts?: number, callback?: fun(client: any)}
+    local function get_client_with_retry(opts)
+        opts = opts or {}
+        local max_attempts = opts.max_attempts or 20  -- ~5 seconds total
+        local attempt = 0
+        local base_delay_ms = 100
+
+        -- Check immediately first
+        local client = get_client({ silent = true })
+        if client then
+            connection_state.waiting = false
+            connection_state.notified = false
+            if opts.callback then
+                opts.callback(client)
+            end
+            return client
+        end
+
+        -- Start polling
+        if not connection_state.waiting then
+            connection_state.waiting = true
+            if not opts.silent and not connection_state.notified then
+                connection_state.notified = true
+                vim.notify("[Remora] Connecting to LSP...", vim.log.levels.INFO)
+                log.info("get_client_with_retry: starting retry loop, showing 'Connecting' message")
+            end
+        end
+
+        local function poll()
+            attempt = attempt + 1
+            log.debug("get_client_with_retry: attempt %d/%d", attempt, max_attempts)
+
+            local c = get_client({ silent = true })
+            if c then
+                connection_state.waiting = false
+                if connection_state.notified then
+                    connection_state.notified = false
+                    vim.notify("[Remora] LSP connected!", vim.log.levels.INFO)
+                    log.info("get_client_with_retry: connected after %d attempts", attempt)
+                end
+                if opts.callback then
+                    opts.callback(c)
+                end
+                return
+            end
+
+            if attempt >= max_attempts then
+                connection_state.waiting = false
+                connection_state.notified = false
+                log.warn("get_client_with_retry: gave up after %d attempts", max_attempts)
+                if not opts.silent then
+                    vim.notify("[Remora] LSP not available — try opening a Python/Markdown/TOML file", vim.log.levels.WARN)
+                end
+                if opts.callback then
+                    opts.callback(nil)
+                end
+                return
+            end
+
+            -- Exponential backoff: 100ms, 150ms, 225ms, ... capped at 500ms
+            local delay = math.min(500, base_delay_ms * (1.5 ^ (attempt - 1)))
+            vim.defer_fn(poll, delay)
+        end
+
+        -- Start polling after initial delay
+        vim.defer_fn(poll, base_delay_ms)
+        return nil  -- Returns nil immediately; result comes via callback
+    end
+
     --- Send workspace/executeCommand to the remora server.
+    --- Uses retry logic to handle LSP startup race condition.
     local function exec_command(command, arguments)
         log.info("exec_command: command=%s arguments=%s", command, vim.inspect(arguments))
-        local client = get_client()
-        if not client then
-            log.warn("exec_command: no client, aborting")
-            return
-        end
-        client.request("workspace/executeCommand", {
-            command = command,
-            arguments = arguments or {},
-        }, function(err, result)
-            if err then
-                log.error("exec_command: ERROR response: %s", vim.inspect(err))
-                vim.notify(
-                    "[Remora] " .. (err.message or tostring(err)),
-                    vim.log.levels.ERROR
-                )
-            else
-                log.info("exec_command: OK response: %s", vim.inspect(result))
+
+        local function do_request(client)
+            if not client then
+                log.warn("exec_command: no client after retry, aborting")
+                return
             end
-        end)
-        log.info("exec_command: request sent")
+            client.request("workspace/executeCommand", {
+                command = command,
+                arguments = arguments or {},
+            }, function(err, result)
+                if err then
+                    log.error("exec_command: ERROR response: %s", vim.inspect(err))
+                    vim.notify(
+                        "[Remora] " .. (err.message or tostring(err)),
+                        vim.log.levels.ERROR
+                    )
+                else
+                    log.info("exec_command: OK response: %s", vim.inspect(result))
+                end
+            end)
+            log.info("exec_command: request sent")
+        end
+
+        -- Try immediate get first
+        local client = get_client({ silent = true })
+        if client then
+            do_request(client)
+        else
+            -- Use retry with callback
+            get_client_with_retry({ callback = do_request })
+        end
     end
 
     --- Try to apply a code action matching `command_name`.
+    --- Uses retry logic to handle LSP startup race condition.
     local function apply_code_action(command_name, not_found_msg)
         log.info("apply_code_action: command=%s", command_name)
-        local client = get_client()
-        if not client then return end
-        vim.lsp.buf.code_action({
-            filter = function(action)
-                return action.command
-                    and action.command.command == command_name
-            end,
-            apply = true,
-        })
+
+        local function do_action(client)
+            if not client then
+                log.warn("apply_code_action: no client after retry")
+                return
+            end
+            vim.lsp.buf.code_action({
+                filter = function(action)
+                    return action.command
+                        and action.command.command == command_name
+                end,
+                apply = true,
+            })
+        end
+
+        -- Try immediate get first
+        local client = get_client({ silent = true })
+        if client then
+            do_action(client)
+        else
+            -- Use retry with callback
+            get_client_with_retry({ callback = do_action })
+        end
     end
 
     --- Get the current buffer URI + cursor line (1-based) for agent resolution.
@@ -154,6 +259,12 @@ function M.setup(opts)
         exec_command = exec_command,
         cursor_context = cursor_context,
         get_client = function() return get_client({ silent = true }) end,
+        get_client_with_retry = function(opts)
+            return get_client_with_retry({
+                silent = opts and opts.silent,
+                callback = opts and opts.callback,
+            })
+        end,
     })
     log.info("M.setup: panel configured with callbacks")
 

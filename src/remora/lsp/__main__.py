@@ -185,41 +185,43 @@ def main(
                         for n in existing
                     ]
                 nodes = server.watcher.parse_and_inject_ids(uri, text, old_nodes)
-                # Emit events to EventStore
+                # Emit events to EventStore (batched per file for efficiency)
                 if server.event_store:
                     from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
 
                     old_ids = {n["node_id"] for n in old_nodes}
                     new_ids = {n["node_id"] for n in nodes}
+
+                    # Batch all events for this file
+                    batch_events = []
                     for node_dict in nodes:
-                        try:
-                            await server.event_store.append(
-                                "lsp",
-                                NodeDiscoveredEvent(
-                                    node_id=node_dict["node_id"],
-                                    node_type=node_dict["node_type"],
-                                    name=node_dict["name"],
-                                    full_name=node_dict.get("full_name", node_dict["name"]),
-                                    file_path=node_dict["file_path"],
-                                    start_line=node_dict["start_line"],
-                                    end_line=node_dict["end_line"],
-                                    source_code=node_dict["source_code"],
-                                    source_hash=node_dict["source_hash"],
-                                    parent_id=node_dict.get("parent_id"),
-                                    start_byte=node_dict.get("start_byte", 0),
-                                    end_byte=node_dict.get("end_byte", 0),
-                                ),
+                        batch_events.append(
+                            NodeDiscoveredEvent(
+                                node_id=node_dict["node_id"],
+                                node_type=node_dict["node_type"],
+                                name=node_dict["name"],
+                                full_name=node_dict.get("full_name", node_dict["name"]),
+                                file_path=node_dict["file_path"],
+                                start_line=node_dict["start_line"],
+                                end_line=node_dict["end_line"],
+                                source_code=node_dict["source_code"],
+                                source_hash=node_dict["source_hash"],
+                                parent_id=node_dict.get("parent_id"),
+                                start_byte=node_dict.get("start_byte", 0),
+                                end_byte=node_dict.get("end_byte", 0),
                             )
-                        except Exception:
-                            log.warning("_background_scan: failed to append node %s", node_dict["node_id"], exc_info=True)
+                        )
                     for removed_id in old_ids - new_ids:
+                        batch_events.append(
+                            NodeRemovedEvent(node_id=removed_id, file_path=uri)
+                        )
+
+                    # Append all events for this file in one transaction
+                    if batch_events:
                         try:
-                            await server.event_store.append(
-                                "lsp",
-                                NodeRemovedEvent(node_id=removed_id, file_path=uri),
-                            )
+                            await server.event_store.batch_append("lsp", batch_events)
                         except Exception:
-                            log.warning("_background_scan: failed to remove node %s in %s", removed_id, fpath, exc_info=True)
+                            log.warning("_background_scan: failed to batch append %d events for %s", len(batch_events), fpath, exc_info=True)
                 await server.db.update_edges(nodes)
                 count += len(nodes)
                 parsed += 1

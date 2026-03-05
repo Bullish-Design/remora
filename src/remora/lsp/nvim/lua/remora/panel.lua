@@ -376,29 +376,26 @@ end
 -- Fetch agent data from server
 -- ---------------------------------------------------------------------------
 
---- Request agent panel data from the server and re-render.
---- If agent_id changes, clear events and re-render. If same agent, just update.
-local function fetch_agent_data()
-    if not M._cursor_context or not M._get_client then
-        log.warn("panel.fetch_agent_data: no cursor_context or get_client callback")
+--- Internal: perform the actual fetch once we have a client.
+local function do_fetch_agent_data(client)
+    if not client then
+        log.debug("panel.do_fetch_agent_data: no LSP client")
         return
     end
-
-    local client = M._get_client()
-    if not client then
-        log.debug("panel.fetch_agent_data: no LSP client")
+    if not M._cursor_context then
+        log.warn("panel.do_fetch_agent_data: no cursor_context callback")
         return
     end
 
     local ctx = M._cursor_context()
-    log.info("panel.fetch_agent_data: requesting for %s:%d", ctx.uri, ctx.line)
+    log.info("panel.do_fetch_agent_data: requesting for %s:%d", ctx.uri, ctx.line)
 
     client.request("workspace/executeCommand", {
         command = "remora.getAgentPanel",
         arguments = { ctx },
     }, function(err, result)
         if err then
-            log.error("panel.fetch_agent_data: error: %s", vim.inspect(err))
+            log.error("panel.do_fetch_agent_data: error: %s", vim.inspect(err))
             return
         end
         if not result then
@@ -425,18 +422,66 @@ local function fetch_agent_data()
                 M._agent = new_agent
                 M._tools = result.tools or {}
                 M._events = result.events or {}
-                log.info("panel.fetch_agent_data: agent changed to %s (%s), %d tools, %d events",
+                log.info("panel.do_fetch_agent_data: agent changed to %s (%s), %d tools, %d events",
                     tostring(new_id), tostring(new_agent and new_agent.name),
                     #M._tools, #M._events)
             else
                 -- Same agent — update metadata but keep accumulated live events
                 M._agent = new_agent
                 M._tools = result.tools or {}
-                -- Don't replace events — we may have newer live events
+                -- Merge server events with live events we already have
+                local server_ids = {}
+                for _, ev in ipairs(result.events or {}) do
+                    server_ids[ev.id or ev.event_id] = true
+                end
+                -- Keep only live events that server doesn't already have
+                local new_events = {}
+                for _, ev in ipairs(result.events or {}) do
+                    table.insert(new_events, ev)
+                end
+                for _, ev in ipairs(M._events) do
+                    if not server_ids[ev.id or ev.event_id] then
+                        table.insert(new_events, ev)
+                    end
+                end
+                M._events = new_events
+                log.debug("panel.do_fetch_agent_data: same agent %s, merged to %d events",
+                    tostring(new_id), #M._events)
             end
+
             render()
         end)
     end)
+end
+
+--- Request agent panel data from the server and re-render (with retry on open).
+--- If agent_id changes, clear events and re-render. If same agent, just update.
+--- @param use_retry? boolean  If true and no client, use retry polling
+local function fetch_agent_data(use_retry)
+    if not M._cursor_context or not M._get_client then
+        log.warn("panel.fetch_agent_data: no cursor_context or get_client callback")
+        return
+    end
+
+    local client = M._get_client()
+    if client then
+        do_fetch_agent_data(client)
+        return
+    end
+
+    -- No client yet — maybe use retry
+    if use_retry and M._get_client_with_retry then
+        log.info("panel.fetch_agent_data: no client, using retry")
+        M._get_client_with_retry({ callback = do_fetch_agent_data })
+        return
+    end
+
+    log.debug("panel.fetch_agent_data: no LSP client")
+end
+
+--- Wrapper for autocmd use (no retry, silent failure).
+local function fetch_agent_data_no_retry()
+    fetch_agent_data(false)
 end
 
 -- ---------------------------------------------------------------------------
@@ -590,7 +635,7 @@ function M.open()
                     M._debounce_timer = nil
                 end
                 if win_valid(M._chat_win) then
-                    fetch_agent_data()
+                    fetch_agent_data_no_retry()
                 end
             end))
         end,
@@ -615,8 +660,8 @@ function M.open()
         vim.api.nvim_set_current_win(origin_win)
     end
 
-    -- Fetch data for current cursor position
-    fetch_agent_data()
+    -- Fetch data for current cursor position (with retry for startup race)
+    fetch_agent_data(true)
 
     log.info("panel.open: done, chat_win=%d input_win=%d", M._chat_win, M._input_win)
 end
@@ -697,6 +742,7 @@ function M.configure(opts)
     M._exec_command = opts.exec_command
     M._cursor_context = opts.cursor_context
     M._get_client = opts.get_client
+    M._get_client_with_retry = opts.get_client_with_retry
     log.info("panel.configure: callbacks set")
 end
 
