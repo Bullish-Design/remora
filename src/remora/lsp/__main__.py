@@ -166,6 +166,7 @@ def main(
 
         _SUPPORTED_SUFFIXES = frozenset({".py", ".md", ".toml"})
         manifest_path = root_path / ".remora" / "scan-manifest.json"
+        manifest_save_interval = 10
 
         def _load_manifest() -> dict[str, dict[str, int]]:
             try:
@@ -182,9 +183,14 @@ def main(
                 log.warning("_background_scan: failed to load scan manifest %s", manifest_path, exc_info=True)
             return {}
 
-        def _save_manifest(data: dict[str, dict[str, int]]) -> None:
+        def _save_manifest_atomic(data: dict[str, dict[str, int]]) -> None:
             manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            manifest_path.write_text(json.dumps(data, sort_keys=True), encoding="utf-8")
+            tmp_path = manifest_path.with_suffix(".json.tmp")
+            tmp_path.write_text(json.dumps(data, sort_keys=True), encoding="utf-8")
+            tmp_path.replace(manifest_path)
+
+        def _save_manifest(data: dict[str, dict[str, int]]) -> None:
+            _save_manifest_atomic(data)
 
         def _iter_source_files(root: Path):
             """Walk root, pruning skip-dirs early to avoid descending into venvs."""
@@ -217,6 +223,15 @@ def main(
         parsed = 0
         skipped_unchanged = 0
         scan_pauses = 0
+        files_since_last_manifest_save = 0
+
+        def _maybe_save_manifest_incremental() -> None:
+            nonlocal files_since_last_manifest_save
+            if files_since_last_manifest_save < manifest_save_interval:
+                return
+            _save_manifest(next_manifest)
+            files_since_last_manifest_save = 0
+
         for fpath in py_files:
             try:
                 relative = str(fpath.relative_to(root_path))
@@ -225,6 +240,8 @@ def main(
                 next_manifest[relative] = signature
                 if existing_manifest.get(relative) == signature:
                     skipped_unchanged += 1
+                    files_since_last_manifest_save += 1
+                    _maybe_save_manifest_incremental()
                     continue
 
                 await _pause_for_user_activity()
@@ -326,6 +343,8 @@ def main(
                     continue
                 count += len(nodes)
                 parsed += 1
+                files_since_last_manifest_save += 1
+                _maybe_save_manifest_incremental()
                 # Brief delay between files to reduce SQLite write contention.
                 # This allows user operations (chat, panel) to acquire write locks.
                 await asyncio.sleep(0.1)

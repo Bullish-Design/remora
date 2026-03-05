@@ -8,28 +8,30 @@
 - [x] Analyzed SQLite write contention (8.6s batch_append)
 - [x] Documented evidence in `issues/2026-03-05-initial-analysis/`
 
-## Phase 2: Design Solution — PENDING
-- [ ] Review proposed fixes and prioritize
-- [ ] Design incremental manifest save strategy (every N files? after each file?)
-- [ ] Determine manifest update granularity vs performance trade-off
-- [ ] Consider atomic write requirements (tmp file + rename pattern)
-- [ ] Plan validation strategy for manifest correctness
+## Phase 2: Design Solution — COMPLETE
+- [x] Review proposed fixes and prioritize
+- [x] Design incremental manifest save strategy (every N files)
+- [x] Determine manifest update granularity vs performance trade-off
+- [x] Consider atomic write requirements (tmp file + rename pattern)
+- [x] Plan validation strategy for manifest correctness
 
-## Phase 3: Implement Fix #1 (Incremental Manifest) — PENDING
-- [ ] Add `_save_manifest_incremental()` helper
-- [ ] Integrate incremental saves into scan loop (every 10 files)
-- [ ] Use atomic write pattern (write to .tmp, then rename)
-- [ ] Add error handling for partial manifest corruption
-- [ ] Preserve existing manifest save at end for completeness
+## Phase 3: Implement Fix #1 (Incremental Manifest) — COMPLETE
+- [x] Add incremental-save helper logic in scan loop
+- [x] Integrate incremental saves into scan loop (every 10 files)
+- [x] Use atomic write pattern (write to .tmp, then rename)
+- [x] Preserve existing manifest save at end for completeness
+- [x] Add regression test for interrupted scan persistence
 
 ## Phase 4: Validate Fix #1 — PENDING
-- [ ] Delete existing manifest (if any): `rm .remora/scan-manifest.json`
-- [ ] Start server and monitor scan progress
-- [ ] Interrupt scan at ~50% completion (quit Neovim)
-- [ ] Verify manifest exists and has ~50% of files
-- [ ] Restart server and verify skipped file count matches manifest entries
-- [ ] Let scan complete and verify final manifest has all files
-- [ ] Third startup should skip 100% of files
+- [x] Verify baseline: `.remora/scan-manifest.json` missing
+- [x] Verify baseline: `.remora/events/events.db-wal` was 4.0MB
+- [x] Add automated interruption test: scan cancelled mid-run still writes manifest incrementally
+- [x] Run targeted tests:
+  - `devenv shell -- pytest tests/unit/test_lsp_background_scan_manifest.py -q`
+  - `devenv shell -- pytest tests/unit/test_llm_config.py -q`
+- [ ] Manual Neovim startup/interrupt validation (pending)
+- [ ] Restart validation with real logs (`skipped_unchanged` reflects persisted entries)
+- [ ] Full real scan completion validation (`_background_scan: COMPLETE`)
 
 ## Phase 5: Implement Fix #2 (Aggressive Preemption) — PENDING
 - [ ] Reduce chunk size from 32 → 8 events

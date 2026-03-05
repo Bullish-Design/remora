@@ -135,3 +135,28 @@ The `lsp-startup-initial-connection` project proposed:
 ## Next Steps
 
 See `issues/2026-03-05-initial-analysis/PROPOSED_FIXES.md` for implementation approach.
+
+## 2026-03-05 Implementation Update
+
+Implemented Fix #1 in `src/remora/lsp/__main__.py`:
+- Added atomic manifest writer (`.json.tmp` + `replace`) to avoid partial writes.
+- Added incremental manifest persistence every 10 processed files during `_background_scan`.
+- Kept final manifest save at scan completion.
+
+Added regression coverage in `tests/unit/test_lsp_background_scan_manifest.py`:
+- Test starts background scan through `main()` with fakes.
+- Blocks scan after 11th file and cancels task before completion.
+- Asserts `.remora/scan-manifest.json` already exists and contains at least 10 entries.
+- This test failed before code change and passes after code change.
+
+Validation run:
+- `devenv shell -- pytest tests/unit/test_lsp_background_scan_manifest.py -q` (pass)
+- `devenv shell -- pytest tests/unit/test_llm_config.py -q` (pass)
+
+Current baseline state check from START_HERE:
+- `.remora/scan-manifest.json`: missing before fix validation.
+- `.remora/events/events.db-wal`: 4.0MB (under 5MB target threshold but still elevated).
+
+Remaining work:
+- Manual Neovim startup/interrupt/restart validation in real harness logs.
+- Decide whether Fix #2 preemption tuning is still needed after real validation.
