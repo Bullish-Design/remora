@@ -187,7 +187,9 @@ class SubscriptionRegistry:
             conn.commit()
             return cursor.lastrowid
 
-        lastrowid = await asyncio.to_thread(_exec, self._conn)
+        async with self._lock:
+            lastrowid = await asyncio.to_thread(_exec, self._conn)
+            
         self._cache = None  # Invalidate cache
 
         return Subscription(
@@ -231,7 +233,9 @@ class SubscriptionRegistry:
             conn.commit()
             return cursor.rowcount
 
-        count = await asyncio.to_thread(_exec, self._conn)
+        async with self._lock:
+            count = await asyncio.to_thread(_exec, self._conn)
+            
         self._cache = None  # Invalidate cache
         return count
 
@@ -248,7 +252,9 @@ class SubscriptionRegistry:
             conn.commit()
             return cursor.rowcount > 0
 
-        removed = await asyncio.to_thread(_exec, self._conn)
+        async with self._lock:
+            removed = await asyncio.to_thread(_exec, self._conn)
+            
         self._cache = None  # Invalidate cache
         return removed
 
@@ -280,7 +286,8 @@ class SubscriptionRegistry:
                 )
             return subscriptions
 
-        return await asyncio.to_thread(_fetch, self._conn)
+        async with self._lock:
+            return await asyncio.to_thread(_fetch, self._conn)
 
     async def get_matching_agents(self, event: RemoraEvent) -> list[str]:
         """Get all agent IDs whose subscriptions match the event.
@@ -321,7 +328,8 @@ class SubscriptionRegistry:
             cursor = conn.execute("SELECT * FROM subscriptions ORDER BY id")
             return [dict(row) for row in cursor.fetchall()]
 
-        rows = await asyncio.to_thread(_fetch, self._conn)
+        async with self._lock:
+            rows = await asyncio.to_thread(_fetch, self._conn)
 
         cache: dict[str, list[tuple[str, SubscriptionPattern]]] = {}
         for row in rows:

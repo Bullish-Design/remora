@@ -616,7 +616,9 @@ class EventStore:
             cursor = conn.execute("SELECT * FROM nodes WHERE node_id = ?", (node_id,))
             return cursor.fetchone()
 
-        row = await asyncio.to_thread(_fetch, self._conn)
+        async with self._lock:
+            row = await asyncio.to_thread(_fetch, self._conn)
+            
         if row is None:
             return None
         return AgentNode.from_row(row)
@@ -666,7 +668,9 @@ class EventStore:
             cursor = conn.execute(query, params)
             return cursor.fetchall()
 
-        rows = await asyncio.to_thread(_fetch, self._conn)
+        async with self._lock:
+            rows = await asyncio.to_thread(_fetch, self._conn)
+            
         return [AgentNode.from_row(row) for row in rows]
 
     async def get_node_at_position(
@@ -692,7 +696,9 @@ class EventStore:
             )
             return cursor.fetchone()
 
-        row = await asyncio.to_thread(_fetch, self._conn)
+        async with self._lock:
+            row = await asyncio.to_thread(_fetch, self._conn)
+            
         if row is None:
             return None
         return AgentNode.from_row(row)
