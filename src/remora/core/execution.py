@@ -282,6 +282,7 @@ async def execute_agent_turn(
     logger.info("execute_agent_turn: bundle=%s manifest=%s", bundle_path, getattr(manifest, "name", "?"))
 
     # 2. Workspace setup
+    logger.info("execute_agent_turn: initializing workspace service")
     if workspace_service is None:
         workspace_service = CairnWorkspaceService(
             config=config,
@@ -290,10 +291,13 @@ async def execute_agent_turn(
         )
         await workspace_service.initialize()
 
+    logger.info("execute_agent_turn: getting agent workspace")
+
     workspace = await workspace_service.get_agent_workspace(node.node_id)
     cairn_externals = workspace_service.get_externals(node.node_id, workspace)
 
     # 3. Build AgentContext for swarm tools
+    logger.info("execute_agent_turn: building AgentContext")
     correlation_id = getattr(trigger_event, "correlation_id", None) if trigger_event else None
     path_resolver = PathResolver(project_root)
 
@@ -360,10 +364,12 @@ async def execute_agent_turn(
     )
 
     # 4. Load workspace files + build prompt
+    logger.info("execute_agent_turn: loading workspace files")
     data_provider = CairnDataProvider(workspace, path_resolver)
     cst_node = _agent_node_to_cst_node(node)
     files = await data_provider.load_files(cst_node)
 
+    logger.info("execute_agent_turn: loading chat history")
     if chat_history is None:
         recent_events = await event_store.get_recent_events(node.node_id, limit=config.chat_history_limit)
         chat_history = []
@@ -391,6 +397,7 @@ async def execute_agent_turn(
             if n.parent_id == trigger_event.parent_id and n.node_id != node.node_id
         ]
 
+    logger.info("execute_agent_turn: building prompt")
     prompt = _build_prompt(
         node,
         cst_node,
@@ -404,6 +411,7 @@ async def execute_agent_turn(
     )
 
     # 5. Discover tools (Grail + swarm + extra_tools)
+    logger.info("execute_agent_turn: discovering tools")
     async def files_provider() -> dict[str, str | bytes]:
         current_files = await data_provider.load_files(cst_node)
         fs: dict[str, str | bytes] = dict(build_virtual_fs(current_files))
