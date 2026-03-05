@@ -8,24 +8,24 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from remora.core.agent_node import AgentNode
 from remora.core.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent, ScaffoldRequestEvent
-from remora.core.execution import ExecutionResult, execute_agent_turn
+from remora.core.execution import execute_agent_turn
 from remora.core.tools.lsp import build_lsp_tools
 from remora.extensions import extension_matches, load_extensions
 from remora.lsp.models import (
     LspAgentErrorEvent,
     LspAgentEvent,
     LspAgentMessageEvent,
-    LspHumanChatEvent,
-    RewriteProposal,
     LspRewriteProposalEvent,
+    RewriteProposal,
     generate_id,
 )
 
 if TYPE_CHECKING:
+    from remora.core.cairn_bridge import CairnWorkspaceService
     from remora.core.config import Config
     from remora.lsp.server import RemoraLanguageServer
 
@@ -99,9 +99,9 @@ class AgentRunner:
 
     def __init__(
         self,
-        server: "RemoraLanguageServer",
+        server: RemoraLanguageServer,
         *,
-        config: "Config | None" = None,
+        config: Config | None = None,
         max_trigger_depth: int | None = None,
         trigger_cooldown_ms: int | None = None,
         max_concurrency: int = 4,
@@ -121,9 +121,11 @@ class AgentRunner:
         self._correlation_depth: dict[str, tuple[int, float]] = {}
         self._last_trigger_time: dict[str, float] = {}
         self._semaphore = asyncio.Semaphore(self._max_concurrency)
+        self._workspace_service: CairnWorkspaceService | None = None
+        self._workspace_service_root: Path | None = None
 
     @property
-    def config(self) -> "Config":
+    def config(self) -> Config:
         """Lazily resolve configuration."""
         if self._config is None:
             from remora.core.config import load_config
@@ -136,11 +138,11 @@ class AgentRunner:
         cls,
         event_store: Any,
         *,
-        config: "Config | None" = None,
+        config: Config | None = None,
         max_trigger_depth: int | None = None,
         trigger_cooldown_ms: int | None = None,
         max_concurrency: int = 4,
-    ) -> "AgentRunner":
+    ) -> AgentRunner:
         """Create a runner for CLI / headless mode without a full LSP server.
 
         Constructs a lightweight ``_HeadlessServer`` adapter around the given
@@ -175,6 +177,53 @@ class AgentRunner:
 
     def stop(self) -> None:
         self._running = False
+
+    async def close(self) -> None:
+        """Release long-lived resources owned by the runner."""
+        if self._workspace_service is None:
+            return
+        try:
+            await self._workspace_service.close()
+        except Exception:
+            logger.warning("AgentRunner.close: workspace service close failed", exc_info=True)
+        else:
+            logger.info("AgentRunner.close: workspace service closed")
+        finally:
+            self._workspace_service = None
+            self._workspace_service_root = None
+
+    async def _get_workspace_service(self, project_root: Path) -> CairnWorkspaceService:
+        """Return a reusable workspace service for the current project root."""
+        from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
+
+        resolved_root = project_root.resolve()
+        if self._workspace_service is not None and self._workspace_service_root == resolved_root:
+            return self._workspace_service
+
+        if self._workspace_service is not None:
+            logger.info(
+                "AgentRunner: project root changed (%s -> %s), recycling workspace service",
+                self._workspace_service_root,
+                resolved_root,
+            )
+            await self.close()
+
+        self._workspace_service = CairnWorkspaceService(
+            config=self.config,
+            swarm_root=self.config.swarm_root,
+            project_root=resolved_root,
+        )
+
+        init_start = time.monotonic()
+        # Keep startup cheap; files are synced lazily on first access.
+        await self._workspace_service.initialize(sync_mode=SyncMode.NONE)
+        logger.info(
+            "AgentRunner: workspace service initialized mode=none root=%s duration_ms=%.1f",
+            resolved_root,
+            (time.monotonic() - init_start) * 1000,
+        )
+        self._workspace_service_root = resolved_root
+        return self._workspace_service
 
     # ------------------------------------------------------------------
     # Cascade prevention — ported from core/agent_runner.py
@@ -221,7 +270,7 @@ class AgentRunner:
         # Wait for run_forever() to set _running before consuming triggers
         while not self._running:
             await asyncio.sleep(0.05)
-        async for agent_id, event_id, event in event_store.get_triggers():
+        async for agent_id, _event_id, event in event_store.get_triggers():
             if not self._running:
                 break
             correlation_id = getattr(event, "correlation_id", None) or self.server.generate_correlation_id()
@@ -466,6 +515,7 @@ class AgentRunner:
                     root_path = getattr(self.server.workspace, "root_path", None)
                     if root_path:
                         project_root = Path(root_path)
+                workspace_service = await self._get_workspace_service(project_root)
 
                 # On-kernel-event callback: forward to LSP UI
                 async def _on_kernel_event(event: Any) -> None:
@@ -496,6 +546,7 @@ class AgentRunner:
                             subscriptions=getattr(self.server, "subscriptions", None),
                             swarm_id="swarm",
                             project_root=project_root,
+                            workspace_service=workspace_service,
                             extra_tools=lsp_tools,
                             on_kernel_event=_on_kernel_event,
                             chat_history=chat_history,

@@ -248,3 +248,110 @@ Per user request, scaffold/stub detection in projection was disabled to unblock 
 Validation:
 - `devenv shell -- ruff check src/remora/core/projections.py` (pass)
 - `devenv shell -- remora-scan-repo --root browser_demo --log-level INFO` (pass)
+
+## 2026-03-05 Startup Attach Diagnostics Update
+
+Implemented additional diagnostics for delayed LSP attach behavior:
+
+1) Neovim client autostart retries now surface lock-owner hints during retry, not only on terminal failure.
+- File: `src/remora/lsp/nvim/lua/remora/init.lua`
+- Behavior:
+  - During `ensure_autostart_connected` retry loop, lock hint checks run on attempt 1 and every 5 attempts.
+  - When a new hint appears, client logs warning + emits `vim.notify("[Remora] Startup waiting: ...")`.
+  - On successful connection, hint state is reset.
+
+2) Launcher now logs explicit lock-acquire diagnostics before server startup.
+- File: `src/remora/lsp/__init__.py`
+- Behavior:
+  - Emits pre-acquire lock metadata snapshot when `.remora/lsp.pid` exists.
+  - Emits structured lock-acquire failure line with owner pid/parent/heartbeat age/paths.
+  - Emits structured lock-acquired line (pid/parent/paths) after successful acquire.
+
+Validation:
+- `devenv shell -- ruff check src/remora/lsp/__init__.py` (pass)
+
+## 2026-03-05 Startup Attach Mitigation (Client Control-Flow + Logging)
+
+Implemented direct mitigations for delayed initial attach in Neovim client:
+
+1) Removed bootstrap buffer startup path.
+- `kick_lsp_start()` now starts only from real loaded user buffers with supported filetype and non-empty filename.
+- Synthetic startup buffers are no longer created.
+
+2) Unified explicit startup into a single shared loop.
+- `get_client_with_retry()` no longer issues its own `vim.lsp.start` calls.
+- It now only ensures `ensure_autostart_connected()` is running and polls for availability.
+
+3) Added startup timeout recycle.
+- New env-controlled timeout: `REMORA_LSP_AUTOSTART_TIMEOUT_MS` (default `3000`).
+- If no attach by timeout, client performs a one-time recycle:
+  - attempts to stop pending/remora clients,
+  - clears pending state,
+  - re-requests startup.
+
+4) Fixed client log timestamp coherence.
+- `src/remora/lsp/nvim/lua/remora/log.lua` now emits `HH:MM:SS.mmm` from a single `gettimeofday` clock source.
+- This removes out-of-order millisecond timestamps caused by mixing `os.date` and `hrtime`.
+
+Sanity validation:
+- `devenv shell -- nvim --headless -u NONE ... require(\"remora.init\") ... +qa` (pass)
+
+Next required validation:
+- Manual Neovim startup run and inspect:
+  - latest `client-*.log`
+  - latest `server-*.log`
+  - `~/.local/state/nvim/lsp.log`
+- Confirm attach occurs without waiting for first panel/chat command and with reduced retry duration.
+
+## 2026-03-05 Startup Attach Mitigation Follow-Up
+
+After first mitigation run, logs showed:
+- startup no longer depended on first panel/chat command (good),
+- but there was still delayed attach and control-loop noise:
+  - false `pending client ... disappeared before attach`,
+  - timeout/recycle firing with `pending_client_id=nil`,
+  - client timestamps showing `.000` only.
+
+Implemented follow-up fixes:
+- Removed pending-ID disappearance check (too racy before client registration).
+- Timeout/recycle now only applies when a start request exists (`pending_client_id` + `pending_started_ms`).
+- Start requests are attempted whenever no pending startup exists (throttled by `REMORA_LSP_KICK_MIN_MS`), rather than sparse attempt buckets.
+- Added autocmd trigger on `{BufEnter, BufWinEnter, FileType}` for startable buffers to reduce delay between first real file open and start request.
+- Reduced silent poll logging noise:
+  - `get_client(..., silent=true)` logs debug instead of warning when no client exists.
+- Fixed logger `gettimeofday` handling for Neovim API variants (table or `(sec,usec)` returns), restoring non-zero millisecond timestamps.
+
+Quick validation:
+- `devenv shell -- nvim --headless -u NONE ... require("remora.init") ...` (pass)
+- logger smoke output now includes non-zero milliseconds in new client log.
+
+## 2026-03-05 Latest Manual Run Diagnosis (client-171612 / server-171713)
+
+Current state from latest manual logs:
+- Background scan path is now healthy:
+  - `_background_scan: COMPLETE — ... (407 unchanged skipped)`
+  - No scan-time SQLite stalls in this run.
+- Interactive panel/read paths are healthy:
+  - `cmd_get_agent_panel` lookups complete in ~1-4ms.
+  - `get_recent_events` calls complete in ~50-60ms.
+- Chat submit path is healthy up to runner trigger:
+  - `on_input_submitted` reached and emitted `HumanChatEvent` in ~7ms.
+
+Remaining issues:
+1) Startup attach still has client-side thrash.
+- Client log shows repeated `startup timeout ... recycling` from ~17:16:17 to ~17:17:08.
+- It cycles through client ids 2..14, then `gave up after 60 retries`.
+- A usable client eventually appears later (id=15), so startup is delayed/noisy.
+
+2) Agent execution still fails in workspace initialization.
+- First turn: `execute_agent_turn` times out at 30s while stuck after `initializing workspace service`.
+- Next turn: immediate `AgentErrorEvent`:
+  - `Failed to create stable workspace: [WORKSPACE_OPEN_FAILED] Failed to open workspace: .remora/swarm/stable.db`.
+- Current on-disk workspace state is very large:
+  - `.remora/swarm/stable.db` ~2.1GB
+  - `.remora/swarm/stable.db-wal` ~3.8GB
+- Direct standalone `cairn_open_workspace(.remora/swarm/stable.db)` succeeds outside the hot path, suggesting intermittent contention/race and/or pathological init cost rather than permanent corruption.
+
+Most likely current bottleneck:
+- `CairnWorkspaceService.initialize()` does `open_workspace(stable.db)` + FULL project sync on first agent turn.
+- With multi-GB stable DB/WAL and 30s runner timeout, initialization can overrun timeout and cascade into follow-on workspace-open failures.

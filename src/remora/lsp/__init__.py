@@ -386,11 +386,36 @@ def main() -> None:
         lock_path=swarm_path / "lsp.lock",
         pid_path=swarm_path / "lsp.pid",
     )
+    owner_at_start = process_lock._read_owner_metadata()
+    if owner_at_start.pid is not None:
+        age_ms = process_lock._heartbeat_age_ms(owner_at_start)
+        print(
+            "remora-lsp: existing lock metadata before acquire "
+            f"(owner_pid={owner_at_start.pid}, "
+            f"owner_parent_pid={owner_at_start.parent_pid}, "
+            f"owner_heartbeat_age_ms={age_ms}, "
+            f"lock={process_lock.lock_path}, pid_file={process_lock.pid_path})",
+            file=sys.stderr,
+        )
     try:
         process_lock.acquire()
     except RuntimeError as exc:
-        print(str(exc), file=sys.stderr)
+        owner = process_lock._read_owner_metadata()
+        age_ms = process_lock._heartbeat_age_ms(owner)
+        print(
+            "remora-lsp: workspace lock acquire failed "
+            f"(error={exc}, owner_pid={owner.pid}, owner_parent_pid={owner.parent_pid}, "
+            f"owner_heartbeat_age_ms={age_ms}, lock={process_lock.lock_path}, "
+            f"pid_file={process_lock.pid_path})",
+            file=sys.stderr,
+        )
         raise SystemExit(2) from exc
+    print(
+        "remora-lsp: workspace lock acquired "
+        f"(pid={os.getpid()}, parent_pid={os.getppid()}, lock={process_lock.lock_path}, "
+        f"pid_file={process_lock.pid_path})",
+        file=sys.stderr,
+    )
 
     watchdog = _ParentProcessWatchdog(process_lock=process_lock)
     watchdog.start()

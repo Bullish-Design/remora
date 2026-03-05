@@ -381,6 +381,11 @@ def main(
         log.exception("Fatal error in server.start_io()")
         raise
     finally:
+        try:
+            runner.stop()
+            asyncio.run(runner.close())
+        except Exception:
+            log.warning("runner close failed", exc_info=True)
         if event_store is not None:
             try:
                 asyncio.run(event_store.close())
