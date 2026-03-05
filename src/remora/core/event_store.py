@@ -61,6 +61,7 @@ class EventStore:
             self._conn = await asyncio.to_thread(
                 sqlite3.connect,
                 str(self._db_path),
+                timeout=15.0,
                 check_same_thread=False,
             )
             self._conn.row_factory = sqlite3.Row
@@ -297,24 +298,30 @@ class EventStore:
         tags = getattr(event, "tags", None)
         tags_json = json.dumps(tags) if tags else None
 
+        def _do_append() -> tuple[int, list[RemoraEvent]]:
+            assert self._conn is not None
+            try:
+                cursor = self._conn.execute(
+                    """
+                    INSERT INTO events (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json),
+                )
+                ev_id = cursor.lastrowid or 0
+
+                f_ups: list[RemoraEvent] = []
+                if self._projection is not None:
+                    f_ups = self._projection.apply(self._conn, event)
+
+                self._conn.commit()
+                return ev_id, f_ups
+            except Exception:
+                self._conn.rollback()
+                raise
+
         async with self._lock:
-            cursor = await asyncio.to_thread(
-                self._conn.execute,
-                """
-                INSERT INTO events (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json),
-            )
-            event_id = cursor.lastrowid or 0
-
-            # Project event into materialized views (e.g. nodes table)
-            # within the SAME transaction as the event INSERT
-            follow_ups: list[RemoraEvent] = []
-            if self._projection is not None:
-                follow_ups = await asyncio.to_thread(self._projection.apply, self._conn, event)
-
-            await asyncio.to_thread(self._conn.commit)
+            event_id, follow_ups = await asyncio.to_thread(_do_append)
 
         if self._trigger_queue is not None and self._subscriptions is not None:
             matching_agents = await self._subscriptions.get_matching_agents(event)

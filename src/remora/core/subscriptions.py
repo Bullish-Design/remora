@@ -141,7 +141,11 @@ class SubscriptionRegistry:
 
             import sqlite3
 
-            self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+            self._conn = sqlite3.connect(
+                str(self._db_path),
+                timeout=15.0,
+                check_same_thread=False,
+            )
             self._conn.row_factory = sqlite3.Row
 
             def _init_db(conn: Any) -> None:

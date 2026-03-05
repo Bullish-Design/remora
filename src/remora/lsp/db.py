@@ -62,7 +62,7 @@ class RemoraDB:
             # Standalone mode (backward compat)
             self.db_path = Path(db_path)
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            self.conn = sqlite3.connect(str(self.db_path), timeout=15.0, check_same_thread=False)
             self.conn.execute("PRAGMA journal_mode=WAL")
             self.conn.execute("PRAGMA synchronous=NORMAL")
             self.conn.row_factory = sqlite3.Row
