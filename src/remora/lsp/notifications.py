@@ -51,6 +51,7 @@ async def on_input_submitted(params: dict) -> None:
             agent_id = params["agent_id"]
             message = params["input"]
             logger.info("on_input_submitted: chat message to agent=%s message=%r", agent_id, message[:100])
+            server.note_user_activity("chat_submit")
 
             correlation_id = server.generate_correlation_id()
             logger.debug("on_input_submitted: correlation_id=%s", correlation_id)

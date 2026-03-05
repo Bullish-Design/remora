@@ -41,10 +41,20 @@ class RemoraLanguageServer(LanguageServer):
         # Debounce timers for didChange reparse (Gap #12) and cursor updates (Gap #13)
         self._reparse_timers: dict[str, asyncio.TimerHandle] = {}
         self._cursor_timers: dict[str, asyncio.TimerHandle] = {}
+        self._last_user_activity_monotonic = 0.0
 
     def generate_correlation_id(self) -> str:
         self._correlation_counter += 1
         return f"corr_{self._correlation_counter}_{uuid.uuid4().hex[:8]}"
+
+    def note_user_activity(self, source: str = "unknown") -> None:
+        self._last_user_activity_monotonic = time.monotonic()
+        logger.debug("note_user_activity: source=%s", source)
+
+    def user_recently_active(self, window_seconds: float = 2.0) -> bool:
+        if self._last_user_activity_monotonic <= 0:
+            return False
+        return (time.monotonic() - self._last_user_activity_monotonic) <= window_seconds
 
     def schedule_reparse(self, uri: str, text: str, delay_ms: int = 500) -> None:
         """Schedule a debounced reparse for *uri*.

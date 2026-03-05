@@ -28,9 +28,62 @@ def main() -> None:
     agent fails with "no event_store available".
     """
     import asyncio
+    import os
+    import sys
+    import time
+    from dataclasses import dataclass
     from pathlib import Path
 
     from remora.lsp.__main__ import main as _main
+
+    @dataclass
+    class _WorkspaceProcessLock:
+        lock_path: Path
+        pid_path: Path
+        handle: object | None = None
+
+        def acquire(self) -> None:
+            import fcntl
+
+            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+            handle = self.lock_path.open("a+", encoding="utf-8")
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                owner_pid = self._read_owner_pid()
+                handle.close()
+                message = f"Another remora-lsp instance is already active for this workspace"
+                if owner_pid:
+                    message += f" (pid={owner_pid})"
+                raise RuntimeError(message) from exc
+
+            self.handle = handle
+            self.pid_path.write_text(f"{os.getpid()}\n{int(time.time())}\n", encoding="utf-8")
+
+        def release(self) -> None:
+            if self.handle is None:
+                return
+            try:
+                import fcntl
+
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                self.handle.close()
+            finally:
+                self.handle = None
+            try:
+                self.pid_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        def _read_owner_pid(self) -> int | None:
+            try:
+                line = self.pid_path.read_text(encoding="utf-8").splitlines()[0].strip()
+                return int(line)
+            except Exception:
+                return None
 
     async def _prepare():
         from remora.core.event_bus import EventBus
@@ -55,18 +108,33 @@ def main() -> None:
 
         await event_store.initialize()
         await subscriptions.initialize()
+        await event_store.checkpoint_wal("PASSIVE")
 
         event_store.set_subscriptions(subscriptions)
         event_store.set_event_bus(event_bus)
 
         return event_store, subscriptions
 
-    event_store, subscriptions = asyncio.run(_prepare())
-
-    _main(
-        event_store=event_store,
-        subscriptions=subscriptions,
+    root = Path.cwd()
+    swarm_path = root / ".remora"
+    process_lock = _WorkspaceProcessLock(
+        lock_path=swarm_path / "lsp.lock",
+        pid_path=swarm_path / "lsp.pid",
     )
+    try:
+        process_lock.acquire()
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    try:
+        event_store, subscriptions = asyncio.run(_prepare())
+        _main(
+            event_store=event_store,
+            subscriptions=subscriptions,
+        )
+    finally:
+        process_lock.release()
 
 
 __all__ = [

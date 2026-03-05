@@ -6,7 +6,11 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
+import random
 import sqlite3
+import subprocess
+import threading
 import time
 from dataclasses import asdict, is_dataclass
 from typing import TYPE_CHECKING, Any, AsyncIterator
@@ -17,6 +21,10 @@ from remora.core.events import RemoraEvent
 from remora.utils import PathLike, normalize_path
 
 logger = logging.getLogger(__name__)
+
+_LOCK_RETRY_MAX_ATTEMPTS = 10
+_LOCK_RETRY_BASE_SECONDS = 0.05
+_LOCK_RETRY_CAP_SECONDS = 1.5
 
 if TYPE_CHECKING:
     from remora.core.agent_node import AgentNode
@@ -75,6 +83,8 @@ class EventStore:
             # Enable WAL mode for better concurrent read/write performance
             await asyncio.to_thread(self._conn.execute, "PRAGMA journal_mode=WAL")
             await asyncio.to_thread(self._conn.execute, "PRAGMA synchronous=NORMAL")
+            # Keep WAL growth bounded even when no explicit checkpoint runs.
+            await asyncio.to_thread(self._conn.execute, "PRAGMA wal_autocheckpoint=1000")
 
             # Create a separate read-only connection for queries.
             # With WAL mode, readers don't block writers and vice versa,
@@ -232,6 +242,50 @@ class EventStore:
             if self._subscriptions is not None:
                 self._trigger_queue = asyncio.Queue()
 
+    def _is_locked_error(self, exc: BaseException) -> bool:
+        message = str(exc).lower()
+        return "database is locked" in message or "database table is locked" in message
+
+    def _retry_delay_seconds(self, attempt: int) -> float:
+        # Jitter avoids synchronized retries across multiple writers.
+        base = min(_LOCK_RETRY_CAP_SECONDS, _LOCK_RETRY_BASE_SECONDS * (2 ** attempt))
+        return min(_LOCK_RETRY_CAP_SECONDS, base * random.uniform(0.6, 1.4))
+
+    def _lock_diagnostics(self) -> dict[str, Any]:
+        holders: list[int] = []
+        try:
+            proc = subprocess.run(
+                ["lsof", "-t", str(self._db_path)],
+                capture_output=True,
+                text=True,
+                timeout=0.5,
+                check=False,
+            )
+            if proc.stdout:
+                seen: set[int] = set()
+                for line in proc.stdout.splitlines():
+                    value = line.strip()
+                    if not value:
+                        continue
+                    try:
+                        pid = int(value)
+                    except ValueError:
+                        continue
+                    if pid in seen:
+                        continue
+                    seen.add(pid)
+                    holders.append(pid)
+        except (FileNotFoundError, subprocess.SubprocessError):
+            holders = []
+
+        return {
+            "pid": os.getpid(),
+            "thread": threading.get_ident(),
+            "db_path": str(self._db_path),
+            "in_transaction": bool(self._conn and self._conn.in_transaction),
+            "holder_pids": holders,
+        }
+
     async def _migrate_routing_fields(self) -> None:
         """Add routing fields to existing tables."""
         assert self._conn is not None, "_migrate_routing_fields called before connection"
@@ -334,26 +388,32 @@ class EventStore:
                 self._conn.execute("ROLLBACK")
                 raise
 
-        # Retry with fast exponential backoff. With a 100ms connection timeout and
-        # 10 attempts, worst-case wait is about 2.5s total, and most operations
-        # succeed quickly since the background scan now yields between files.
+        # Retry with jittered exponential backoff.
         # IMPORTANT: Lock is released before sleeping to allow other queries to proceed.
-        max_attempts = 10
+        max_attempts = _LOCK_RETRY_MAX_ATTEMPTS
         for attempt in range(max_attempts):
             try:
                 async with self._lock:
                     event_id, follow_ups = await asyncio.to_thread(_do_append)
                 break
             except sqlite3.OperationalError as exc:
-                if "database is locked" in str(exc) and attempt < max_attempts - 1:
-                    # Fast exponential backoff: 50ms, 100ms, 200ms, 400ms, ...
-                    delay = 0.05 * (2 ** attempt)
-                    logger.warning(
-                        "append: database locked (attempt %d/%d), retrying in %.2fs...",
-                        attempt + 1,
-                        max_attempts,
-                        delay,
-                    )
+                if self._is_locked_error(exc) and attempt < max_attempts - 1:
+                    delay = self._retry_delay_seconds(attempt)
+                    if attempt in (0, max_attempts - 2):
+                        logger.warning(
+                            "append: database locked (attempt %d/%d), retrying in %.2fs; diagnostics=%s",
+                            attempt + 1,
+                            max_attempts,
+                            delay,
+                            self._lock_diagnostics(),
+                        )
+                    else:
+                        logger.warning(
+                            "append: database locked (attempt %d/%d), retrying in %.2fs...",
+                            attempt + 1,
+                            max_attempts,
+                            delay,
+                        )
                     await asyncio.sleep(delay)
                 else:
                     raise
@@ -439,22 +499,30 @@ class EventStore:
                 raise
 
         # IMPORTANT: Lock is released before sleeping to allow other queries to proceed.
-        max_attempts = 10
+        max_attempts = _LOCK_RETRY_MAX_ATTEMPTS
         for attempt in range(max_attempts):
             try:
                 async with self._lock:
                     event_ids, follow_ups = await asyncio.to_thread(_do_batch_append)
                 break
             except sqlite3.OperationalError as exc:
-                if "database is locked" in str(exc) and attempt < max_attempts - 1:
-                    # Fast exponential backoff: 50ms, 100ms, 200ms, 400ms, ...
-                    delay = 0.05 * (2 ** attempt)
-                    logger.warning(
-                        "batch_append: database locked (attempt %d/%d), retrying in %.2fs...",
-                        attempt + 1,
-                        max_attempts,
-                        delay,
-                    )
+                if self._is_locked_error(exc) and attempt < max_attempts - 1:
+                    delay = self._retry_delay_seconds(attempt)
+                    if attempt in (0, max_attempts - 2):
+                        logger.warning(
+                            "batch_append: database locked (attempt %d/%d), retrying in %.2fs; diagnostics=%s",
+                            attempt + 1,
+                            max_attempts,
+                            delay,
+                            self._lock_diagnostics(),
+                        )
+                    else:
+                        logger.warning(
+                            "batch_append: database locked (attempt %d/%d), retrying in %.2fs...",
+                            attempt + 1,
+                            max_attempts,
+                            delay,
+                        )
                     await asyncio.sleep(delay)
                 else:
                     raise
@@ -890,12 +958,51 @@ class EventStore:
         async with self._lock:
             return await asyncio.to_thread(_delete)
 
+    async def checkpoint_wal(self, mode: str = "PASSIVE") -> tuple[int, int, int]:
+        """Run a WAL checkpoint and return (busy, log_frames, checkpointed_frames)."""
+        if self._conn is None:
+            await self.initialize()
+        if self._conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        mode_upper = mode.upper()
+        if mode_upper not in {"PASSIVE", "FULL", "RESTART", "TRUNCATE"}:
+            raise ValueError(f"Unsupported checkpoint mode: {mode}")
+
+        def _checkpoint() -> tuple[int, int, int]:
+            assert self._conn is not None
+            with contextlib.closing(self._conn.execute(f"PRAGMA wal_checkpoint({mode_upper})")) as cursor:
+                row = cursor.fetchone()
+            if row is None:
+                return (0, 0, 0)
+            return (int(row[0]), int(row[1]), int(row[2]))
+
+        async with self._lock:
+            result = await asyncio.to_thread(_checkpoint)
+
+        logger.info(
+            "checkpoint_wal: mode=%s busy=%d log_frames=%d checkpointed_frames=%d",
+            mode_upper,
+            result[0],
+            result[1],
+            result[2],
+        )
+        return result
+
     async def close(self) -> None:
         """Close the database connection."""
         if self._conn:
             async with self._lock:
+                try:
+                    with contextlib.closing(self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")) as cursor:
+                        cursor.fetchone()
+                except Exception:
+                    logger.debug("close: wal checkpoint failed", exc_info=True)
                 await asyncio.to_thread(self._conn.close)
                 self._conn = None
+        if self._read_conn:
+            await asyncio.to_thread(self._read_conn.close)
+            self._read_conn = None
         self._trigger_queue = None
 
     def _serialize_event(self, event: StructuredEvent | RemoraEvent) -> str:

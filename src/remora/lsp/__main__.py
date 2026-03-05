@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
 import time
@@ -107,6 +108,11 @@ def main(
         # loop is fully closed: event → EventStore → subscription matching
         # → trigger queue → AgentRunner (Gap #1 closure)
         if server.event_store is not None:
+            try:
+                # Opportunistically compact carried-over WAL work from prior sessions.
+                await server.event_store.checkpoint_wal("PASSIVE")
+            except Exception:
+                log.warning("startup checkpoint failed", exc_info=True)
             log.info("Starting EventStore trigger bridge...")
             asyncio.ensure_future(runner.run_from_event_store(server.event_store))
         log.info("Starting background workspace scan...")
@@ -158,6 +164,26 @@ def main(
         )
 
         _SUPPORTED_SUFFIXES = frozenset({".py", ".md", ".toml"})
+        manifest_path = root_path / ".remora" / "scan-manifest.json"
+
+        def _load_manifest() -> dict[str, dict[str, int]]:
+            try:
+                data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return {
+                        str(path): {"mtime_ns": int(sig["mtime_ns"]), "size": int(sig["size"])}
+                        for path, sig in data.items()
+                        if isinstance(sig, dict) and "mtime_ns" in sig and "size" in sig
+                    }
+            except FileNotFoundError:
+                return {}
+            except Exception:
+                log.warning("_background_scan: failed to load scan manifest %s", manifest_path, exc_info=True)
+            return {}
+
+        def _save_manifest(data: dict[str, dict[str, int]]) -> None:
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(json.dumps(data, sort_keys=True), encoding="utf-8")
 
         def _iter_source_files(root: Path):
             """Walk root, pruning skip-dirs early to avoid descending into venvs."""
@@ -172,10 +198,26 @@ def main(
         py_files = list(_iter_source_files(root_path))
         log.info("_background_scan: found %d source files in %s (skip-dirs pruned)", len(py_files), root)
 
+        existing_manifest = _load_manifest()
+        next_manifest: dict[str, dict[str, int]] = {}
         count = 0
         parsed = 0
+        skipped_unchanged = 0
+        scan_pauses = 0
         for fpath in py_files:
             try:
+                relative = str(fpath.relative_to(root_path))
+                stat = fpath.stat()
+                signature = {"mtime_ns": int(stat.st_mtime_ns), "size": int(stat.st_size)}
+                next_manifest[relative] = signature
+                if existing_manifest.get(relative) == signature:
+                    skipped_unchanged += 1
+                    continue
+
+                while server.user_recently_active(window_seconds=2.0):
+                    scan_pauses += 1
+                    await asyncio.sleep(0.25)
+
                 text = fpath.read_text(encoding="utf-8", errors="replace")
                 uri = from_fs_path(str(fpath))
                 # Get existing nodes from EventStore to preserve IDs
@@ -236,16 +278,23 @@ def main(
                 parsed += 1
                 # Brief delay between files to reduce SQLite write contention.
                 # This allows user operations (chat, panel) to acquire write locks.
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.1)
                 log.debug("_background_scan: parsed %s -> %d nodes", fpath.relative_to(root_path), len(nodes))
             except Exception:
                 log.warning("_background_scan: failed to parse %s", fpath, exc_info=True)
 
+        try:
+            _save_manifest(next_manifest)
+        except Exception:
+            log.warning("_background_scan: failed to save scan manifest %s", manifest_path, exc_info=True)
+
         log.info(
-            "_background_scan: COMPLETE — %d nodes from %d parsed files (%d total)",
+            "_background_scan: COMPLETE — %d nodes from %d parsed files (%d total, %d unchanged skipped, %d pauses for user activity)",
             count,
             parsed,
             len(py_files),
+            skipped_unchanged,
+            scan_pauses,
         )
         await server.notify_agents_updated()
 
@@ -263,6 +312,11 @@ def main(
         log.exception("Fatal error in server.start_io()")
         raise
     finally:
+        if event_store is not None:
+            try:
+                asyncio.run(event_store.close())
+            except Exception:
+                log.warning("event store close failed", exc_info=True)
         log.info("remora-lsp shutting down")
 
 
