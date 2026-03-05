@@ -395,10 +395,12 @@ class AgentRunner:
                 for event in events:
                     event_type = event["event_type"]
                     payload = event.get("payload", {})
-                    if event_type == "HumanChatEvent" and payload.get("to_agent") == agent_id:
+                    to_agent = event.get("to_agent")
+                    from_agent = event.get("from_agent", "unknown")
+
+                    if event_type == "HumanChatEvent" and to_agent == agent_id:
                         chat_history.append({"role": "user", "content": payload.get("message", "")})
-                    elif event_type == "AgentMessageEvent" and payload.get("to_agent") == agent_id:
-                        from_agent = payload.get("from_agent", "unknown")
+                    elif event_type == "AgentMessageEvent" and to_agent == agent_id:
                         chat_history.append(
                             {"role": "user", "content": f"[From {from_agent}]: {payload.get('message', '')}"}
                         )
@@ -594,6 +596,35 @@ class AgentRunner:
                 break
 
         return agent
+
+    def get_agent_tools(self, agent: AgentNode) -> list[dict]:
+        """Return the list of tools available to this agent."""
+        from remora.core.tools.lsp import build_lsp_tools
+
+        async def _dummy(*args: Any, **kwargs: Any) -> None:
+            pass
+
+        lsp_tools = build_lsp_tools(
+            agent,
+            self.server.event_store,
+            create_proposal=_dummy,
+            message_node=_dummy,
+            emit_tool_event=_dummy,
+        )
+
+        raw_tools = []
+        for t in lsp_tools:
+            # Format to dict with "function" key containing "name" and "description"
+            s = t.schema
+            raw_tools.append({
+                "function": {
+                    "name": s.name,
+                    "description": s.description
+                }
+            })
+            
+        # Also include any built-in tools that unstructured agents could have
+        return raw_tools
 
     async def execute_extension_tool(self, agent: AgentNode, tool_name: str, params: dict, correlation_id: str) -> None:
         from remora.lsp.server import emit_event
