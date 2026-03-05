@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 import threading
 
@@ -116,25 +117,22 @@ class LazyGraph:
         if not self._nodes_conn:
             return []
         with self._lock:
-            cursor = self._nodes_conn.cursor()
-            cursor.execute("SELECT * FROM nodes WHERE file_path = ?", (file_path,))
-            return [self._normalize_node(row) for row in cursor.fetchall()]
+            with contextlib.closing(self._nodes_conn.execute("SELECT * FROM nodes WHERE file_path = ?", (file_path,))) as cursor:
+                return [self._normalize_node(row) for row in cursor.fetchall()]
 
     def _get_node(self, node_id: str) -> dict | None:
         if not self._nodes_conn:
             return None
         with self._lock:
-            cursor = self._nodes_conn.cursor()
-            cursor.execute("SELECT * FROM nodes WHERE node_id = ?", (node_id,))
-            row = cursor.fetchone()
+            with contextlib.closing(self._nodes_conn.execute("SELECT * FROM nodes WHERE node_id = ?", (node_id,))) as cursor:
+                row = cursor.fetchone()
         return self._normalize_node(row) if row else None
 
     def _get_neighborhood(self, node_id: str, depth: int = 2) -> list[dict]:
         """Get node + neighbors by walking edges, then fetching node data."""
         with self._lock:
             # Walk edges to find neighbor IDs
-            cursor = self._edges_conn.cursor()
-            cursor.execute(
+            with contextlib.closing(self._edges_conn.execute(
                 """
                 WITH RECURSIVE neighbors(nid, d) AS (
                     SELECT ?, 0
@@ -150,8 +148,8 @@ class LazyGraph:
                 SELECT DISTINCT nid FROM neighbors
             """,
                 (node_id, depth),
-            )
-            neighbor_ids = [row[0] for row in cursor.fetchall()]
+            )) as cursor:
+                neighbor_ids = [row[0] for row in cursor.fetchall()]
 
         if not neighbor_ids or not self._nodes_conn:
             return []
@@ -159,9 +157,8 @@ class LazyGraph:
         # Fetch node data from EventStore DB
         with self._lock:
             placeholders = ",".join("?" * len(neighbor_ids))
-            cursor = self._nodes_conn.cursor()
-            cursor.execute(f"SELECT * FROM nodes WHERE node_id IN ({placeholders})", neighbor_ids)
-            return [self._normalize_node(row) for row in cursor.fetchall()]
+            with contextlib.closing(self._nodes_conn.execute(f"SELECT * FROM nodes WHERE node_id IN ({placeholders})", neighbor_ids)) as cursor:
+                return [self._normalize_node(row) for row in cursor.fetchall()]
 
     # ── Private: edge queries (RemoraDB) ──────────────────────────────────
 
@@ -172,15 +169,14 @@ class LazyGraph:
         placeholders = ",".join("?" * len(node_ids))
         params = node_ids + node_ids
         with self._lock:
-            cursor = self._edges_conn.cursor()
-            cursor.execute(
+            with contextlib.closing(self._edges_conn.execute(
                 f"""
                 SELECT * FROM edges 
                 WHERE from_id IN ({placeholders}) AND to_id IN ({placeholders})
             """,
                 params,
-            )
-            return [dict(row) for row in cursor.fetchall()]
+            )) as cursor:
+                return [dict(row) for row in cursor.fetchall()]
 
     @staticmethod
     def _normalize_node(row: sqlite3.Row) -> dict:

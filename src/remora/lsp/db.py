@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import json
 import threading
@@ -123,102 +124,99 @@ class RemoraDB:
 
     def _migrate(self):
         """Add columns that may be missing from older databases."""
-        cursor = self.conn.cursor()
-        cursor.execute("PRAGMA table_info(proposals)")
-        columns = {row[1] for row in cursor.fetchall()}
+        with contextlib.closing(self.conn.execute("PRAGMA table_info(proposals)")) as cursor:
+            columns = {row[1] for row in cursor.fetchall()}
         if "file_path" not in columns:
-            cursor.execute("ALTER TABLE proposals ADD COLUMN file_path TEXT")
+            with contextlib.closing(self.conn.cursor()) as cursor:
+                cursor.execute("ALTER TABLE proposals ADD COLUMN file_path TEXT")
 
     # ── Cursor focus ──────────────────────────────────────────────────────
 
     @async_db
     def update_cursor_focus(self, agent_id: str | None, file_path: str, line: int) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO cursor_focus (id, agent_id, file_path, line, timestamp)
-            VALUES (1, ?, ?, ?, ?)
-        """,
-            (agent_id, file_path, line, time.time()),
-        )
+        with contextlib.closing(self.conn.cursor()) as cursor:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO cursor_focus (id, agent_id, file_path, line, timestamp)
+                VALUES (1, ?, ?, ?, ?)
+            """,
+                (agent_id, file_path, line, time.time()),
+            )
 
     def get_cursor_focus(self) -> dict | None:
         """Read the current cursor focus (sync, for web server reads)."""
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT agent_id, file_path, line, timestamp FROM cursor_focus WHERE id = 1")
-        row = cursor.fetchone()
+        with contextlib.closing(self.conn.execute("SELECT agent_id, file_path, line, timestamp FROM cursor_focus WHERE id = 1")) as cursor:
+            row = cursor.fetchone()
         return dict(row) if row else None
 
     # ── Activation chain ──────────────────────────────────────────────────
 
     @async_db
     def add_to_chain(self, correlation_id: str, agent_id: str) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO activation_chain (correlation_id, agent_id, depth, timestamp)
-            VALUES (?, ?, 1, ?)
-        """,
-            (correlation_id, agent_id, time.time()),
-        )
+        with contextlib.closing(self.conn.cursor()) as cursor:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO activation_chain (correlation_id, agent_id, depth, timestamp)
+                VALUES (?, ?, 1, ?)
+            """,
+                (correlation_id, agent_id, time.time()),
+            )
 
     @async_db
     def get_activation_chain(self, correlation_id: str) -> list[str]:
-        cursor = self.conn.cursor()
-        cursor.execute(
+        with contextlib.closing(self.conn.execute(
             """
             SELECT agent_id FROM activation_chain 
             WHERE correlation_id = ?
             ORDER BY depth ASC
         """,
             (correlation_id,),
-        )
-        return [row["agent_id"] for row in cursor.fetchall()]
+        )) as cursor:
+            return [row["agent_id"] for row in cursor.fetchall()]
 
     # ── Edges ─────────────────────────────────────────────────────────────
 
     @async_db
     def update_edges(self, nodes: list[dict]) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute("BEGIN IMMEDIATE")
-        try:
-            for node in nodes:
-                parent_id = node.get("parent_id")
-                node_id = node["node_id"]
-                if parent_id:
-                    cursor.execute(
-                        """
-                        INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
-                        VALUES (?, ?, 'parent_of')
-                    """,
-                        (parent_id, node_id),
-                    )
-                for callee in node.get("callee_ids", []):
-                    cursor.execute(
-                        """
-                        INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
-                        VALUES (?, ?, 'calls')
-                    """,
-                        (node_id, callee),
-                    )
-            cursor.execute("COMMIT")
-        except Exception:
-            cursor.execute("ROLLBACK")
-            raise
+        with contextlib.closing(self.conn.cursor()) as cursor:
+            cursor.execute("BEGIN IMMEDIATE")
+            try:
+                for node in nodes:
+                    parent_id = node.get("parent_id")
+                    node_id = node["node_id"]
+                    if parent_id:
+                        cursor.execute(
+                            """
+                            INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
+                            VALUES (?, ?, 'parent_of')
+                        """,
+                            (parent_id, node_id),
+                        )
+                    for callee in node.get("callee_ids", []):
+                        cursor.execute(
+                            """
+                            INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
+                            VALUES (?, ?, 'calls')
+                        """,
+                            (node_id, callee),
+                        )
+                cursor.execute("COMMIT")
+            except Exception:
+                cursor.execute("ROLLBACK")
+                raise
 
     # ── Proposals ─────────────────────────────────────────────────────────
 
     @async_db
     def get_proposals_for_file(self, file_path: str) -> list[dict]:
-        cursor = self.conn.cursor()
-        cursor.execute(
+        with contextlib.closing(self.conn.execute(
             """
             SELECT * FROM proposals
             WHERE file_path = ? AND status = 'pending'
         """,
             (file_path,),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        )) as cursor:
+            return [dict(row) for row in cursor.fetchall()]
 
     @async_db
     def store_proposal(
@@ -230,57 +228,55 @@ class RemoraDB:
         diff: str,
         file_path: str = "",
     ) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO proposals (proposal_id, agent_id, old_source, new_source, diff, status, created_at, file_path)
-            VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
-        """,
-            (proposal_id, agent_id, old_source, new_source, diff, time.time(), file_path),
-        )
+        with contextlib.closing(self.conn.cursor()) as cursor:
+            cursor.execute(
+                """
+                INSERT INTO proposals (proposal_id, agent_id, old_source, new_source, diff, status, created_at, file_path)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+            """,
+                (proposal_id, agent_id, old_source, new_source, diff, time.time(), file_path),
+            )
 
     @async_db
     def update_proposal_status(self, proposal_id: str, status: str) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute("UPDATE proposals SET status = ? WHERE proposal_id = ?", (status, proposal_id))
+        with contextlib.closing(self.conn.cursor()) as cursor:
+            cursor.execute("UPDATE proposals SET status = ? WHERE proposal_id = ?", (status, proposal_id))
 
     @async_db
     def get_proposal(self, proposal_id: str) -> dict | None:
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM proposals WHERE proposal_id = ?", (proposal_id,))
-        row = cursor.fetchone()
+        with contextlib.closing(self.conn.execute("SELECT * FROM proposals WHERE proposal_id = ?", (proposal_id,))) as cursor:
+            row = cursor.fetchone()
         return dict(row) if row else None
 
     # ── Command queue ─────────────────────────────────────────────────────
 
     def push_command(self, command_type: str, agent_id: str | None, payload: dict) -> int:
         """Insert a command into the queue. Returns the command id."""
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO command_queue (command_type, agent_id, payload, status, created_at)
-            VALUES (?, ?, ?, 'pending', ?)
-            """,
-            (command_type, agent_id, json.dumps(payload), time.time()),
-        )
-        return cursor.lastrowid
+        with contextlib.closing(self.conn.cursor()) as cursor:
+            cursor.execute(
+                """
+                INSERT INTO command_queue (command_type, agent_id, payload, status, created_at)
+                VALUES (?, ?, ?, 'pending', ?)
+                """,
+                (command_type, agent_id, json.dumps(payload), time.time()),
+            )
+            return cursor.lastrowid
 
     def poll_commands(self, limit: int = 10) -> list[dict]:
         """Read pending commands in FIFO order."""
-        cursor = self.conn.cursor()
-        cursor.execute(
+        with contextlib.closing(self.conn.execute(
             "SELECT * FROM command_queue WHERE status = 'pending' ORDER BY id ASC LIMIT ?",
             (limit,),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        )) as cursor:
+            return [dict(row) for row in cursor.fetchall()]
 
     def mark_command_done(self, command_id: int) -> None:
         """Mark a command as processed."""
-        cursor = self.conn.cursor()
-        cursor.execute(
-            "UPDATE command_queue SET status = 'done', processed_at = ? WHERE id = ?",
-            (time.time(), command_id),
-        )
+        with contextlib.closing(self.conn.cursor()) as cursor:
+            cursor.execute(
+                "UPDATE command_queue SET status = 'done', processed_at = ? WHERE id = ?",
+                (time.time(), command_id),
+            )
 
     def close(self) -> None:
         if self._shared:

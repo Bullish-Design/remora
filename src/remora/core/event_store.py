@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import sqlite3
@@ -217,11 +218,13 @@ class EventStore:
     async def _migrate_routing_fields(self) -> None:
         """Add routing fields to existing tables."""
         assert self._conn is not None, "_migrate_routing_fields called before connection"
-        cursor = await asyncio.to_thread(
-            self._conn.execute,
-            "PRAGMA table_info(events)",
-        )
-        columns = {row["name"] for row in cursor.fetchall()}
+        
+        def _get_columns(table: str) -> set[str]:
+            assert self._conn is not None
+            with contextlib.closing(self._conn.execute(f"PRAGMA table_info({table})")) as cursor:
+                return {row["name"] for row in cursor.fetchall()}
+
+        columns = await asyncio.to_thread(_get_columns, "events")
 
         if "from_agent" not in columns:
             await asyncio.to_thread(
@@ -245,11 +248,7 @@ class EventStore:
             )
 
         # Migrate nodes table: add start_byte/end_byte for existing DBs
-        cursor = await asyncio.to_thread(
-            self._conn.execute,
-            "PRAGMA table_info(nodes)",
-        )
-        node_columns = {row["name"] for row in cursor.fetchall()}
+        node_columns = await asyncio.to_thread(_get_columns, "nodes")
 
         if "start_byte" not in node_columns:
             await asyncio.to_thread(
@@ -263,11 +262,7 @@ class EventStore:
             )
 
         # Migrate proposals table: add file_path for existing DBs
-        cursor = await asyncio.to_thread(
-            self._conn.execute,
-            "PRAGMA table_info(proposals)",
-        )
-        proposal_columns = {row["name"] for row in cursor.fetchall()}
+        proposal_columns = await asyncio.to_thread(_get_columns, "proposals")
         if "file_path" not in proposal_columns:
             await asyncio.to_thread(
                 self._conn.execute,
@@ -303,14 +298,14 @@ class EventStore:
             assert self._conn is not None
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                cursor = self._conn.execute(
+                with contextlib.closing(self._conn.execute(
                     """
                     INSERT INTO events (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json),
-                )
-                ev_id = cursor.lastrowid or 0
+                )) as cursor:
+                    ev_id = cursor.lastrowid or 0
 
                 f_ups: list[RemoraEvent] = []
                 if self._projection is not None:
@@ -409,13 +404,13 @@ class EventStore:
 
         query += " ORDER BY timestamp ASC, id ASC"
 
+        def _fetch() -> list[sqlite3.Row]:
+            assert self._conn is not None
+            with contextlib.closing(self._conn.execute(query, params)) as cursor:
+                return cursor.fetchall()
+
         async with self._lock:
-            cursor = await asyncio.to_thread(
-                self._conn.execute,
-                query,
-                params,
-            )
-            rows = await asyncio.to_thread(cursor.fetchall)
+            rows = await asyncio.to_thread(_fetch)
 
         for row in rows:
             yield self._row_to_dict(row)
@@ -440,13 +435,13 @@ class EventStore:
             ORDER BY timestamp DESC, id DESC
             LIMIT ?
         """
+        def _fetch() -> list[sqlite3.Row]:
+            assert self._conn is not None
+            with contextlib.closing(self._conn.execute(query, (agent_id, agent_id, limit))) as cursor:
+                return cursor.fetchall()
+
         async with self._lock:
-            cursor = await asyncio.to_thread(
-                self._conn.execute,
-                query,
-                (agent_id, agent_id, limit),
-            )
-            rows = await asyncio.to_thread(cursor.fetchall)
+            rows = await asyncio.to_thread(_fetch)
 
         return [self._row_to_dict(row) for row in rows]
 
@@ -465,13 +460,13 @@ class EventStore:
             WHERE correlation_id = ?
             ORDER BY timestamp ASC, id ASC
         """
+        def _fetch() -> list[sqlite3.Row]:
+            assert self._conn is not None
+            with contextlib.closing(self._conn.execute(query, (correlation_id,))) as cursor:
+                return cursor.fetchall()
+
         async with self._lock:
-            cursor = await asyncio.to_thread(
-                self._conn.execute,
-                query,
-                (correlation_id,),
-            )
-            rows = await asyncio.to_thread(cursor.fetchall)
+            rows = await asyncio.to_thread(_fetch)
 
         return [self._row_to_dict(row) for row in rows]
 
@@ -573,13 +568,13 @@ class EventStore:
         query += " GROUP BY graph_id ORDER BY started_at DESC LIMIT ?"
         params.append(limit)
 
+        def _fetch() -> list[sqlite3.Row]:
+            assert self._conn is not None
+            with contextlib.closing(self._conn.execute(query, params)) as cursor:
+                return cursor.fetchall()
+
         async with self._lock:
-            cursor = await asyncio.to_thread(
-                self._conn.execute,
-                query,
-                params,
-            )
-            rows = await asyncio.to_thread(cursor.fetchall)
+            rows = await asyncio.to_thread(_fetch)
 
         return [
             {
@@ -598,13 +593,13 @@ class EventStore:
         if self._conn is None:
             raise RuntimeError("EventStore not initialized")
 
+        def _fetch() -> sqlite3.Row | None:
+            assert self._conn is not None
+            with contextlib.closing(self._conn.execute("SELECT COUNT(*) FROM events WHERE graph_id = ?", (graph_id,))) as cursor:
+                return cursor.fetchone()
+
         async with self._lock:
-            cursor = await asyncio.to_thread(
-                self._conn.execute,
-                "SELECT COUNT(*) FROM events WHERE graph_id = ?",
-                (graph_id,),
-            )
-            row = await asyncio.to_thread(cursor.fetchone)
+            row = await asyncio.to_thread(_fetch)
 
         return row[0] if row else 0
 
@@ -615,13 +610,13 @@ class EventStore:
         if self._conn is None:
             raise RuntimeError("EventStore not initialized")
 
+        def _delete() -> int:
+            assert self._conn is not None
+            with contextlib.closing(self._conn.execute("DELETE FROM events WHERE graph_id = ?", (graph_id,))) as cursor:
+                return cursor.rowcount
+
         async with self._lock:
-            cursor = await asyncio.to_thread(
-                self._conn.execute,
-                "DELETE FROM events WHERE graph_id = ?",
-                (graph_id,),
-            )
-            return cursor.rowcount
+            return await asyncio.to_thread(_delete)
 
     async def get_node(self, node_id: str) -> "AgentNode | None":
         """Get a single AgentNode by ID from the nodes table."""
@@ -633,8 +628,8 @@ class EventStore:
             raise RuntimeError("EventStore not initialized")
 
         def _fetch(conn: sqlite3.Connection) -> sqlite3.Row | None:
-            cursor = conn.execute("SELECT * FROM nodes WHERE node_id = ?", (node_id,))
-            return cursor.fetchone()
+            with contextlib.closing(conn.execute("SELECT * FROM nodes WHERE node_id = ?", (node_id,))) as cursor:
+                return cursor.fetchone()
 
         async with self._lock:
             row = await asyncio.to_thread(_fetch, self._conn)
@@ -685,8 +680,8 @@ class EventStore:
         query += " ORDER BY file_path, start_line"
 
         def _fetch(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-            cursor = conn.execute(query, params)
-            return cursor.fetchall()
+            with contextlib.closing(conn.execute(query, params)) as cursor:
+                return cursor.fetchall()
 
         async with self._lock:
             rows = await asyncio.to_thread(_fetch, self._conn)
@@ -707,14 +702,14 @@ class EventStore:
             raise RuntimeError("EventStore not initialized")
 
         def _fetch(conn: sqlite3.Connection) -> sqlite3.Row | None:
-            cursor = conn.execute(
+            with contextlib.closing(conn.execute(
                 """SELECT * FROM nodes
                    WHERE file_path = ? AND start_line <= ? AND end_line >= ?
                    ORDER BY (end_line - start_line) ASC
                    LIMIT 1""",
                 (file_path, line, line),
-            )
-            return cursor.fetchone()
+            )) as cursor:
+                return cursor.fetchone()
 
         async with self._lock:
             row = await asyncio.to_thread(_fetch, self._conn)
@@ -730,12 +725,13 @@ class EventStore:
         if self._conn is None:
             raise RuntimeError("EventStore not initialized")
 
+        def _update() -> None:
+            assert self._conn is not None
+            with contextlib.closing(self._conn.execute("UPDATE nodes SET status = ? WHERE node_id = ?", (status, node_id))):
+                pass
+                
         async with self._lock:
-            await asyncio.to_thread(
-                self._conn.execute,
-                "UPDATE nodes SET status = ? WHERE node_id = ?",
-                (status, node_id),
-            )
+            await asyncio.to_thread(_update)
 
     async def remove_nodes_for_file(self, file_path: str) -> int:
         """Remove all nodes for a given file path. Returns count removed."""
@@ -744,13 +740,13 @@ class EventStore:
         if self._conn is None:
             raise RuntimeError("EventStore not initialized")
 
+        def _delete() -> int:
+            assert self._conn is not None
+            with contextlib.closing(self._conn.execute("DELETE FROM nodes WHERE file_path = ?", (file_path,))) as cursor:
+                return cursor.rowcount
+
         async with self._lock:
-            cursor = await asyncio.to_thread(
-                self._conn.execute,
-                "DELETE FROM nodes WHERE file_path = ?",
-                (file_path,),
-            )
-            return cursor.rowcount
+            return await asyncio.to_thread(_delete)
 
     async def close(self) -> None:
         """Close the database connection."""
