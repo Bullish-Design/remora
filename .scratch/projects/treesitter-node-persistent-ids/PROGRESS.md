@@ -8,3 +8,4 @@
 - [x] Update spawn_child and reconciler to use unified identity/hash primitives.
 - [x] Update exports and all affected tests for new APIs and semantic ID behavior.
 - [x] Verify with targeted + integration tests covering discovery, watcher, background scan, reconcile, and spawn_child paths.
+- [x] Thorough code review against `docs/EventBased_Concept.md` and identification of future architectural improvements.
