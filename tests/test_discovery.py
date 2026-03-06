@@ -227,3 +227,33 @@ class TestParseContent:
         nodes = parse_content("test.py", code)
         names = [n.name for n in nodes if n.node_type == "function"]
         assert "read_optional" in names
+
+
+class TestCSTNodeParentId:
+    """CSTNode should carry parent_id after semantic identity resolution."""
+
+    def test_method_has_class_parent(self):
+        content = "class Foo:\n    def bar(self):\n        pass\n"
+        nodes = parse_content("test.py", content)
+        by_name = {n.name: n for n in nodes}
+        assert by_name["bar"].parent_id == by_name["Foo"].node_id
+
+    def test_class_has_file_parent(self):
+        content = "class Foo:\n    pass\n"
+        nodes = parse_content("test.py", content)
+        by_name = {n.name: n for n in nodes}
+        file_node = [n for n in nodes if n.node_type == "file"][0]
+        assert by_name["Foo"].parent_id == file_node.node_id
+
+    def test_file_node_has_no_parent(self):
+        content = "x = 1\n"
+        nodes = parse_content("test.py", content)
+        file_node = [n for n in nodes if n.node_type == "file"][0]
+        assert file_node.parent_id is None
+
+    def test_function_method_dedup_keeps_method(self):
+        content = "class Foo:\n    def bar(self):\n        pass\n"
+        nodes = parse_content("test.py", content)
+        names_types = [(n.name, n.node_type) for n in nodes]
+        assert ("bar", "method") in names_types
+        assert ("bar", "function") not in names_types

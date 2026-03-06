@@ -26,7 +26,7 @@ from remora.core.event_store import EventStore
 from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
 from remora.core.projections import NodeProjection
 from remora.lsp.db import RemoraDB
-from remora.lsp.watcher import ASTWatcher
+from remora.core.discovery import parse_content, _assign_semantic_identity
 
 _SKIP_DIRS = frozenset(
     {
@@ -250,7 +250,6 @@ async def _scan(args: argparse.Namespace) -> int:
     _LOG.info("loaded existing manifest entries=%d", len(existing_manifest))
     next_manifest: dict[str, dict[str, int]] = {}
 
-    watcher = ASTWatcher()
     projection = NodeProjection()
     event_store = EventStore(events_db_path, projection=projection)
     db = RemoraDB(str(indexer_db_path))
@@ -422,7 +421,9 @@ async def _scan(args: argparse.Namespace) -> int:
                 parse_start = time.monotonic()
                 _update_lock_file(lock_path, lock_payload, phase="parse_nodes", current_file=relative)
                 _LOG.info("parse start file=%s", relative)
-                nodes = watcher.parse_and_inject_ids(uri, text, old_nodes)
+                cst_nodes = parse_content(uri, text)
+                _assign_semantic_identity(cst_nodes, old_nodes)
+                nodes = cst_nodes
                 _LOG.info(
                     "parse end file=%s nodes=%d duration_ms=%.1f",
                     relative,
@@ -431,25 +432,10 @@ async def _scan(args: argparse.Namespace) -> int:
                 )
 
                 old_ids = {n["node_id"] for n in old_nodes}
-                new_ids = {n["node_id"] for n in nodes}
+                new_ids = {n.node_id for n in nodes}
                 batch_events: list[NodeDiscoveredEvent | NodeRemovedEvent] = []
-                for node_dict in nodes:
-                    batch_events.append(
-                        NodeDiscoveredEvent(
-                            node_id=node_dict["node_id"],
-                            node_type=node_dict["node_type"],
-                            name=node_dict["name"],
-                            full_name=node_dict.get("full_name", node_dict["name"]),
-                            file_path=node_dict["file_path"],
-                            start_line=node_dict["start_line"],
-                            end_line=node_dict["end_line"],
-                            source_code=node_dict["source_code"],
-                            source_hash=node_dict["source_hash"],
-                            parent_id=node_dict.get("parent_id"),
-                            start_byte=node_dict.get("start_byte", 0),
-                            end_byte=node_dict.get("end_byte", 0),
-                        )
-                    )
+                for node in nodes:
+                    batch_events.append(NodeDiscoveredEvent.from_cst_node(node))
                 removed_ids = old_ids - new_ids
                 for removed_id in removed_ids:
                     batch_events.append(NodeRemovedEvent(node_id=removed_id, file_path=uri))

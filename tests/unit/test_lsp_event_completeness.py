@@ -211,12 +211,8 @@ class TestDoReparse:
         from remora.core.event_store import EventStore
         from remora.core.projections import NodeProjection
         from remora.lsp.server import RemoraLanguageServer
-        from remora.lsp.watcher import ASTWatcher
-
-        srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
         srv._reparse_timers = {}
         srv._cursor_timers = {}
-        srv.watcher = ASTWatcher()
 
         event_store = EventStore(tmp_path / "events.db", projection=NodeProjection())
         await event_store.initialize()
@@ -247,12 +243,8 @@ class TestDoReparse:
         from remora.core.events import NodeDiscoveredEvent
         from remora.core.projections import NodeProjection
         from remora.lsp.server import RemoraLanguageServer
-        from remora.lsp.watcher import ASTWatcher
-
-        srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
         srv._reparse_timers = {}
         srv._cursor_timers = {}
-        srv.watcher = ASTWatcher()
 
         event_store = EventStore(tmp_path / "events.db", projection=NodeProjection())
         await event_store.initialize()
@@ -285,12 +277,8 @@ class TestDoReparse:
         from remora.core.event_store import EventStore
         from remora.core.projections import NodeProjection
         from remora.lsp.server import RemoraLanguageServer
-        from remora.lsp.watcher import ASTWatcher
-
-        srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
         srv._reparse_timers = {}
         srv._cursor_timers = {}
-        srv.watcher = ASTWatcher()
 
         event_store = EventStore(tmp_path / "events.db", projection=NodeProjection())
         await event_store.initialize()

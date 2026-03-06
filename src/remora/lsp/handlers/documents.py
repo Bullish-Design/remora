@@ -9,34 +9,22 @@ from remora.lsp.models import RewriteProposal
 from remora.lsp.server import logger, publish_diagnostics, refresh_code_lenses, server, uri_to_path
 
 
-async def _emit_node_events(uri: str, new_dicts: list[dict]) -> None:
+from remora.core.discovery import CSTNode, parse_content
+
+async def _emit_node_events(uri: str, new_nodes: list[CSTNode]) -> None:
     """Emit NodeDiscovered/NodeRemoved events for a file's parse results."""
     if not server.event_store:
         return
 
     old_agents = await server.event_store.list_nodes(file_path=uri)
     old_ids = {a.node_id for a in old_agents}
-    new_ids = {nd["node_id"] for nd in new_dicts}
+    new_ids = {n.node_id for n in new_nodes}
 
     for orphan_id in old_ids - new_ids:
         await server.event_store.append("nodes", NodeRemovedEvent(node_id=orphan_id))
 
-    for nd in new_dicts:
-        event = NodeDiscoveredEvent(
-            node_id=nd["node_id"],
-            node_type=nd["node_type"],
-            name=nd["name"],
-            full_name=nd["full_name"],
-            file_path=nd["file_path"],
-            start_line=nd["start_line"],
-            end_line=nd["end_line"],
-            source_code=nd["source_code"],
-            source_hash=nd["source_hash"],
-            parent_id=nd["parent_id"],
-            start_byte=nd.get("start_byte", 0),
-            end_byte=nd.get("end_byte", 0),
-        )
-        await server.event_store.append("nodes", event)
+    for node in new_nodes:
+        await server.event_store.append("nodes", NodeDiscoveredEvent.from_cst_node(node))
 
 
 @server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
@@ -46,17 +34,17 @@ async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
         text = params.text_document.text
         logger.info("did_open: uri=%s text_len=%d", uri, len(text))
 
-        new_dicts = server.watcher.parse(uri, text)
-        logger.info("did_open: parsed %d nodes from %s", len(new_dicts), uri)
-        for nd in new_dicts:
+        new_nodes = parse_content(uri, text)
+        logger.info("did_open: parsed %d nodes from %s", len(new_nodes), uri)
+        for node in new_nodes:
             logger.debug(
-                "did_open:   node: %s (%s) lines %d-%d", nd["name"], nd["node_type"], nd["start_line"], nd["end_line"]
+                "did_open:   node: %s (%s) lines %d-%d", node.name, node.node_type, node.start_line, node.end_line
             )
 
-        await _emit_node_events(uri, new_dicts)
+        await _emit_node_events(uri, new_nodes)
 
         # Update edges in RemoraDB (edges stay in RemoraDB for now)
-        await server.db.update_edges(new_dicts)
+        await server.db.update_edges(new_nodes)
         logger.debug("did_open: emitted node events + updated edges")
 
         await refresh_code_lenses()
@@ -125,20 +113,20 @@ async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
         text = params.text if params.text is not None else Path(uri_to_path(uri)).read_text()
         logger.debug("did_save: read %d chars from %s", len(text), uri)
 
-        new_dicts = server.watcher.parse(uri, text)
-        logger.info("did_save: parsed %d nodes for %s", len(new_dicts), uri)
+        new_nodes = parse_content(uri, text)
+        logger.info("did_save: parsed %d nodes for %s", len(new_nodes), uri)
 
         if server.event_store:
-            await _emit_node_events(uri, new_dicts)
+            await _emit_node_events(uri, new_nodes)
 
             # Emit file-level reactive events (Gap #10 — reactive loop)
             await server.event_store.append("files", FileSavedEvent(path=uri))
             await server.event_store.append("files", ContentChangedEvent(path=uri))
 
         # Update edges in RemoraDB
-        await server.db.update_edges(new_dicts)
+        await server.db.update_edges(new_nodes)
 
-        server.graph.invalidate(uri)
+        await server.graph.invalidate(uri)
 
         await refresh_code_lenses()
 

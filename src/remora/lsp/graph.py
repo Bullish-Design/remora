@@ -3,35 +3,27 @@ from __future__ import annotations
 import contextlib
 import sqlite3
 import threading
+from typing import Any
 
 import rustworkx as rx
 
 from remora.lsp.db import RemoraDB
 
+from remora.core.event_store import EventStore
+
 
 class LazyGraph:
     """Graph topology backed by RemoraDB (edges) and EventStore (nodes).
 
-    Edges live in RemoraDB. Node data lives in EventStore's nodes table.
-    Each source has its own SQLite connection for thread-safe reads.
+    Edges live in RemoraDB. Node data is fetched via EventStore.
     """
 
-    def __init__(self, db: RemoraDB, event_store_db_path: str | None = None):
+    def __init__(self, db: RemoraDB, event_store: EventStore | None = None):
         # Edges connection — RemoraDB
         self._edges_conn = sqlite3.connect(str(db.db_path), check_same_thread=False)
         self._edges_conn.row_factory = sqlite3.Row
 
-        # Nodes connection — EventStore DB (if available)
-        self._nodes_conn: sqlite3.Connection | None = None
-        if event_store_db_path:
-            self._nodes_conn = sqlite3.connect(
-                event_store_db_path,
-                timeout=15.0,
-                check_same_thread=False,
-                isolation_level=None,
-            )
-            self._nodes_conn.execute("PRAGMA journal_mode=WAL")
-            self._nodes_conn.row_factory = sqlite3.Row
+        self.event_store = event_store
 
         self._lock = threading.Lock()
         self.graph = rx.PyDiGraph()
@@ -39,12 +31,12 @@ class LazyGraph:
         self.loaded_files: set[str] = set()
         self._expanded: set[str] = set()  # nodes whose neighborhood has been loaded
 
-    def invalidate(self, file_path: str) -> None:
+    async def invalidate(self, file_path: str) -> None:
         self.loaded_files.discard(file_path)
 
-        nodes = self._get_nodes_for_file(file_path)
+        nodes = await self._get_nodes_for_file(file_path)
         for node in nodes:
-            nid = node.get("id", node.get("node_id"))
+            nid = getattr(node, "node_id", node.get("node_id", node.get("id")))
             self._expanded.discard(nid)
             if nid in self.node_indices:
                 idx = self.node_indices.pop(nid)
@@ -53,32 +45,32 @@ class LazyGraph:
                 except Exception:
                     pass
 
-    def ensure_loaded(self, node_id: str) -> None:
+    async def ensure_loaded(self, node_id: str) -> None:
         if node_id in self._expanded:
             return
 
-        node = self._get_node(node_id)
+        node = await self._get_node(node_id)
         if not node:
             return
 
         self._expanded.add(node_id)
-        neighbors = self._get_neighborhood(node_id, depth=2)
+        neighbors = await self._get_neighborhood(node_id, depth=2)
 
         for neighbor in neighbors:
-            nid = neighbor.get("id", neighbor.get("node_id"))
+            nid = getattr(neighbor, "node_id", neighbor.get("node_id", neighbor.get("id")))
             if nid not in self.node_indices:
                 idx = self.graph.add_node(neighbor)
                 self.node_indices[nid] = idx
 
-        edges = self._get_edges_for_nodes([n.get("id", n.get("node_id")) for n in neighbors])
+        edges = self._get_edges_for_nodes([getattr(n, "node_id", n.get("node_id", n.get("id"))) for n in neighbors])
         for edge in edges:
             if edge["from_id"] in self.node_indices and edge["to_id"] in self.node_indices:
                 self.graph.add_edge(
                     self.node_indices[edge["from_id"]], self.node_indices[edge["to_id"]], edge["edge_type"]
                 )
 
-    def get_parent(self, node_id: str) -> str | None:
-        self.ensure_loaded(node_id)
+    async def get_parent(self, node_id: str) -> str | None:
+        await self.ensure_loaded(node_id)
         if node_id not in self.node_indices:
             return None
 
@@ -86,13 +78,13 @@ class LazyGraph:
         for predecessor in self.graph.predecessor_indices(idx):
             edge = self.graph.get_edge_data(predecessor, idx)
             if edge == "parent_of":
-                data = self.graph[predecessor]
-                return data.get("id", data.get("node_id"))
+                # data could be AgentNode or dict
+                return getattr(data, "node_id", data.get("node_id", data.get("id")))
 
         return None
 
-    def get_callers(self, node_id: str) -> list[str]:
-        self.ensure_loaded(node_id)
+    async def get_callers(self, node_id: str) -> list[str]:
+        await self.ensure_loaded(node_id)
         if node_id not in self.node_indices:
             return []
 
@@ -101,34 +93,26 @@ class LazyGraph:
         for predecessor in self.graph.predecessor_indices(idx):
             edge = self.graph.get_edge_data(predecessor, idx)
             if edge == "calls":
-                data = self.graph[predecessor]
-                callers.append(data.get("id", data.get("node_id")))
+                callers.append(getattr(data, "node_id", data.get("node_id", data.get("id"))))
 
         return callers
 
     def close(self) -> None:
         self._edges_conn.close()
-        if self._nodes_conn:
-            self._nodes_conn.close()
 
     # ── Private: node queries (EventStore DB) ─────────────────────────────
 
-    def _get_nodes_for_file(self, file_path: str) -> list[dict]:
-        if not self._nodes_conn:
+    async def _get_nodes_for_file(self, file_path: str) -> list[Any]:
+        if not self.event_store:
             return []
-        with self._lock:
-            with contextlib.closing(self._nodes_conn.execute("SELECT * FROM nodes WHERE file_path = ?", (file_path,))) as cursor:
-                return [self._normalize_node(row) for row in cursor.fetchall()]
+        return await self.event_store.list_nodes(file_path=file_path)
 
-    def _get_node(self, node_id: str) -> dict | None:
-        if not self._nodes_conn:
+    async def _get_node(self, node_id: str) -> Any | None:
+        if not self.event_store:
             return None
-        with self._lock:
-            with contextlib.closing(self._nodes_conn.execute("SELECT * FROM nodes WHERE node_id = ?", (node_id,))) as cursor:
-                row = cursor.fetchone()
-        return self._normalize_node(row) if row else None
+        return await self.event_store.get_node(node_id)
 
-    def _get_neighborhood(self, node_id: str, depth: int = 2) -> list[dict]:
+    async def _get_neighborhood(self, node_id: str, depth: int = 2) -> list[Any]:
         """Get node + neighbors by walking edges, then fetching node data."""
         with self._lock:
             # Walk edges to find neighbor IDs
@@ -151,14 +135,16 @@ class LazyGraph:
             )) as cursor:
                 neighbor_ids = [row[0] for row in cursor.fetchall()]
 
-        if not neighbor_ids or not self._nodes_conn:
+        if not neighbor_ids or not self.event_store:
             return []
 
-        # Fetch node data from EventStore DB
-        with self._lock:
-            placeholders = ",".join("?" * len(neighbor_ids))
-            with contextlib.closing(self._nodes_conn.execute(f"SELECT * FROM nodes WHERE node_id IN ({placeholders})", neighbor_ids)) as cursor:
-                return [self._normalize_node(row) for row in cursor.fetchall()]
+        # Fetch node data from EventStore
+        nodes = []
+        for nid in neighbor_ids:
+            node = await self._get_node(nid)
+            if node:
+                nodes.append(node)
+        return nodes
 
     # ── Private: edge queries (RemoraDB) ──────────────────────────────────
 
@@ -178,10 +164,4 @@ class LazyGraph:
             )) as cursor:
                 return [dict(row) for row in cursor.fetchall()]
 
-    @staticmethod
-    def _normalize_node(row: sqlite3.Row) -> dict:
-        """Ensure node dict has both 'id' and 'node_id' keys for compat."""
-        data = dict(row)
-        if "node_id" in data and "id" not in data:
-            data["id"] = data["node_id"]
-        return data
+

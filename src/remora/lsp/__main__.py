@@ -246,39 +246,23 @@ def main(
 
                 await _pause_for_user_activity()
 
+                from remora.core.discovery import parse_content
                 text = await asyncio.to_thread(fpath.read_text, encoding="utf-8", errors="replace")
                 uri = from_fs_path(str(fpath))
-                nodes = await asyncio.to_thread(server.watcher.parse, uri, text)
+                nodes = await asyncio.to_thread(parse_content, uri, text)
                 # Emit events to EventStore (batched per file for efficiency)
                 if server.event_store:
                     from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
 
                     old_agents = await server.event_store.list_nodes(file_path=uri)
                     old_ids = {a.node_id for a in old_agents}
-                    new_ids = {n["node_id"] for n in nodes}
+                    new_ids = {n.node_id for n in nodes}
 
                     # Batch all events for this file
-                    batch_events = []
-                    for node_dict in nodes:
-                        batch_events.append(
-                            NodeDiscoveredEvent(
-                                node_id=node_dict["node_id"],
-                                node_type=node_dict["node_type"],
-                                name=node_dict["name"],
-                                full_name=node_dict.get("full_name", node_dict["name"]),
-                                file_path=node_dict["file_path"],
-                                start_line=node_dict["start_line"],
-                                end_line=node_dict["end_line"],
-                                source_code=node_dict["source_code"],
-                                source_hash=node_dict["source_hash"],
-                                parent_id=node_dict.get("parent_id"),
-                                start_byte=node_dict.get("start_byte", 0),
-                                end_byte=node_dict.get("end_byte", 0),
-                            )
-                        )
+                    batch_events = [NodeDiscoveredEvent.from_cst_node(n) for n in nodes]
                     for removed_id in old_ids - new_ids:
                         batch_events.append(
-                            NodeRemovedEvent(node_id=removed_id, file_path=uri)
+                            NodeRemovedEvent(node_id=removed_id)
                         )
 
                     # Append events in small chunks so user-triggered operations

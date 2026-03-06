@@ -16,7 +16,6 @@ from remora.core.agent_node import AgentNode, ToolSchema
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
 from remora.lsp.models import RewriteProposal
-from remora.lsp.watcher import ASTWatcher
 
 logger = logging.getLogger("remora.lsp")
 
@@ -30,9 +29,7 @@ class RemoraLanguageServer(LanguageServer):
         super().__init__(name="remora", version="0.1.0")
         self.db = RemoraDB()
         self.event_store = event_store
-        es_db_path = str(event_store._db_path) if event_store else None
-        self.graph = LazyGraph(self.db, event_store_db_path=es_db_path)
-        self.watcher = ASTWatcher()
+        self.graph = LazyGraph(self.db, event_store=event_store)
         self.proposals: dict[str, RewriteProposal] = {}
         self.runner: "AgentRunner | None" = None
         self._correlation_counter = 0
@@ -76,37 +73,24 @@ class RemoraLanguageServer(LanguageServer):
 
     async def _do_reparse(self, uri: str, text: str) -> None:
         """Execute the actual debounced reparse for *uri*."""
+        from remora.core.discovery import parse_content
         from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
 
         self._reparse_timers.pop(uri, None)
         try:
-            new_dicts = self.watcher.parse(uri, text)
-            logger.debug("_do_reparse: %d nodes for %s", len(new_dicts), uri)
+            cst_nodes = parse_content(uri, text)
+            logger.debug("_do_reparse: %d nodes for %s", len(cst_nodes), uri)
 
             if self.event_store:
                 old_agents = await self.event_store.list_nodes(file_path=uri)
-                new_ids = {nd["node_id"] for nd in new_dicts}
+                new_ids = {n.node_id for n in cst_nodes}
                 old_ids = {a.node_id for a in old_agents}
 
                 for orphan_id in old_ids - new_ids:
                     await self.event_store.append("nodes", NodeRemovedEvent(node_id=orphan_id))
 
-                for nd in new_dicts:
-                    event = NodeDiscoveredEvent(
-                        node_id=nd["node_id"],
-                        node_type=nd["node_type"],
-                        name=nd["name"],
-                        full_name=nd["full_name"],
-                        file_path=nd["file_path"],
-                        start_line=nd["start_line"],
-                        end_line=nd["end_line"],
-                        source_code=nd["source_code"],
-                        source_hash=nd["source_hash"],
-                        parent_id=nd["parent_id"],
-                        start_byte=nd.get("start_byte", 0),
-                        end_byte=nd.get("end_byte", 0),
-                    )
-                    await self.event_store.append("nodes", event)
+                for node in cst_nodes:
+                    await self.event_store.append("nodes", NodeDiscoveredEvent.from_cst_node(node))
 
             await self.refresh_code_lenses()
             await self.notify_agents_updated()

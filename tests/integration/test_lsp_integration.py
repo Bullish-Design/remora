@@ -14,7 +14,6 @@ from remora.lsp.handlers import actions, capabilities, commands, documents, lens
 from remora.lsp.server import server
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
-from remora.lsp.watcher import ASTWatcher
 from remora.core.event_store import EventStore
 from remora.core.projections import NodeProjection
 
@@ -34,7 +33,6 @@ async def isolated_lsp_server(tmp_path: Path) -> None:
     server.shutdown()
     server.db = RemoraDB(str(tmp_path / "indexer.db"))
     server.proposals.clear()
-    server.watcher = ASTWatcher()
 
     # Set up EventStore with NodeProjection
     event_store = EventStore(
@@ -43,7 +41,7 @@ async def isolated_lsp_server(tmp_path: Path) -> None:
     )
     await event_store.initialize()
     server.event_store = event_store
-    server.graph = LazyGraph(server.db, event_store_db_path=str(tmp_path / "events.db"))
+    server.graph = LazyGraph(server.db, event_store=event_store)
 
     original_discover = server.discover_tools_for_agent
 

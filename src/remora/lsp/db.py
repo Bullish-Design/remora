@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import ParamSpec, TypeVar
 
 import sqlite3
+from remora.core.discovery import CSTNode
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -59,6 +60,7 @@ class RemoraDB:
             self.conn.row_factory = sqlite3.Row
             self._lock = lock if lock is not None else threading.Lock()
             self._shared = True
+            self._init_schema()  # Always create LSP tables — idempotent with IF NOT EXISTS
         else:
             # Standalone mode (backward compat)
             self.db_path = Path(db_path)
@@ -177,28 +179,15 @@ class RemoraDB:
     # ── Edges ─────────────────────────────────────────────────────────────
 
     @async_db
-    def update_edges(self, nodes: list[dict]) -> None:
+    def update_edges(self, nodes: list[CSTNode]) -> None:
         with contextlib.closing(self.conn.cursor()) as cursor:
             cursor.execute("BEGIN IMMEDIATE")
             try:
                 for node in nodes:
-                    parent_id = node.get("parent_id")
-                    node_id = node["node_id"]
-                    if parent_id:
+                    if node.parent_id:
                         cursor.execute(
-                            """
-                            INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
-                            VALUES (?, ?, 'parent_of')
-                        """,
-                            (parent_id, node_id),
-                        )
-                    for callee in node.get("callee_ids", []):
-                        cursor.execute(
-                            """
-                            INSERT OR REPLACE INTO edges (from_id, to_id, edge_type)
-                            VALUES (?, ?, 'calls')
-                        """,
-                            (node_id, callee),
+                            "INSERT OR REPLACE INTO edges (from_id, to_id, edge_type) VALUES (?, ?, 'parent_of')",
+                            (node.parent_id, node.node_id),
                         )
                 cursor.execute("COMMIT")
             except Exception:

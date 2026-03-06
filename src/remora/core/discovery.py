@@ -62,6 +62,7 @@ class CSTNode(BaseModel):
     end_line: int
     start_byte: int
     end_byte: int
+    parent_id: str | None = None
 
     def __hash__(self) -> int:
         """Hash only by node_id — intentional override.
@@ -206,6 +207,16 @@ def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
     if not any(n.node_type == "file" for n in nodes):
         nodes.insert(0, _create_file_node(file_path, content))
 
+    # Deduplicate: when both "function" and "method" exist for the same
+    # (name, start_line, end_line), keep only "method".
+    method_keys = {
+        (n.name, n.start_line, n.end_line) for n in nodes if n.node_type == "method"
+    }
+    nodes = [
+        n for n in nodes
+        if not (n.node_type == "function" and (n.name, n.start_line, n.end_line) in method_keys)
+    ]
+
     return _assign_semantic_identity(str(file_path), nodes)
 
 
@@ -338,12 +349,14 @@ def _create_file_node(file_path: Path, content: str | None = None) -> CSTNode:
 
 
 def _assign_semantic_identity(file_path: str, nodes: list[CSTNode]) -> list[CSTNode]:
-    """Assign semantic full_name + node_id for each node using containment."""
+    """Assign semantic full_name, node_id, and parent_id using containment."""
     if not nodes:
         return nodes
 
     stem = Path(file_path).stem
-    work: list[dict[str, int | str]] = []
+
+    # Build work items: mutable dicts with room for full_name and parent index
+    work: list[dict[str, int | str | None]] = []
     for node in nodes:
         work.append(
             {
@@ -356,50 +369,67 @@ def _assign_semantic_identity(file_path: str, nodes: list[CSTNode]) -> list[CSTN
                 "start_byte": node.start_byte,
                 "end_byte": node.end_byte,
                 "full_name": "",
+                "_parent_idx": None,  # track parent index for parent_id
             }
         )
 
-    for node in work:
-        if node["node_type"] == "file":
-            node["full_name"] = stem
+    # First pass: compute full_name and cache parent index
+    for i, item in enumerate(work):
+        if item["node_type"] == "file":
+            item["full_name"] = stem
             continue
 
-        node_start = int(node["start_line"])
-        node_end = int(node["end_line"])
+        node_start = int(item["start_line"])
+        node_end = int(item["end_line"])
         node_span = node_end - node_start
-        best_parent: dict[str, int | str] | None = None
+        best_j: int | None = None
         best_span = float("inf")
-        for candidate in work:
-            if candidate is node:
+        for j, candidate in enumerate(work):
+            if j == i:
                 continue
             cand_start = int(candidate["start_line"])
             cand_end = int(candidate["end_line"])
             cand_span = cand_end - cand_start
-            if cand_start <= node_start and cand_end >= node_end and cand_span > node_span and cand_span < best_span:
-                best_parent = candidate
+            if (
+                cand_start <= node_start
+                and cand_end >= node_end
+                and cand_span > node_span
+                and cand_span < best_span
+            ):
+                best_j = j
                 best_span = cand_span
 
-        if best_parent is not None:
-            node["full_name"] = f"{best_parent['full_name']}.{node['name']}"
+        if best_j is not None:
+            item["full_name"] = f"{work[best_j]['full_name']}.{item['name']}"
+            item["_parent_idx"] = best_j
         else:
-            node["full_name"] = f"{stem}.{node['name']}"
+            item["full_name"] = f"{stem}.{item['name']}"
+
+    # Second pass: compute node_ids (needs full_name), then resolve parent_id
+    node_ids: list[str] = []
+    for item in work:
+        node_ids.append(
+            compute_node_id(file_path, str(item["node_type"]), str(item["full_name"]))
+        )
 
     resolved: list[CSTNode] = []
-    for node in work:
-        node_type = str(node["node_type"])
-        full_name = str(node["full_name"])
+    for i, item in enumerate(work):
+        parent_idx = item["_parent_idx"]
+        parent_id = node_ids[parent_idx] if parent_idx is not None else None
+
         resolved.append(
             CSTNode(
-                node_id=compute_node_id(file_path, node_type, full_name),
-                node_type=node_type,
-                name=str(node["name"]),
-                full_name=full_name,
-                file_path=str(node["file_path"]),
-                text=str(node["text"]),
-                start_line=int(node["start_line"]),
-                end_line=int(node["end_line"]),
-                start_byte=int(node["start_byte"]),
-                end_byte=int(node["end_byte"]),
+                node_id=node_ids[i],
+                node_type=str(item["node_type"]),
+                name=str(item["name"]),
+                full_name=str(item["full_name"]),
+                file_path=str(item["file_path"]),
+                text=str(item["text"]),
+                start_line=int(item["start_line"]),
+                end_line=int(item["end_line"]),
+                start_byte=int(item["start_byte"]),
+                end_byte=int(item["end_byte"]),
+                parent_id=parent_id,
             )
         )
 
@@ -575,6 +605,16 @@ def parse_content(file_path: str, content: str, language: str | None = None) -> 
     # Always include file-level node
     if not any(n.node_type == "file" for n in nodes):
         nodes.insert(0, _create_file_node_from_content(file_path, content))
+
+    # Deduplicate: when both "function" and "method" exist for the same
+    # (name, start_line, end_line), keep only "method".
+    method_keys = {
+        (n.name, n.start_line, n.end_line) for n in nodes if n.node_type == "method"
+    }
+    nodes = [
+        n for n in nodes
+        if not (n.node_type == "function" and (n.name, n.start_line, n.end_line) in method_keys)
+    ]
 
     return _assign_semantic_identity(file_path, nodes)
 

@@ -197,58 +197,7 @@ class EventStore:
                 """,
             )
 
-            # RemoraDB operational tables (shared with RemoraDB)
-            await asyncio.to_thread(
-                self._conn.executescript,
-                """
-                CREATE TABLE IF NOT EXISTS edges (
-                    from_id TEXT NOT NULL,
-                    to_id TEXT NOT NULL,
-                    edge_type TEXT NOT NULL,
-                    PRIMARY KEY (from_id, to_id, edge_type)
-                );
 
-                CREATE TABLE IF NOT EXISTS activation_chain (
-                    correlation_id TEXT NOT NULL,
-                    agent_id TEXT NOT NULL,
-                    depth INTEGER NOT NULL,
-                    timestamp REAL NOT NULL,
-                    PRIMARY KEY (correlation_id, agent_id)
-                );
-
-                CREATE TABLE IF NOT EXISTS proposals (
-                    proposal_id TEXT PRIMARY KEY,
-                    agent_id TEXT NOT NULL,
-                    old_source TEXT NOT NULL,
-                    new_source TEXT NOT NULL,
-                    diff TEXT NOT NULL,
-                    status TEXT DEFAULT 'pending',
-                    created_at REAL NOT NULL,
-                    file_path TEXT
-                );
-
-                CREATE TABLE IF NOT EXISTS cursor_focus (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    agent_id TEXT,
-                    file_path TEXT,
-                    line INTEGER,
-                    timestamp REAL
-                );
-
-                CREATE TABLE IF NOT EXISTS command_queue (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    command_type TEXT NOT NULL,
-                    agent_id TEXT,
-                    payload JSON NOT NULL,
-                    status TEXT DEFAULT 'pending',
-                    created_at REAL NOT NULL,
-                    processed_at REAL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_chain_correlation
-                ON activation_chain(correlation_id);
-                """,
-            )
 
             await self._migrate_routing_fields()
 
@@ -424,13 +373,7 @@ class EventStore:
                 "ALTER TABLE nodes ADD COLUMN end_byte INTEGER NOT NULL DEFAULT 0",
             )
 
-        # Migrate proposals table: add file_path for existing DBs
-        proposal_columns = await asyncio.to_thread(_get_columns, "proposals")
-        if "file_path" not in proposal_columns:
-            await asyncio.to_thread(
-                self._conn.execute,
-                "ALTER TABLE proposals ADD COLUMN file_path TEXT",
-            )
+
 
     async def append(
         self,

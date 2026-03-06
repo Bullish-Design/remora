@@ -174,6 +174,25 @@ class NodeDiscoveredEvent(_FrozenEvent):
     end_byte: int = 0
     timestamp: float = Field(default_factory=time.time)
 
+    @classmethod
+    def from_cst_node(cls, node: "CSTNode") -> "NodeDiscoveredEvent":
+        """Create from a CSTNode — single source of truth for field mapping."""
+        from remora.core.discovery import compute_source_hash
+        return cls(
+            node_id=node.node_id,
+            node_type=node.node_type,
+            name=node.name,
+            full_name=node.full_name,
+            file_path=node.file_path,
+            start_line=node.start_line,
+            end_line=node.end_line,
+            start_byte=node.start_byte,
+            end_byte=node.end_byte,
+            source_code=node.text,
+            source_hash=compute_source_hash(node.text),
+            parent_id=node.parent_id,
+        )
+
 
 class ScaffoldRequestEvent(_FrozenEvent):
     """Emitted when a scaffold node is created and needs initialization.
@@ -200,10 +219,6 @@ class NodeRemovedEvent(_FrozenEvent):
     node_id: str
     timestamp: float = Field(default_factory=time.time)
 
-
-# ============================================================================
-# Union Type for Pattern Matching
-# ============================================================================
 
 # ============================================================================
 # Union Type for Pattern Matching
