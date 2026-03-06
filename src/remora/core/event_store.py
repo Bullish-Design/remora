@@ -50,8 +50,15 @@ class EventStore:
         self._db_path = normalize_path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
-        self._read_conn: sqlite3.Connection | None = None  # Separate connection for reads (no lock needed)
+        self._read_conn: sqlite3.Connection | None = None  # Separate connection for reads
         self._lock = asyncio.Lock()
+        # Serializes concurrent asyncio.to_thread dispatches against _read_conn.
+        # SQLite connections are NOT thread-safe even in WAL mode; concurrent
+        # to_thread() calls against the same connection corrupt its internal
+        # state and raise sqlite3.InterfaceError. The lock is asyncio-level so
+        # it does NOT block write throughput — writers use _lock, readers use
+        # _read_lock, and they never contend with each other.
+        self._read_lock = asyncio.Lock()
         self._subscriptions = subscriptions
         self._event_bus = event_bus
         self._projection = projection
@@ -91,8 +98,10 @@ class EventStore:
             await asyncio.to_thread(self._conn.execute, "PRAGMA wal_autocheckpoint=1000")
 
             # Create a separate read-only connection for queries.
-            # With WAL mode, readers don't block writers and vice versa,
-            # so this connection can be used without acquiring _lock.
+            # With WAL mode, readers don't block writers and vice versa.
+            # All reads are serialized via _read_lock to prevent the
+            # sqlite3.InterfaceError that occurs when concurrent to_thread()
+            # dispatches share the same connection object.
             self._read_conn = await asyncio.to_thread(
                 sqlite3.connect,
                 str(self._db_path),
@@ -847,8 +856,8 @@ class EventStore:
             with contextlib.closing(self._read_conn.execute(query, (agent_id, agent_id, limit))) as cursor:
                 return cursor.fetchall()
 
-        # No lock needed for reads with WAL mode
-        rows = await asyncio.to_thread(_fetch)
+        async with self._read_lock:
+            rows = await asyncio.to_thread(_fetch)
 
         return [self._row_to_dict(row) for row in rows]
 
@@ -875,8 +884,8 @@ class EventStore:
             with contextlib.closing(self._read_conn.execute(query, (correlation_id,))) as cursor:
                 return cursor.fetchall()
 
-        # No lock needed for reads with WAL mode
-        rows = await asyncio.to_thread(_fetch)
+        async with self._read_lock:
+            rows = await asyncio.to_thread(_fetch)
 
         return [self._row_to_dict(row) for row in rows]
 
@@ -1044,8 +1053,8 @@ class EventStore:
             with contextlib.closing(conn.execute("SELECT * FROM nodes WHERE node_id = ?", (node_id,))) as cursor:
                 return cursor.fetchone()
 
-        # No lock needed for reads with WAL mode
-        row = await asyncio.to_thread(_fetch, self._read_conn)
+        async with self._read_lock:
+            row = await asyncio.to_thread(_fetch, self._read_conn)
 
         if row is None:
             return None
@@ -1098,8 +1107,8 @@ class EventStore:
             with contextlib.closing(conn.execute(query, params)) as cursor:
                 return cursor.fetchall()
 
-        # No lock needed for reads with WAL mode
-        rows = await asyncio.to_thread(_fetch, self._read_conn)
+        async with self._read_lock:
+            rows = await asyncio.to_thread(_fetch, self._read_conn)
 
         return [AgentNode.from_row(row) for row in rows]
 
@@ -1131,8 +1140,8 @@ class EventStore:
             )) as cursor:
                 return cursor.fetchone()
 
-        # No lock needed for reads with WAL mode
-        row = await asyncio.to_thread(_fetch, self._read_conn)
+        async with self._read_lock:
+            row = await asyncio.to_thread(_fetch, self._read_conn)
 
         if row is None:
             return None

@@ -812,6 +812,33 @@ function M.on_event(event)
     render()
 end
 
+--- Force the panel to track a specific agent, clearing events and re-rendering.
+--- Called from init.lua when requestInput fires for an agent that doesn't match
+--- the currently displayed agent, so that live events stream to the right panel.
+--- @param agent_id string  The agent ID to switch to.
+--- @param agent_name? string  Optional display name for the agent.
+function M.switch_agent(agent_id, agent_name)
+    log.info("panel.switch_agent: switching to agent_id=%s name=%s", tostring(agent_id), tostring(agent_name))
+    if M._agent and M._agent.id == agent_id then
+        log.debug("panel.switch_agent: already tracking agent_id=%s", agent_id)
+        return
+    end
+    -- Clear state and pin to new agent so on_event() will accept its events.
+    M._agent = {
+        id = agent_id,
+        name = agent_name or agent_id,
+        node_type = "?",
+        status = "running",
+        start_line = nil,
+        end_line = nil,
+    }
+    M._events = {}
+    M._tools = {}
+    M._last_fetch_error = nil
+    render()
+    log.info("panel.switch_agent: panel now tracking agent_id=%s", agent_id)
+end
+
 --- Configure callbacks. Called once from init.lua setup.
 function M.configure(opts)
     M._exec_command = opts.exec_command

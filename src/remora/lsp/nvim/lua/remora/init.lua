@@ -702,8 +702,19 @@ function M.setup(opts)
                 return
             end
             log.warn("HANDLER $/remora/requestInput: agent matched but input window invalid; falling back to vim.ui.input")
-        elseif panel_open then
-            log.info("HANDLER $/remora/requestInput: panel open but agent mismatch; using vim.ui.input fallback")
+        elseif panel_open and requested_agent_id then
+            -- Panel is open but showing a different agent.  Switch the panel to
+            -- track the chat target so live events (model response, etc.) are
+            -- displayed rather than silently dropped, then focus the input window.
+            log.info("HANDLER $/remora/requestInput: panel agent mismatch; switching panel to agent=%s", requested_agent_id)
+            panel.switch_agent(requested_agent_id)
+            if input_win_valid then
+                vim.api.nvim_set_current_win(panel._input_win)
+                vim.cmd("startinsert")
+                log.info("HANDLER $/remora/requestInput: panel switched and input focused")
+                return
+            end
+            log.warn("HANDLER $/remora/requestInput: panel switched but input window invalid; falling back to vim.ui.input")
         else
             log.info("HANDLER $/remora/requestInput: panel closed; using vim.ui.input fallback")
         end

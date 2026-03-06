@@ -302,6 +302,9 @@ def main(
                         for idx in range(0, len(batch_events), scan_append_chunk_size):
                             chunk = batch_events[idx : idx + scan_append_chunk_size]
                             await _pause_for_user_activity()
+                            # Yield to event loop BEFORE acquiring write lock so
+                            # pending panel / chat requests can be serviced first.
+                            await asyncio.sleep(0)
                             append_start = time.monotonic()
                             try:
                                 await server.event_store.batch_append("lsp", chunk)
