@@ -9,3 +9,5 @@
 - [x] Update exports and all affected tests for new APIs and semantic ID behavior.
 - [x] Verify with targeted + integration tests covering discovery, watcher, background scan, reconcile, and spawn_child paths.
 - [x] Thorough code review against `docs/EventBased_Concept.md` and identification of future architectural improvements.
+
+- Completed full codebase architectural review against EventBased_Concept.md principles and generated architectural_review_report.md
