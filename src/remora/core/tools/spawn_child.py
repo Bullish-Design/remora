@@ -9,7 +9,6 @@ Allows any agent to spawn a new child node by:
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -17,6 +16,7 @@ from typing import Any
 from structured_agents.types import ToolCall, ToolResult, ToolSchema
 
 from remora.core.agent_context import AgentContext
+from remora.core.discovery import compute_node_id, compute_source_hash
 from remora.core.events import NodeDiscoveredEvent, ScaffoldRequestEvent
 
 
@@ -26,15 +26,6 @@ _STUB_TEMPLATES: dict[str, str] = {
     "class": "class {name}: pass\n",
     "function": "def {name}(): pass\n",
 }
-
-
-def _compute_source_hash(source: str) -> str:
-    return hashlib.sha256(source.encode()).hexdigest()[:16]
-
-
-def _compute_node_id(file_path: str, name: str, start_line: int, end_line: int) -> str:
-    content = f"{file_path}:{name}:{start_line}:{end_line}"
-    return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
 class SpawnChildTool:
@@ -109,8 +100,13 @@ class SpawnChildTool:
         try:
             stub_source, actual_file_path, start_line, end_line = self._write_stub(node_type, name, file_path)
 
-            node_id = _compute_node_id(actual_file_path, name, start_line, end_line)
-            source_hash = _compute_source_hash(stub_source)
+            if node_type == "file":
+                full_name = Path(actual_file_path).stem
+            else:
+                full_name = f"{Path(actual_file_path).stem}.{name}"
+
+            node_id = compute_node_id(actual_file_path, node_type, full_name)
+            source_hash = compute_source_hash(stub_source)
             parent_id = self._context.agent_id
 
             # Emit NodeDiscoveredEvent
@@ -118,7 +114,7 @@ class SpawnChildTool:
                 node_id=node_id,
                 node_type=node_type,
                 name=name,
-                full_name=f"{node_type}:{name}",
+                full_name=full_name,
                 file_path=actual_file_path,
                 start_line=start_line,
                 end_line=end_line,

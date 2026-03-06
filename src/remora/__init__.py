@@ -13,6 +13,7 @@ from remora.core.discovery import (
     CSTNode,
     LANGUAGE_EXTENSIONS,
     compute_node_id,
+    compute_source_hash,
     discover,
 )
 from remora.core.errors import (
@@ -94,6 +95,7 @@ __all__ = [
     "CSTNode",
     "LANGUAGE_EXTENSIONS",
     "compute_node_id",
+    "compute_source_hash",
     "discover",
     "AgentWorkspace",
     "CairnDataProvider",

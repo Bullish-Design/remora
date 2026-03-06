@@ -7,7 +7,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from remora_demo.graph.state import GraphState
+from remora_demo.web.graph.state import GraphState
 
 
 def _init_test_db(db_path: str) -> sqlite3.Connection:
@@ -89,15 +89,17 @@ class TestGraphState:
         assert len(events) == 1
         assert events[0]["event_type"] == "HumanChatEvent"
 
-    def test_fingerprint_changes_on_insert(self):
-        fp1 = self.state._fingerprint()
-        self.conn.execute(
-            "INSERT INTO nodes (id, node_type, name, file_path, start_line, end_line, source_code, source_hash) "
-            "VALUES ('n1', 'file', 'test.py', '/a/test.py', 1, 10, 'code', 'hash')"
-        )
-        self.conn.commit()
-        fp2 = self.state._fingerprint()
-        assert fp1 != fp2
+    def test_push_command_writes_to_command_queue(self):
+        cmd_id = self.state.push_command("chat", "a1", {"message": "hello"})
+        assert isinstance(cmd_id, int)
+        row = self.conn.execute(
+            "SELECT command_type, agent_id, payload, status FROM command_queue WHERE id = ?",
+            (cmd_id,),
+        ).fetchone()
+        assert row is not None
+        assert row["command_type"] == "chat"
+        assert row["agent_id"] == "a1"
+        assert row["status"] == "pending"
 
     def test_read_proposals_for_agent(self):
         self.conn.execute(

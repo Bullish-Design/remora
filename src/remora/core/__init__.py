@@ -23,6 +23,7 @@ from remora.core.discovery import (
     CSTNode,
     LANGUAGE_EXTENSIONS,
     compute_node_id,
+    compute_source_hash,
     discover,
 )
 from remora.core.errors import (
@@ -117,6 +118,7 @@ __all__ = [
     "WorkspaceError",
     "build_virtual_fs",
     "compute_node_id",
+    "compute_source_hash",
     "discover",
     "discover_grail_tools",
     "get_agent_dir",

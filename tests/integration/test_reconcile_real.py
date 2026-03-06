@@ -192,10 +192,10 @@ async def test_reconcile_refreshes_source_hash_for_common_agents(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_reconcile_removes_old_and_creates_new_when_function_moves(
+async def test_reconcile_preserves_identity_when_function_moves(
     tmp_path: Path,
 ) -> None:
-    """When a function moves lines, node_id changes — old node is removed, new one created."""
+    """When a function moves lines, semantic node_id stays stable and metadata updates."""
     project_root, target_file = _create_sample_project(tmp_path)
     swarm_root = project_root / ".remora"
 
@@ -244,22 +244,22 @@ async def test_reconcile_removes_old_and_creates_new_when_function_moves(
             swarm_id="swarm",
         )
 
-        # Old function node should be removed, new one created
-        assert summary["created"] >= 1
-        assert summary["orphaned"] >= 1
+        # Line movement should not churn identity.
+        assert summary["created"] == 0
+        assert summary["orphaned"] == 0
+        assert summary["updated"] >= 1
 
         active_nodes = await event_store.list_nodes()
-        new_func = next(
+        moved_func = next(
             (n for n in active_nodes if n.node_type == "function"),
             None,
         )
-        assert new_func is not None
-        assert new_func.node_id != old_id
-        assert new_func.start_line == 6  # After 5 blank lines
+        assert moved_func is not None
+        assert moved_func.node_id == old_id
+        assert moved_func.start_line == 6  # After 5 blank lines
 
-        # Old node should be gone from the nodes table (deleted via NodeRemovedEvent)
-        old_node = await event_store.get_node(old_id)
-        assert old_node is None, f"Old node {old_id} should have been removed from EventStore"
+        preserved_node = await event_store.get_node(old_id)
+        assert preserved_node is not None
     finally:
         await subscriptions.close()
         await event_store.close()

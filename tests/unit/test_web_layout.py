@@ -1,156 +1,94 @@
-"""Tests for the web graph layout focus bounding box and render integration."""
+"""Tests for refactored web graph layout and SVG rendering."""
 
-from remora_demo.web.layout import FocusBBox, compute_layout
-from remora_demo.web.render import render_graph
-from remora_demo.web.state import GraphSnapshot
+from remora_demo.web.graph.layout import ForceLayout
+from remora_demo.web.graph.state import GraphSnapshot
+from remora_demo.web.graph.views.graph import render_graph
 
 
-def _make_node(nid, node_type, file_path, parent_id=None, start_line=1, end_line=10):
+def _make_node(nid: str, node_type: str, file_path: str, parent_id: str | None = None) -> dict:
     return {
         "remora_id": nid,
         "node_type": node_type,
         "file_path": file_path,
         "name": nid,
         "parent_id": parent_id,
-        "start_line": start_line,
-        "end_line": end_line,
+        "start_line": 1,
+        "end_line": 10,
+        "status": "active",
     }
 
 
-def _make_edge(from_id, to_id, edge_type="calls"):
+def _make_edge(from_id: str, to_id: str, edge_type: str = "calls") -> dict:
     return {"from_id": from_id, "to_id": to_id, "edge_type": edge_type}
 
 
-# ---------------------------------------------------------------------------
-# FocusBBox computation
-# ---------------------------------------------------------------------------
-
-
-class TestFocusBBox:
-    def test_no_focus_returns_none(self):
-        nodes = [_make_node("f1", "file", "/a/b.py")]
-        result = compute_layout(nodes, [], None)
-        assert result.focus_bbox is None
-
-    def test_focus_includes_focused_node(self):
+class TestForceLayout:
+    def test_set_graph_creates_positions(self):
+        layout = ForceLayout(width=900, height=600)
         nodes = [
             _make_node("f1", "file", "/a/b.py"),
             _make_node("fn1", "function", "/a/b.py", parent_id="f1"),
         ]
-        focus = {"file_path": "/a/b.py", "agent_id": "fn1"}
-        result = compute_layout(nodes, [], focus)
-        assert result.focus_bbox is not None
-        pos = result.positions["fn1"]
-        assert result.focus_bbox.x <= pos.x
-        assert result.focus_bbox.y <= pos.y
-        assert result.focus_bbox.x + result.focus_bbox.w >= pos.x + pos.w
-        assert result.focus_bbox.y + result.focus_bbox.h >= pos.y + pos.h
+        edges = [_make_edge("f1", "fn1", "parent_of")]
 
-    def test_focus_includes_edge_neighbors(self):
-        nodes = [
-            _make_node("f1", "file", "/a/b.py"),
-            _make_node("fn1", "function", "/a/b.py", parent_id="f1"),
-            _make_node("f2", "file", "/a/c.py"),
-            _make_node("fn2", "function", "/a/c.py", parent_id="f2"),
-        ]
-        edges = [_make_edge("fn1", "fn2", "calls")]
-        focus = {"file_path": "/a/b.py", "agent_id": "fn1"}
-        result = compute_layout(nodes, edges, focus)
-        bbox = result.focus_bbox
-        assert bbox is not None
-        # f2 is a sibling file (file-only), positioned; fn2 is hidden (not positioned)
-        # At minimum, f1, fn1, f2 should be positioned
-        assert "f1" in result.positions
-        assert "fn1" in result.positions
-        assert "f2" in result.positions
+        layout.set_graph(nodes, edges)
+        positions = layout.get_positions()
 
-    def test_focus_bbox_positive_dimensions(self):
-        nodes = [
-            _make_node("f1", "file", "/a/b.py"),
-            _make_node("fn1", "function", "/a/b.py", parent_id="f1"),
-        ]
-        focus = {"file_path": "/a/b.py", "agent_id": "fn1"}
-        result = compute_layout(nodes, [], focus)
-        bbox = result.focus_bbox
-        assert bbox is not None
-        assert bbox.w > 0
-        assert bbox.h > 0
+        assert set(positions.keys()) == {"f1", "fn1"}
 
-    def test_focus_with_unknown_agent_falls_back_to_file(self):
-        nodes = [_make_node("f1", "file", "/a/b.py")]
-        focus = {"file_path": "/a/b.py", "agent_id": "nonexistent"}
-        result = compute_layout(nodes, [], focus)
-        assert result.focus_bbox is not None
+    def test_set_graph_preserves_existing_node_positions(self):
+        layout = ForceLayout(width=900, height=600)
+        layout.set_graph([_make_node("f1", "file", "/a/b.py")], [])
+        original = layout.get_positions()["f1"]
 
-    def test_focus_normalizes_file_uris(self):
-        nodes = [
-            _make_node("f1", "file", "file:///home/user/a/b.py"),
-            _make_node("fn1", "function", "file:///home/user/a/b.py", parent_id="f1"),
-        ]
-        focus = {"file_path": "file:///home/user/a/b.py", "agent_id": "fn1"}
-        result = compute_layout(nodes, [], focus)
-        assert result.focus_bbox is not None
-
-    def test_focus_mixed_uri_and_path(self):
-        """cursor_focus plain path matches nodes stored as file:// URIs."""
-        nodes = [
-            _make_node("f1", "file", "file:///home/user/a/b.py"),
-            _make_node("fn1", "function", "file:///home/user/a/b.py", parent_id="f1"),
-        ]
-        focus = {"file_path": "/home/user/a/b.py", "agent_id": None}
-        result = compute_layout(nodes, [], focus)
-        assert result.focus_bbox is not None
-
-    def test_no_focus_shows_all_nodes(self):
-        """Backward compat: no cursor_focus -> everything expanded, no bbox."""
-        nodes = [
-            _make_node("f1", "file", "/a/b.py"),
-            _make_node("fn1", "function", "/a/b.py", parent_id="f1"),
-            _make_node("f2", "file", "/c/d.py"),
-        ]
-        result = compute_layout(nodes, [], None)
-        assert result.focus_bbox is None
-        assert len(result.positions) == 3
-        assert len(result.collapsed_dirs) == 0
-
-
-# ---------------------------------------------------------------------------
-# Render integration: data attributes
-# ---------------------------------------------------------------------------
-
-
-class TestRenderFocusBBox:
-    def test_render_includes_focus_data_attrs(self):
-        nodes = [
-            _make_node("f1", "file", "/a/b.py"),
-            _make_node("fn1", "function", "/a/b.py", parent_id="f1"),
-        ]
-        snapshot = GraphSnapshot(
-            nodes=nodes,
-            edges=[],
-            cursor_focus={"file_path": "/a/b.py", "agent_id": "fn1"},
+        layout.set_graph(
+            [
+                _make_node("f1", "file", "/a/b.py"),
+                _make_node("fn1", "function", "/a/b.py", parent_id="f1"),
+            ],
+            [_make_edge("f1", "fn1", "parent_of")],
         )
-        html = render_graph(snapshot)
-        assert 'data-focus-x="' in html
-        assert 'data-focus-y="' in html
-        assert 'data-focus-w="' in html
-        assert 'data-focus-h="' in html
+        updated = layout.get_positions()["f1"]
 
-    def test_render_no_focus_no_data_attrs(self):
+        assert original == updated
+
+    def test_step_keeps_nodes_within_bounds(self):
+        layout = ForceLayout(width=900, height=600)
+        nodes = [_make_node(f"n{i}", "function", f"/a/{i}.py") for i in range(20)]
+        layout.set_graph(nodes, [])
+
+        layout.step(100)
+        positions = layout.get_positions()
+
+        for x, y in positions.values():
+            assert 40 <= x <= 860
+            assert 40 <= y <= 560
+
+
+class TestRenderGraph:
+    def test_render_graph_outputs_svg_and_nodes(self):
+        layout = ForceLayout(width=900, height=600)
+        nodes = [
+            _make_node("f1", "file", "/a/b.py"),
+            _make_node("fn1", "function", "/a/b.py", parent_id="f1"),
+        ]
+        edges = [_make_edge("f1", "fn1", "parent_of")]
+
+        layout.set_graph(nodes, edges)
+        layout.step(10)
+        snapshot = GraphSnapshot(nodes=nodes, edges=edges, cursor_focus=None)
+
+        html = render_graph(snapshot, layout.get_positions(), cursor_focus="fn1")
+
+        assert 'id="graph-svg"' in html
+        assert "/agent/fn1" in html
+        assert "<line" in html
+
+    def test_render_graph_without_positions_renders_empty_svg(self):
         nodes = [_make_node("f1", "file", "/a/b.py")]
         snapshot = GraphSnapshot(nodes=nodes, edges=[], cursor_focus=None)
-        html = render_graph(snapshot)
-        assert "data-focus-x" not in html
 
-    def test_render_shell_has_follow_button(self):
-        from remora_demo.web.render import render_shell
+        html = render_graph(snapshot, positions={})
 
-        html = render_shell()
-        assert 'id="follow-btn"' in html
-        assert "Follow Cursor" in html
-
-    def test_render_shell_has_fit_all_button(self):
-        from remora_demo.web.render import render_shell
-
-        html = render_shell()
-        assert 'id="fit-all-btn"' in html
+        assert 'id="graph-svg"' in html
+        assert 'class="node-group"' not in html

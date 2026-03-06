@@ -35,7 +35,6 @@ async def isolated_lsp_server(tmp_path: Path) -> None:
     server.db = RemoraDB(str(tmp_path / "indexer.db"))
     server.proposals.clear()
     server.watcher = ASTWatcher()
-    server._injecting.clear()
 
     # Set up EventStore with NodeProjection
     event_store = EventStore(

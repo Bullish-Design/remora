@@ -11,12 +11,11 @@ This module provides the reconcile_on_startup function that:
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from remora.core.discovery import CSTNode, discover
+from remora.core.discovery import CSTNode, compute_source_hash, discover
 from remora.core.events import ContentChangedEvent, NodeDiscoveredEvent, NodeRemovedEvent
 from remora.core.subscriptions import SubscriptionRegistry
 from remora.utils import PathLike, normalize_path, to_project_relative
@@ -37,9 +36,20 @@ def get_agent_workspace_path(swarm_root: Path, agent_id: str) -> Path:
     return get_agent_dir(swarm_root, agent_id) / "workspace.db"
 
 
-def _compute_source_hash(text: str) -> str:
-    """Compute a hash of the source code text."""
-    return hashlib.sha256(text.encode()).hexdigest()[:16]
+def _node_metadata_changed(node: CSTNode, existing: Any) -> bool:
+    """Return True when non-source metadata changed for a stable node identity."""
+    return any(
+        (
+            node.node_type != existing.node_type,
+            getattr(node, "name", "") != existing.name,
+            getattr(node, "full_name", "") != existing.full_name,
+            node.file_path != existing.file_path,
+            node.start_line != existing.start_line,
+            node.end_line != existing.end_line,
+            node.start_byte != existing.start_byte,
+            node.end_byte != existing.end_byte,
+        )
+    )
 
 
 async def reconcile_on_startup(
@@ -91,7 +101,7 @@ async def reconcile_on_startup(
     # --- New nodes: emit NodeDiscoveredEvent ---
     for node_id in new_ids:
         node = node_map[node_id]
-        source_hash = _compute_source_hash(node.text)
+        source_hash = compute_source_hash(node.text)
 
         if event_store is not None:
             event = NodeDiscoveredEvent(
@@ -127,14 +137,16 @@ async def reconcile_on_startup(
         await subscriptions.unregister_all(node_id)
         orphaned += 1
 
-    # --- Common nodes: check for changes via source_hash ---
+    # --- Common nodes: check for text/metadata changes ---
     for node_id in common_ids:
         node = node_map[node_id]
         existing = existing_map[node_id]
-        new_source_hash = _compute_source_hash(node.text)
+        new_source_hash = compute_source_hash(node.text)
+        source_changed = new_source_hash != existing.source_hash
+        metadata_changed = _node_metadata_changed(node, existing)
 
-        if new_source_hash != existing.source_hash:
-            # Source code changed — re-emit NodeDiscoveredEvent to update
+        if source_changed or metadata_changed:
+            # Re-emit NodeDiscoveredEvent to refresh projected fields.
             if event_store is not None:
                 discovered_event = NodeDiscoveredEvent(
                     node_id=node.node_id,
@@ -152,13 +164,14 @@ async def reconcile_on_startup(
                 )
                 await event_store.append(swarm_id, discovered_event)
 
-                # Also emit ContentChangedEvent for reactive triggers
-                relative_path = to_project_relative(project_path, node.file_path)
-                change_event = ContentChangedEvent(
-                    path=relative_path,
-                    diff="File modified while daemon offline.",
-                )
-                await event_store.append(swarm_id, change_event)
+                if source_changed:
+                    # Emit reactive content event only when source text changed.
+                    relative_path = to_project_relative(project_path, node.file_path)
+                    change_event = ContentChangedEvent(
+                        path=relative_path,
+                        diff="File modified while daemon offline.",
+                    )
+                    await event_store.append(swarm_id, change_event)
 
             updated += 1
 

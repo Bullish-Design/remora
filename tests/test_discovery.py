@@ -16,17 +16,17 @@ SAMPLE_MD = FIXTURE_DIR / "sample.md"
 
 class TestComputeNodeId:
     def test_deterministic(self) -> None:
-        id1 = compute_node_id("test.py", "hello", 1, 2)
-        id2 = compute_node_id("test.py", "hello", 1, 2)
+        id1 = compute_node_id("test.py", "function", "test.hello")
+        id2 = compute_node_id("test.py", "function", "test.hello")
         assert id1 == id2
 
     def test_length(self) -> None:
-        nid = compute_node_id("test.py", "hello", 1, 2)
+        nid = compute_node_id("test.py", "function", "test.hello")
         assert len(nid) == 16
 
     def test_different_names_differ(self) -> None:
-        id1 = compute_node_id("test.py", "hello", 1, 2)
-        id2 = compute_node_id("test.py", "goodbye", 1, 2)
+        id1 = compute_node_id("test.py", "function", "test.hello")
+        id2 = compute_node_id("test.py", "function", "test.goodbye")
         assert id1 != id2
 
 

@@ -36,7 +36,6 @@ class RemoraLanguageServer(LanguageServer):
         self.proposals: dict[str, RewriteProposal] = {}
         self.runner: "AgentRunner | None" = None
         self._correlation_counter = 0
-        self._injecting: set[str] = set()
         self.subscriptions = subscriptions
         # Debounce timers for didChange reparse (Gap #12) and cursor updates (Gap #13)
         self._reparse_timers: dict[str, asyncio.TimerHandle] = {}
@@ -81,13 +80,11 @@ class RemoraLanguageServer(LanguageServer):
 
         self._reparse_timers.pop(uri, None)
         try:
-            old_agents = await self.event_store.list_nodes(file_path=uri) if self.event_store else []
-            old_dicts = [{"name": a.name, "node_type": a.node_type, "node_id": a.node_id} for a in old_agents]
-
-            new_dicts = self.watcher.parse_and_inject_ids(uri, text, old_dicts)
+            new_dicts = self.watcher.parse(uri, text)
             logger.debug("_do_reparse: %d nodes for %s", len(new_dicts), uri)
 
             if self.event_store:
+                old_agents = await self.event_store.list_nodes(file_path=uri)
                 new_ids = {nd["node_id"] for nd in new_dicts}
                 old_ids = {a.node_id for a in old_agents}
 

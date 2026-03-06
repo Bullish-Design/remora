@@ -25,7 +25,7 @@ from remora.lsp.models import (
     generate_id,
 )
 from remora.lsp.server import RemoraLanguageServer
-from remora.lsp.watcher import ASTWatcher, inject_ids
+from remora.lsp.watcher import ASTWatcher
 
 
 def _env_int(name: str, default: int) -> int:
@@ -448,7 +448,6 @@ __all__ = [
     "RemoraDB",
     "LazyGraph",
     "ASTWatcher",
-    "inject_ids",
     "RemoraLanguageServer",
     "main",
 ]

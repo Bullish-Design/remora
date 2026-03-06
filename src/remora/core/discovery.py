@@ -47,7 +47,7 @@ class CSTNode(BaseModel):
     """A concrete syntax tree node discovered from source code.
 
     Immutable data object representing a discovered code element.
-    The node_id is deterministic based on file path, name, and position.
+    The node_id is deterministic based on file path, type, and semantic name.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -74,10 +74,19 @@ class CSTNode(BaseModel):
         return hash(self.node_id)
 
 
-def compute_node_id(file_path: str, name: str, start_line: int, end_line: int) -> str:
-    """Compute deterministic node ID using SHA256."""
-    content = f"{file_path}:{name}:{start_line}:{end_line}"
+def compute_node_id(file_path: str, node_type: str, full_name: str) -> str:
+    """Compute deterministic node ID from semantic key.
+
+    Identity is based on (file_path, node_type, full_name) — not position.
+    Same inputs always produce the same ID across restarts and line shifts.
+    """
+    content = f"{file_path}:{node_type}:{full_name}"
     return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+
+def compute_source_hash(text: str) -> str:
+    """Compute SHA256-based hash of source text."""
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
 # ============================================================================
@@ -173,12 +182,13 @@ def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
 
         node_type = capture_name.split(".", 1)[0]
         name = _extract_name(node, captures)
+        full_name = f"{node_type}:{name}"
 
         cst_node = CSTNode(
-            node_id=compute_node_id(str(file_path), name, node.start_point[0] + 1, node.end_point[0] + 1),
+            node_id=compute_node_id(str(file_path), node_type, full_name),
             node_type=node_type,
             name=name,
-            full_name=f"{node_type}:{name}",
+            full_name=full_name,
             file_path=str(file_path),
             text=content[node.start_byte : node.end_byte],
             start_line=node.start_point[0] + 1,
@@ -196,7 +206,7 @@ def _parse_file(file_path: Path, language: str) -> list[CSTNode]:
     if not any(n.node_type == "file" for n in nodes):
         nodes.insert(0, _create_file_node(file_path, content))
 
-    return nodes
+    return _assign_semantic_identity(str(file_path), nodes)
 
 
 def _postprocess_markdown(
@@ -234,15 +244,16 @@ def _postprocess_markdown(
 
     # Determine name: frontmatter title, fallback to filename
     name = str(metadata.get("title", file_path.name))
+    full_name = f"{node_type}:{name}"
 
     line_count = content.count("\n") + 1 if content else 1
     byte_length = len(content.encode("utf-8")) if content else 0
 
     note_node = CSTNode(
-        node_id=compute_node_id(str(file_path), name, 1, line_count),
+        node_id=compute_node_id(str(file_path), node_type, full_name),
         node_type=node_type,
         name=name,
-        full_name=f"{node_type}:{name}",
+        full_name=full_name,
         file_path=str(file_path),
         text=content,
         start_line=1,
@@ -313,10 +324,10 @@ def _create_file_node(file_path: Path, content: str | None = None) -> CSTNode:
 
     byte_length = len(content.encode("utf-8")) if content else 0
     return CSTNode(
-        node_id=compute_node_id(str(file_path), file_path.name, 1, line_count),
+        node_id=compute_node_id(str(file_path), "file", file_path.stem),
         node_type="file",
         name=file_path.name,
-        full_name=file_path.name,
+        full_name=file_path.stem,
         file_path=str(file_path),
         text=content,
         start_line=1,
@@ -324,6 +335,75 @@ def _create_file_node(file_path: Path, content: str | None = None) -> CSTNode:
         start_byte=0,
         end_byte=byte_length,
     )
+
+
+def _assign_semantic_identity(file_path: str, nodes: list[CSTNode]) -> list[CSTNode]:
+    """Assign semantic full_name + node_id for each node using containment."""
+    if not nodes:
+        return nodes
+
+    stem = Path(file_path).stem
+    work: list[dict[str, int | str]] = []
+    for node in nodes:
+        work.append(
+            {
+                "node_type": node.node_type,
+                "name": node.name,
+                "file_path": node.file_path,
+                "text": node.text,
+                "start_line": node.start_line,
+                "end_line": node.end_line,
+                "start_byte": node.start_byte,
+                "end_byte": node.end_byte,
+                "full_name": "",
+            }
+        )
+
+    for node in work:
+        if node["node_type"] == "file":
+            node["full_name"] = stem
+            continue
+
+        node_start = int(node["start_line"])
+        node_end = int(node["end_line"])
+        node_span = node_end - node_start
+        best_parent: dict[str, int | str] | None = None
+        best_span = float("inf")
+        for candidate in work:
+            if candidate is node:
+                continue
+            cand_start = int(candidate["start_line"])
+            cand_end = int(candidate["end_line"])
+            cand_span = cand_end - cand_start
+            if cand_start <= node_start and cand_end >= node_end and cand_span > node_span and cand_span < best_span:
+                best_parent = candidate
+                best_span = cand_span
+
+        if best_parent is not None:
+            node["full_name"] = f"{best_parent['full_name']}.{node['name']}"
+        else:
+            node["full_name"] = f"{stem}.{node['name']}"
+
+    resolved: list[CSTNode] = []
+    for node in work:
+        node_type = str(node["node_type"])
+        full_name = str(node["full_name"])
+        resolved.append(
+            CSTNode(
+                node_id=compute_node_id(file_path, node_type, full_name),
+                node_type=node_type,
+                name=str(node["name"]),
+                full_name=full_name,
+                file_path=str(node["file_path"]),
+                text=str(node["text"]),
+                start_line=int(node["start_line"]),
+                end_line=int(node["end_line"]),
+                start_byte=int(node["start_byte"]),
+                end_byte=int(node["end_byte"]),
+            )
+        )
+
+    return resolved
 
 
 # ============================================================================
@@ -472,12 +552,13 @@ def parse_content(file_path: str, content: str, language: str | None = None) -> 
 
         node_type = capture_name.split(".", 1)[0]
         name = _extract_name(node, captures)
+        full_name = f"{node_type}:{name}"
 
         cst_node = CSTNode(
-            node_id=compute_node_id(file_path, name, node.start_point[0] + 1, node.end_point[0] + 1),
+            node_id=compute_node_id(file_path, node_type, full_name),
             node_type=node_type,
             name=name,
-            full_name=f"{node_type}:{name}",
+            full_name=full_name,
             file_path=file_path,
             text=content[node.start_byte : node.end_byte],
             start_line=node.start_point[0] + 1,
@@ -495,7 +576,7 @@ def parse_content(file_path: str, content: str, language: str | None = None) -> 
     if not any(n.node_type == "file" for n in nodes):
         nodes.insert(0, _create_file_node_from_content(file_path, content))
 
-    return nodes
+    return _assign_semantic_identity(file_path, nodes)
 
 
 def _create_file_node_from_content(file_path: str, content: str) -> CSTNode:
@@ -504,10 +585,10 @@ def _create_file_node_from_content(file_path: str, content: str) -> CSTNode:
     line_count = content.count("\n") + 1 if content else 1
     byte_length = len(content.encode("utf-8")) if content else 0
     return CSTNode(
-        node_id=compute_node_id(file_path, path_obj.name, 1, line_count),
+        node_id=compute_node_id(file_path, "file", path_obj.stem),
         node_type="file",
         name=path_obj.name,
-        full_name=path_obj.name,
+        full_name=path_obj.stem,
         file_path=file_path,
         text=content,
         start_line=1,
@@ -520,6 +601,7 @@ def _create_file_node_from_content(file_path: str, content: str) -> CSTNode:
 __all__ = [
     "CSTNode",
     "compute_node_id",
+    "compute_source_hash",
     "discover",
     "LANGUAGE_EXTENSIONS",
     "parse_content",

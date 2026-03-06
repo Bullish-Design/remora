@@ -18,7 +18,7 @@ class MyClass:
 def another():
     pass
 """
-    nodes = watcher.parse_and_inject_ids("file:///test.py", text)
+    nodes = watcher.parse("file:///test.py", text)
     # Should return list of dicts, not ASTAgentNode objects
     assert all(isinstance(n, dict) for n in nodes), "Expected dicts, got non-dict objects"
 
@@ -30,12 +30,11 @@ def another():
 
 
 def test_parse_preserves_ids():
-    """Existing IDs should be reused on re-parse."""
+    """IDs should be deterministic on re-parse."""
     watcher = ASTWatcher()
     text = "def foo(): pass\n"
-    nodes1 = watcher.parse_and_inject_ids("file:///t.py", text)
-    old_nodes = [{"name": n["name"], "node_type": n["node_type"], "node_id": n["node_id"]} for n in nodes1]
-    nodes2 = watcher.parse_and_inject_ids("file:///t.py", text, old_nodes)
+    nodes1 = watcher.parse("file:///t.py", text)
+    nodes2 = watcher.parse("file:///t.py", text)
     assert nodes1[0]["node_id"] == nodes2[0]["node_id"]
 
 
@@ -43,7 +42,7 @@ def test_parse_multibyte_characters():
     """Function names must be correct even when file contains multi-byte UTF-8."""
     watcher = ASTWatcher()
     text = "# Comment with emoji: \u2728\ndef read_optional(path):\n    pass\n"
-    nodes = watcher.parse_and_inject_ids("file:///test_mb.py", text)
+    nodes = watcher.parse("file:///test_mb.py", text)
     names = [n["name"] for n in nodes if n["node_type"] == "function"]
     assert "read_optional" in names, f"Expected 'read_optional', got {names}"
 
@@ -52,7 +51,7 @@ def test_parse_returns_required_dict_fields():
     """Every returned dict must have all fields needed for NodeDiscoveredEvent."""
     watcher = ASTWatcher()
     text = "def hello(): pass\n"
-    nodes = watcher.parse_and_inject_ids("file:///fields.py", text)
+    nodes = watcher.parse("file:///fields.py", text)
     required_fields = {
         "node_id",
         "node_type",
@@ -81,7 +80,7 @@ class MyClass:
     def my_method(self):
         pass
 """
-    nodes = watcher.parse_and_inject_ids("file:///mymod.py", text)
+    nodes = watcher.parse("file:///mymod.py", text)
     by_name = {n["name"]: n for n in nodes}
 
     # file-level node: full_name = stem
@@ -105,7 +104,7 @@ class MyClass:
     def my_method(self):
         pass
 """
-    nodes = watcher.parse_and_inject_ids("file:///test.py", text)
+    nodes = watcher.parse("file:///test.py", text)
     by_name = {n["name"]: n for n in nodes}
 
     file_node = by_name["test"]
@@ -122,7 +121,7 @@ def test_parse_non_python_file():
     """Non-Python files with tree-sitter support should return structured nodes."""
     watcher = ASTWatcher()
     text = "# My Document\n\nSome content here.\n"
-    nodes = watcher.parse_and_inject_ids("file:///readme.md", text)
+    nodes = watcher.parse("file:///readme.md", text)
     # Markdown now returns file + section + heading nodes (Gap #5 fix)
     assert len(nodes) >= 1
     assert all(isinstance(n, dict) for n in nodes)

@@ -1,28 +1,43 @@
 # Context
 
 ## Current State
-A complete template scaffold now exists at `.scratch/projects/treesitter-node-persistent-ids/template/` for implementing persistent inline Tree-sitter IDs.
+The runtime implementation described in
+`.scratch/projects/treesitter-node-persistent-ids/implementation_plan.md`
+is complete in `src/remora` and integrated through LSP + reconciliation paths.
 
-A detailed concept overview now exists at:
-- `.scratch/projects/treesitter-node-persistent-ids/identity-resolver-sidecar-concept.md`
+## What Was Implemented
+- Core identity now uses semantic IDs via
+  `compute_node_id(file_path, node_type, full_name)` in
+  `src/remora/core/discovery.py`.
+- Source hashing is unified with `compute_source_hash(text)` in discovery and
+  reused by watcher/reconciler/spawn_child.
+- `ASTWatcher` now exposes `parse(uri, text)` only; old-node reuse + random ID
+  generation + `inject_ids()` source mutation were removed.
+- LSP document handlers/server/background scan now perform parse + orphan diff
+  without watcher state or mutation guards.
+- Reconciler now updates nodes when either source hash changes or metadata
+  changes (line/byte/name/full_name/path), preserving semantic identity while
+  keeping position metadata fresh.
+- Spawn child now uses shared identity/hash primitives and emits semantic
+  `full_name`.
+- Exports were updated in `remora.core` and top-level `remora`.
+- Tests were updated for new watcher API and semantic identity behavior.
 
-This document reframes implementation around a centralized `NodeIdentityResolver` + SQLite sidecar anchor store, with inline IDs as optional input (not default save-time mutation).
-
-## What Was Added
-- Project tracking docs required by the scratch project convention.
-- Python package skeleton with modules for:
-  - ID parsing/encoding
-  - line mapping
-  - extractor interfaces
-  - SQLite schema + store wrapper
-  - indexing pipeline
-  - writeback stub
-- Query placeholders for Python and Markdown.
-- Starter tests + fixtures.
-- Architecture note for implementation sequence.
+## Validation
+- Passed:
+  - `tests/test_discovery.py`
+  - `tests/unit/test_lsp_watcher.py`
+  - `tests/unit/test_scaffold_watcher.py`
+  - `tests/unit/test_lsp_background_scan_manifest.py`
+  - `tests/integration/test_lsp_integration.py`
+  - `tests/integration/test_reconcile_real.py`
+  - `tests/unit/test_spawn_child.py`
+  - `tests/unit/test_identity_unification.py`
+- Attempted broad run:
+  - `tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn`
+  - This still fails during collection on pre-existing missing modules under
+    `remora_demo.graph` / `remora_demo.web`, unrelated to this implementation.
 
 ## Next Logical Steps
-1. Decide acceptance of the sidecar resolver concept as the authoritative direction.
-2. If accepted, implement resolver library + sidecar schema in runtime code (`src/remora`), not only template.
-3. Replace core/LSP identity assignment logic with resolver output and enable delta-based event emission.
-4. Disable default save-time ID injection and gate annotation behind explicit CLI commands.
+1. Optional cleanup: address unrelated `remora_demo.*` import gaps so the broader
+   non-ignored test run can collect fully.

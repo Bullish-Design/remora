@@ -7,14 +7,11 @@ expected by the LSP path (EventStore / NodeDiscoveredEvent / NodeRemovedEvent).
 
 from __future__ import annotations
 
-import hashlib
-import re
 from pathlib import Path
 
 import logging
 
-from remora.core.discovery import parse_content, CSTNode
-from remora.lsp.models import generate_id
+from remora.core.discovery import CSTNode, compute_source_hash, parse_content
 
 logger = logging.getLogger("remora.lsp.watcher")
 
@@ -23,24 +20,23 @@ class ASTWatcher:
     def __init__(self):
         pass
 
-    def parse_and_inject_ids(self, uri: str, text: str, old_nodes: list[dict] | None = None) -> list[dict]:
+    def parse(self, uri: str, text: str) -> list[dict]:
         """Parse text and return list of node dicts for the LSP path.
 
         Delegates to ``core.discovery.parse_content()`` for tree-sitter parsing,
-        then converts CSTNode objects to dicts and assigns stable IDs.
+        then converts CSTNode objects to dicts. Node IDs are deterministic
+        from parse output — no state or prior nodes needed.
         """
         cst_nodes = parse_content(uri, text)
-        return self._convert_nodes(uri, text, cst_nodes, old_nodes)
+        return self._convert_nodes(uri, text, cst_nodes)
 
     def _convert_nodes(
         self,
         uri: str,
         text: str,
         cst_nodes: list[CSTNode],
-        old_nodes: list[dict] | None = None,
     ) -> list[dict]:
         """Convert CSTNode list to LSP-path dicts with parent_id and stable IDs."""
-        old_by_key = {(n["name"], n["node_type"]): n for n in (old_nodes or [])}
         stem = Path(uri).stem
 
         # Deduplicate: when both "function" and "method" exist for the same
@@ -65,15 +61,8 @@ class ASTWatcher:
             else:
                 source_code = cst.text
 
-            source_hash = hashlib.md5(cst.text.encode("utf-8")).hexdigest()
-
-            # Stable IDs: reuse old node ID if the (name, type) key matches
-            key = (name, node_type)
-            if key in old_by_key:
-                node_id = old_by_key[key]["node_id"]
-                del old_by_key[key]
-            else:
-                node_id = generate_id()
+            source_hash = compute_source_hash(cst.text)
+            node_id = cst.node_id
 
             dicts.append(
                 {
@@ -138,23 +127,3 @@ class ASTWatcher:
             else:
                 node["parent_id"] = None
                 node["full_name"] = f"{stem}.{node['name']}"
-
-
-def inject_ids(file_path: Path, nodes: list[dict]) -> str:
-    lines = file_path.read_text().splitlines()
-
-    nodes_sorted = sorted(nodes, key=lambda n: n["start_line"], reverse=True)
-
-    for node in nodes_sorted:
-        line_idx = node["start_line"] - 1
-        if line_idx >= len(lines):
-            continue
-        line = lines[line_idx]
-
-        line = re.sub(r"\s*# rm_[a-z0-9]{8}\s*$", "", line)
-
-        lines[line_idx] = f"{line}  # {node['node_id']}"
-
-    new_content = "\n".join(lines) + "\n"
-    file_path.write_text(new_content)
-    return new_content

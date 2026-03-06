@@ -35,7 +35,7 @@ class _BlockingDB:
 
 
 class _FakeWatcher:
-    def parse_and_inject_ids(self, uri: str, text: str, _old_nodes: list[dict]) -> list[dict]:
+    def parse(self, uri: str, text: str) -> list[dict]:
         _ = text
         node_id = f"{uri}#0"
         return [
@@ -122,7 +122,7 @@ class _ChunkTrackingEventStore:
 
 
 class _ManyNodesWatcher:
-    def parse_and_inject_ids(self, uri: str, text: str, _old_nodes: list[dict]) -> list[dict]:
+    def parse(self, uri: str, text: str) -> list[dict]:
         _ = text
         nodes: list[dict] = []
         for idx in range(20):
