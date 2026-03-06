@@ -246,7 +246,7 @@ def main(
 
                 await _pause_for_user_activity()
 
-                text = fpath.read_text(encoding="utf-8", errors="replace")
+                text = await asyncio.to_thread(fpath.read_text, encoding="utf-8", errors="replace")
                 uri = from_fs_path(str(fpath))
                 # Get existing nodes from EventStore to preserve IDs
                 old_nodes = []
@@ -263,7 +263,7 @@ def main(
                         }
                         for n in existing
                     ]
-                nodes = server.watcher.parse_and_inject_ids(uri, text, old_nodes)
+                nodes = await asyncio.to_thread(server.watcher.parse_and_inject_ids, uri, text, old_nodes)
                 # Emit events to EventStore (batched per file for efficiency)
                 if server.event_store:
                     from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent

@@ -1,0 +1,25 @@
+{
+  "files": [
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/server-2026-03-05_193827.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-startup-initial-connection/runs/2026-03-05-chat-scenario/simplified-logs/server-2026-03-05_193827.simplified.log",
+      "total_lines": 12,
+      "kept_lines": 12,
+      "dropped_lines": 0,
+      "dropped_by_pattern": {}
+    },
+    {
+      "source": "/home/andrew/Documents/Projects/remora/.remora/logs/client-2026-03-05_193938.log",
+      "destination": "/home/andrew/Documents/Projects/remora/.scratch/projects/lsp-startup-initial-connection/runs/2026-03-05-chat-scenario/simplified-logs/client-2026-03-05_193938.simplified.log",
+      "total_lines": 257,
+      "kept_lines": 257,
+      "dropped_lines": 0,
+      "dropped_by_pattern": {}
+    }
+  ],
+  "totals": {
+    "total_lines": 269,
+    "kept_lines": 269,
+    "dropped_lines": 0
+  }
+}

@@ -52,3 +52,13 @@ Date: **2026-03-05**
 2. Run a fresh startup probe and capture new logs.
 3. Compare new run markers against issue `LOG_ANALYSIS.md` baselines.
 4. Implement one minimal fix, then immediately re-run manual + headless validation.
+
+## 2026-03-05 Audit Artifact
+- Added `.scratch/projects/lsp-startup-initial-connection/STARTUP_AUDIT_CHECKLIST.md`.
+- Checklist covers full startup path from Neovim `vim.lsp.start` through:
+  - `remora-lsp` entrypoint resolution
+  - lock/heartbeat/watchdog bootstrap
+  - EventStore/subscription prep
+  - runtime `start_io` + `INITIALIZED` callbacks
+  - background scan + runner/notification command paths
+- Use this checklist as the primary ordered debugging guide for startup failures.

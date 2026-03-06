@@ -1,0 +1,2 @@
+#!/bin/bash
+exec /home/andrew/Documents/Projects/remora/.devenv/state/venv/bin/python -m remora.lsp "$@"

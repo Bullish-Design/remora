@@ -89,10 +89,10 @@ function M.setup(opts)
     --- @param opts? {silent?: boolean}
     local function get_client(opts)
         opts = opts or {}
-        local clients = vim.lsp.get_clients({ name = "remora", bufnr = 0 })
+        local clients = vim.lsp.get_clients({ name = "remora", bufnr = 0, _uninitialized = true })
         log.debug("get_client: buffer-attached clients=%d", #clients)
         if #clients == 0 then
-            clients = vim.lsp.get_clients({ name = "remora" })
+            clients = vim.lsp.get_clients({ name = "remora", _uninitialized = true })
             log.debug("get_client: all remora clients=%d", #clients)
         end
         if #clients == 0 then
@@ -312,7 +312,7 @@ function M.setup(opts)
             table.insert(ids, pending_id)
             seen[pending_id] = true
         end
-        for _, client in ipairs(vim.lsp.get_clients({ name = "remora" })) do
+        for _, client in ipairs(vim.lsp.get_clients({ name = "remora", _uninitialized = true })) do
             if not seen[client.id] then
                 table.insert(ids, client.id)
                 seen[client.id] = true
@@ -721,8 +721,14 @@ function M.setup(opts)
                     params.proposal_id = result.proposal_id
                 end
                 log.info("HANDLER $/remora/requestInput: sending $/remora/submitInput params=%s", vim.inspect(params))
-                vim.lsp.buf_notify(0, "$/remora/submitInput", params)
-                log.info("HANDLER $/remora/requestInput: buf_notify sent")
+                local client = get_client({ silent = true })
+                if client then
+                    client.notify("$/remora/submitInput", params)
+                    log.info("HANDLER $/remora/requestInput: explicit client.notify sent")
+                else
+                    vim.lsp.buf_notify(0, "$/remora/submitInput", params)
+                    log.info("HANDLER $/remora/requestInput: buf_notify sent (fallback)")
+                end
             else
                 log.info("HANDLER $/remora/requestInput: user cancelled input")
             end

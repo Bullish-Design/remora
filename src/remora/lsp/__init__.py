@@ -371,9 +371,10 @@ def main() -> None:
             projection=projection,
         )
 
-        await event_store.initialize()
-        await subscriptions.initialize()
-        await event_store.checkpoint_wal("PASSIVE")
+        # We do NOT await initialize() or checkpoint_wal() here because that
+        # blocks the LSP IO loop from starting (making Neovim timeout while
+        # track the server's initialization response).
+        # These are handled inside `__main__.py` in the `INITIALIZED` handler.
 
         event_store.set_subscriptions(subscriptions)
         event_store.set_event_bus(event_bus)
