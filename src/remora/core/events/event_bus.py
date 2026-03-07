@@ -11,11 +11,12 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from structured_agents.events import Event as StructuredEvent
 
-from remora.core.events.events import CoreEvent
+if TYPE_CHECKING:
+    from remora.core.events import CoreEvent
 
 # Preserve historical logger name for compatibility with existing tests and tooling.
 logger = logging.getLogger("remora.core.events.event_bus")

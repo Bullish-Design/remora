@@ -6,7 +6,7 @@ import time
 
 from lsprotocol import types as lsp
 
-from remora.core.events.events import HumanChatEvent, RewriteRejectedEvent
+from remora.core.events.agent_events import HumanChatEvent, RewriteRejectedEvent
 from remora.lsp.protocols import LspServer
 
 logger = logging.getLogger("remora.lsp")

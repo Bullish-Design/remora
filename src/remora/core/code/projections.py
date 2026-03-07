@@ -13,14 +13,9 @@ from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from remora.core.events.events import (
-    AgentCompleteEvent,
-    AgentErrorEvent,
-    AgentStartEvent,
-    CoreEvent,
-    NodeDiscoveredEvent,
-    NodeRemovedEvent,
-)
+from remora.core.events import CoreEvent
+from remora.core.events.agent_events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent
+from remora.core.events.code_events import NodeDiscoveredEvent, NodeRemovedEvent
 
 logger = logging.getLogger(__name__)
 

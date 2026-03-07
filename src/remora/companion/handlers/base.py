@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Protocol, TYPE_CHECKING
-from remora.core.events.events import _FrozenEvent
+from remora.core.events.agent_events import _FrozenEvent
 
 if TYPE_CHECKING:
     from cairn import CairnWorkspaceService, AgentWorkspace

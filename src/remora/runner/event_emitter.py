@@ -3,13 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from remora.core.events.events import (
-    AgentEvent,
-    AgentMessageEvent,
-    HumanChatEvent,
-    RewriteProposalEvent,
-    RewriteRejectedEvent,
-)
+from remora.core.events.agent_events import AgentEvent, HumanChatEvent, RewriteProposalEvent, RewriteRejectedEvent
+from remora.core.events.interaction_events import AgentMessageEvent
 from remora.runner.protocols import RunnerServer
 
 

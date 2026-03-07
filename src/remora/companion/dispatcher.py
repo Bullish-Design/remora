@@ -14,7 +14,8 @@ from remora.companion.events import (
 )
 from remora.companion.handlers.base import CompanionHandler
 from remora.companion.state import CompanionState
-from remora.core.events.events import ContentChangedEvent, CursorFocusEvent, FileSavedEvent, _FrozenEvent
+from remora.core.events.agent_events import _FrozenEvent
+from remora.core.events.interaction_events import ContentChangedEvent, CursorFocusEvent, FileSavedEvent
 
 
 # Reusing definitions from the plan

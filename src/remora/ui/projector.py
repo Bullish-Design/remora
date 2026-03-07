@@ -10,17 +10,19 @@ from typing import Any
 
 from structured_agents.events import Event as StructuredEvent
 
-from remora.core.events.events import (
+from remora.core.events import CoreEvent
+from remora.core.events.agent_events import (
     AgentCompleteEvent,
     AgentErrorEvent,
     AgentStartEvent,
     HumanInputRequestEvent,
     HumanInputResponseEvent,
+)
+from remora.core.events.kernel_events import (
     KernelEndEvent,
     KernelStartEvent,
     ModelRequestEvent,
     ModelResponseEvent,
-    CoreEvent,
     ToolCallEvent,
     ToolResultEvent,
     TurnCompleteEvent,

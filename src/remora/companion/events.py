@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from pydantic import Field
 
-from remora.core.events.events import _FrozenEvent
+from remora.core.events.agent_events import _FrozenEvent
 
 # ============================================================================
 # Source Events

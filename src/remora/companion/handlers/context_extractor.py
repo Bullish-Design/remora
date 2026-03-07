@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from remora.core.events.events import _FrozenEvent, CursorFocusEvent
+from remora.core.events.agent_events import _FrozenEvent
+from remora.core.events.interaction_events import CursorFocusEvent
 from remora.companion.events import CompanionContextExtracted
 from remora.companion.handlers.base import CompanionHandlerBase
 from remora.companion.state import CompanionState

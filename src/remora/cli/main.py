@@ -286,7 +286,7 @@ def swarm_emit(event_type: str, data: str | None, project_root: str | None) -> N
 
     async def _emit() -> None:
         from remora.core.store.event_store import EventStore
-        from remora.core.events.events import AgentMessageEvent, ContentChangedEvent
+        from remora.core.events.interaction_events import AgentMessageEvent, ContentChangedEvent
 
         swarm_path = root / ".remora"
         event_store_path = swarm_path / "events" / "events.db"

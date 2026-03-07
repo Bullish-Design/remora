@@ -11,7 +11,7 @@ from typing import Any
 from pygls.uris import from_fs_path
 
 from remora.core.code.discovery import node_to_event
-from remora.core.events.events import NodeRemovedEvent
+from remora.core.events.code_events import NodeRemovedEvent
 
 
 class BackgroundScanner:

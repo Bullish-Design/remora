@@ -21,8 +21,9 @@ from remora.core.agents.agent_context import AgentContext
 from remora.core.agents.agent_node import AgentNode
 from remora.core.agents.cairn_bridge import CairnWorkspaceService, SyncMode
 from remora.core.code.discovery import CSTNode
+from remora.core.events.code_events import ScaffoldRequestEvent
+from remora.core.events.interaction_events import AgentMessageEvent
 from remora.core.store.event_store import EventStore
-from remora.core.events.events import AgentMessageEvent, ScaffoldRequestEvent
 from remora.core.agents.kernel_factory import create_kernel
 from remora.core.manifest import load_manifest
 from remora.core.events.subscriptions import SubscriptionRegistry

@@ -539,7 +539,7 @@ def node_to_event(node: CSTNode) -> "NodeDiscoveredEvent":
     This factory lives in discovery (not on the event type) because event
     definitions must not depend on discovery internals.
     """
-    from remora.core.events.events import NodeDiscoveredEvent
+    from remora.core.events.code_events import NodeDiscoveredEvent
 
     return NodeDiscoveredEvent(
         node_id=node.node_id,

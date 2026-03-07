@@ -32,28 +32,27 @@ from remora.core.errors import (
     RemoraError,
     WorkspaceError,
 )
-from remora.core.events.event_bus import EventBus, EventHandler
-from remora.core.store.event_store import EventStore
-from remora.core.events.events import (
+from remora.core.events import CoreEvent
+from remora.core.events.agent_events import (
     AgentCompleteEvent,
     AgentErrorEvent,
-    AgentMessageEvent,
     AgentStartEvent,
-    ContentChangedEvent,
     HumanInputRequestEvent,
     HumanInputResponseEvent,
+)
+from remora.core.events.code_events import NodeDiscoveredEvent, NodeRemovedEvent, ScaffoldRequestEvent
+from remora.core.events.event_bus import EventBus, EventHandler
+from remora.core.events.interaction_events import AgentMessageEvent, ContentChangedEvent
+from remora.core.events.kernel_events import (
     KernelEndEvent,
     KernelStartEvent,
     ModelRequestEvent,
     ModelResponseEvent,
-    NodeDiscoveredEvent,
-    NodeRemovedEvent,
-    CoreEvent,
-    ScaffoldRequestEvent,
     ToolCallEvent,
     ToolResultEvent,
     TurnCompleteEvent,
 )
+from remora.core.store.event_store import EventStore
 from remora.core.code.projections import NodeProjection
 from remora.core.code.reconciler import (
     get_agent_dir,

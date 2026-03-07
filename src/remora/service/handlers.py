@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING, Any
 
 from remora.core.config import Config
 from remora.core.code.discovery import discover
+from remora.core.events.agent_events import HumanInputResponseEvent
 from remora.core.events.event_bus import EventBus
+from remora.core.events.interaction_events import AgentMessageEvent, ContentChangedEvent
 from remora.core.store.event_store import EventStore
-from remora.core.events.events import HumanInputResponseEvent
 from remora.models import ConfigSnapshot, InputResponse
 from remora.ui.projector import UiStateProjector
 from remora.utils import PathResolver
@@ -68,8 +69,6 @@ async def handle_swarm_emit(request: Any, deps: ServiceDeps) -> dict[str, Any]:
     """Handle swarm.emit - emit an event to the swarm."""
     if deps.event_store is None:
         raise ValueError("event store not configured")
-
-    from remora.core.events.events import AgentMessageEvent, ContentChangedEvent
 
     event_type = getattr(request, "event_type", None)
     data = getattr(request, "data", {}) or {}

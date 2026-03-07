@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from remora.core.events.events import _FrozenEvent
+from remora.core.events.agent_events import _FrozenEvent
 from remora.companion.events import CompanionContextExtracted, CompanionTaskInferred
 from remora.companion.handlers.base import CompanionHandlerBase
 from remora.companion.state import CompanionState

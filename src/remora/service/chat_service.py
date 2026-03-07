@@ -13,7 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from remora.core.agents.chat import ChatSession, ChatConfig, Message
 from remora.core.events.event_bus import EventBus
-from remora.core.events.events import ToolCallEvent, ToolResultEvent
+from remora.core.events.kernel_events import ToolCallEvent, ToolResultEvent
 
 import logging
 

@@ -17,7 +17,6 @@ from structured_agents.events import Event as StructuredEvent
 import remora.core.store.event_store_connection as store_connection
 import remora.core.store.event_store_queries as store_queries
 import remora.core.store.event_store_schema as store_schema
-from remora.core.events.events import CoreEvent
 from remora.utils import PathLike, normalize_path
 
 logger = logging.getLogger(__name__)
@@ -27,6 +26,7 @@ _T = TypeVar("_T")
 
 if TYPE_CHECKING:
     from remora.core.code.projections import NodeProjection
+    from remora.core.events import CoreEvent
     from remora.core.events.event_bus import EventBus
     from remora.core.events.subscriptions import SubscriptionRegistry
     from remora.core.store.node_store import NodeStore

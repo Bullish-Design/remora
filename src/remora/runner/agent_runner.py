@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING, Any
 
 from remora.core.agents.agent_node import AgentNode
 from remora.core.agents.execution import execute_agent_turn
-from remora.core.events.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent, ScaffoldRequestEvent
+from remora.core.events.agent_events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent
+from remora.core.events.code_events import ScaffoldRequestEvent
 from remora.extensions import extension_matches, load_extensions
 from remora.runner.event_emitter import RunnerEventEmitter
 from remora.runner.headless import _HeadlessServer

@@ -9,7 +9,7 @@
 - [x] W1: Enforce Tach policy in tach.toml + CI gate (COMPLETE — 2026-03-07)
 - [x] W2: Fix runner.agent_runner → lsp.models (move RewriteProposal to runner.models) (COMPLETE — 2026-03-07)
 - [x] W3: Fix events.events → code.discovery (move from_cst_node to discovery.node_to_event) (COMPLETE — 2026-03-07)
-- [ ] W4: Decompose core.events.events into 4 bounded modules
+- [x] W4: Decompose core.events.events into 4 bounded modules (COMPLETE — 2026-03-07)
 - [x] W5: Break LSP barrel/server/handlers cycle — ALREADY DONE (no lsp.handlers → lsp barrel edges found)
 - [ ] W6: Thin orchestration hotspots (lsp.server, agents.execution, service.api)
 - [ ] W7: Barrel import audit + CI SLO gates
@@ -132,3 +132,31 @@ No core → adapter violations found (core is clean with respect to lsp/service/
   - `devenv shell -- tach check` → pass.
 - Test runs:
   - `devenv shell -- pytest tests/test_events.py tests/unit/test_lsp_event_completeness.py tests/unit/test_lsp_background_scan_manifest.py -q` → pass.
+
+## W4 Findings (2026-03-07)
+- Added bounded event modules under `src/remora/core/events/`:
+  - `agent_events.py`
+  - `interaction_events.py`
+  - `code_events.py`
+  - `kernel_events.py`
+- Rewrote `src/remora/core/events/events.py` into a thin compatibility barrel with re-exports
+  and `CoreEvent`.
+- Updated `src/remora/core/events/__init__.py` to re-export from bounded modules and define
+  `CoreEvent` directly.
+- Migrated production imports from barrel to bounded modules across `src/`:
+  - `agent_events` for agent/HITL/proposal events and `_FrozenEvent`
+  - `interaction_events` for message/file/cursor/trigger events
+  - `code_events` for node lifecycle events
+  - `kernel_events` for structured-agents kernel event re-exports
+- Updated `src/remora/core/code/discovery.py` to import `NodeDiscoveredEvent` from
+  `remora.core.events.code_events` in `node_to_event()`.
+- Updated architecture config using `devenv shell -- tach sync` after the import migration.
+- TDD:
+  - Added `tests/unit/test_event_module_split.py` (fail-first then pass) to assert bounded
+    modules are independently importable.
+- Acceptance checks:
+  - `grep -rl "from remora.core.events.events import" src/` → no results.
+  - `devenv shell -- tach check` → pass.
+- Test runs:
+  - `devenv shell -- pytest tests/unit/test_event_module_split.py tests/unit/test_unified_events.py tests/unit/test_event_bus.py tests/companion/test_claim_checker.py -q` → pass.
+  - `devenv shell -- python -m pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q` → pass (warnings only).

@@ -16,8 +16,9 @@ from typing import TYPE_CHECKING, Any
 from structured_agents import build_client
 
 from remora.core.agents.agent_node import AgentNode
+from remora.core.events.agent_events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent
+from remora.core.events.code_events import ScaffoldRequestEvent
 from remora.core.store.event_store import EventStore
-from remora.core.events.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent, ScaffoldRequestEvent
 from remora.core.agents.execution import execute_agent_turn
 from remora.core.events.subscriptions import SubscriptionRegistry
 from remora.core.agents.cairn_bridge import CairnWorkspaceService

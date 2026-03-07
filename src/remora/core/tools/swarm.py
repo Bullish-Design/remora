@@ -8,7 +8,7 @@ from typing import Any
 from structured_agents.types import ToolCall, ToolResult, ToolSchema
 
 from remora.core.agents.agent_context import AgentContext
-from remora.core.events.events import AgentMessageEvent
+from remora.core.events.interaction_events import AgentMessageEvent
 from remora.core.events.subscriptions import SubscriptionPattern
 
 

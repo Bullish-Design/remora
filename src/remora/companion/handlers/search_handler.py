@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from remora.core.events.events import _FrozenEvent
+from remora.core.events.agent_events import _FrozenEvent
 from remora.companion.events import CompanionContextExtracted, CompanionSearchCompleted
 from remora.companion.handlers.base import CompanionHandlerBase
 from remora.companion.state import CompanionState
