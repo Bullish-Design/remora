@@ -257,7 +257,7 @@ class TestRemoraStateManager:
     async def test_get_turn_state_returns_default(self, mock_workspace: MagicMock, mock_cairn_state: MagicMock) -> None:
         """get_turn_state should return default when not persisted."""
         with patch(
-            "remora.core.state_manager.CairnStateManager",
+            "remora.core.agents.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
             from remora.core.agents.state_manager import RemoraStateManager
@@ -274,7 +274,7 @@ class TestRemoraStateManager:
         """get_turn_state should return persisted state."""
         mock_cairn_state.get_typed = AsyncMock(return_value=AgentTurnState(turn_number=5))
         with patch(
-            "remora.core.state_manager.CairnStateManager",
+            "remora.core.agents.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
             from remora.core.agents.state_manager import RemoraStateManager
@@ -287,7 +287,7 @@ class TestRemoraStateManager:
     async def test_save_turn_state_calls_cairn(self, mock_workspace: MagicMock, mock_cairn_state: MagicMock) -> None:
         """save_turn_state should call Cairn set_typed."""
         with patch(
-            "remora.core.state_manager.CairnStateManager",
+            "remora.core.agents.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
             from remora.core.agents.state_manager import RemoraStateManager
@@ -304,7 +304,7 @@ class TestRemoraStateManager:
         """record_turn should load, increment, and save state."""
         mock_cairn_state.get_typed = AsyncMock(return_value=AgentTurnState(turn_number=2))
         with patch(
-            "remora.core.state_manager.CairnStateManager",
+            "remora.core.agents.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
             from remora.core.agents.state_manager import RemoraStateManager
@@ -320,7 +320,7 @@ class TestRemoraStateManager:
     async def test_get_memory_returns_default(self, mock_workspace: MagicMock, mock_cairn_state: MagicMock) -> None:
         """get_memory should return empty memory when not persisted."""
         with patch(
-            "remora.core.state_manager.CairnStateManager",
+            "remora.core.agents.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
             from remora.core.agents.state_manager import RemoraStateManager
@@ -334,7 +334,7 @@ class TestRemoraStateManager:
     async def test_save_memory_calls_cairn(self, mock_workspace: MagicMock, mock_cairn_state: MagicMock) -> None:
         """save_memory should call Cairn set_typed."""
         with patch(
-            "remora.core.state_manager.CairnStateManager",
+            "remora.core.agents.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
             from remora.core.agents.state_manager import RemoraStateManager
@@ -348,7 +348,7 @@ class TestRemoraStateManager:
     async def test_get_metrics_returns_default(self, mock_workspace: MagicMock, mock_cairn_state: MagicMock) -> None:
         """get_metrics should return empty metrics when not persisted."""
         with patch(
-            "remora.core.state_manager.CairnStateManager",
+            "remora.core.agents.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
             from remora.core.agents.state_manager import RemoraStateManager
@@ -365,7 +365,7 @@ class TestRemoraStateManager:
         """increment_turn should delegate to Cairn."""
         mock_cairn_state.increment_turn = AsyncMock(return_value=5)
         with patch(
-            "remora.core.state_manager.CairnStateManager",
+            "remora.core.agents.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
             from remora.core.agents.state_manager import RemoraStateManager
@@ -380,7 +380,7 @@ class TestRemoraStateManager:
         """get_turn should delegate to Cairn."""
         mock_cairn_state.get_turn = AsyncMock(return_value=7)
         with patch(
-            "remora.core.state_manager.CairnStateManager",
+            "remora.core.agents.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
             from remora.core.agents.state_manager import RemoraStateManager
@@ -394,7 +394,7 @@ class TestRemoraStateManager:
         """get/set should delegate to Cairn for arbitrary keys."""
         mock_cairn_state.get = AsyncMock(return_value="test_value")
         with patch(
-            "remora.core.state_manager.CairnStateManager",
+            "remora.core.agents.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
             from remora.core.agents.state_manager import RemoraStateManager
@@ -410,7 +410,7 @@ class TestRemoraStateManager:
     async def test_agent_id_property(self, mock_workspace: MagicMock, mock_cairn_state: MagicMock) -> None:
         """agent_id property should return the agent ID."""
         with patch(
-            "remora.core.state_manager.CairnStateManager",
+            "remora.core.agents.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
             from remora.core.agents.state_manager import RemoraStateManager
@@ -423,7 +423,7 @@ class TestRemoraStateManager:
         """clear_all should delegate to Cairn."""
         mock_cairn_state.clear_all = AsyncMock(return_value=5)
         with patch(
-            "remora.core.state_manager.CairnStateManager",
+            "remora.core.agents.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
             from remora.core.agents.state_manager import RemoraStateManager

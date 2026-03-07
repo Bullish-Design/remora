@@ -253,7 +253,7 @@ def swarm_list(project_root: str | None) -> None:
         event_store = EventStore(event_store_path)
         await event_store.initialize()
 
-        agents = await event_store.list_nodes()
+        agents = await event_store.nodes.list_nodes()
 
         if not agents:
             click.echo("No agents found.")

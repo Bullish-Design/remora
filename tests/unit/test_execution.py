@@ -94,8 +94,8 @@ def _make_mock_kernel(response_text: str = "I analyzed the code.") -> MagicMock:
 def _make_mock_event_store() -> MagicMock:
     es = MagicMock()
     es.append = AsyncMock()
-    es.get_node = AsyncMock(return_value=None)
-    es.list_nodes = AsyncMock(return_value=[])
+    es.nodes.get_node = AsyncMock(return_value=None)
+    es.nodes.list_nodes = AsyncMock(return_value=[])
     es.get_recent_events = AsyncMock(return_value=[])
     return es
 
@@ -335,11 +335,11 @@ class TestExecuteAgentTurn:
         kernel = _make_mock_kernel("The code looks correct.")
 
         with (
-            patch("remora.core.execution.load_manifest") as mock_manifest,
-            patch("remora.core.execution.create_kernel", return_value=kernel),
-            patch("remora.core.execution.discover_grail_tools", return_value=[]),
-            patch("remora.core.execution.CairnDataProvider") as mock_dp,
-            patch("remora.core.execution.build_client") as mock_build_client,
+            patch("remora.core.agents.execution.load_manifest") as mock_manifest,
+            patch("remora.core.agents.execution.create_kernel", return_value=kernel),
+            patch("remora.core.agents.execution.discover_grail_tools", return_value=[]),
+            patch("remora.core.agents.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.agents.execution.build_client") as mock_build_client,
         ):
             mock_manifest.return_value = MagicMock(
                 name="test-bundle",
@@ -382,11 +382,11 @@ class TestExecuteAgentTurn:
         extra_tool.schema = MagicMock(name="rewrite_self")
 
         with (
-            patch("remora.core.execution.load_manifest") as mock_manifest,
-            patch("remora.core.execution.create_kernel", return_value=kernel) as mock_create,
-            patch("remora.core.execution.discover_grail_tools", return_value=[]),
-            patch("remora.core.execution.CairnDataProvider") as mock_dp,
-            patch("remora.core.execution.build_client"),
+            patch("remora.core.agents.execution.load_manifest") as mock_manifest,
+            patch("remora.core.agents.execution.create_kernel", return_value=kernel) as mock_create,
+            patch("remora.core.agents.execution.discover_grail_tools", return_value=[]),
+            patch("remora.core.agents.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.agents.execution.build_client"),
         ):
             mock_manifest.return_value = MagicMock(
                 name="test-bundle",
@@ -429,11 +429,11 @@ class TestExecuteAgentTurn:
         callback = AsyncMock()
 
         with (
-            patch("remora.core.execution.load_manifest") as mock_manifest,
-            patch("remora.core.execution.create_kernel", return_value=kernel),
-            patch("remora.core.execution.discover_grail_tools", return_value=[]),
-            patch("remora.core.execution.CairnDataProvider") as mock_dp,
-            patch("remora.core.execution.build_client"),
+            patch("remora.core.agents.execution.load_manifest") as mock_manifest,
+            patch("remora.core.agents.execution.create_kernel", return_value=kernel),
+            patch("remora.core.agents.execution.discover_grail_tools", return_value=[]),
+            patch("remora.core.agents.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.agents.execution.build_client"),
         ):
             mock_manifest.return_value = MagicMock(
                 name="test-bundle",
@@ -479,11 +479,11 @@ class TestExecuteAgentTurn:
         mock_client = MagicMock()
 
         with (
-            patch("remora.core.execution.load_manifest") as mock_manifest,
-            patch("remora.core.execution.create_kernel", return_value=kernel) as mock_create,
-            patch("remora.core.execution.discover_grail_tools", return_value=[]),
-            patch("remora.core.execution.CairnDataProvider") as mock_dp,
-            patch("remora.core.execution.build_client") as mock_build,
+            patch("remora.core.agents.execution.load_manifest") as mock_manifest,
+            patch("remora.core.agents.execution.create_kernel", return_value=kernel) as mock_create,
+            patch("remora.core.agents.execution.discover_grail_tools", return_value=[]),
+            patch("remora.core.agents.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.agents.execution.build_client") as mock_build,
         ):
             mock_manifest.return_value = MagicMock(
                 name="test-bundle",
@@ -526,12 +526,12 @@ class TestExecuteAgentTurn:
         mock_ws = _make_mock_workspace_service()
 
         with (
-            patch("remora.core.execution.load_manifest") as mock_manifest,
-            patch("remora.core.execution.create_kernel", return_value=kernel),
-            patch("remora.core.execution.discover_grail_tools", return_value=[]),
-            patch("remora.core.execution.CairnDataProvider") as mock_dp,
-            patch("remora.core.execution.build_client"),
-            patch("remora.core.execution.CairnWorkspaceService", return_value=mock_ws),
+            patch("remora.core.agents.execution.load_manifest") as mock_manifest,
+            patch("remora.core.agents.execution.create_kernel", return_value=kernel),
+            patch("remora.core.agents.execution.discover_grail_tools", return_value=[]),
+            patch("remora.core.agents.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.agents.execution.build_client"),
+            patch("remora.core.agents.execution.CairnWorkspaceService", return_value=mock_ws),
         ):
             mock_manifest.return_value = MagicMock(
                 name="test-bundle",
@@ -577,11 +577,11 @@ class TestExecuteAgentTurn:
         kernel = _make_mock_kernel()
 
         with (
-            patch("remora.core.execution.load_manifest") as mock_manifest,
-            patch("remora.core.execution.create_kernel", return_value=kernel),
-            patch("remora.core.execution.discover_grail_tools", return_value=[]),
-            patch("remora.core.execution.CairnDataProvider") as mock_dp,
-            patch("remora.core.execution.build_client"),
+            patch("remora.core.agents.execution.load_manifest") as mock_manifest,
+            patch("remora.core.agents.execution.create_kernel", return_value=kernel),
+            patch("remora.core.agents.execution.discover_grail_tools", return_value=[]),
+            patch("remora.core.agents.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.agents.execution.build_client"),
         ):
             mock_manifest.return_value = MagicMock(
                 name="test-bundle",
@@ -621,11 +621,11 @@ class TestExecuteAgentTurn:
         mock_grail_tool.schema = MagicMock(name="grail_tool")
 
         with (
-            patch("remora.core.execution.load_manifest") as mock_manifest,
-            patch("remora.core.execution.create_kernel", return_value=kernel) as mock_create,
-            patch("remora.core.execution.discover_grail_tools", return_value=[mock_grail_tool]) as mock_discover,
-            patch("remora.core.execution.CairnDataProvider") as mock_dp,
-            patch("remora.core.execution.build_client"),
+            patch("remora.core.agents.execution.load_manifest") as mock_manifest,
+            patch("remora.core.agents.execution.create_kernel", return_value=kernel) as mock_create,
+            patch("remora.core.agents.execution.discover_grail_tools", return_value=[mock_grail_tool]) as mock_discover,
+            patch("remora.core.agents.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.agents.execution.build_client"),
         ):
             mock_manifest.return_value = MagicMock(
                 name="test-bundle",
@@ -667,11 +667,11 @@ class TestExecuteAgentTurn:
         kernel.run = AsyncMock(side_effect=RuntimeError("LLM timeout"))
 
         with (
-            patch("remora.core.execution.load_manifest") as mock_manifest,
-            patch("remora.core.execution.create_kernel", return_value=kernel),
-            patch("remora.core.execution.discover_grail_tools", return_value=[]),
-            patch("remora.core.execution.CairnDataProvider") as mock_dp,
-            patch("remora.core.execution.build_client"),
+            patch("remora.core.agents.execution.load_manifest") as mock_manifest,
+            patch("remora.core.agents.execution.create_kernel", return_value=kernel),
+            patch("remora.core.agents.execution.discover_grail_tools", return_value=[]),
+            patch("remora.core.agents.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.agents.execution.build_client"),
         ):
             mock_manifest.return_value = MagicMock(
                 name="test-bundle",
@@ -714,11 +714,11 @@ class TestExecuteAgentTurn:
         kernel.run = AsyncMock(return_value=result_obj)
 
         with (
-            patch("remora.core.execution.load_manifest") as mock_manifest,
-            patch("remora.core.execution.create_kernel", return_value=kernel),
-            patch("remora.core.execution.discover_grail_tools", return_value=[]),
-            patch("remora.core.execution.CairnDataProvider") as mock_dp,
-            patch("remora.core.execution.build_client"),
+            patch("remora.core.agents.execution.load_manifest") as mock_manifest,
+            patch("remora.core.agents.execution.create_kernel", return_value=kernel),
+            patch("remora.core.agents.execution.discover_grail_tools", return_value=[]),
+            patch("remora.core.agents.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.agents.execution.build_client"),
         ):
             mock_manifest.return_value = MagicMock(
                 name="test-bundle",
@@ -780,8 +780,8 @@ class TestExecuteAgentTurn:
                 return node
             return None
 
-        es.get_node = AsyncMock(side_effect=mock_get_node)
-        es.list_nodes = AsyncMock(return_value=[node, sibling_node, parent_node])
+        es.nodes.get_node = AsyncMock(side_effect=mock_get_node)
+        es.nodes.list_nodes = AsyncMock(return_value=[node, sibling_node, parent_node])
 
         trigger = ScaffoldRequestEvent(
             node_id="child_fn",
@@ -791,12 +791,12 @@ class TestExecuteAgentTurn:
         )
 
         with (
-            patch("remora.core.execution.load_manifest") as mock_manifest,
-            patch("remora.core.execution.create_kernel", return_value=kernel),
-            patch("remora.core.execution.discover_grail_tools", return_value=[]),
-            patch("remora.core.execution.CairnDataProvider") as mock_dp,
-            patch("remora.core.execution.build_client"),
-            patch("remora.core.execution._build_prompt", wraps=_build_prompt) as mock_bp,
+            patch("remora.core.agents.execution.load_manifest") as mock_manifest,
+            patch("remora.core.agents.execution.create_kernel", return_value=kernel),
+            patch("remora.core.agents.execution.discover_grail_tools", return_value=[]),
+            patch("remora.core.agents.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.agents.execution.build_client"),
+            patch("remora.core.agents.execution._build_prompt", wraps=_build_prompt) as mock_bp,
         ):
             mock_manifest.return_value = MagicMock(
                 name="test-bundle",
@@ -844,12 +844,12 @@ class TestExecuteAgentTurn:
         trigger = ContentChangedEvent(path="src/mod.py")
 
         with (
-            patch("remora.core.execution.load_manifest") as mock_manifest,
-            patch("remora.core.execution.create_kernel", return_value=kernel),
-            patch("remora.core.execution.discover_grail_tools", return_value=[]),
-            patch("remora.core.execution.CairnDataProvider") as mock_dp,
-            patch("remora.core.execution.build_client"),
-            patch("remora.core.execution._build_prompt", wraps=_build_prompt) as mock_bp,
+            patch("remora.core.agents.execution.load_manifest") as mock_manifest,
+            patch("remora.core.agents.execution.create_kernel", return_value=kernel),
+            patch("remora.core.agents.execution.discover_grail_tools", return_value=[]),
+            patch("remora.core.agents.execution.CairnDataProvider") as mock_dp,
+            patch("remora.core.agents.execution.build_client"),
+            patch("remora.core.agents.execution._build_prompt", wraps=_build_prompt) as mock_bp,
         ):
             mock_manifest.return_value = MagicMock(
                 name="test-bundle",

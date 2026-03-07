@@ -32,7 +32,7 @@ async def on_cursor_moved(ls: LspServer, params: dict) -> None:
         if not uri or line is None:
             return
         # Resolve which agent (if any) the cursor is on
-        node = await ls.event_store.get_node_at_position(uri, line)
+        node = await ls.event_store.nodes.get_node_at_position(uri, line)
         agent_id = node.node_id if node else None
         # Debounce: actual DB write + CursorFocusEvent emission delayed 200ms
         ls.schedule_cursor_update(agent_id, uri, line, delay_ms=200)

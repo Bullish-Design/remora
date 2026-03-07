@@ -39,7 +39,7 @@ async def _resolve_agent(ls: LspServer, args) -> str | None:
     start = time.monotonic()
     try:
         agent = await asyncio.wait_for(
-            ls.event_store.get_node_at_position(uri, line),
+            ls.event_store.nodes.get_node_at_position(uri, line),
             timeout=RESOLVE_AGENT_TIMEOUT_SECONDS,
         )
     except TimeoutError:
@@ -92,7 +92,7 @@ async def cmd_get_agent_panel(ls: LspServer, *args) -> dict | None:
         read_start = time.monotonic()
         try:
             agent = await asyncio.wait_for(
-                ls.event_store.get_node_at_position(uri, line),
+                ls.event_store.nodes.get_node_at_position(uri, line),
                 timeout=GET_PANEL_NODE_TIMEOUT_SECONDS,
             )
         except TimeoutError:
@@ -241,7 +241,7 @@ async def cmd_execute_tool(ls: LspServer, agent_id: str, tool_name: str, *args) 
     try:
         tool_params = args[0] if args else {}
         if ls.runner and ls.event_store:
-            agent = await ls.event_store.get_node(agent_id)
+            agent = await ls.event_store.nodes.get_node(agent_id)
             if agent:
                 await ls.runner.execute_extension_tool(agent, tool_name, tool_params, ls.generate_correlation_id())
     except Exception:

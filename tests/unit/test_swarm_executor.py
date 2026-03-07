@@ -272,7 +272,7 @@ class TestBuildPrompt:
 class TestConnectionPooling:
     """Verify that the LLM client is created once in __init__."""
 
-    @patch("remora.core.swarm_executor.build_client")
+    @patch("remora.core.agents.swarm_executor.build_client")
     def test_client_created_in_init(self, mock_build_client, tmp_path):
         mock_build_client.return_value = MagicMock()
         config = _make_config(tmp_path)
@@ -287,7 +287,7 @@ class TestConnectionPooling:
         mock_build_client.assert_called_once()
         assert executor._client is mock_build_client.return_value
 
-    @patch("remora.core.swarm_executor.build_client")
+    @patch("remora.core.agents.swarm_executor.build_client")
     def test_client_receives_config_values(self, mock_build_client, tmp_path):
         mock_build_client.return_value = MagicMock()
         config = _make_config(
@@ -350,8 +350,8 @@ class TestSwarmExecutorDomainEvents:
     and last_completed_at (Workstream E — Gap #11)."""
 
     @pytest.mark.asyncio
-    @patch("remora.core.swarm_executor.build_client")
-    @patch("remora.core.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
+    @patch("remora.core.agents.swarm_executor.build_client")
+    @patch("remora.core.agents.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
     async def test_emits_start_and_complete_events(self, mock_exec, mock_build_client, tmp_path):
         from remora.core.agents.execution import ExecutionResult
 
@@ -388,8 +388,8 @@ class TestSwarmExecutorDomainEvents:
         assert complete_events[0][0][1].agent_id == "agent_func_1"
 
     @pytest.mark.asyncio
-    @patch("remora.core.swarm_executor.build_client")
-    @patch("remora.core.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
+    @patch("remora.core.agents.swarm_executor.build_client")
+    @patch("remora.core.agents.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
     async def test_emits_error_event_on_failure(self, mock_exec, mock_build_client, tmp_path):
         mock_build_client.return_value = MagicMock()
         mock_exec.side_effect = RuntimeError("model error")
@@ -424,8 +424,8 @@ class TestSwarmExecutorDomainEvents:
         assert len(complete_events) == 0
 
     @pytest.mark.asyncio
-    @patch("remora.core.swarm_executor.build_client")
-    @patch("remora.core.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
+    @patch("remora.core.agents.swarm_executor.build_client")
+    @patch("remora.core.agents.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
     async def test_scaffold_trigger_adds_scaffold_tag(self, mock_exec, mock_build_client, tmp_path):
         """When trigger_event is ScaffoldRequestEvent, AgentCompleteEvent should have tags=('scaffold',)."""
         from remora.core.events.events import ScaffoldRequestEvent
@@ -464,8 +464,8 @@ class TestSwarmExecutorDomainEvents:
         assert complete_events[0][0][1].tags == ("scaffold",)
 
     @pytest.mark.asyncio
-    @patch("remora.core.swarm_executor.build_client")
-    @patch("remora.core.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
+    @patch("remora.core.agents.swarm_executor.build_client")
+    @patch("remora.core.agents.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
     async def test_non_scaffold_trigger_has_no_tags(self, mock_exec, mock_build_client, tmp_path):
         """When trigger_event is not ScaffoldRequestEvent, AgentCompleteEvent tags should be empty."""
         from remora.core.events.events import ContentChangedEvent

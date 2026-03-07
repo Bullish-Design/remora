@@ -236,7 +236,7 @@ class TestDoReparse:
 
         await srv._do_reparse(uri, text)
 
-        nodes = await event_store.list_nodes(file_path=uri)
+        nodes = await event_store.nodes.list_nodes(file_path=uri)
         assert len(nodes) >= 1
         assert any(n.name == "hello" for n in nodes)
 
@@ -268,13 +268,13 @@ class TestDoReparse:
         # First parse with two functions
         text_v1 = "def hello():\n    pass\n\ndef goodbye():\n    pass\n"
         await srv._do_reparse(uri, text_v1)
-        nodes_v1 = await event_store.list_nodes(file_path=uri)
+        nodes_v1 = await event_store.nodes.list_nodes(file_path=uri)
         assert len(nodes_v1) >= 2
 
         # Second parse removes goodbye
         text_v2 = "def hello():\n    pass\n"
         await srv._do_reparse(uri, text_v2)
-        nodes_v2 = await event_store.list_nodes(file_path=uri)
+        nodes_v2 = await event_store.nodes.list_nodes(file_path=uri)
         names = [n.name for n in nodes_v2]
         assert "hello" in names
         assert "goodbye" not in names
@@ -463,7 +463,7 @@ class TestOnCursorMovedDebounce:
         mock_node.node_id = "agent-1"
 
         server.event_store = MagicMock()
-        server.event_store.get_node_at_position = AsyncMock(return_value=mock_node)
+        server.event_store.nodes.get_node_at_position = AsyncMock(return_value=mock_node)
 
         with patch.object(server, "schedule_cursor_update") as mock_schedule:
             await on_cursor_moved(server, {"uri": "file:///test.py", "line": 10})
@@ -478,7 +478,7 @@ class TestOnCursorMovedDebounce:
         register_handlers(server)
 
         server.event_store = MagicMock()
-        server.event_store.get_node_at_position = AsyncMock(return_value=None)
+        server.event_store.nodes.get_node_at_position = AsyncMock(return_value=None)
 
         with patch.object(server, "schedule_cursor_update") as mock_schedule:
             await on_cursor_moved(server, {"uri": "file:///test.py", "line": 5})
@@ -496,7 +496,7 @@ class TestOnCursorMovedDebounce:
         mock_node.node_id = "a1"
 
         server.event_store = MagicMock()
-        server.event_store.get_node_at_position = AsyncMock(return_value=mock_node)
+        server.event_store.nodes.get_node_at_position = AsyncMock(return_value=mock_node)
         server.db = MagicMock()
         server.db.update_cursor_focus = AsyncMock()
 

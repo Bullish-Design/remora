@@ -322,10 +322,10 @@ async def execute_agent_turn(
         return f"No subscription found for {subscription_id}."
 
     async def _broadcast(to_pattern: str, content: str) -> str:
-        current_node = await event_store.get_node(node.node_id)
+        current_node = await event_store.nodes.get_node(node.node_id)
         if current_node is None:
             return "Error: Agent metadata is unavailable."
-        agents = await event_store.list_nodes()
+        agents = await event_store.nodes.list_nodes()
         pattern = to_pattern.lower()
         if pattern == "children":
             targets = [a.node_id for a in agents if a.parent_id == node.node_id]
@@ -351,7 +351,7 @@ async def execute_agent_turn(
         return f"Broadcast sent to {len(targets)} agents via {to_pattern}."
 
     async def _query_agents(filter_type: str | None = None) -> list[AgentNode]:
-        agents = await event_store.list_nodes()
+        agents = await event_store.nodes.list_nodes()
         if not filter_type:
             return agents
         target_type = filter_type.lower()
@@ -392,11 +392,11 @@ async def execute_agent_turn(
         if isinstance(trigger_event, ScaffoldRequestEvent):
             scaffold_context = {"parent_source": "", "siblings": [], "intent": getattr(trigger_event, "intent", "")}
             if trigger_event.parent_id:
-                parent_node = await event_store.get_node(trigger_event.parent_id)
+                parent_node = await event_store.nodes.get_node(trigger_event.parent_id)
                 if parent_node is not None:
                     scaffold_context["parent_source"] = parent_node.source_code or ""
             # Siblings: nodes with same parent_id, excluding self
-            all_nodes = await event_store.list_nodes()
+            all_nodes = await event_store.nodes.list_nodes()
             scaffold_context["siblings"] = [
                 {"name": n.name, "node_type": n.node_type}
                 for n in all_nodes

@@ -14,7 +14,7 @@ async def hover(ls: LspServer, params: lsp.HoverParams) -> lsp.Hover | None:
         if not ls.event_store:
             return None
 
-        agent = await ls.event_store.get_node_at_position(uri, pos.line + 1)
+        agent = await ls.event_store.nodes.get_node_at_position(uri, pos.line + 1)
         if not agent:
             return None
 

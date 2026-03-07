@@ -59,6 +59,14 @@ class EventStore:
         self._event_bus = event_bus
         self._projection = projection
         self._trigger_queue: asyncio.Queue[tuple[str, int, CoreEvent]] | None = None
+        self._node_store: NodeStore | None = None
+
+    @property
+    def nodes(self) -> NodeStore:
+        """Access the isolated NodeStore for graph nodes."""
+        if self._node_store is None:
+            raise RuntimeError("EventStore not initialized")
+        return self._node_store
 
     def set_subscriptions(self, subscriptions: SubscriptionRegistry) -> None:
         """Set the subscription registry for trigger matching."""
@@ -107,6 +115,9 @@ class EventStore:
             self._read_conn.row_factory = sqlite3.Row
             # Mark read connection as read-only via query_only pragma
             await asyncio.to_thread(self._read_conn.execute, "PRAGMA query_only=ON")
+
+            from remora.core.store.node_store import NodeStore
+            self._node_store = NodeStore(self._read_conn, self._read_lock)
 
             await asyncio.to_thread(store_schema.create_tables, self._conn)
             await self._migrate_routing_fields()
@@ -661,124 +672,27 @@ class EventStore:
                 graph_id=graph_id,
             )
 
-    async def get_node(self, node_id: str) -> AgentNode | None:
-        """Get a single AgentNode by ID from the nodes table.
-
-        Uses the dedicated read connection to avoid blocking on write operations.
-        """
-        from remora.core.agents.agent_node import AgentNode
-
-        if self._read_conn is None:
-            await self.initialize()
-        if self._read_conn is None:
-            raise RuntimeError("EventStore not initialized")
-
-        async with self._read_lock:
-            row = await asyncio.to_thread(
-                store_queries.fetch_node_row,
-                self._read_conn,
-                node_id=node_id,
-            )
-
-        if row is None:
-            return None
-        return AgentNode.from_row(row)
-
-    async def list_nodes(
-        self,
-        *,
-        file_path: str | None = None,
-        node_type: str | None = None,
-        columns: list[str] | None = None,
-    ) -> list[AgentNode]:
-        """List AgentNodes with optional filters.
-
-        Uses the dedicated read connection to avoid blocking on write operations.
-
-        Args:
-            file_path: Filter by file path.
-            node_type: Filter by node type.
-            columns: If provided, only SELECT these columns (optimization to
-                     avoid fetching large source_code blobs).  When *columns*
-                     is ``None`` (the default), ``SELECT *`` is used and full
-                     ``AgentNode`` objects are returned.
-        """
-        from remora.core.agents.agent_node import AgentNode
-
-        if self._read_conn is None:
-            await self.initialize()
-        if self._read_conn is None:
-            raise RuntimeError("EventStore not initialized")
-
-        async with self._read_lock:
-            rows = await asyncio.to_thread(
-                store_queries.fetch_node_rows,
-                self._read_conn,
-                file_path=file_path,
-                node_type=node_type,
-                columns=columns,
-            )
-
-        return [AgentNode.from_row(row) for row in rows]
-
-    async def get_node_at_position(
-        self,
-        file_path: str,
-        line: int,
-    ) -> AgentNode | None:
-        """Get the narrowest AgentNode containing the given line in a file.
-
-        Uses the dedicated read connection to avoid blocking on write operations.
-        With WAL mode, this read doesn't need the lock since readers and writers
-        don't block each other.
-        """
-        from remora.core.agents.agent_node import AgentNode
-
-        if self._read_conn is None:
-            await self.initialize()
-        if self._read_conn is None:
-            raise RuntimeError("EventStore not initialized")
-
-        async with self._read_lock:
-            row = await asyncio.to_thread(
-                store_queries.fetch_node_at_position_row,
-                self._read_conn,
-                file_path=file_path,
-                line=line,
-            )
-
-        if row is None:
-            return None
-        return AgentNode.from_row(row)
-
     async def set_node_status(self, node_id: str, status: str) -> None:
-        """Update the status field of a node directly."""
+        """Update the status field of a node directly.
+        
+        This lives on EventStore because it requires the write connection and lock.
+        """
         if self._conn is None:
             await self.initialize()
         if self._conn is None:
             raise RuntimeError("EventStore not initialized")
-
-        async with self._lock:
-            await asyncio.to_thread(
-                store_queries.update_node_status,
-                self._conn,
-                node_id=node_id,
-                status=status,
-            )
+        await self.nodes.set_node_status(self._conn, self._lock, node_id, status)
 
     async def remove_nodes_for_file(self, file_path: str) -> int:
-        """Remove all nodes for a given file path. Returns count removed."""
+        """Remove all nodes for a given file path. Returns count removed.
+        
+        This lives on EventStore because it requires the write connection and lock.
+        """
         if self._conn is None:
             await self.initialize()
         if self._conn is None:
             raise RuntimeError("EventStore not initialized")
-
-        async with self._lock:
-            return await asyncio.to_thread(
-                store_queries.delete_nodes_for_file,
-                self._conn,
-                file_path=file_path,
-            )
+        return await self.nodes.remove_nodes_for_file(self._conn, self._lock, file_path)
 
     async def checkpoint_wal(self, mode: str = "PASSIVE") -> tuple[int, int, int]:
         """Run a WAL checkpoint and return (busy, log_frames, checkpointed_frames)."""

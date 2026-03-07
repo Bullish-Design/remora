@@ -12,12 +12,12 @@ from remora.lsp.handlers import commands
 
 @pytest.mark.asyncio
 async def test_resolve_agent_times_out_event_store_query() -> None:
-    class SlowEventStore:
+    class SlowNodeStore:
         async def get_node_at_position(self, uri: str, line: int):
             await asyncio.sleep(0.05)
             return None
 
-    ls = SimpleNamespace(event_store=SlowEventStore())
+    ls = SimpleNamespace(event_store=SimpleNamespace(nodes=SlowNodeStore()))
     args = ({"uri": "file:///test.py", "line": 1},)
 
     with patch.object(commands, "RESOLVE_AGENT_TIMEOUT_SECONDS", 0.01):

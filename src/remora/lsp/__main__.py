@@ -295,7 +295,7 @@ def _run_server(
                 if server.event_store:
                     from remora.core.events.events import NodeDiscoveredEvent, NodeRemovedEvent
 
-                    old_agents = await server.event_store.list_nodes(file_path=uri)
+                    old_agents = await server.event_store.nodes.list_nodes(file_path=uri)
                     old_ids = {a.node_id for a in old_agents}
                     new_ids = {n.node_id for n in nodes}
 

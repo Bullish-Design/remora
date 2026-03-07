@@ -85,7 +85,7 @@ async def test_wait_for_predicate_matching_event() -> None:
 @pytest.mark.asyncio
 async def test_emit_noisy_events_log_at_debug(caplog: pytest.LogCaptureFixture) -> None:
     bus = EventBus()
-    caplog.set_level(logging.DEBUG, logger="remora.core.event_bus")
+    caplog.set_level(logging.DEBUG, logger="remora.core.events.event_bus")
 
     await bus.emit(
         ScaffoldRequestEvent(

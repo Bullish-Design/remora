@@ -87,6 +87,7 @@ class _SimpleDB:
 class _ChunkTrackingEventStore:
     def __init__(self) -> None:
         self.chunk_sizes: list[int] = []
+        self.nodes = self
 
     async def list_nodes(self, file_path: str):
         _ = file_path
@@ -200,7 +201,7 @@ async def test_background_scan_uses_aggressive_preemption_settings(
     monkeypatch.setattr(runner_mod, "AgentRunner", _FakeRunner)
     monkeypatch.setattr("remora.core.config.load_config", lambda path=None: Config())
     monkeypatch.setattr(asyncio, "sleep", _capture_sleep)
-    monkeypatch.setattr("remora.core.discovery.parse_content", mock_parse_content)
+    monkeypatch.setattr("remora.core.code.discovery.parse_content", mock_parse_content)
 
     with pytest.raises(_StopSentinel):
         lsp_main_mod._run_server(event_store=event_store)

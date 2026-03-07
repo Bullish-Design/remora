@@ -63,7 +63,7 @@ async def test_full_lifecycle(store: EventStore):
     )
 
     # Verify extension was matched
-    node = await store.get_node("node_test_foo")
+    node = await store.nodes.get_node("node_test_foo")
     assert node is not None
     assert node.extension_name == "TestAgent"
     assert node.custom_system_prompt == "You are a test runner."
@@ -74,7 +74,7 @@ async def test_full_lifecycle(store: EventStore):
         "swarm",
         AgentStartEvent(graph_id="s", agent_id="node_test_foo", node_name="test_foo"),
     )
-    node = await store.get_node("node_test_foo")
+    node = await store.nodes.get_node("node_test_foo")
     assert node.status == "running"
 
     # 3. Complete the agent
@@ -82,7 +82,7 @@ async def test_full_lifecycle(store: EventStore):
         "swarm",
         AgentCompleteEvent(graph_id="s", agent_id="node_test_foo", result_summary="done"),
     )
-    node = await store.get_node("node_test_foo")
+    node = await store.nodes.get_node("node_test_foo")
     assert node.status == "idle"
     assert node.last_completed_at is not None
 
@@ -97,7 +97,7 @@ async def test_full_lifecycle(store: EventStore):
 
     # 6. Remove the node
     await store.append("swarm", NodeRemovedEvent(node_id="node_test_foo"))
-    node = await store.get_node("node_test_foo")
+    node = await store.nodes.get_node("node_test_foo")
     assert node is None
 
 
@@ -139,7 +139,7 @@ async def test_re_discovery_preserves_status(store: EventStore):
         ),
     )
 
-    node = await store.get_node("node_1")
+    node = await store.nodes.get_node("node_1")
     assert node.source_hash == "h2"
     assert node.end_line == 8
     # Status preserved from before re-discovery (projection upsert preserves status)

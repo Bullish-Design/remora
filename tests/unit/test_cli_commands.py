@@ -58,10 +58,10 @@ class TestSwarmList:
 
         mock_store = MagicMock()
         mock_store.initialize = AsyncMock()
-        mock_store.list_nodes = AsyncMock(return_value=[])
+        mock_store.nodes.list_nodes = AsyncMock(return_value=[])
         mock_store.close = AsyncMock()
 
-        with patch("remora.core.event_store.EventStore", return_value=mock_store):
+        with patch("remora.core.store.event_store.EventStore", return_value=mock_store):
             result = _invoke("swarm", "list", "--project-root", str(tmp_path))
 
         assert result.exit_code == 0
@@ -82,10 +82,10 @@ class TestSwarmList:
 
         mock_store = MagicMock()
         mock_store.initialize = AsyncMock()
-        mock_store.list_nodes = AsyncMock(return_value=[agent])
+        mock_store.nodes.list_nodes = AsyncMock(return_value=[agent])
         mock_store.close = AsyncMock()
 
-        with patch("remora.core.event_store.EventStore", return_value=mock_store):
+        with patch("remora.core.store.event_store.EventStore", return_value=mock_store):
             result = _invoke("swarm", "list", "--project-root", str(tmp_path))
 
         assert result.exit_code == 0
@@ -112,7 +112,7 @@ class TestSwarmEmit:
 
         data = json.dumps({"from_agent": "cli", "to_agent": "rm_abc", "content": "hello"})
 
-        with patch("remora.core.event_store.EventStore", return_value=mock_store):
+        with patch("remora.core.store.event_store.EventStore", return_value=mock_store):
             result = _invoke(
                 "swarm",
                 "emit",
@@ -135,7 +135,7 @@ class TestSwarmEmit:
 
         data = json.dumps({"path": "src/foo.py", "diff": "+new line"})
 
-        with patch("remora.core.event_store.EventStore", return_value=mock_store):
+        with patch("remora.core.store.event_store.EventStore", return_value=mock_store):
             result = _invoke(
                 "swarm",
                 "emit",
@@ -165,7 +165,7 @@ class TestSwarmEmit:
         mock_store.initialize = AsyncMock()
         mock_store.close = AsyncMock()
 
-        with patch("remora.core.event_store.EventStore", return_value=mock_store):
+        with patch("remora.core.store.event_store.EventStore", return_value=mock_store):
             runner = CliRunner()
             result = runner.invoke(
                 main,
@@ -182,7 +182,7 @@ class TestSwarmEmit:
         mock_store.append = AsyncMock(return_value="evt_003")
         mock_store.close = AsyncMock()
 
-        with patch("remora.core.event_store.EventStore", return_value=mock_store):
+        with patch("remora.core.store.event_store.EventStore", return_value=mock_store):
             result = _invoke(
                 "swarm",
                 "emit",
@@ -217,9 +217,9 @@ class TestSwarmReconcile:
         mock_reconcile = AsyncMock(return_value=recon_result)
 
         with (
-            patch("remora.core.subscriptions.SubscriptionRegistry", return_value=mock_subs),
-            patch("remora.core.event_store.EventStore", return_value=mock_store),
-            patch("remora.core.reconciler.reconcile_on_startup", mock_reconcile),
+            patch("remora.core.events.subscriptions.SubscriptionRegistry", return_value=mock_subs),
+            patch("remora.core.store.event_store.EventStore", return_value=mock_store),
+            patch("remora.core.code.reconciler.reconcile_on_startup", mock_reconcile),
         ):
             result = _invoke(
                 "swarm",
@@ -294,10 +294,10 @@ class TestSwarmStart:
         original_event.wait = AsyncMock(side_effect=asyncio.CancelledError)
 
         with (
-            patch("remora.core.subscriptions.SubscriptionRegistry", return_value=mock_subs),
-            patch("remora.core.event_store.EventStore", return_value=mock_store),
-            patch("remora.core.event_bus.EventBus", return_value=mock_bus),
-            patch("remora.core.reconciler.reconcile_on_startup", mock_reconcile),
+            patch("remora.core.events.subscriptions.SubscriptionRegistry", return_value=mock_subs),
+            patch("remora.core.store.event_store.EventStore", return_value=mock_store),
+            patch("remora.core.events.event_bus.EventBus", return_value=mock_bus),
+            patch("remora.core.code.reconciler.reconcile_on_startup", mock_reconcile),
             patch("remora.runner.agent_runner.AgentRunner.create_headless", return_value=mock_runner),
             patch("asyncio.Event", return_value=original_event),
         ):
@@ -331,10 +331,10 @@ class TestSwarmStart:
         mock_lsp_main = MagicMock()
 
         with (
-            patch("remora.core.subscriptions.SubscriptionRegistry", return_value=mock_subs),
-            patch("remora.core.event_store.EventStore", return_value=mock_store),
-            patch("remora.core.event_bus.EventBus", return_value=mock_bus),
-            patch("remora.core.reconciler.reconcile_on_startup", mock_reconcile),
+            patch("remora.core.events.subscriptions.SubscriptionRegistry", return_value=mock_subs),
+            patch("remora.core.store.event_store.EventStore", return_value=mock_store),
+            patch("remora.core.events.event_bus.EventBus", return_value=mock_bus),
+            patch("remora.core.code.reconciler.reconcile_on_startup", mock_reconcile),
             patch("remora.lsp.__main__.main", mock_lsp_main),
         ):
             result = _invoke(

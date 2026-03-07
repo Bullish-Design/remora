@@ -463,7 +463,7 @@ class AgentRunner:
         elif cmd_type == "execute_tool" and agent_id:
             tool_name = payload.get("tool_name", "")
             tool_params = payload.get("params", {})
-            agent = await self.server.event_store.get_node(agent_id)
+            agent = await self.server.event_store.nodes.get_node(agent_id)
             if agent and tool_name:
                 await self.execute_extension_tool(agent, tool_name, tool_params, self.server.generate_correlation_id())
         else:
@@ -539,7 +539,7 @@ class AgentRunner:
             await self.server.db.add_to_chain(correlation_id, agent_id)
 
             node_read_start = time.monotonic()
-            agent = await self.server.event_store.get_node(agent_id)
+            agent = await self.server.event_store.nodes.get_node(agent_id)
             node_read_ms = (time.monotonic() - node_read_start) * 1000
             logger.info(
                 "execute_turn: get_node END agent=%s duration_ms=%.1f found=%s",
@@ -772,7 +772,7 @@ class AgentRunner:
 
     async def refresh_code_lens(self, agent_id: str) -> None:
 
-        node = await self.server.event_store.get_node(agent_id)
+        node = await self.server.event_store.nodes.get_node(agent_id)
         if node:
             await self.server.refresh_code_lenses()
 

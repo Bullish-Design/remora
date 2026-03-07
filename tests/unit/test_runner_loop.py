@@ -1,7 +1,7 @@
 """Tests for AgentRunner — execute_turn, create_proposal, depth tracking.
 
 After the Workstream B refactoring, the runner delegates actual agent execution
-to ``execute_agent_turn()`` from ``remora.core.execution``.  Tests that
+to ``execute_agent_turn()`` from ``remora.core.agents.execution``.  Tests that
 exercised the removed LLM loop / handle_response / get_agent_tools / ToolCall /
 LLMResponse have been deleted.  The remaining tests verify the runner's own
 responsibilities: status management, cascade tracking, error handling, proposal
@@ -50,7 +50,7 @@ def _make_mock_server() -> MagicMock:
     server = MagicMock()
     server.event_store = MagicMock()
     server.event_store.set_node_status = AsyncMock()
-    server.event_store.get_node = AsyncMock(return_value=_make_agent())
+    server.event_store.nodes.get_node = AsyncMock(return_value=_make_agent())
     server.event_store.get_events_for_correlation = AsyncMock(return_value=[])
     server.event_store.append = AsyncMock(return_value=1)
     server.db = MagicMock()
@@ -103,7 +103,7 @@ class TestExecuteTurn:
     @pytest.mark.asyncio
     async def test_turn_missing_node_emits_error(self):
         server = _make_mock_server()
-        server.event_store.get_node = AsyncMock(return_value=None)
+        server.event_store.nodes.get_node = AsyncMock(return_value=None)
         runner = AgentRunner(server)
 
         trigger = Trigger(agent_id="rm_missing", correlation_id="corr_1")

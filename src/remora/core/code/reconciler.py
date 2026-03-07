@@ -86,7 +86,7 @@ async def reconcile_on_startup(
     # Get existing nodes from EventStore
     existing_nodes: list = []
     if event_store is not None:
-        existing_nodes = await event_store.list_nodes()
+        existing_nodes = await event_store.nodes.list_nodes()
     existing_map = {n.node_id: n for n in existing_nodes}
     existing_ids = set(existing_map.keys())
 

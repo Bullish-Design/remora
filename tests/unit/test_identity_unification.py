@@ -112,7 +112,7 @@ class TestReconcilerUsesEventStore:
             assert result["created"] >= 1
 
             # Nodes should be in EventStore
-            nodes = await event_store.list_nodes()
+            nodes = await event_store.nodes.list_nodes()
             assert len(nodes) >= 1
 
             # Find the function node
@@ -196,7 +196,7 @@ class TestReconcilerUsesEventStore:
                 swarm_id="test",
             )
 
-            nodes_before = await event_store.list_nodes()
+            nodes_before = await event_store.nodes.list_nodes()
             assert len(nodes_before) >= 1
 
             # Remove the file
@@ -215,7 +215,7 @@ class TestReconcilerUsesEventStore:
             assert result["orphaned"] >= 1
 
             # The function node should be gone
-            nodes_after = await event_store.list_nodes(node_type="function")
+            nodes_after = await event_store.nodes.list_nodes(node_type="function")
             func_names = [n.name for n in nodes_after]
             assert "hello" not in func_names
         finally:
@@ -255,7 +255,7 @@ class TestReconcilerUsesEventStore:
                 swarm_id="test",
             )
 
-            nodes_before = await event_store.list_nodes(node_type="function")
+            nodes_before = await event_store.nodes.list_nodes(node_type="function")
             assert len(nodes_before) >= 1
             old_hash = nodes_before[0].source_hash
 
@@ -274,7 +274,7 @@ class TestReconcilerUsesEventStore:
             )
 
             # Node should have updated source_hash
-            nodes_after = await event_store.list_nodes(node_type="function")
+            nodes_after = await event_store.nodes.list_nodes(node_type="function")
             assert len(nodes_after) >= 1
             new_hash = nodes_after[0].source_hash
             assert new_hash != old_hash, "source_hash should change after code modification"
@@ -324,7 +324,7 @@ class TestSwarmExecutorUsesAgentNode:
         assert "src/billing.py" in prompt
         assert "Lines: 10-25" in prompt
 
-    @patch("remora.core.swarm_executor.build_client")
+    @patch("remora.core.agents.swarm_executor.build_client")
     def test_executor_constructor_no_swarm_state_param(self, mock_build_client, tmp_path):
         """SwarmExecutor should not require a swarm_state parameter."""
         import inspect
@@ -334,7 +334,7 @@ class TestSwarmExecutorUsesAgentNode:
         param_names = list(sig.parameters.keys())
         assert "swarm_state" not in param_names, "SwarmExecutor.__init__ should not have a swarm_state parameter"
 
-    @patch("remora.core.swarm_executor.build_client")
+    @patch("remora.core.agents.swarm_executor.build_client")
     def test_run_agent_accepts_agent_node(self, mock_build_client, tmp_path):
         """run_agent type annotation should accept AgentNode."""
         import inspect
@@ -364,7 +364,7 @@ class TestServiceHandlersUseEventStore:
         from remora.service.handlers import handle_swarm_list_agents, ServiceDeps
 
         mock_event_store = AsyncMock()
-        mock_event_store.list_nodes = AsyncMock(
+        mock_event_store.nodes.list_nodes = AsyncMock(
             return_value=[
                 _make_agent_node(node_id="a1", name="func_a"),
                 _make_agent_node(node_id="a2", name="func_b"),
@@ -381,7 +381,7 @@ class TestServiceHandlersUseEventStore:
 
         result = await handle_swarm_list_agents(deps)
         assert len(result) == 2
-        mock_event_store.list_nodes.assert_awaited_once()
+        mock_event_store.nodes.list_nodes.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_handle_swarm_get_agent_uses_event_store(self):
@@ -389,7 +389,7 @@ class TestServiceHandlersUseEventStore:
         from remora.service.handlers import handle_swarm_get_agent, ServiceDeps
 
         mock_event_store = AsyncMock()
-        mock_event_store.get_node = AsyncMock(return_value=_make_agent_node(node_id="agent_1", name="my_func"))
+        mock_event_store.nodes.get_node = AsyncMock(return_value=_make_agent_node(node_id="agent_1", name="my_func"))
 
         deps = ServiceDeps(
             event_bus=MagicMock(),
@@ -402,7 +402,7 @@ class TestServiceHandlersUseEventStore:
         result = await handle_swarm_get_agent("agent_1", deps)
         assert result["node_id"] == "agent_1"
         assert result["name"] == "my_func"
-        mock_event_store.get_node.assert_awaited_once_with("agent_1")
+        mock_event_store.nodes.get_node.assert_awaited_once_with("agent_1")
 
     @pytest.mark.asyncio
     async def test_handle_swarm_list_agents_no_event_store_raises(self):
@@ -426,7 +426,7 @@ class TestServiceHandlersUseEventStore:
         from remora.service.handlers import handle_swarm_get_agent, ServiceDeps
 
         mock_event_store = AsyncMock()
-        mock_event_store.get_node = AsyncMock(return_value=None)
+        mock_event_store.nodes.get_node = AsyncMock(return_value=None)
 
         deps = ServiceDeps(
             event_bus=MagicMock(),

@@ -227,7 +227,7 @@ class ReadNodeTool:
             logger.info("read_node: resolved 'parent' -> %s for agent %s", self._agent.parent_id, self._agent.node_id)
             target_id = self._agent.parent_id
 
-        target = await self._event_store.get_node(target_id)
+        target = await self._event_store.nodes.get_node(target_id)
         if target:
             result_text = json.dumps(
                 {

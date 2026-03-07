@@ -400,9 +400,9 @@ class TestLightweightListNodes:
     def test_list_nodes_has_columns_param(self):
         """The list_nodes method should accept a columns keyword arg."""
         import inspect
-        from remora.core.store.event_store import EventStore
+        from remora.core.store.node_store import NodeStore
 
-        sig = inspect.signature(EventStore.list_nodes)
+        sig = inspect.signature(NodeStore.list_nodes)
         assert "columns" in sig.parameters
 
 

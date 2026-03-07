@@ -94,7 +94,7 @@ class RemoraLanguageServer(LanguageServer):
             logger.debug("_do_reparse: %d nodes for %s", len(cst_nodes), uri)
 
             if self.event_store:
-                old_agents = await self.event_store.list_nodes(file_path=uri)
+                old_agents = await self.event_store.nodes.list_nodes(file_path=uri)
                 new_ids = {n.node_id for n in cst_nodes}
                 old_ids = {a.node_id for a in old_agents}
 
@@ -322,7 +322,7 @@ class RemoraLanguageServer(LanguageServer):
         """Send $/remora/agentsUpdated with all active nodes to the client."""
         try:
             if self.event_store:
-                all_agents = await self.event_store.list_nodes()
+                all_agents = await self.event_store.nodes.list_nodes()
                 agent_list = [
                     {
                         "node_id": a.node_id,

@@ -107,7 +107,7 @@ async def test_document_handlers_populate_db_and_code_lenses(tmp_path: Path, iso
     await documents.did_open(server, params)
 
     # Nodes now live in EventStore, not RemoraDB
-    nodes = await server.event_store.list_nodes(file_path=uri)
+    nodes = await server.event_store.nodes.list_nodes(file_path=uri)
     assert any(node.node_type == "function" for node in nodes)
 
     lens_params = lsp.CodeLensParams(text_document=lsp.TextDocumentIdentifier(uri=uri))

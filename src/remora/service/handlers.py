@@ -97,7 +97,7 @@ async def handle_swarm_list_agents(deps: ServiceDeps) -> list[dict[str, Any]]:
     """List all agents in the swarm."""
     if deps.event_store is None:
         raise ValueError("event store not configured")
-    agents = await deps.event_store.list_nodes()
+    agents = await deps.event_store.nodes.list_nodes()
     return [agent.model_dump() for agent in agents]
 
 
@@ -105,7 +105,7 @@ async def handle_swarm_get_agent(agent_id: str, deps: ServiceDeps) -> dict[str, 
     """Get a specific agent."""
     if deps.event_store is None:
         raise ValueError("event store not configured")
-    agent = await deps.event_store.get_node(agent_id)
+    agent = await deps.event_store.nodes.get_node(agent_id)
     if agent is None:
         raise ValueError("agent not found")
     return agent.model_dump()

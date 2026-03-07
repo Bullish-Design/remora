@@ -1,7 +1,7 @@
 """TDD tests for 6.5: Kernel factory (create_kernel).
 
 Verifies:
-- create_kernel exists in remora.core.kernel_factory
+- create_kernel exists in remora.core.agents.kernel_factory
 - Accepts model_name, base_url, api_key, timeout, tools, observer
 - Returns an AgentKernel instance
 - SwarmExecutor._run_kernel uses create_kernel

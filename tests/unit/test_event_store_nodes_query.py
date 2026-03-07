@@ -53,7 +53,7 @@ async def store(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_get_node(store: EventStore):
-    node = await store.get_node("id_foo")
+    node = await store.nodes.get_node("id_foo")
     assert node is not None
     assert node.name == "foo"
     assert isinstance(node, AgentNode)
@@ -61,25 +61,25 @@ async def test_get_node(store: EventStore):
 
 @pytest.mark.asyncio
 async def test_get_node_not_found(store: EventStore):
-    node = await store.get_node("nonexistent")
+    node = await store.nodes.get_node("nonexistent")
     assert node is None
 
 
 @pytest.mark.asyncio
 async def test_list_nodes(store: EventStore):
-    nodes = await store.list_nodes()
+    nodes = await store.nodes.list_nodes()
     assert len(nodes) == 2
 
 
 @pytest.mark.asyncio
 async def test_list_nodes_by_file(store: EventStore):
-    nodes = await store.list_nodes(file_path="/test.py")
+    nodes = await store.nodes.list_nodes(file_path="/test.py")
     assert len(nodes) == 2
 
 
 @pytest.mark.asyncio
 async def test_list_nodes_by_type(store: EventStore):
-    nodes = await store.list_nodes(node_type="class")
+    nodes = await store.nodes.list_nodes(node_type="class")
     assert len(nodes) == 1
     assert nodes[0].name == "Bar"
 
@@ -87,7 +87,7 @@ async def test_list_nodes_by_type(store: EventStore):
 @pytest.mark.asyncio
 async def test_get_node_at_position_hit(store: EventStore):
     """Line 3 is inside foo (lines 1-5)."""
-    node = await store.get_node_at_position("/test.py", 3)
+    node = await store.nodes.get_node_at_position("/test.py", 3)
     assert node is not None
     assert node.node_id == "id_foo"
 
@@ -95,7 +95,7 @@ async def test_get_node_at_position_hit(store: EventStore):
 @pytest.mark.asyncio
 async def test_get_node_at_position_miss(store: EventStore):
     """Line 6 is between foo and Bar — no node."""
-    node = await store.get_node_at_position("/test.py", 6)
+    node = await store.nodes.get_node_at_position("/test.py", 6)
     assert node is None
 
 
@@ -118,7 +118,7 @@ async def test_get_node_at_position_narrowest(store: EventStore, tmp_path: Path)
         ),
     )
     # Line 10 is inside both Bar (7-20) and baz (9-12). Should return baz.
-    node = await store.get_node_at_position("/test.py", 10)
+    node = await store.nodes.get_node_at_position("/test.py", 10)
     assert node is not None
     assert node.node_id == "id_method"
 
@@ -126,7 +126,7 @@ async def test_get_node_at_position_narrowest(store: EventStore, tmp_path: Path)
 @pytest.mark.asyncio
 async def test_get_node_at_position_wrong_file(store: EventStore):
     """Querying a different file returns None."""
-    node = await store.get_node_at_position("/other.py", 3)
+    node = await store.nodes.get_node_at_position("/other.py", 3)
     assert node is None
 
 
@@ -134,12 +134,12 @@ async def test_get_node_at_position_wrong_file(store: EventStore):
 async def test_set_node_status(store: EventStore):
     """set_node_status updates the status field."""
     await store.set_node_status("id_foo", "running")
-    node = await store.get_node("id_foo")
+    node = await store.nodes.get_node("id_foo")
     assert node is not None
     assert node.status == "running"
 
     await store.set_node_status("id_foo", "idle")
-    node = await store.get_node("id_foo")
+    node = await store.nodes.get_node("id_foo")
     assert node.status == "idle"
 
 
@@ -149,7 +149,7 @@ async def test_remove_nodes_for_file(store: EventStore):
     removed = await store.remove_nodes_for_file("/test.py")
     assert removed == 2
 
-    nodes = await store.list_nodes(file_path="/test.py")
+    nodes = await store.nodes.list_nodes(file_path="/test.py")
     assert len(nodes) == 0
 
 

@@ -192,7 +192,7 @@ class TestHandleSwarmListAgents:
     @pytest.mark.asyncio
     async def test_returns_agent_list(self, deps):
         mock_store = AsyncMock()
-        mock_store.list_nodes = AsyncMock(return_value=[])
+        mock_store.nodes.list_nodes = AsyncMock(return_value=[])
         deps.event_store = mock_store
 
         result = await handle_swarm_list_agents(deps)
@@ -213,7 +213,7 @@ class TestHandleSwarmGetAgent:
     @pytest.mark.asyncio
     async def test_agent_not_found_raises(self, deps):
         mock_store = AsyncMock()
-        mock_store.get_node = AsyncMock(return_value=None)
+        mock_store.nodes.get_node = AsyncMock(return_value=None)
         deps.event_store = mock_store
 
         with pytest.raises(ValueError, match="agent not found"):

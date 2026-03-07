@@ -197,7 +197,7 @@ class TestExtensionComplexFieldsRoundTrip:
         event = make_discovered_event()
         await store_with_projection.append("g1", event)
 
-        node = await store_with_projection.get_node("test_node_001")
+        node = await store_with_projection.nodes.get_node("test_node_001")
         assert node is not None
         assert node.extension_name == "WorkerAgent"
         assert len(node.extra_tools) == 1
@@ -209,7 +209,7 @@ class TestExtensionComplexFieldsRoundTrip:
         event = make_discovered_event()
         await store_with_projection.append("g1", event)
 
-        node = await store_with_projection.get_node("test_node_001")
+        node = await store_with_projection.nodes.get_node("test_node_001")
         assert node is not None
         assert len(node.extra_subscriptions) == 1
         sub = node.extra_subscriptions[0]
@@ -221,7 +221,7 @@ class TestExtensionComplexFieldsRoundTrip:
         event = make_discovered_event()
         await store_with_projection.append("g1", event)
 
-        node = await store_with_projection.get_node("test_node_001")
+        node = await store_with_projection.nodes.get_node("test_node_001")
         assert node is not None
         assert node.mounted_workspaces == ["/data/staging", "/data/prod"]
 
@@ -230,7 +230,7 @@ class TestExtensionComplexFieldsRoundTrip:
         event = make_discovered_event()
         await store_with_projection.append("g1", event)
 
-        node = await store_with_projection.get_node("test_node_001")
+        node = await store_with_projection.nodes.get_node("test_node_001")
         assert node is not None
         assert node.custom_system_prompt == "You are a worker."
 
@@ -240,7 +240,7 @@ class TestExtensionComplexFieldsRoundTrip:
         event = make_discovered_event()
         await store_with_projection.append("g1", event)
 
-        node = await store_with_projection.get_node("test_node_001")
+        node = await store_with_projection.nodes.get_node("test_node_001")
         assert node is not None
         llm_tool = node.extra_tools[0].to_llm_tool()
         assert llm_tool["type"] == "function"
@@ -255,7 +255,7 @@ class TestExtensionComplexFieldsRoundTrip:
         event2 = make_discovered_event(source_hash="v2", source_code="def do_work(x): pass")
         await store_with_projection.append("g1", event2)
 
-        node = await store_with_projection.get_node("test_node_001")
+        node = await store_with_projection.nodes.get_node("test_node_001")
         assert node is not None
         assert node.source_hash == "v2"
         # Extension fields should still be populated after upsert
@@ -268,7 +268,7 @@ class TestExtensionComplexFieldsRoundTrip:
         event = make_discovered_event(name="other_func", full_name="function:other_func")
         await store_with_projection.append("g1", event)
 
-        node = await store_with_projection.get_node("test_node_001")
+        node = await store_with_projection.nodes.get_node("test_node_001")
         assert node is not None
         assert node.extension_name is None
         assert node.extra_tools == []
@@ -425,7 +425,7 @@ class TestAppendConcurrency:
         await asyncio.gather(*[_append(i) for i in range(n_events)])
 
         # Node should exist (last upsert wins)
-        node = await store.get_node("test_node_001")
+        node = await store.nodes.get_node("test_node_001")
         assert node is not None
         assert node.node_id == "test_node_001"
 

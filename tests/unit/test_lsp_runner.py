@@ -104,7 +104,7 @@ class TestDispatchCommand:
             assert agent_arg.node_id == "rm_abc12"
 
         # RemoraDB.get_node should NOT be called
-        mock_server.db.get_node.assert_not_called()
+        mock_server.db.nodes.get_node.assert_not_called()
 
 
 class TestExecuteTurn:
@@ -128,7 +128,7 @@ class TestExecuteTurn:
             await runner.execute_turn(trigger)
 
         # Status should have been set to "running" then back to "idle"
-        node = await event_store.get_node("rm_abc12")
+        node = await event_store.nodes.get_node("rm_abc12")
         assert node is not None
         assert node.status == "idle"  # After finally block resets to idle
 
@@ -150,7 +150,7 @@ class TestExecuteTurn:
             await runner.execute_turn(trigger)
 
         # RemoraDB.get_node should NOT be called
-        mock_server.db.get_node.assert_not_called()
+        mock_server.db.nodes.get_node.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_execute_agent_turn_timeout_emits_error(self, runner, event_store):
@@ -173,7 +173,7 @@ class TestExecuteTurn:
         _, error_message, _ = mock_emit_error.await_args.args
         assert "timed out" in error_message
 
-        node = await event_store.get_node("rm_abc12")
+        node = await event_store.nodes.get_node("rm_abc12")
         assert node is not None
         assert node.status == "idle"
 
@@ -226,4 +226,4 @@ class TestRefreshCodeLens:
             await runner.refresh_code_lens("rm_abc12")
 
         mock_refresh.assert_called_once()
-        mock_server.db.get_node.assert_not_called()
+        mock_server.db.nodes.get_node.assert_not_called()

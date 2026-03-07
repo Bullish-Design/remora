@@ -111,7 +111,7 @@ async def _register_extra_subscriptions(
     node_id: str,
 ) -> None:
     """Register the extra_subscriptions from a node's extension data."""
-    node = await event_store.get_node(node_id)
+    node = await event_store.nodes.get_node(node_id)
     assert node is not None
     for sub_pattern in node.extra_subscriptions:
         await subscriptions.register(node_id, sub_pattern)
@@ -142,7 +142,7 @@ class TestCascadeClassDiscovery:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("cls:MyWidget")
+        node = await event_store.nodes.get_node("cls:MyWidget")
         assert node is not None
         assert node.extension_name == "ClassDocGenerator"
         assert node.custom_system_prompt != ""
@@ -204,7 +204,7 @@ class TestCascadeFunctionDiscovery:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("fn:calculate_total")
+        node = await event_store.nodes.get_node("fn:calculate_total")
         assert node is not None
         assert node.extension_name == "FunctionTestScaffold"
 
@@ -225,7 +225,7 @@ class TestCascadeFunctionDiscovery:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("fn:test_calculate")
+        node = await event_store.nodes.get_node("fn:test_calculate")
         assert node is not None
         assert node.extension_name == "TestFunction"
 
@@ -250,7 +250,7 @@ class TestCascadeSwarmMonitor:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("file:MONITOR")
+        node = await event_store.nodes.get_node("file:MONITOR")
         assert node is not None
         assert node.extension_name == "SwarmMonitor"
 
@@ -413,9 +413,9 @@ class TestFullCascadeChain:
             await event_store.append("swarm", event)
 
         # Verify extensions were matched correctly
-        cls_node = await event_store.get_node("cls:Processor")
-        fn_node = await event_store.get_node("fn:transform")
-        mon_node = await event_store.get_node("file:MONITOR")
+        cls_node = await event_store.nodes.get_node("cls:Processor")
+        fn_node = await event_store.nodes.get_node("fn:transform")
+        mon_node = await event_store.nodes.get_node("file:MONITOR")
 
         assert cls_node is not None
         assert fn_node is not None
@@ -476,7 +476,7 @@ class TestFullCascadeChain:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("cls:Widget")
+        node = await event_store.nodes.get_node("cls:Widget")
         assert node is not None
 
         # Extension fields populated

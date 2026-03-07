@@ -15,7 +15,7 @@ async def code_action(ls: LspServer, params: lsp.CodeActionParams) -> list[lsp.C
         if not ls.event_store:
             return []
 
-        agent = await ls.event_store.get_node_at_position(uri, range_.start.line + 1)
+        agent = await ls.event_store.nodes.get_node_at_position(uri, range_.start.line + 1)
         if not agent:
             return []
 

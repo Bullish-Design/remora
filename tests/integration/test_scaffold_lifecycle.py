@@ -108,7 +108,7 @@ async def _register_extra_subscriptions(
     node_id: str,
 ) -> None:
     """Register the extra_subscriptions from a node's extension data."""
-    node = await event_store.get_node(node_id)
+    node = await event_store.nodes.get_node(node_id)
     assert node is not None
     for sub_pattern in node.extra_subscriptions:
         await subscriptions.register(node_id, sub_pattern)
@@ -139,7 +139,7 @@ class TestScaffoldStatusAssignment:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("fn:stub_func")
+        node = await event_store.nodes.get_node("fn:stub_func")
         assert node is not None
         assert node.status == "scaffold"
 
@@ -160,7 +160,7 @@ class TestScaffoldStatusAssignment:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("cls:StubClass")
+        node = await event_store.nodes.get_node("cls:StubClass")
         assert node is not None
         assert node.status == "scaffold"
 
@@ -181,7 +181,7 @@ class TestScaffoldStatusAssignment:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("file:empty")
+        node = await event_store.nodes.get_node("file:empty")
         assert node is not None
         assert node.status == "scaffold"
 
@@ -202,7 +202,7 @@ class TestScaffoldStatusAssignment:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("fn:real_func")
+        node = await event_store.nodes.get_node("fn:real_func")
         assert node is not None
         assert node.status == "idle"
 
@@ -232,7 +232,7 @@ class TestScaffoldExtensionMatching:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("fn:placeholder")
+        node = await event_store.nodes.get_node("fn:placeholder")
         assert node is not None
         assert node.extension_name == "ScaffoldInitializer"
         assert "rewrite_self" in node.custom_system_prompt
@@ -254,7 +254,7 @@ class TestScaffoldExtensionMatching:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("cls:EmptyClass")
+        node = await event_store.nodes.get_node("cls:EmptyClass")
         assert node is not None
         assert node.extension_name == "ScaffoldInitializer"
 
@@ -276,7 +276,7 @@ class TestScaffoldExtensionMatching:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("fn:calculate")
+        node = await event_store.nodes.get_node("fn:calculate")
         assert node is not None
         # ScaffoldInitializer (s) comes after FunctionTestScaffold (f) alphabetically
         # but a real function shouldn't match ScaffoldInitializer at all
@@ -407,7 +407,7 @@ class TestScaffoldFullLifecycle:
         await event_store.append("swarm", stub_event)
 
         # 3. Verify scaffold status and extension
-        node = await event_store.get_node("fn:process_data")
+        node = await event_store.nodes.get_node("fn:process_data")
         assert node is not None
         assert node.status == "scaffold"
         assert node.extension_name == "ScaffoldInitializer"
@@ -465,8 +465,8 @@ class TestScaffoldFullLifecycle:
         await event_store.append("swarm", real_event)
         await event_store.append("swarm", stub_event)
 
-        real_node = await event_store.get_node("fn:real")
-        stub_node = await event_store.get_node("fn:stub")
+        real_node = await event_store.nodes.get_node("fn:real")
+        stub_node = await event_store.nodes.get_node("fn:stub")
 
         assert real_node is not None
         assert stub_node is not None
@@ -497,7 +497,7 @@ class TestScaffoldFullLifecycle:
         )
         await event_store.append("swarm", event)
 
-        node = await event_store.get_node("fn:pending")
+        node = await event_store.nodes.get_node("fn:pending")
         assert node is not None
         assert len(node.extra_subscriptions) >= 1
 

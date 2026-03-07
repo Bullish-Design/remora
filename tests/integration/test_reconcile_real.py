@@ -53,7 +53,7 @@ async def test_reconcile_registers_agents_and_default_subscriptions(tmp_path: Pa
         )
 
         assert summary["created"] >= 1
-        nodes = await event_store.list_nodes()
+        nodes = await event_store.nodes.list_nodes()
         assert nodes
 
         for node in nodes:
@@ -146,7 +146,7 @@ async def test_reconcile_refreshes_source_hash_for_common_agents(tmp_path: Path)
             swarm_id="swarm",
         )
 
-        nodes_before = await event_store.list_nodes()
+        nodes_before = await event_store.nodes.list_nodes()
         func_node = next(
             (n for n in nodes_before if n.node_type == "function"),
             None,
@@ -174,7 +174,7 @@ async def test_reconcile_refreshes_source_hash_for_common_agents(tmp_path: Path)
 
         assert summary["updated"] >= 1, "Expected at least 1 updated agent"
 
-        nodes_after = await event_store.list_nodes()
+        nodes_after = await event_store.nodes.list_nodes()
         updated_func = next(
             (n for n in nodes_after if n.node_id == func_node.node_id),
             None,
@@ -219,7 +219,7 @@ async def test_reconcile_preserves_identity_when_function_moves(
             swarm_id="swarm",
         )
 
-        nodes_before = await event_store.list_nodes()
+        nodes_before = await event_store.nodes.list_nodes()
         func_before = next(
             (n for n in nodes_before if n.node_type == "function"),
             None,
@@ -249,7 +249,7 @@ async def test_reconcile_preserves_identity_when_function_moves(
         assert summary["orphaned"] == 0
         assert summary["updated"] >= 1
 
-        active_nodes = await event_store.list_nodes()
+        active_nodes = await event_store.nodes.list_nodes()
         moved_func = next(
             (n for n in active_nodes if n.node_type == "function"),
             None,
@@ -258,7 +258,7 @@ async def test_reconcile_preserves_identity_when_function_moves(
         assert moved_func.node_id == old_id
         assert moved_func.start_line == 6  # After 5 blank lines
 
-        preserved_node = await event_store.get_node(old_id)
+        preserved_node = await event_store.nodes.get_node(old_id)
         assert preserved_node is not None
     finally:
         await subscriptions.close()

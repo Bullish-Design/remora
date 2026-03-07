@@ -116,12 +116,12 @@ class LazyGraph:
     async def _get_nodes_for_file(self, file_path: str) -> list[Any]:
         if not self.event_store:
             return []
-        return await self.event_store.list_nodes(file_path=file_path)
+        return await self.event_store.nodes.list_nodes(file_path=file_path)
 
     async def _get_node(self, node_id: str) -> Any | None:
         if not self.event_store:
             return None
-        return await self.event_store.get_node(node_id)
+        return await self.event_store.nodes.get_node(node_id)
 
     async def _get_neighborhood(self, node_id: str, depth: int = 2) -> list[Any]:
         """Get node + neighbors by walking edges, then fetching node data."""

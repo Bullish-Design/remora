@@ -26,7 +26,7 @@ async def _emit_node_events(ls: LspServer, uri: str, new_nodes: list[CSTNode]) -
     if not ls.event_store:
         return
 
-    old_agents = await ls.event_store.list_nodes(file_path=uri)
+    old_agents = await ls.event_store.nodes.list_nodes(file_path=uri)
     old_ids = {a.node_id for a in old_agents}
     new_ids = {n.node_id for n in new_nodes}
 
@@ -79,7 +79,7 @@ async def did_open(ls: LspServer, params: lsp.DidOpenTextDocumentParams) -> None
 
         # Discover tools for each agent node from EventStore
         if ls.event_store:
-            agents = await ls.event_store.list_nodes(file_path=uri)
+            agents = await ls.event_store.nodes.list_nodes(file_path=uri)
             for agent in agents:
                 # Discover tools so they are cached on the server for later use.
                 # Tools are not persisted to the node row because they are
