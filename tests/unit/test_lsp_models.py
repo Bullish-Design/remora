@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from remora.core.agents.agent_node import AgentNode, ToolSchema
+from remora.core.events.events import HumanChatEvent
 from remora.lsp.models import (
-    LspHumanChatEvent,
     RewriteProposal,
 )
 
@@ -85,6 +85,6 @@ def test_rewrite_proposal_to_code_actions():
 
 
 def test_event_defaults():
-    evt = LspHumanChatEvent(to_agent="rm_test", message="hi", correlation_id="c1", timestamp=0.1)
+    evt = HumanChatEvent(to_agent="rm_test", message="hi", correlation_id="c1", timestamp=0.1)
     assert evt.event_type == "HumanChatEvent"
     assert "rm_test" in evt.summary

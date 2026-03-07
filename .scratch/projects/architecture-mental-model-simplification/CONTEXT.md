@@ -1,23 +1,18 @@
 # CONTEXT
 
-Created on 2026-03-07 after reviewing Tach dependency graphs with the user.
+Updated on 2026-03-07 after completing W2.
 
-User requested a follow-up project that packages the architecture simplification ideas and all diagram artifacts for continuation in a future session.
-
-## What was prepared
-- New project directory:
-  - `.scratch/projects/architecture-mental-model-simplification/`
-- Standard project files populated (`PLAN`, `ASSUMPTIONS`, `PROGRESS`, `CONTEXT`, `DECISIONS`, `ISSUES`)
-- Diagram corpus copied into:
-  - `diagrams/current_root/`
-  - `diagrams/architecture_refactor/`
-  - `diagrams/graph_views/`
-
-## Key architectural direction for next session
-- Enforce strict layer boundaries in Tach first.
-- Remove residual `lsp <-> runner` conceptual coupling.
-- Decompose event and orchestrator hotspots.
-- Gate complexity via architecture SLO checks in CI.
+## Current state
+- W0, W1, and W2 are complete.
+- `tach.toml` now documents one remaining temporary violation:
+  - `remora.core.events.events -> remora.core.code.discovery` (to remove in W3)
+- CI architecture gate added: `.github/workflows/test.yml` runs `tach check`.
+- Local command added via `justfile`: `just check-arch`.
+- W2 verification:
+  - `devenv shell -- tach check`
+  - `devenv shell -- python -c "from remora.runner.agent_runner import AgentRunner"`
+  - `devenv shell -- python -m pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q`
+  - Result: pass (`All modules validated`).
 
 ## Immediate next step when resuming
-Start W1 in `PLAN.md`: codify and enforce dependency constraints in `tach.toml` and run Tach checks to establish a failing/passing baseline.
+Start W3 in `PLAN.md`: move `NodeDiscoveredEvent.from_cst_node` conversion into `remora.core.code.discovery.node_to_event`, remove `core.events.events -> core.code.discovery`, and then update `tach.toml` so `remora.core.events.events` has no internal deps.

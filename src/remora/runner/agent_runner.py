@@ -11,9 +11,9 @@ from remora.core.agents.agent_node import AgentNode
 from remora.core.agents.execution import execute_agent_turn
 from remora.core.events.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent, ScaffoldRequestEvent
 from remora.extensions import extension_matches, load_extensions
-from remora.lsp.models import RewriteProposal, generate_id
 from remora.runner.event_emitter import RunnerEventEmitter
 from remora.runner.headless import _HeadlessServer
+from remora.runner.models import RewriteProposal, generate_id
 from remora.runner.protocols import RunnerServer
 from remora.runner.tools import build_lsp_tools
 from remora.runner.trigger import Trigger

@@ -123,52 +123,52 @@ class TestModelDump:
 
 
 class TestBridgeRemoved:
-    """to_core_event() bridge methods must not exist on LSP model classes."""
+    """Bridge helper methods must not exist on event model classes."""
 
     def test_no_to_core_event_on_human_chat(self):
-        from remora.lsp.models import LspHumanChatEvent
+        from remora.core.events.events import HumanChatEvent
 
-        assert not hasattr(LspHumanChatEvent, "to_core_event"), "LspHumanChatEvent should not have to_core_event()"
+        assert not hasattr(HumanChatEvent, "to_core_event"), "HumanChatEvent should not have to_core_event()"
 
     def test_no_to_core_event_on_rewrite_proposal_event(self):
-        from remora.lsp.models import LspRewriteProposalEvent
+        from remora.core.events.events import RewriteProposalEvent
 
-        assert not hasattr(LspRewriteProposalEvent, "to_core_event"), (
-            "LspRewriteProposalEvent should not have to_core_event()"
+        assert not hasattr(RewriteProposalEvent, "to_core_event"), (
+            "RewriteProposalEvent should not have to_core_event()"
         )
 
     def test_no_to_core_event_on_rewrite_applied_event(self):
-        from remora.lsp.models import LspRewriteAppliedEvent
+        from remora.core.events.events import RewriteAppliedEvent
 
-        assert not hasattr(LspRewriteAppliedEvent, "to_core_event"), (
-            "LspRewriteAppliedEvent should not have to_core_event()"
+        assert not hasattr(RewriteAppliedEvent, "to_core_event"), (
+            "RewriteAppliedEvent should not have to_core_event()"
         )
 
     def test_no_to_core_event_on_rewrite_rejected_event(self):
-        from remora.lsp.models import LspRewriteRejectedEvent
+        from remora.core.events.events import RewriteRejectedEvent
 
-        assert not hasattr(LspRewriteRejectedEvent, "to_core_event"), (
-            "LspRewriteRejectedEvent should not have to_core_event()"
+        assert not hasattr(RewriteRejectedEvent, "to_core_event"), (
+            "RewriteRejectedEvent should not have to_core_event()"
         )
 
     def test_no_to_core_event_on_agent_error_event(self):
-        from remora.lsp.models import LspAgentErrorEvent
+        from remora.core.events.events import AgentErrorEvent
 
-        assert not hasattr(LspAgentErrorEvent, "to_core_event"), (
-            "lsp.models.LspAgentErrorEvent should not have to_core_event()"
+        assert not hasattr(AgentErrorEvent, "to_core_event"), (
+            "AgentErrorEvent should not have to_core_event()"
         )
 
     def test_no_to_core_event_on_agent_message_event(self):
-        from remora.lsp.models import LspAgentMessageEvent
+        from remora.core.events.events import AgentMessageEvent
 
-        assert not hasattr(LspAgentMessageEvent, "to_core_event"), (
-            "lsp.models.LspAgentMessageEvent should not have to_core_event()"
+        assert not hasattr(AgentMessageEvent, "to_core_event"), (
+            "AgentMessageEvent should not have to_core_event()"
         )
 
     def test_no_from_core_event_on_agent_event(self):
-        from remora.lsp.models import LspAgentEvent
+        from remora.core.events.events import AgentEvent
 
-        assert not hasattr(LspAgentEvent, "from_core_event"), "LspAgentEvent should not have from_core_event()"
+        assert not hasattr(AgentEvent, "from_core_event"), "AgentEvent should not have from_core_event()"
 
     def test_no_core_event_imports(self):
         """lsp/models.py must not import core events with 'Core' alias."""

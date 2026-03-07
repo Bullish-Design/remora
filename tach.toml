@@ -75,7 +75,7 @@ depends_on = [ "remora.core.events.events", "remora.lsp.protocols"]
 
 [[modules ]]
 path = "remora.lsp.models"
-depends_on = [ "remora.core.events.events"]
+depends_on = [ "remora.runner.models"]
 
 [[modules ]]
 path = "remora.workspace.sandbox"
@@ -135,6 +135,8 @@ depends_on = ["remora.models", "remora.utils", "remora.ui.projector", "remora.co
 
 [[modules ]]
 path = "remora.core"
+# Layer boundary: core must not depend on adapter modules
+# (remora.lsp, remora.service, remora.ui, remora.companion, remora.cli, remora.extensions).
 depends_on = [ "remora.core.errors", "remora.core.tools", "remora.core.manifest", "remora.core.config", "remora.core.agents.state_manager", "remora.core.agents.workspace", "remora.core.agents.kernel_factory", "remora.core.store.event_store", "remora.core.events.subscriptions", "remora.core.code.projections", "remora.core.agents.swarm_executor", "remora.core.agents.cairn_externals", "remora.core.agents.agent_node", "remora.core.agents.cairn_bridge", "remora.core.events.event_bus", "remora.core.events.events", "remora.core.code.reconciler", "remora.core.agents.agent_context", "remora.core.code.discovery"]
 
 [[modules ]]
@@ -247,7 +249,24 @@ depends_on = []
 
 [[modules ]]
 path = "remora.runner.agent_runner"
-depends_on = ["remora.core.events.events", "remora.extensions", "remora.runner.protocols", "remora.runner.trigger", "remora.core.agents.cairn_bridge", "remora.core.agents.agent_node", "remora.runner.headless", "remora.core.agents.execution", "remora.core.config", "remora.lsp.models", "remora.runner.event_emitter", "remora.runner.tools"]
+depends_on = [
+    "remora.core.events.events",
+    "remora.extensions",
+    "remora.runner.protocols",
+    "remora.runner.trigger",
+    "remora.core.agents.cairn_bridge",
+    "remora.core.agents.agent_node",
+    "remora.runner.headless",
+    "remora.core.agents.execution",
+    "remora.core.config",
+    "remora.runner.event_emitter",
+    "remora.runner.models",
+    "remora.runner.tools",
+]
+
+[[modules ]]
+path = "remora.runner.models"
+depends_on = []
 
 [[modules ]]
 path = "remora.core.agents.execution"
@@ -259,7 +278,10 @@ depends_on = ["remora.companion.events", "remora.companion.state", "remora.core.
 
 [[modules ]]
 path = "remora.core.events.events"
-depends_on = ["remora.core.code.discovery"]
+depends_on = [
+    # VIOLATION - to be removed in W3: remora.core.code.discovery
+    "remora.core.code.discovery",
+]
 
 [[modules ]]
 path = "remora.core.store.event_store_schema"
