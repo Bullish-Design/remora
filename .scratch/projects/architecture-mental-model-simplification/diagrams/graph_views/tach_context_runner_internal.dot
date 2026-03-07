@@ -1,0 +1,20 @@
+strict digraph {
+  graph [rankdir=LR, overlap=false, splines=true, pad=0.25, nodesep=0.35, ranksep=0.55];
+  node [shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#475569", fontname="Helvetica", fontsize=10];
+  edge [color="#94A3B8", arrowsize=0.7, penwidth=1.0];
+  label="Remora Dependency Graph (RUNNER Internal Only)";
+  labelloc=t;
+  fontsize=16;
+  "remora.runner";
+  "remora.runner.agent_runner";
+  "remora.runner.headless";
+  "remora.runner.protocols";
+  "remora.runner.trigger";
+  "remora.runner" -> "remora.runner.agent_runner";
+  "remora.runner" -> "remora.runner.protocols";
+  "remora.runner" -> "remora.runner.trigger";
+  "remora.runner.agent_runner" -> "remora.runner";
+  "remora.runner.agent_runner" -> "remora.runner.headless";
+  "remora.runner.agent_runner" -> "remora.runner.protocols";
+  "remora.runner.agent_runner" -> "remora.runner.trigger";
+}

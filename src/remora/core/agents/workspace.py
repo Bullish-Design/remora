@@ -5,16 +5,16 @@ Remora does not import fsdantic directly; workspace access flows through Cairn.
 
 Concurrency note
 ----------------
-Each Turso ``aio.Connection`` serialises its own operations via a dedicated
-worker thread.  A single workspace connection is therefore safe for sequential
-async access without application-level locking.  The ``asyncio.Lock`` wrappers
-that previously lived here have been removed — concurrency is now handled at
-the storage layer (WAL / MVCC) configured when opening the workspace through
-Cairn.
+AgentFS currently updates inode ``atime`` on reads, so read and write
+operations both perform DB writes.  In practice, concurrent async operations
+against a single workspace can trigger ``database is locked`` errors under
+load.  This wrapper therefore serializes filesystem operations per workspace
+with ``asyncio.Lock`` for correctness.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -48,6 +48,9 @@ class AgentWorkspace:
         self._agent_id = agent_id
         self._stable_workspace = stable_workspace
         self._ensure_file_synced = ensure_file_synced
+        # AgentFS reads currently update inode atime, so reads and writes both
+        # contend on the same DB. Serialize all filesystem operations per workspace.
+        self._fs_lock = asyncio.Lock()
 
     @property
     def cairn(self) -> Any:
@@ -57,52 +60,57 @@ class AgentWorkspace:
     async def read(self, path: PathLike) -> str:
         """Read a file from the workspace."""
         path_str = normalize_path(path).as_posix()
-        try:
-            return await self._workspace.files.read(path_str, mode="text")
-        except Exception as exc:
-            if not _is_missing_file_error(exc) or self._stable_workspace is None:
-                raise
-        try:
-            return await self._stable_workspace.files.read(path_str, mode="text")
-        except Exception as exc:
-            if not _is_missing_file_error(exc):
-                raise
+        async with self._fs_lock:
+            try:
+                return await self._workspace.files.read(path_str, mode="text")
+            except Exception as exc:
+                if not _is_missing_file_error(exc) or self._stable_workspace is None:
+                    raise
+            try:
+                return await self._stable_workspace.files.read(path_str, mode="text")
+            except Exception as exc:
+                if not _is_missing_file_error(exc):
+                    raise
 
-        if self._ensure_file_synced is not None:
-            await self._ensure_file_synced(path_str)
-            return await self._stable_workspace.files.read(path_str, mode="text")
-        raise FileNotFoundError(path_str)
+            if self._ensure_file_synced is not None:
+                await self._ensure_file_synced(path_str)
+                return await self._stable_workspace.files.read(path_str, mode="text")
+            raise FileNotFoundError(path_str)
 
     async def write(self, path: PathLike, content: str | bytes) -> None:
         """Write a file to the workspace (CoW isolated)."""
         path_str = normalize_path(path).as_posix()
-        await self._workspace.files.write(path_str, content)
+        async with self._fs_lock:
+            await self._workspace.files.write(path_str, content)
 
     async def exists(self, path: PathLike) -> bool:
         """Check if a file exists in the workspace."""
         path_str = normalize_path(path).as_posix()
-        if await self._workspace.files.exists(path_str):
-            return True
-        if self._stable_workspace is None:
-            return False
-        return await self._stable_workspace.files.exists(path_str)
+        async with self._fs_lock:
+            if await self._workspace.files.exists(path_str):
+                return True
+            if self._stable_workspace is None:
+                return False
+            return await self._stable_workspace.files.exists(path_str)
 
     async def list_dir(self, path: PathLike = ".") -> list[str]:
         """List directory entries in the workspace."""
         path_str = normalize_path(path).as_posix()
-        entries = set(await self._workspace.files.list_dir(path_str, output="name"))
-        if self._stable_workspace is not None:
-            try:
-                stable_entries = await self._stable_workspace.files.list_dir(path_str, output="name")
-            except Exception:
-                stable_entries = []
-            entries.update(stable_entries)
-        return sorted(entries)
+        async with self._fs_lock:
+            entries = set(await self._workspace.files.list_dir(path_str, output="name"))
+            if self._stable_workspace is not None:
+                try:
+                    stable_entries = await self._stable_workspace.files.list_dir(path_str, output="name")
+                except Exception:
+                    stable_entries = []
+                entries.update(stable_entries)
+            return sorted(entries)
 
     async def delete(self, path: PathLike) -> None:
         """Delete a file from the workspace."""
         path_str = normalize_path(path).as_posix()
-        await self._workspace.files.remove(path_str)
+        async with self._fs_lock:
+            await self._workspace.files.remove(path_str)
 
     async def mkdir(self, path: PathLike) -> None:
         """Create a directory in the workspace.

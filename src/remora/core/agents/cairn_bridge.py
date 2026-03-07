@@ -7,6 +7,7 @@ through Cairn.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from enum import Enum
 from pathlib import Path
@@ -52,6 +53,7 @@ class CairnWorkspaceService:
         self._manager = cairn_workspace_manager.WorkspaceManager()
         self._stable_workspace: Any | None = None
         self._agent_workspaces: dict[str, AgentWorkspace] = {}
+        self._agent_workspaces_lock = asyncio.Lock()
         self._ignore_patterns: set[str] = set(config.workspace_ignore_patterns or DEFAULT_IGNORE_PATTERNS)
         self._ignore_dotfiles: bool = config.workspace_ignore_dotfiles
         self._file_mtimes: dict[str, float] = {}
@@ -90,29 +92,33 @@ class CairnWorkspaceService:
         if agent_id in self._agent_workspaces:
             return self._agent_workspaces[agent_id]
 
-        if self._stable_workspace is None:
-            raise WorkspaceError("CairnWorkspaceService is not initialized")
+        async with self._agent_workspaces_lock:
+            if agent_id in self._agent_workspaces:
+                return self._agent_workspaces[agent_id]
 
-        workspace_path = self._swarm_root / "agents" / agent_id[:2] / agent_id / "workspace.db"
-        workspace_path.parent.mkdir(parents=True, exist_ok=True)
+            if self._stable_workspace is None:
+                raise WorkspaceError("CairnWorkspaceService is not initialized")
 
-        try:
-            workspace = await cairn_open_workspace(
-                workspace_path,
-                readonly=False,
+            workspace_path = self._swarm_root / "agents" / agent_id[:2] / agent_id / "workspace.db"
+            workspace_path.parent.mkdir(parents=True, exist_ok=True)
+
+            try:
+                workspace = await cairn_open_workspace(
+                    workspace_path,
+                    readonly=False,
+                )
+                self._manager.track_workspace(workspace)
+            except Exception as exc:
+                raise WorkspaceError(f"Failed to create workspace for {agent_id}: {exc}") from exc
+
+            agent_workspace = AgentWorkspace(
+                workspace,
+                agent_id,
+                stable_workspace=self._stable_workspace,
+                ensure_file_synced=self.ensure_file_synced,
             )
-            self._manager.track_workspace(workspace)
-        except Exception as exc:
-            raise WorkspaceError(f"Failed to create workspace for {agent_id}: {exc}") from exc
-
-        agent_workspace = AgentWorkspace(
-            workspace,
-            agent_id,
-            stable_workspace=self._stable_workspace,
-            ensure_file_synced=self.ensure_file_synced,
-        )
-        self._agent_workspaces[agent_id] = agent_workspace
-        return agent_workspace
+            self._agent_workspaces[agent_id] = agent_workspace
+            return agent_workspace
 
     def get_externals(self, agent_id: str, agent_workspace: AgentWorkspace) -> dict[str, Any]:
         """Build Cairn external helpers for Grail tools."""

@@ -1,0 +1,16 @@
+strict digraph {
+  graph [rankdir=LR, overlap=false, splines=true, pad=0.25, nodesep=0.35, ranksep=0.55];
+  node [shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#475569", fontname="Helvetica", fontsize=10];
+  edge [color="#94A3B8", arrowsize=0.7, penwidth=1.0];
+  label="Remora Dependency Graph (SERVICE Internal Only)";
+  labelloc=t;
+  fontsize=16;
+  "remora.service";
+  "remora.service.api";
+  "remora.service.chat_service";
+  "remora.service.datastar";
+  "remora.service.handlers";
+  "remora.service" -> "remora.service.api";
+  "remora.service.api" -> "remora.service.datastar";
+  "remora.service.api" -> "remora.service.handlers";
+}

@@ -1,0 +1,57 @@
+strict digraph {
+  graph [rankdir=LR, overlap=false, splines=true, pad=0.28, nodesep=0.46, ranksep=0.72, bgcolor="#FFFFFF"];
+  node [shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#475569", fontname="Helvetica", fontsize=11];
+  edge [color="#94A3B8", arrowsize=0.8, penwidth=1.0, fontname="Helvetica", fontsize=10];
+  label="Remora Package Graph (Domain/Runtime Coupling, Entrypoints Hidden)";
+  labelloc=t;
+  fontsize=16;
+
+  "remora.companion";
+  "remora.core" [label="remora.core\n(in=51, out=12, degree=63)", fillcolor="#FEE2E2", color="#B91C1C", penwidth=2.1, fontcolor="#7F1D1D"];
+  "remora.extensions";
+  "remora.lsp" [label="remora.lsp\n(in=0, out=22, degree=22)", fillcolor="#FEE2E2", color="#B91C1C", penwidth=2.1, fontcolor="#7F1D1D"];
+  "remora.models";
+  "remora.runner" [label="remora.runner\n(in=5, out=8, degree=13)", fillcolor="#FEE2E2", color="#B91C1C", penwidth=2.1, fontcolor="#7F1D1D"];
+  "remora.service" [label="remora.service\n(in=0, out=23, degree=23)", fillcolor="#FEE2E2", color="#B91C1C", penwidth=2.1, fontcolor="#7F1D1D"];
+  "remora.ui";
+  "remora.utils" [label="remora.utils\n(in=14, out=0, degree=14)", fillcolor="#FEE2E2", color="#B91C1C", penwidth=2.1, fontcolor="#7F1D1D"];
+  "remora.workspace";
+
+  "remora.companion" -> "remora.core" [label="12", color="#DC2626", penwidth=1.9, fontcolor="#7F1D1D"];
+  "remora.core" -> "remora.utils" [label="12", color="#DC2626", penwidth=1.9, fontcolor="#7F1D1D"];
+  "remora.lsp" -> "remora.core" [label="16", color="#DC2626", penwidth=1.9, fontcolor="#7F1D1D"];
+  "remora.lsp" -> "remora.extensions" [label="1"];
+  "remora.lsp" -> "remora.runner" [label="5"];
+  "remora.models" -> "remora.core" [label="1"];
+  "remora.runner" -> "remora.core" [label="7", color="#DC2626", penwidth=1.9, fontcolor="#7F1D1D"];
+  "remora.runner" -> "remora.extensions" [label="1"];
+  "remora.service" -> "remora.core" [label="14", color="#DC2626", penwidth=1.9, fontcolor="#7F1D1D"];
+  "remora.service" -> "remora.extensions" [label="1"];
+  "remora.service" -> "remora.models" [label="2"];
+  "remora.service" -> "remora.ui" [label="4"];
+  "remora.service" -> "remora.utils" [label="2"];
+  "remora.ui" -> "remora.core" [label="1"];
+
+  subgraph cluster_legend {
+    label="Legend";
+    fontsize=12;
+    color="#D1D5DB";
+    style="rounded,dashed";
+    legend_hot_pkg [label="Hot package (high in+out)", shape=box, style="rounded,filled", fillcolor="#FEE2E2", color="#B91C1C", fontcolor="#7F1D1D", penwidth=2.1];
+    legend_pkg [label="Package", shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#475569"];
+    legend_hot_edge [label="High-pressure edge", shape=box, style="rounded,filled", fillcolor="#FFF7ED", color="#C2410C", fontcolor="#7C2D12"];
+    legend_hot_pkg -> legend_pkg [label="edge label = module edge count", color="#94A3B8"];
+    legend_hot_edge -> legend_pkg [label="highlighted = top 5", color="#DC2626", fontcolor="#7F1D1D"];
+  }
+
+  "pressure_1" [shape=note, style="filled", fillcolor="#FFF7ED", color="#C2410C", fontcolor="#7C2D12", label="P1: remora.lsp -> remora.core (16)"];
+  "pressure_1" -> "remora.lsp" [style=dashed, color="#C2410C", penwidth=1.1];
+  "pressure_2" [shape=note, style="filled", fillcolor="#FFF7ED", color="#C2410C", fontcolor="#7C2D12", label="P2: remora.service -> remora.core (14)"];
+  "pressure_2" -> "remora.service" [style=dashed, color="#C2410C", penwidth=1.1];
+  "pressure_3" [shape=note, style="filled", fillcolor="#FFF7ED", color="#C2410C", fontcolor="#7C2D12", label="P3: remora.core -> remora.utils (12)"];
+  "pressure_3" -> "remora.core" [style=dashed, color="#C2410C", penwidth=1.1];
+  "pressure_4" [shape=note, style="filled", fillcolor="#FFF7ED", color="#C2410C", fontcolor="#7C2D12", label="P4: remora.companion -> remora.core (12)"];
+  "pressure_4" -> "remora.companion" [style=dashed, color="#C2410C", penwidth=1.1];
+  "pressure_5" [shape=note, style="filled", fillcolor="#FFF7ED", color="#C2410C", fontcolor="#7C2D12", label="P5: remora.runner -> remora.core (7)"];
+  "pressure_5" -> "remora.runner" [style=dashed, color="#C2410C", penwidth=1.1];
+}
