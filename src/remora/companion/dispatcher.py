@@ -61,15 +61,15 @@ class CompanionDispatcher:
         routing = self._build_routing_table()
         
         for event_type, handler_ids in routing.items():
-            async def make_on_event(hids):
+            def make_on_event(hids):
                 async def on_event(event):
                     self._state.apply(event)
                     for hid in hids:
                         await self._dispatch(hid, event)
                 return on_event
                 
-            handler_callback = await make_on_event(handler_ids)
-            self._bus.subscribe(event_type.__name__, handler_callback)
+            handler_callback = make_on_event(handler_ids)
+            self._bus.subscribe(event_type, handler_callback)
             
     async def _dispatch(self, handler_id: str, event: _FrozenEvent) -> None:
         config = self._configs.get(handler_id)
@@ -83,7 +83,7 @@ class CompanionDispatcher:
         new_events = await handler.handle(event, self._state)
         for new_event in new_events:
             await self._store.append(self._session_id, new_event)
-            await self._bus.publish(new_event)
+            await self._bus.emit(new_event)
             
     async def _dispatch_debounced(
         self, handler_id: str, event: _FrozenEvent, ms: int

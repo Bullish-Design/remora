@@ -155,8 +155,8 @@ def _run_server(
                 asyncio.ensure_future(run_background_scan())
 
     # Import once so scan loop can reuse it and tests can monkeypatch
-    # remora.core.discovery.parse_content consistently.
-    from remora.core.discovery import parse_content
+    # remora.core.code.discovery.parse_content consistently.
+    from remora.core.code.discovery import parse_content
 
     async def _background_scan() -> None:
         """Walk workspace for *.py files, parse each, and populate the DB.

@@ -11,9 +11,8 @@ import sqlite3
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from lsprotocol import types as lsp
 from pydantic import BaseModel, ConfigDict, Field
-
-pass
 
 from remora.core.events.subscriptions import SubscriptionPattern
 
@@ -50,11 +49,6 @@ class ToolSchema(BaseModel):
         }
 
     def to_code_action(self, node_id: str) -> Any:
-        try:
-            from lsprotocol import types as lsp
-        except ImportError:
-            return None
-
         return lsp.CodeAction(
             title=self.description,
             kind=lsp.CodeActionKind.Empty,
@@ -132,11 +126,6 @@ class AgentNode(BaseModel):
     # --- LSP helper ---
 
     def to_range(self) -> Any:
-        try:
-            from lsprotocol import types as lsp
-        except ImportError:
-            return None
-
         return lsp.Range(
             start=lsp.Position(line=self.start_line - 1, character=0),
             end=lsp.Position(line=self.end_line - 1, character=0),
@@ -179,11 +168,6 @@ class AgentNode(BaseModel):
     # --- LSP conversions ---
 
     def to_code_lens(self) -> Any:
-        try:
-            from lsprotocol import types as lsp
-        except ImportError:
-            return None
-
         status_icon = {
             "idle": "\u25cf",
             "running": "\u25b6",
@@ -203,11 +187,6 @@ class AgentNode(BaseModel):
         )
 
     def to_hover(self, recent_events: list | None = None) -> Any:
-        try:
-            from lsprotocol import types as lsp
-        except ImportError:
-            return None
-
         lines = [
             f"## {self.name}",
             f"**ID:** `{self.node_id}`  **Type:** {self.node_type}  **Status:** {self.status}",
@@ -233,11 +212,6 @@ class AgentNode(BaseModel):
         )
 
     def to_code_actions(self) -> Any:
-        try:
-            from lsprotocol import types as lsp
-        except ImportError:
-            return None
-
         actions = [
             lsp.CodeAction(
                 title="Chat with this agent",
@@ -272,11 +246,6 @@ class AgentNode(BaseModel):
         return actions
 
     def to_document_symbol(self) -> Any:
-        try:
-            from lsprotocol import types as lsp
-        except ImportError:
-            return None
-
         kind_map = {
             "function": lsp.SymbolKind.Function,
             "method": lsp.SymbolKind.Method,
