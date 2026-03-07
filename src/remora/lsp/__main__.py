@@ -90,7 +90,7 @@ def _run_server(
     log.info("Config loaded: model=%s base_url=%s", config.model_default, config.model_base_url)
 
     log.debug("Importing remora.lsp.server ...")
-    from remora.lsp.server import register_handlers
+    from remora.lsp.server_setup import register_handlers
 
     server = _get_server()
     if hasattr(server, "command") and hasattr(server, "feature"):

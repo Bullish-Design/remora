@@ -15,7 +15,7 @@ import pytest
 
 from remora.core.config import Config
 from remora.core.events.event_bus import EventBus
-from remora.core.events.events import AgentStartEvent, AgentCompleteEvent, AgentErrorEvent
+from remora.core.events import AgentStartEvent, AgentCompleteEvent, AgentErrorEvent
 from remora.ui.projector import UiStateProjector
 
 
@@ -87,7 +87,7 @@ class TestDuplicatePromptContext:
     passed as kernel messages (requires_context=False avoids duplication)."""
 
     def test_prompt_without_context_excludes_history(self):
-        from remora.core.agents.execution import _agent_node_to_cst_node, _build_prompt
+        from remora.core.agents.turn_context import _agent_node_to_cst_node, _build_prompt
         from remora.core.agents.agent_node import AgentNode
         from remora.utils import PathResolver
 
@@ -116,7 +116,7 @@ class TestDuplicatePromptContext:
         assert "Recent Chat History" not in prompt
 
     def test_prompt_with_context_includes_history(self):
-        from remora.core.agents.execution import _agent_node_to_cst_node, _build_prompt
+        from remora.core.agents.turn_context import _agent_node_to_cst_node, _build_prompt
         from remora.core.agents.agent_node import AgentNode
         from remora.utils import PathResolver
 
@@ -288,7 +288,7 @@ class TestEventBusErrorPolicy:
         bus.subscribe_all(bad_handler)
 
         # Should not raise
-        from remora.core.events.events import AgentStartEvent
+        from remora.core.events import AgentStartEvent
 
         await bus.emit(AgentStartEvent(graph_id="g", agent_id="a1", node_name="a1"))
 
@@ -302,7 +302,7 @@ class TestEventBusErrorPolicy:
 
         bus.subscribe_all(bad_handler)
 
-        from remora.core.events.events import AgentStartEvent
+        from remora.core.events import AgentStartEvent
 
         with pytest.raises(ValueError, match="boom"):
             await bus.emit(AgentStartEvent(graph_id="g", agent_id="a1", node_name="a1"))
@@ -576,7 +576,7 @@ class TestChatHistoryLimitConfigurable:
         assert config.chat_history_limit == 5  # sensible default
 
     def test_build_prompt_uses_config_limit(self):
-        from remora.core.agents.execution import _agent_node_to_cst_node, _build_prompt
+        from remora.core.agents.turn_context import _agent_node_to_cst_node, _build_prompt
         from remora.core.agents.agent_node import AgentNode
         from remora.utils import PathResolver
 

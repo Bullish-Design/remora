@@ -5,7 +5,7 @@ import pytest
 from structured_agents.events import ModelResponseEvent, ToolCallEvent, ToolResultEvent
 
 from remora.core.events.event_bus import EventBus
-from remora.core.events.events import CoreEvent, ScaffoldRequestEvent
+from remora.core.events import CoreEvent, ScaffoldRequestEvent
 
 
 @pytest.mark.asyncio

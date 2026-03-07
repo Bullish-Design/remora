@@ -1,19 +1,30 @@
 # CONTEXT
 
-Updated on 2026-03-07 after completing W4.
+Updated on 2026-03-07 after completing W6 + W7 and final cleanup.
 
 ## Current state
-- W0, W1, W2, W3, and W4 are complete.
-- Event model split is complete:
-  - `agent_events.py`, `interaction_events.py`, `code_events.py`, `kernel_events.py`
-  - `events.py` is now a thin compatibility re-export barrel.
-- Production modules no longer import directly from `remora.core.events.events`.
-- CI architecture gate added: `.github/workflows/test.yml` runs `tach check`.
-- Local command added via `justfile`: `just check-arch`.
-- W4 verification:
-  - `devenv shell -- tach check`
-  - `devenv shell -- python -m pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q`
-  - Result: pass (`All modules validated`).
+- All workstreams W0–W7 are complete.
+- Compatibility shims were intentionally removed:
+  - `src/remora/lsp/models.py` deleted
+  - `src/remora/core/events/events.py` deleted
+  - `register_handlers` shim removed from `src/remora/lsp/server.py`
+- Orchestration hotspot modules are thinned and below out-degree target:
+  - `remora.lsp.server`: out=7
+  - `remora.core.agents.execution`: out=2
+  - `remora.service.api`: out=7
+  - `remora.runner.agent_runner`: out=7
+- Architecture wiring is complete:
+  - `tach.toml` synced with explicit entries for newly introduced modules.
+  - `scripts/check_arch_slo.py` enforced in CI and exposed through `just` recipes.
+  - `docs/architecture.mmd` regenerated from current Tach graph.
+
+## Verification snapshot
+- `devenv shell -- uv sync --extra dev` ✅
+- `devenv shell -- tach sync` ✅
+- `devenv shell -- tach check` ✅
+- `devenv shell -- python scripts/check_arch_slo.py` ✅ (`Architecture SLOs: OK`)
+- `devenv shell -- python -m pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q` ✅ (warnings only)
+- DOT SCC cycle analysis on `/tmp/remora_arch.dot` reports `cycles=0`.
 
 ## Immediate next step when resuming
-Start W6 in `PLAN.md`: thin orchestration hotspots (`lsp.server`, `core.agents.execution`, `service.api`) by extracting focused helper modules and reducing top-level module degree/cognitive load.
+- No implementation work remains for this plan. Next action is commit/push and open follow-up work only if new architecture constraints are requested.

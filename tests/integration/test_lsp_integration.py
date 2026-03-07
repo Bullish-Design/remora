@@ -11,7 +11,8 @@ import pytest
 from lsprotocol import types as lsp
 
 from remora.lsp.handlers import actions, capabilities, commands, documents, lens
-from remora.lsp.server import get_server, register_handlers
+from remora.lsp.server import get_server
+from remora.lsp.server_setup import register_handlers
 
 server = get_server()
 register_handlers(server)

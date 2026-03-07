@@ -3,7 +3,7 @@ import logging
 
 from lsprotocol import types as lsp
 
-from remora.lsp.models import RewriteProposal
+from remora.runner.models import RewriteProposal
 from remora.lsp.protocols import LspServer
 
 logger = logging.getLogger("remora.lsp")

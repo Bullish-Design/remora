@@ -277,7 +277,7 @@ class TestEventStoreTriggerBridge:
         runner.execute_turn = AsyncMock()
 
         # Inject a trigger into the EventStore
-        from remora.core.events.events import ManualTriggerEvent
+        from remora.core.events import ManualTriggerEvent
         from remora.core.events.subscriptions import SubscriptionPattern, SubscriptionRegistry
 
         subs = SubscriptionRegistry(event_store._db_path.parent / "subs.db")

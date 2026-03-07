@@ -23,6 +23,9 @@ jobs:
       - name: Enforce architecture boundaries
         run: tach check
 
+      - name: Enforce architecture SLOs
+        run: python scripts/check_arch_slo.py
+
       - name: Run unit tests
         run: pytest tests/ -v --ignore=tests/acceptance --ignore=tests/integration
 

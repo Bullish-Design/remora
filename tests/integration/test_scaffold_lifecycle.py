@@ -16,7 +16,7 @@ from pathlib import Path
 
 from remora.core.agents.agent_node import AgentNode, ToolSchema
 from remora.core.store.event_store import EventStore
-from remora.core.events.events import (
+from remora.core.events import (
     NodeDiscoveredEvent,
     ScaffoldRequestEvent,
 )

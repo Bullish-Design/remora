@@ -6,13 +6,11 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
 
-from remora.core.agents.agent_node import AgentNode, ToolSchema
 from remora.core.events.agent_events import (
     AgentEvent,
     HumanChatEvent,
@@ -23,7 +21,9 @@ from remora.core.events.agent_events import (
 from remora.core.events.interaction_events import AgentMessageEvent
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
-from remora.lsp.models import RewriteProposal
+from remora.runner.models import RewriteProposal
+from remora.lsp.runtime_ops import do_cursor_update, do_reparse
+from remora.lsp.tooling import discover_tools_for_agent as _discover_tools_for_agent
 
 if TYPE_CHECKING:
     from remora.core.events.subscriptions import SubscriptionRegistry
@@ -91,29 +91,7 @@ class RemoraLanguageServer(LanguageServer):
 
     async def _do_reparse(self, uri: str, text: str) -> None:
         """Execute the actual debounced reparse for *uri*."""
-        from remora.core.code.discovery import node_to_event, parse_content
-        from remora.core.events.code_events import NodeRemovedEvent
-
-        self._reparse_timers.pop(uri, None)
-        try:
-            cst_nodes = parse_content(uri, text)
-            logger.debug("_do_reparse: %d nodes for %s", len(cst_nodes), uri)
-
-            if self.event_store:
-                old_agents = await self.event_store.nodes.list_nodes(file_path=uri)
-                new_ids = {n.node_id for n in cst_nodes}
-                old_ids = {a.node_id for a in old_agents}
-
-                for orphan_id in old_ids - new_ids:
-                    await self.event_store.append("nodes", NodeRemovedEvent(node_id=orphan_id))
-
-                for node in cst_nodes:
-                    await self.event_store.append("nodes", node_to_event(node))
-
-            await self.refresh_code_lenses()
-            await self.notify_agents_updated()
-        except Exception:
-            logger.exception("Error in _do_reparse for %s", uri)
+        await do_reparse(self, uri, text)
 
     def schedule_cursor_update(
         self,
@@ -140,16 +118,7 @@ class RemoraLanguageServer(LanguageServer):
 
     async def _do_cursor_update(self, agent_id: str | None, uri: str, line: int) -> None:
         """Execute the actual debounced cursor update."""
-        from remora.core.events.interaction_events import CursorFocusEvent
-
-        self._cursor_timers.pop(uri, None)
-        try:
-            await self.db.update_cursor_focus(agent_id, uri, line)
-            if self.event_store:
-                event = CursorFocusEvent(focused_agent_id=agent_id, file_path=uri, line=line)
-                await self.event_store.append("cursor", event)
-        except Exception:
-            logger.debug("Error in _do_cursor_update", exc_info=True)
+        await do_cursor_update(self, agent_id, uri, line)
 
     async def refresh_code_lenses(self) -> None:
         try:
@@ -294,32 +263,8 @@ class RemoraLanguageServer(LanguageServer):
         except Exception:
             logger.warning("Failed to close LazyGraph", exc_info=True)
 
-    async def discover_tools_for_agent(self, agent: AgentNode) -> list[ToolSchema]:
-        try:
-            from remora.core.config import load_config
-            from remora.core.tools.grail import discover_grail_tools
-
-            config = load_config()
-            bundle_name = config.bundle_mapping.get(agent.node_type)
-            if not bundle_name:
-                return []
-
-            bundle_dir = Path(config.bundle_root) / bundle_name / "tools"
-            if not bundle_dir.exists():
-                return []
-
-            grail_tools = discover_grail_tools(str(bundle_dir), {}, lambda: {})
-            return [
-                ToolSchema(
-                    name=t.schema.name,
-                    description=t.schema.description,
-                    parameters=t.schema.parameters,
-                )
-                for t in grail_tools
-            ]
-        except Exception:
-            logger.exception("Error discovering tools for agent")
-            return []
+    async def discover_tools_for_agent(self, agent: Any) -> list[Any]:
+        return await _discover_tools_for_agent(agent)
 
     async def notify_agents_updated(self) -> None:
         """Send $/remora/agentsUpdated with all active nodes to the client."""
@@ -356,35 +301,7 @@ def get_server() -> RemoraLanguageServer:
         atexit.register(_server.shutdown)
     return _server
 
-
-def register_handlers(server: RemoraLanguageServer) -> None:
-    """Register LSP handlers on the given server instance.
-
-    Must be called AFTER server creation, BEFORE server.start_io().
-    Handlers use pygls's built-in LanguageServer parameter injection.
-    """
-    if getattr(server, "_handlers_registered", False):
-        return
-    server._handlers_registered = True
-    from remora.lsp.handlers.actions import register_action_handlers
-    from remora.lsp.handlers.capabilities import register_capability_handlers
-    from remora.lsp.handlers.commands import register_command_handlers
-    from remora.lsp.handlers.documents import register_document_handlers
-    from remora.lsp.handlers.hover import register_hover_handlers
-    from remora.lsp.handlers.lens import register_lens_handlers
-    from remora.lsp.notifications import register_notification_handlers
-
-    register_command_handlers(server)
-    register_document_handlers(server)
-    register_action_handlers(server)
-    register_capability_handlers(server)
-    register_hover_handlers(server)
-    register_lens_handlers(server)
-    register_notification_handlers(server)
-
-
 __all__ = [
     "RemoraLanguageServer",
     "get_server",
-    "register_handlers",
 ]

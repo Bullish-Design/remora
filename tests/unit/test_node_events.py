@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from remora.core.events.events import NodeDiscoveredEvent, NodeRemovedEvent
+from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
 
 
 class TestNodeDiscoveredEvent:

@@ -23,10 +23,9 @@ from remora.core.agents.agent_node import AgentNode
 from remora.core.agents.execution import (
     ExecutionResult,
     _CompositeObserver,
-    _build_prompt,
-    _resolve_bundle_path,
     execute_agent_turn,
 )
+from remora.core.agents.turn_context import _build_prompt, _resolve_bundle_path
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +141,7 @@ class TestResolveBundlePath:
 
 class TestBuildPrompt:
     def test_basic_prompt(self):
-        from remora.core.agents.execution import _agent_node_to_cst_node
+        from remora.core.agents.turn_context import _agent_node_to_cst_node
 
         node = _make_agent()
         cst_node = _agent_node_to_cst_node(node)
@@ -163,7 +162,7 @@ class TestBuildPrompt:
         assert "def foo():" in prompt
 
     def test_prompt_with_trigger_event(self):
-        from remora.core.agents.execution import _agent_node_to_cst_node
+        from remora.core.agents.turn_context import _agent_node_to_cst_node
 
         node = _make_agent()
         cst_node = _agent_node_to_cst_node(node)
@@ -189,7 +188,7 @@ class TestBuildPrompt:
 
     def test_prompt_with_scaffold_context(self):
         """_build_prompt includes Scaffold Context section when scaffold_context is provided."""
-        from remora.core.agents.execution import _agent_node_to_cst_node
+        from remora.core.agents.turn_context import _agent_node_to_cst_node
 
         node = _make_agent()
         cst_node = _agent_node_to_cst_node(node)
@@ -224,7 +223,7 @@ class TestBuildPrompt:
 
     def test_prompt_scaffold_context_with_intent(self):
         """_build_prompt includes intent when provided in scaffold_context."""
-        from remora.core.agents.execution import _agent_node_to_cst_node
+        from remora.core.agents.turn_context import _agent_node_to_cst_node
 
         node = _make_agent()
         cst_node = _agent_node_to_cst_node(node)
@@ -253,7 +252,7 @@ class TestBuildPrompt:
 
     def test_prompt_scaffold_context_empty_omits_section(self):
         """_build_prompt omits Scaffold Context section when all fields are empty."""
-        from remora.core.agents.execution import _agent_node_to_cst_node
+        from remora.core.agents.turn_context import _agent_node_to_cst_node
 
         node = _make_agent()
         cst_node = _agent_node_to_cst_node(node)
@@ -750,7 +749,7 @@ class TestExecuteAgentTurn:
         """When trigger_event is ScaffoldRequestEvent, execute_agent_turn should
         build scaffold_context with parent source and siblings, and pass it to
         _build_prompt."""
-        from remora.core.events.events import ScaffoldRequestEvent
+        from remora.core.events import ScaffoldRequestEvent
 
         node = _make_agent(node_id="child_fn", parent_id="parent_cls")
         config = _make_config()
@@ -832,7 +831,7 @@ class TestExecuteAgentTurn:
     @pytest.mark.asyncio
     async def test_no_scaffold_context_for_non_scaffold_trigger(self):
         """When trigger_event is NOT ScaffoldRequestEvent, scaffold_context should be None."""
-        from remora.core.events.events import ContentChangedEvent
+        from remora.core.events import ContentChangedEvent
 
         node = _make_agent()
         config = _make_config()

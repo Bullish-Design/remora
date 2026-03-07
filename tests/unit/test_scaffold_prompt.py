@@ -16,7 +16,7 @@ import pytest
 
 from remora.core.agents.agent_node import AgentNode
 from remora.core.config import Config
-from remora.core.agents.execution import _agent_node_to_cst_node, _build_prompt
+from remora.core.agents.turn_context import _agent_node_to_cst_node, _build_prompt
 from remora.utils import PathResolver
 
 

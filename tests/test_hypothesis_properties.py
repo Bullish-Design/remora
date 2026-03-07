@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from remora.core.events.events import (
+from remora.core.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
     AgentMessageEvent,

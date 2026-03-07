@@ -5,23 +5,23 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from remora.core.agents.agent_node import AgentNode
-from remora.core.agents.execution import execute_agent_turn
-from remora.core.events.agent_events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent
-from remora.core.events.code_events import ScaffoldRequestEvent
-from remora.extensions import extension_matches, load_extensions
 from remora.runner.event_emitter import RunnerEventEmitter
 from remora.runner.headless import _HeadlessServer
 from remora.runner.models import RewriteProposal, generate_id
 from remora.runner.protocols import RunnerServer
 from remora.runner.tools import build_lsp_tools
+from remora.runner.turn_logic import (
+    apply_agent_extensions,
+    append_agent_complete,
+    append_agent_error,
+    append_agent_start,
+    create_workspace_service,
+    execute_agent_turn,
+    load_runner_config,
+)
 from remora.runner.trigger import Trigger
-
-if TYPE_CHECKING:
-    from remora.core.agents.cairn_bridge import CairnWorkspaceService
-    from remora.core.config import Config
 
 logger = logging.getLogger("remora.runner")
 
@@ -50,7 +50,7 @@ class AgentRunner:
         self,
         server: RunnerServer,
         *,
-        config: Config | None = None,
+        config: Any | None = None,
         max_trigger_depth: int | None = None,
         trigger_cooldown_ms: int | None = None,
         max_concurrency: int = 4,
@@ -70,17 +70,15 @@ class AgentRunner:
         self._correlation_depth: dict[str, tuple[int, float]] = {}
         self._last_trigger_time: dict[str, float] = {}
         self._semaphore = asyncio.Semaphore(self._max_concurrency)
-        self._workspace_service: CairnWorkspaceService | None = None
+        self._workspace_service: Any | None = None
         self._workspace_service_root: Path | None = None
         self._events = RunnerEventEmitter(server)
 
     @property
-    def config(self) -> Config:
+    def config(self) -> Any:
         """Lazily resolve configuration."""
         if self._config is None:
-            from remora.core.config import load_config
-
-            self._config = load_config()
+            self._config = load_runner_config()
         return self._config
 
     @classmethod
@@ -88,7 +86,7 @@ class AgentRunner:
         cls,
         event_store: Any,
         *,
-        config: Config | None = None,
+        config: Any | None = None,
         max_trigger_depth: int | None = None,
         trigger_cooldown_ms: int | None = None,
         max_concurrency: int = 4,
@@ -142,10 +140,8 @@ class AgentRunner:
             self._workspace_service = None
             self._workspace_service_root = None
 
-    async def _get_workspace_service(self, project_root: Path) -> CairnWorkspaceService:
+    async def _get_workspace_service(self, project_root: Path) -> Any:
         """Return a reusable workspace service for the current project root."""
-        from remora.core.agents.cairn_bridge import CairnWorkspaceService, SyncMode
-
         resolved_root = project_root.resolve()
         if self._workspace_service is not None and self._workspace_service_root == resolved_root:
             return self._workspace_service
@@ -158,20 +154,7 @@ class AgentRunner:
             )
             await self.close()
 
-        self._workspace_service = CairnWorkspaceService(
-            config=self.config,
-            swarm_root=self.config.swarm_root,
-            project_root=resolved_root,
-        )
-
-        init_start = time.monotonic()
-        # Keep startup cheap; files are synced lazily on first access.
-        await self._workspace_service.initialize(sync_mode=SyncMode.NONE)
-        logger.info(
-            "AgentRunner: workspace service initialized mode=none root=%s duration_ms=%.1f",
-            resolved_root,
-            (time.monotonic() - init_start) * 1000,
-        )
+        self._workspace_service = await create_workspace_service(self.config, resolved_root)
         self._workspace_service_root = resolved_root
         return self._workspace_service
 
@@ -377,14 +360,7 @@ class AgentRunner:
 
             # Emit domain-level AgentStartEvent so projections populate
             # last_trigger_event (Workstream E — Gap #11)
-            await self.server.event_store.append(
-                "swarm",
-                AgentStartEvent(
-                    graph_id="swarm",
-                    agent_id=agent_id,
-                    node_name=agent.name,
-                ),
-            )
+            await append_agent_start(self.server.event_store, agent_id=agent_id, node_name=agent.name)
 
             try:
                 agent = self.apply_extensions(agent)
@@ -516,28 +492,17 @@ class AgentRunner:
 
                 # Emit domain-level AgentCompleteEvent so projections
                 # populate last_completed_at (Workstream E — Gap #11)
-                tags = ("scaffold",) if isinstance(trigger.trigger_event, ScaffoldRequestEvent) else ()
-                await self.server.event_store.append(
-                    "swarm",
-                    AgentCompleteEvent(
-                        graph_id="swarm",
-                        agent_id=agent_id,
-                        result_summary=result.response_text[:200] if result.response_text else "",
-                        tags=tags,
-                    ),
+                await append_agent_complete(
+                    self.server.event_store,
+                    agent_id=agent_id,
+                    result_summary=result.response_text[:200] if result.response_text else "",
+                    trigger_event=trigger.trigger_event,
                 )
 
             except Exception as e:
                 # Emit domain-level AgentErrorEvent so projections set
                 # status = 'error' (Workstream E — Gap #11)
-                await self.server.event_store.append(
-                    "swarm",
-                    AgentErrorEvent(
-                        graph_id="swarm",
-                        agent_id=agent_id,
-                        error=str(e),
-                    ),
-                )
+                await append_agent_error(self.server.event_store, agent_id=agent_id, error=str(e))
                 await self.emit_error(agent_id, str(e), correlation_id)
             finally:
                 # Decrement depth tracking
@@ -551,7 +516,7 @@ class AgentRunner:
                 await self.server.event_store.nodes.set_node_status(agent_id, "idle")
                 await self.server.refresh_code_lenses()
 
-    async def create_proposal(self, agent: AgentNode, new_source: str, correlation_id: str) -> None:
+    async def create_proposal(self, agent: Any, new_source: str, correlation_id: str) -> None:
 
         proposal_id = generate_id()
         proposal = RewriteProposal(
@@ -597,26 +562,10 @@ class AgentRunner:
         if node:
             await self.server.refresh_code_lenses()
 
-    def apply_extensions(self, agent: AgentNode) -> AgentNode:
-        extensions = load_extensions(Path(".remora/models"))
+    def apply_extensions(self, agent: Any) -> Any:
+        return apply_agent_extensions(agent)
 
-        for ext_cls in extensions:
-            if extension_matches(
-                ext_cls,
-                agent.node_type,
-                agent.name,
-                file_path=agent.file_path,
-                source_code=agent.source_code,
-            ):
-                data = ext_cls.get_extension_data()
-                for key, value in data.items():
-                    if hasattr(agent, key):
-                        setattr(agent, key, value)
-                break
-
-        return agent
-
-    def get_agent_tools(self, agent: AgentNode) -> list[dict]:
+    def get_agent_tools(self, agent: Any) -> list[dict]:
         """Return the list of tools available to this agent."""
         async def _dummy(*args: Any, **kwargs: Any) -> None:
             pass
@@ -643,7 +592,7 @@ class AgentRunner:
         # Also include any built-in tools that unstructured agents could have
         return raw_tools
 
-    async def execute_extension_tool(self, agent: AgentNode, tool_name: str, params: dict, correlation_id: str) -> None:
+    async def execute_extension_tool(self, agent: Any, tool_name: str, params: dict, correlation_id: str) -> None:
         await self._events.emit_agent_event(
             event_type="ToolResultEvent",
             agent_id=agent.node_id,

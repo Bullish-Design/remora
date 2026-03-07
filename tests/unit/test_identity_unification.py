@@ -20,7 +20,7 @@ import pytest
 from remora.core.agents.agent_node import AgentNode
 from remora.core.config import Config
 from remora.core.store.event_store import EventStore
-from remora.core.events.events import NodeDiscoveredEvent, NodeRemovedEvent
+from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
 from remora.core.code.projections import NodeProjection
 from remora.core.events.subscriptions import SubscriptionRegistry
 
@@ -303,7 +303,7 @@ class TestSwarmExecutorUsesAgentNode:
 
     def test_resolve_bundle_path_with_agent_node(self, tmp_path):
         """_resolve_bundle_path should work with AgentNode."""
-        from remora.core.agents.execution import _resolve_bundle_path
+        from remora.core.agents.turn_context import _resolve_bundle_path
 
         config = _make_config(tmp_path, bundle_mapping={"function": "code"})
         node = _make_agent_node(node_type="function")
@@ -312,7 +312,7 @@ class TestSwarmExecutorUsesAgentNode:
 
     def test_build_prompt_with_agent_node(self, tmp_path):
         """_build_prompt should work with AgentNode."""
-        from remora.core.agents.execution import _build_prompt, _agent_node_to_cst_node
+        from remora.core.agents.turn_context import _build_prompt, _agent_node_to_cst_node
         from remora.utils import PathResolver
 
         config = _make_config(tmp_path)

@@ -13,7 +13,7 @@ import sqlite3
 import pytest
 
 from remora.core.store.event_store import EventStore
-from remora.core.events.events import NodeDiscoveredEvent
+from remora.core.events import NodeDiscoveredEvent
 from remora.core.code.projections import NodeProjection
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph

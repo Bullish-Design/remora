@@ -11,8 +11,8 @@
 - [x] W3: Fix events.events → code.discovery (move from_cst_node to discovery.node_to_event) (COMPLETE — 2026-03-07)
 - [x] W4: Decompose core.events.events into 4 bounded modules (COMPLETE — 2026-03-07)
 - [x] W5: Break LSP barrel/server/handlers cycle — ALREADY DONE (no lsp.handlers → lsp barrel edges found)
-- [ ] W6: Thin orchestration hotspots (lsp.server, agents.execution, service.api)
-- [ ] W7: Barrel import audit + CI SLO gates
+- [x] W6: Thin orchestration hotspots (lsp.server, agents.execution, service.api) (COMPLETE — 2026-03-07)
+- [x] W7: Barrel import audit + CI SLO gates (COMPLETE — 2026-03-07)
 
 ## OLD Baseline Snapshot (stale — from prior session graph, now superseded)
 - These nodes used flat compatibility-shim paths (e.g. remora.core.agent_context) that have
@@ -160,3 +160,50 @@ No core → adapter violations found (core is clean with respect to lsp/service/
 - Test runs:
   - `devenv shell -- pytest tests/unit/test_event_module_split.py tests/unit/test_unified_events.py tests/unit/test_event_bus.py tests/companion/test_claim_checker.py -q` → pass.
   - `devenv shell -- python -m pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q` → pass (warnings only).
+
+## W6 Findings (2026-03-07)
+- Added focused orchestration helpers and thinned hotspot entrypoints:
+  - `src/remora/lsp/server_setup.py`
+  - `src/remora/lsp/runtime_ops.py`
+  - `src/remora/lsp/tooling.py`
+  - `src/remora/core/agents/turn_context.py`
+  - `src/remora/runner/turn_logic.py`
+- `remora.lsp.server` now delegates handler registration/runtime operations/tool discovery and no longer owns handler registration logic.
+- `remora.core.agents.execution` delegates per-turn assembly to `build_turn_context(...)`.
+- `remora.service.api` is route/wiring focused and delegates runtime/bootstrap/render helpers to `service.handlers`.
+- Hotspot out-degree verification (from `/tmp/remora_arch.dot` SCC/degree pass):
+  - `remora.lsp.server`: out=7
+  - `remora.core.agents.execution`: out=2
+  - `remora.service.api`: out=7
+  - `remora.runner.agent_runner`: out=7
+
+## W7 Findings (2026-03-07)
+- Barrel import audit complete for production code:
+  - `rg -n "from remora.core import|from remora.lsp import|from remora.runner import" src/remora -g '!**/__init__.py'` → no results.
+- Added architecture SLO gate:
+  - New `scripts/check_arch_slo.py`
+  - CI updated: `.github/workflows/test.yml` runs SLO script.
+  - `justfile` recipes:
+    - `check-arch`
+    - `check-arch-slo`
+    - `check`
+- Generated architecture graph artifact:
+  - `docs/architecture.mmd` via `devenv shell -- tach show --mermaid -o docs/architecture.mmd`
+
+## Post-W7 Cleanup (No Compatibility Shims)
+- Removed compatibility surfaces to align with clean-architecture direction:
+  - Deleted `src/remora/lsp/models.py`
+  - Deleted `src/remora/core/events/events.py`
+  - Removed `register_handlers` compatibility shim from `src/remora/lsp/server.py`
+- Updated production imports to canonical modules:
+  - Rewrite proposal model imports now come from `remora.runner.models`.
+  - Event imports resolve through bounded event modules/package exports.
+- Refactored tests to current architecture (no legacy module paths).
+
+## Final Verification (2026-03-07)
+- `devenv shell -- uv sync --extra dev` → pass
+- `devenv shell -- tach sync` → pass
+- `devenv shell -- tach check` → pass
+- `devenv shell -- python scripts/check_arch_slo.py` → `Architecture SLOs: OK`
+- `devenv shell -- python -m pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q` → pass (warnings only)
+- Cycle verification on generated DOT graph (`/tmp/remora_arch.dot`) → `cycles=0`

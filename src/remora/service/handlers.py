@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from remora.core.config import Config
-from remora.core.code.discovery import discover
 from remora.core.events.agent_events import HumanInputResponseEvent
 from remora.core.events.event_bus import EventBus
 from remora.core.events.interaction_events import AgentMessageEvent, ContentChangedEvent
 from remora.core.store.event_store import EventStore
 from remora.models import ConfigSnapshot, InputResponse
-from remora.ui.projector import UiStateProjector
+from remora.service.datastar import render_patch, render_shell
+from remora.ui.projector import UiStateProjector, normalize_event
+from remora.ui.view import render_dashboard
 from remora.utils import PathResolver
 
 if TYPE_CHECKING:
@@ -33,6 +35,70 @@ class ServiceDeps:
     event_store: EventStore | None = None
     subscriptions: "SubscriptionRegistry | None" = None
     workspace_service: "CairnWorkspaceService | None" = None
+
+
+def build_default_runtime(
+    *,
+    config: Config,
+    project_root: Path,
+    event_bus: EventBus,
+    enable_event_store: bool = True,
+) -> tuple[EventStore | None, "SubscriptionRegistry", "CairnWorkspaceService"]:
+    """Build default event/subscription/workspace services for RemoraService."""
+    from remora.core.agents.cairn_bridge import CairnWorkspaceService
+    from remora.core.code.projections import NodeProjection
+    from remora.core.events.subscriptions import SubscriptionRegistry
+    from remora.extensions import extension_matches, load_extensions
+
+    swarm_root = project_root / ".remora"
+    subscriptions = SubscriptionRegistry(swarm_root / "subscriptions.db")
+
+    event_store: EventStore | None = None
+    if enable_event_store:
+        extensions = load_extensions(swarm_root / "models")
+        projection = NodeProjection(
+            extension_matcher=extension_matches,
+            extension_configs=extensions,
+        )
+        event_store = EventStore(
+            swarm_root / "events" / "events.db",
+            subscriptions=subscriptions,
+            projection=projection,
+        )
+        event_store.set_subscriptions(subscriptions)
+        event_store.set_event_bus(event_bus)
+
+    workspace_service = CairnWorkspaceService(
+        config=config,
+        swarm_root=swarm_root,
+        project_root=project_root,
+    )
+
+    return event_store, subscriptions, workspace_service
+
+
+def resolve_bundle_default(config: Config) -> str:
+    snapshot = ConfigSnapshot.from_config(config)
+    mapping = snapshot.bundles.get("mapping", {})
+    if isinstance(mapping, dict) and mapping:
+        return next(iter(mapping))
+    return ""
+
+
+def render_index_html(projector: UiStateProjector, bundle_default: str) -> str:
+    state = projector.snapshot()
+    return render_shell(render_dashboard(state, bundle_default=bundle_default))
+
+
+def render_state_patch(projector: UiStateProjector, bundle_default: str) -> str:
+    return render_patch(projector.snapshot(), bundle_default=bundle_default)
+
+
+def render_event_sse(event: Any) -> str:
+    envelope = normalize_event(event)
+    data = json.dumps(envelope, default=str)
+    event_name = envelope.get("type", "event")
+    return f"event: {event_name}\ndata: {data}\n\n"
 
 
 async def handle_input(request_id: str, response: str, deps: ServiceDeps) -> InputResponse:
@@ -133,6 +199,12 @@ async def handle_swarm_get_subscriptions(agent_id: str, deps: ServiceDeps) -> li
 
 __all__ = [
     "ServiceDeps",
+    "build_default_runtime",
+    "resolve_bundle_default",
+    "render_index_html",
+    "render_state_patch",
+    "render_event_sse",
+    "_normalize_target",
     "handle_config_snapshot",
     "handle_input",
     "handle_ui_snapshot",

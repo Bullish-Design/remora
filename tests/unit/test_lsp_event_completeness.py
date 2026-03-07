@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from lsprotocol import types as lsp
 
-from remora.core.events.events import CursorFocusEvent
+from remora.core.events import CursorFocusEvent
 
 
 # ============================================================================
@@ -51,7 +51,8 @@ class TestDidChangeHandler:
 
     def test_did_change_handler_is_registered(self):
         """The didChange handler should be registered on the server."""
-        from remora.lsp.server import get_server, register_handlers
+        from remora.lsp.server import get_server
+        from remora.lsp.server_setup import register_handlers
         server = get_server()
         register_handlers(server)
 
@@ -63,7 +64,8 @@ class TestDidChangeHandler:
     async def test_did_change_calls_schedule_reparse(self):
         """did_change should call server.schedule_reparse with the full text."""
         from remora.lsp.handlers.documents import did_change
-        from remora.lsp.server import get_server, register_handlers
+        from remora.lsp.server import get_server
+        from remora.lsp.server_setup import register_handlers
         server = get_server()
         register_handlers(server)
 
@@ -84,7 +86,8 @@ class TestDidChangeHandler:
     async def test_did_change_ignores_empty_content_changes(self):
         """did_change should return early if content_changes is empty."""
         from remora.lsp.handlers.documents import did_change
-        from remora.lsp.server import get_server, register_handlers
+        from remora.lsp.server import get_server
+        from remora.lsp.server_setup import register_handlers
         server = get_server()
         register_handlers(server)
 
@@ -101,7 +104,8 @@ class TestDidChangeHandler:
     async def test_did_change_does_not_emit_content_changed_event(self):
         """didChange must NOT emit ContentChangedEvent — only didSave does."""
         from remora.lsp.handlers.documents import did_change
-        from remora.lsp.server import get_server, register_handlers
+        from remora.lsp.server import get_server
+        from remora.lsp.server_setup import register_handlers
         server = get_server()
         register_handlers(server)
 
@@ -243,7 +247,7 @@ class TestDoReparse:
     async def test_do_reparse_removes_orphans(self, tmp_path: Path):
         """_do_reparse should emit NodeRemovedEvent for nodes no longer in source."""
         from remora.core.store.event_store import EventStore
-        from remora.core.events.events import NodeDiscoveredEvent
+        from remora.core.events import NodeDiscoveredEvent
         from remora.core.code.projections import NodeProjection
         from remora.lsp.server import RemoraLanguageServer
         srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
@@ -445,7 +449,8 @@ class TestOnCursorMovedDebounce:
     async def test_on_cursor_moved_calls_schedule_cursor_update(self):
         """on_cursor_moved should resolve the agent and call schedule_cursor_update."""
         from remora.lsp.notifications import on_cursor_moved
-        from remora.lsp.server import get_server, register_handlers
+        from remora.lsp.server import get_server
+        from remora.lsp.server_setup import register_handlers
         server = get_server()
         register_handlers(server)
 
@@ -463,7 +468,8 @@ class TestOnCursorMovedDebounce:
     async def test_on_cursor_moved_null_agent(self):
         """When cursor is not on an agent, schedule_cursor_update gets None."""
         from remora.lsp.notifications import on_cursor_moved
-        from remora.lsp.server import get_server, register_handlers
+        from remora.lsp.server import get_server
+        from remora.lsp.server_setup import register_handlers
         server = get_server()
         register_handlers(server)
 
@@ -478,7 +484,8 @@ class TestOnCursorMovedDebounce:
     async def test_on_cursor_moved_no_direct_db_write(self):
         """on_cursor_moved should NOT directly call db.update_cursor_focus anymore."""
         from remora.lsp.notifications import on_cursor_moved
-        from remora.lsp.server import get_server, register_handlers
+        from remora.lsp.server import get_server
+        from remora.lsp.server_setup import register_handlers
         server = get_server()
         register_handlers(server)
 

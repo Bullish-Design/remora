@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from remora.core.agents.agent_node import AgentNode, ToolSchema
-from remora.core.events.events import HumanChatEvent
-from remora.lsp.models import (
+from remora.core.events import HumanChatEvent
+from remora.runner.models import (
     RewriteProposal,
 )
 

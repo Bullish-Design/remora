@@ -18,7 +18,7 @@ import pytest
 
 from remora.core.agents.agent_node import AgentNode
 from remora.core.store.event_store import EventStore
-from remora.core.events.events import ManualTriggerEvent
+from remora.core.events import ManualTriggerEvent
 from remora.core.code.projections import NodeProjection
 from remora.core.events.subscriptions import SubscriptionPattern, SubscriptionRegistry
 from remora.runner.agent_runner import AgentRunner

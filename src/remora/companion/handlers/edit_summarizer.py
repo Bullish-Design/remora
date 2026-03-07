@@ -11,7 +11,7 @@ from remora.companion.state import CompanionState
 def _generate_summary(event: ContentChangedEvent) -> str:
     """Generate a heuristic summary of the edit."""
     file_name = Path(event.path).name
-    # Since ContentChangedEvent in remora.core.events.events only has diff, we can't get exact line range easily without parsing diff.
+    # ContentChangedEvent only carries a diff payload, so line ranges require diff parsing.
     # But for a heuristic summary, the diff first few lines added/removed will do.
     diff = event.diff or ""
     

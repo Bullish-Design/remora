@@ -182,7 +182,7 @@ class TestApplyExtensions:
     """Test apply_extensions uses core AgentExtension."""
 
     def test_applies_extension_data(self, runner):
-        """apply_extensions should use core load_extensions + AgentExtension."""
+        """apply_extensions should delegate to turn_logic extension loading."""
         from remora.extensions import AgentExtension
 
         class TestExt(AgentExtension):
@@ -199,7 +199,7 @@ class TestApplyExtensions:
 
         agent = _make_agent_node()
 
-        with patch("remora.runner.agent_runner.load_extensions", return_value=[TestExt]):
+        with patch("remora.runner.turn_logic.load_extensions", return_value=[TestExt]):
             result = runner.apply_extensions(agent)
 
         assert result.custom_system_prompt == "You are a test agent."
@@ -209,7 +209,7 @@ class TestApplyExtensions:
         """apply_extensions with no matches should return agent unchanged."""
         agent = _make_agent_node()
 
-        with patch("remora.runner.agent_runner.load_extensions", return_value=[]):
+        with patch("remora.runner.turn_logic.load_extensions", return_value=[]):
             result = runner.apply_extensions(agent)
 
         assert result.custom_system_prompt == ""

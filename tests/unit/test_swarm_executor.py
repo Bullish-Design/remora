@@ -20,7 +20,7 @@ import pytest
 
 from remora.core.agents.agent_node import AgentNode
 from remora.core.config import Config
-from remora.core.events.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent
+from remora.core.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent
 from remora.core.agents.execution import (
     _lang_tag_for,
     _agent_node_to_cst_node,
@@ -428,7 +428,7 @@ class TestSwarmExecutorDomainEvents:
     @patch("remora.core.agents.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
     async def test_scaffold_trigger_adds_scaffold_tag(self, mock_exec, mock_build_client, tmp_path):
         """When trigger_event is ScaffoldRequestEvent, AgentCompleteEvent should have tags=('scaffold',)."""
-        from remora.core.events.events import ScaffoldRequestEvent
+        from remora.core.events import ScaffoldRequestEvent
         from remora.core.agents.execution import ExecutionResult
 
         mock_build_client.return_value = MagicMock()
@@ -468,7 +468,7 @@ class TestSwarmExecutorDomainEvents:
     @patch("remora.core.agents.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
     async def test_non_scaffold_trigger_has_no_tags(self, mock_exec, mock_build_client, tmp_path):
         """When trigger_event is not ScaffoldRequestEvent, AgentCompleteEvent tags should be empty."""
-        from remora.core.events.events import ContentChangedEvent
+        from remora.core.events import ContentChangedEvent
         from remora.core.agents.execution import ExecutionResult
 
         mock_build_client.return_value = MagicMock()
@@ -632,7 +632,7 @@ class TestSwarmToolsEndToEnd:
     @pytest.mark.asyncio
     async def test_subscribe_tool_matches_events(self, registry):
         """A subscription created by SubscribeTool should match events via get_matching_agents."""
-        from remora.core.events.events import ContentChangedEvent
+        from remora.core.events import ContentChangedEvent
         from remora.core.tools.swarm import SubscribeTool
 
         ctx = self._make_context(registry)

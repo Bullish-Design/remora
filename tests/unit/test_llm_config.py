@@ -121,7 +121,7 @@ class TestLspMainUsesConfig:
             lambda: __import__("logging").getLogger("test"),
         )
         monkeypatch.setattr("remora.lsp.__main__.register_handlers", lambda server: None, raising=False)
-        monkeypatch.setattr("remora.lsp.server.register_handlers", lambda server: None)
+        monkeypatch.setattr("remora.lsp.server_setup.register_handlers", lambda server: None)
 
         with pytest.raises(_StopSentinel):
             lsp_main_mod._run_server()

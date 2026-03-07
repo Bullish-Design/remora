@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from remora.core.events.events import AgentMessageEvent, ContentChangedEvent
+from remora.core.events import AgentMessageEvent, ContentChangedEvent
 from remora.core.events.subscriptions import SubscriptionPattern, SubscriptionRegistry
 from remora.core.tools.swarm import SubscribeTool
 

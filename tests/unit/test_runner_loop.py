@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from remora.core.agents.agent_node import AgentNode
-from remora.core.events.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent, ContentChangedEvent
+from remora.core.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent, ContentChangedEvent
 from remora.core.agents.execution import ExecutionResult
 from remora.runner.agent_runner import AgentRunner, Trigger
 
@@ -431,7 +431,7 @@ class TestExecuteTurnEmitsDomainEvents:
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
     async def test_scaffold_trigger_adds_scaffold_tag(self, mock_exec):
         """When trigger carries a ScaffoldRequestEvent, AgentCompleteEvent should have tags=('scaffold',)."""
-        from remora.core.events.events import ScaffoldRequestEvent
+        from remora.core.events import ScaffoldRequestEvent
 
         mock_exec.return_value = _ok_result("Scaffolded.")
         server = _make_mock_server()

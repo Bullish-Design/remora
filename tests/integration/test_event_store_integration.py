@@ -12,7 +12,7 @@ import asyncio
 import pytest
 
 from remora.core.store.event_store import EventStore
-from remora.core.events.events import (
+from remora.core.events import (
     AgentMessageEvent,
     ContentChangedEvent,
     ManualTriggerEvent,

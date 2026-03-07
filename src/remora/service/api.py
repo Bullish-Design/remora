@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any, AsyncIterator, TYPE_CHECKING
+from typing import Any, AsyncIterator
 
 from remora.core.config import Config, load_config
 from remora.core.events.event_bus import EventBus
 from remora.core.store.event_store import EventStore
-from remora.core.code.projections import NodeProjection
-from remora.core.events.subscriptions import SubscriptionRegistry
-from remora.core.agents.cairn_bridge import CairnWorkspaceService
 from remora.models import ConfigSnapshot, InputResponse
-from remora.service.datastar import render_patch, render_shell
 from remora.service.handlers import (
     ServiceDeps,
+    build_default_runtime,
     handle_config_snapshot,
     handle_input,
     handle_swarm_emit,
@@ -23,10 +19,19 @@ from remora.service.handlers import (
     handle_swarm_get_subscriptions,
     handle_swarm_list_agents,
     handle_ui_snapshot,
+    render_event_sse,
+    render_index_html,
+    render_state_patch,
+    resolve_bundle_default,
 )
-from remora.ui.projector import UiStateProjector, normalize_event
-from remora.utils import PathLike, normalize_path
-from remora.ui.view import render_dashboard
+from remora.ui.projector import UiStateProjector
+from remora.utils import PathLike
+
+
+def _resolve_project_root(project_root: PathLike | None) -> Path:
+    if project_root is None:
+        return Path.cwd().resolve()
+    return Path(project_root).expanduser().resolve()
 
 
 class RemoraService:
@@ -42,34 +47,13 @@ class RemoraService:
         enable_event_store: bool = True,
     ) -> "RemoraService":
         resolved_config = config or load_config(config_path)
-        resolved_root = normalize_path(project_root or Path.cwd()).resolve()
+        resolved_root = _resolve_project_root(project_root)
         event_bus = EventBus()
-        event_store: EventStore | None = None
-        subscriptions: SubscriptionRegistry | None = None
-
-        swarm_root = resolved_root / ".remora"
-
-        subscriptions_path = swarm_root / "subscriptions.db"
-        subscriptions = SubscriptionRegistry(subscriptions_path)
-
-        if enable_event_store:
-            store_path = swarm_root / "events" / "events.db"
-            from remora.extensions import extension_matches, load_extensions
-            extensions = load_extensions(swarm_root / "models")
-            projection = NodeProjection(
-                extension_matcher=extension_matches,
-                extension_configs=extensions,
-            )
-            event_store = EventStore(
-                store_path,
-                subscriptions=subscriptions,
-                projection=projection,
-            )
-
-        workspace_service = CairnWorkspaceService(
+        event_store, subscriptions, workspace_service = build_default_runtime(
             config=resolved_config,
-            swarm_root=swarm_root,
             project_root=resolved_root,
+            event_bus=event_bus,
+            enable_event_store=enable_event_store,
         )
 
         return cls(
@@ -99,7 +83,7 @@ class RemoraService:
         self._projector = projector or UiStateProjector()
         self._subscriptions = subscriptions
         self._workspace_service = workspace_service
-        self._bundle_default = _resolve_bundle_default(self._config)
+        self._bundle_default = resolve_bundle_default(self._config)
         self._event_bus.subscribe_all(self._projector.record)
 
         self._deps = ServiceDeps(
@@ -113,27 +97,23 @@ class RemoraService:
         )
 
     def index_html(self) -> str:
-        state = self._projector.snapshot()
-        return render_shell(render_dashboard(state, bundle_default=self._bundle_default))
+        return render_index_html(self._projector, self._bundle_default)
 
     @property
     def event_bus(self) -> EventBus:
         return self._event_bus
 
     async def subscribe_stream(self) -> AsyncIterator[str]:
-        yield render_patch(self._projector.snapshot(), bundle_default=self._bundle_default)
+        yield render_state_patch(self._projector, self._bundle_default)
         async with self._event_bus.stream() as events:
             async for _event in events:
-                yield render_patch(self._projector.snapshot(), bundle_default=self._bundle_default)
+                yield render_state_patch(self._projector, self._bundle_default)
 
     async def events_stream(self) -> AsyncIterator[str]:
         yield ": open\n\n"
         async with self._event_bus.stream() as events:
             async for event in events:
-                envelope = normalize_event(event)
-                data = json.dumps(envelope, default=str)
-                event_name = envelope.get("type", "event")
-                yield f"event: {event_name}\ndata: {data}\n\n"
+                yield render_event_sse(event)
 
     async def replay_events(
         self,
@@ -188,14 +168,5 @@ class RemoraService:
     async def get_agent_subscriptions(self, agent_id: str) -> list[dict[str, Any]]:
         """Get subscriptions for an agent."""
         return await handle_swarm_get_subscriptions(agent_id, self._deps)
-
-
-def _resolve_bundle_default(config: Config) -> str:
-    snapshot = ConfigSnapshot.from_config(config)
-    mapping = snapshot.bundles.get("mapping", {})
-    if isinstance(mapping, dict) and mapping:
-        return next(iter(mapping))
-    return ""
-
 
 __all__ = ["RemoraService"]

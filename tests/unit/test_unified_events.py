@@ -15,7 +15,7 @@ import time
 import pytest
 from pydantic import BaseModel
 
-from remora.core.events.events import (
+from remora.core.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
     AgentMessageEvent,
@@ -126,54 +126,54 @@ class TestBridgeRemoved:
     """Bridge helper methods must not exist on event model classes."""
 
     def test_no_to_core_event_on_human_chat(self):
-        from remora.core.events.events import HumanChatEvent
+        from remora.core.events import HumanChatEvent
 
         assert not hasattr(HumanChatEvent, "to_core_event"), "HumanChatEvent should not have to_core_event()"
 
     def test_no_to_core_event_on_rewrite_proposal_event(self):
-        from remora.core.events.events import RewriteProposalEvent
+        from remora.core.events import RewriteProposalEvent
 
         assert not hasattr(RewriteProposalEvent, "to_core_event"), (
             "RewriteProposalEvent should not have to_core_event()"
         )
 
     def test_no_to_core_event_on_rewrite_applied_event(self):
-        from remora.core.events.events import RewriteAppliedEvent
+        from remora.core.events import RewriteAppliedEvent
 
         assert not hasattr(RewriteAppliedEvent, "to_core_event"), (
             "RewriteAppliedEvent should not have to_core_event()"
         )
 
     def test_no_to_core_event_on_rewrite_rejected_event(self):
-        from remora.core.events.events import RewriteRejectedEvent
+        from remora.core.events import RewriteRejectedEvent
 
         assert not hasattr(RewriteRejectedEvent, "to_core_event"), (
             "RewriteRejectedEvent should not have to_core_event()"
         )
 
     def test_no_to_core_event_on_agent_error_event(self):
-        from remora.core.events.events import AgentErrorEvent
+        from remora.core.events import AgentErrorEvent
 
         assert not hasattr(AgentErrorEvent, "to_core_event"), (
             "AgentErrorEvent should not have to_core_event()"
         )
 
     def test_no_to_core_event_on_agent_message_event(self):
-        from remora.core.events.events import AgentMessageEvent
+        from remora.core.events import AgentMessageEvent
 
         assert not hasattr(AgentMessageEvent, "to_core_event"), (
             "AgentMessageEvent should not have to_core_event()"
         )
 
     def test_no_from_core_event_on_agent_event(self):
-        from remora.core.events.events import AgentEvent
+        from remora.core.events import AgentEvent
 
         assert not hasattr(AgentEvent, "from_core_event"), "AgentEvent should not have from_core_event()"
 
     def test_no_core_event_imports(self):
-        """lsp/models.py must not import core events with 'Core' alias."""
+        """runner/models.py must not import core events with 'Core' alias."""
         import inspect
-        import remora.lsp.models as mod
+        import remora.runner.models as mod
 
         source = inspect.getsource(mod)
         assert "CoreAgentCompleteEvent" not in source
