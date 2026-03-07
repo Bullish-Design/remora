@@ -16,7 +16,7 @@ Read this file FIRST after every compaction or session start.
 **After every compaction, immediately read this file and continue working.** Do not wait for user input. The compaction summary tells you what was happening; this file and the project files tell you how to resume.
 
 1. Read this file in full.
-2. Read `.scratch/REPO_RULES.md` for repo-specific coding standards and reference files.
+2. Read `.scratch/REPO_RULES.md` for repo-specific coding standards and reference files. The file that you should append self-reminders to specific to this repository.
 3. Identify which project you are working on.
 4. Read that project's `CONTEXT.md` to resume where you left off.
 5. Check `PROGRESS.md` for current task status.
@@ -41,7 +41,6 @@ Each project directory contains these standard files. Create them if they don't 
 
 | File | Purpose |
 |------|---------|
-| `REPO_RULES.md` | The file that you should append self-reminders to specific to this repository.
 | `PROGRESS.md` | Task tracker with status (pending/in-progress/done). The source of truth for what's been completed and what remains. |
 | `CONTEXT.md` | Current state for resumption after compaction. What just happened, what's next, key variable state. Update this before any large context shift. |
 | `PLAN.md` | Implementation plan. Ordered steps, dependencies, acceptance criteria. |
