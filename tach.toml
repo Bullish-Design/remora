@@ -1,0 +1,286 @@
+interfaces = []
+exclude = [
+    "**/*__pycache__",
+    "**/*egg-info",
+    "**/docs",
+    "**/tests",
+    "**/venv",
+]
+source_roots = [ "src",
+]
+
+[[modules ]]
+path = "remora.utils.fs"
+depends_on = ["remora.utils.types"]
+
+[[modules ]]
+path = "remora.core.reconciler"
+depends_on = ["remora.core.discovery", "remora.utils", "remora.core.subscriptions", "remora.core.events"]
+
+[[modules ]]
+path = "remora.lsp.nvim"
+depends_on = []
+
+[[modules ]]
+path = "remora.core.swarm_executor"
+depends_on = ["remora.core.event_store", "remora.utils", "remora.core.execution", "remora.core.subscriptions", "remora.core.cairn_bridge", "remora.core.agent_node", "remora.core.events"]
+
+[[modules ]]
+path = "remora.lsp.runner"
+depends_on = ["remora.lsp.handlers", "remora.core.config", "remora.lsp.models", "remora.core.agent_node", "remora.core.execution", "remora.extensions", "remora.lsp.server", "remora.core.tools", "remora.core.events", "remora.core.cairn_bridge"]
+
+[[modules ]]
+path = "remora.ui.projector"
+depends_on = ["remora.core.events"]
+
+[[modules ]]
+path = "remora.companion"
+depends_on = []
+
+[[modules ]]
+path = "remora.companion.events"
+depends_on = ["remora.core.events"]
+
+[[modules ]]
+path = "remora.core.cairn_externals"
+depends_on = ["remora.utils"]
+
+[[modules ]]
+path = "remora.lsp.server"
+depends_on = ["remora.lsp.handlers", "remora.core.events", "remora.lsp.db", "remora.core.agent_node", "remora.core.config", "remora.lsp.models", "remora.core.discovery", "remora.core.tools", "remora.lsp.notifications", "remora.lsp.graph"]
+
+[[modules ]]
+path = "remora.core.workspace"
+depends_on = ["remora.core.config", "remora.core.discovery", "remora.core.errors", "remora.utils"]
+
+[[modules ]]
+path = "remora.__main__"
+depends_on = ["remora.cli.main"]
+
+[[modules ]]
+path = "remora.ui"
+depends_on = ["remora.ui.projector", "remora.ui.view"]
+
+[[modules ]]
+path = "remora.adapters.starlette"
+depends_on = ["remora.service.api"]
+
+[[modules ]]
+path = "remora.utils.types"
+depends_on = []
+
+[[modules ]]
+path = "remora.core.state_manager"
+depends_on = []
+
+[[modules ]]
+path = "remora.queries.markdown"
+depends_on = []
+
+[[modules ]]
+path = "remora.ui.components"
+depends_on = []
+
+[[modules ]]
+path = "remora.core.agent_node"
+depends_on = ["remora.core.subscriptions"]
+
+[[modules ]]
+path = "remora.core.discovery"
+depends_on = ["remora.utils"]
+
+[[modules ]]
+path = "remora.lsp.__main__"
+depends_on = ["remora.core.discovery", "remora.lsp.server", "remora.core.config", "remora.lsp.runner", "remora.core.events"]
+
+[[modules ]]
+path = "remora.core.chat"
+depends_on = ["remora.core.cairn_bridge", "remora.core.event_bus", "remora.core.workspace", "remora.core.config", "remora.core.discovery", "remora.core.kernel_factory"]
+
+[[modules ]]
+path = "remora.workspace"
+depends_on = ["remora.workspace.sandbox", "remora.workspace.sync", "remora.workspace.validation", "remora.workspace.inspector"]
+
+[[modules ]]
+path = "remora.companion.indexing_service"
+depends_on = ["remora.companion.config", "remora.companion.events"]
+
+[[modules ]]
+path = "remora.lsp.notifications"
+depends_on = ["remora.lsp.server", "remora.lsp.models"]
+
+[[modules ]]
+path = "remora.core.subscriptions"
+depends_on = ["remora.utils"]
+
+[[modules ]]
+path = "remora.lsp.models"
+depends_on = []
+
+[[modules ]]
+path = "remora.workspace.sandbox"
+depends_on = []
+
+[[modules ]]
+path = "remora.core.cairn_bridge"
+depends_on = ["remora.core.errors", "remora.core.cairn_externals", "remora.utils", "remora.core.workspace", "remora.core.config"]
+
+[[modules ]]
+path = "remora.adapters"
+depends_on = ["remora.adapters.starlette"]
+
+[[modules ]]
+path = "remora.core.event_store"
+depends_on = ["remora.core.events", "remora.utils", "remora.core.agent_node"]
+
+[[modules ]]
+path = "remora.models"
+depends_on = ["remora.core.config"]
+
+[[modules ]]
+path = "remora.lsp.graph"
+depends_on = ["remora.lsp.db", "remora.core.event_store"]
+
+[[modules ]]
+path = "remora.workspace.validation"
+depends_on = ["remora.workspace.sandbox"]
+
+[[modules ]]
+path = "remora.core.config"
+depends_on = ["remora.core.errors", "remora.utils"]
+
+[[modules ]]
+path = "remora.companion.handlers"
+depends_on = ["remora.companion.events", "remora.companion.state", "remora.core.events", "remora.companion.indexing_service"]
+
+[[modules ]]
+path = "remora.service.api"
+depends_on = ["remora.core.event_bus", "remora.ui.view", "remora.core.cairn_bridge", "remora.service.datastar", "remora.core.subscriptions", "remora.utils", "remora.ui.projector", "remora.service.handlers", "remora.core.projections", "remora.core.event_store", "remora.models", "remora.core.config"]
+
+[[modules ]]
+path = "remora.lsp.handlers"
+depends_on = ["remora.core.events", "remora.lsp.models", "remora.lsp.server", "remora.core.discovery"]
+
+[[modules ]]
+path = "remora.core.projections"
+depends_on = ["remora.extensions", "remora.core.events"]
+
+[[modules ]]
+path = "remora.queries.python"
+depends_on = []
+
+[[modules ]]
+path = "remora.service"
+depends_on = ["remora.service.api"]
+
+[[modules ]]
+path = "remora.core.tools"
+depends_on = ["remora.core.subscriptions", "remora.core.events", "remora.core.event_store", "remora.core.discovery", "remora.core.agent_context", "remora.core.agent_node"]
+
+[[modules ]]
+path = "remora.core.agent_context"
+depends_on = []
+
+[[modules ]]
+path = "remora.core.event_bus"
+depends_on = ["remora.core.events"]
+
+[[modules ]]
+path = "remora.workspace.sync"
+depends_on = []
+
+[[modules ]]
+path = "remora.lsp"
+depends_on = ["remora.lsp.models", "remora.lsp.db", "remora.core.event_bus", "remora.core.agent_node", "remora.core.event_store", "remora.core.subscriptions", "remora.lsp.server", "remora.lsp.graph", "remora.lsp.__main__", "remora.core.projections"]
+
+[[modules ]]
+path = "remora.service.handlers"
+depends_on = ["remora.models", "remora.utils", "remora.ui.projector", "remora.core.discovery", "remora.core.events", "remora.core.config", "remora.core.event_store", "remora.core.event_bus"]
+
+[[modules ]]
+path = "remora.core"
+depends_on = ["remora.core.projections", "remora.core.cairn_externals", "remora.core.cairn_bridge", "remora.core.errors", "remora.lsp.runner", "remora.core.reconciler", "remora.core.workspace", "remora.core.agent_context", "remora.core.tools", "remora.core.swarm_executor", "remora.core.event_store", "remora.core.kernel_factory", "remora.core.state_manager", "remora.core.subscriptions", "remora.core.event_bus", "remora.core.manifest", "remora.core.discovery", "remora.core.events", "remora.core.config", "remora.core.agent_node"]
+
+[[modules ]]
+path = "remora.companion.startup"
+depends_on = ["remora.companion.dispatcher", "remora.companion.handlers", "remora.companion.state", "remora.companion.indexing_service", "remora.companion.events", "remora.companion.config"]
+
+[[modules ]]
+path = "remora.companion.state"
+depends_on = ["remora.core.events"]
+
+[[modules ]]
+path = "remora.core.kernel_factory"
+depends_on = []
+
+[[modules ]]
+path = "remora.lsp.db"
+depends_on = ["remora.core.discovery"]
+
+[[modules ]]
+path = "remora.service.chat_service"
+depends_on = ["remora.core.event_bus", "remora.core.chat", "remora.core.events"]
+
+[[modules ]]
+path = "remora.core.events"
+depends_on = ["remora.core.discovery", "remora.companion.events"]
+
+[[modules ]]
+path = "remora.core.manifest"
+depends_on = []
+
+[[modules ]]
+path = "remora.queries"
+depends_on = []
+
+[[modules ]]
+path = "remora.core.protocols"
+depends_on = []
+
+[[modules ]]
+path = "remora.utils"
+depends_on = ["remora.utils.fs", "remora.utils.text", "remora.utils.types", "remora.utils.path_resolver"]
+
+[[modules ]]
+path = "remora.core.execution"
+depends_on = ["remora.core.subscriptions", "remora.core.agent_node", "remora.core.kernel_factory", "remora.core.workspace", "remora.utils", "remora.core.event_store", "remora.core.events", "remora.core.tools", "remora.core.discovery", "remora.core.cairn_bridge", "remora.core.agent_context", "remora.core.manifest"]
+
+[[modules ]]
+path = "remora.workspace.inspector"
+depends_on = []
+
+[[modules ]]
+path = "remora.extensions"
+depends_on = []
+
+[[modules ]]
+path = "remora.companion.dispatcher"
+depends_on = ["remora.companion.events", "remora.companion.handlers", "remora.core.events", "remora.companion.state"]
+
+[[modules ]]
+path = "remora.core.errors"
+depends_on = []
+
+[[modules ]]
+path = "remora.utils.path_resolver"
+depends_on = ["remora.utils.types"]
+
+[[modules ]]
+path = "remora.companion.config"
+depends_on = []
+
+[[modules ]]
+path = "remora.queries.toml"
+depends_on = []
+
+[[modules ]]
+path = "remora.ui.view"
+depends_on = ["remora.ui.components"]
+
+[[modules ]]
+path = "remora.utils.text"
+depends_on = []
+
+[[modules ]]
+path = "remora.service.datastar"
+depends_on = ["remora.ui.view"]
