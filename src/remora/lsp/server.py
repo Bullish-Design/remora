@@ -91,8 +91,8 @@ class RemoraLanguageServer(LanguageServer):
 
     async def _do_reparse(self, uri: str, text: str) -> None:
         """Execute the actual debounced reparse for *uri*."""
-        from remora.core.code.discovery import parse_content
-        from remora.core.events.events import NodeDiscoveredEvent, NodeRemovedEvent
+        from remora.core.code.discovery import node_to_event, parse_content
+        from remora.core.events.events import NodeRemovedEvent
 
         self._reparse_timers.pop(uri, None)
         try:
@@ -108,7 +108,7 @@ class RemoraLanguageServer(LanguageServer):
                     await self.event_store.append("nodes", NodeRemovedEvent(node_id=orphan_id))
 
                 for node in cst_nodes:
-                    await self.event_store.append("nodes", NodeDiscoveredEvent.from_cst_node(node))
+                    await self.event_store.append("nodes", node_to_event(node))
 
             await self.refresh_code_lenses()
             await self.notify_agents_updated()

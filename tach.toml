@@ -278,10 +278,7 @@ depends_on = ["remora.companion.events", "remora.companion.state", "remora.core.
 
 [[modules ]]
 path = "remora.core.events.events"
-depends_on = [
-    # VIOLATION - to be removed in W3: remora.core.code.discovery
-    "remora.core.code.discovery",
-]
+depends_on = []
 
 [[modules ]]
 path = "remora.core.store.event_store_schema"
@@ -337,7 +334,7 @@ depends_on = ["remora.core.agents.workspace", "remora.workspace.inspector", "rem
 
 [[modules ]]
 path = "remora.core.code.discovery"
-depends_on = ["remora.utils", "remora.utils.languages"]
+depends_on = ["remora.utils", "remora.utils.languages", "remora.core.events.events"]
 
 [[modules ]]
 path = "remora.companion.handlers.context_extractor"
@@ -469,7 +466,7 @@ depends_on = ["remora.core.agents.swarm_executor", "remora.core.agents.agent_con
 
 [[modules ]]
 path = "remora.lsp.background_scanner"
-depends_on = ["remora.core.events.events"]
+depends_on = ["remora.core.events.events", "remora.core.code.discovery"]
 
 [[modules ]]
 path = "remora.ui.components.layout"

@@ -6,8 +6,8 @@ from pathlib import Path
 from lsprotocol import types as lsp
 from pygls.uris import to_fs_path
 
-from remora.core.code.discovery import CSTNode, parse_content
-from remora.core.events.events import ContentChangedEvent, FileSavedEvent, NodeDiscoveredEvent, NodeRemovedEvent
+from remora.core.code.discovery import CSTNode, node_to_event, parse_content
+from remora.core.events.events import ContentChangedEvent, FileSavedEvent, NodeRemovedEvent
 from remora.lsp.models import RewriteProposal
 from remora.lsp.protocols import LspServer
 
@@ -34,7 +34,7 @@ async def _emit_node_events(ls: LspServer, uri: str, new_nodes: list[CSTNode]) -
         await ls.event_store.append("nodes", NodeRemovedEvent(node_id=orphan_id))
 
     for node in new_nodes:
-        await ls.event_store.append("nodes", NodeDiscoveredEvent.from_cst_node(node))
+        await ls.event_store.append("nodes", node_to_event(node))
 
 
 async def did_open(ls: LspServer, params: lsp.DidOpenTextDocumentParams) -> None:

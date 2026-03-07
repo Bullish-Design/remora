@@ -8,7 +8,7 @@
 - [x] W0: Diagnostic — identify cycles and update baseline (COMPLETE — see findings below)
 - [x] W1: Enforce Tach policy in tach.toml + CI gate (COMPLETE — 2026-03-07)
 - [x] W2: Fix runner.agent_runner → lsp.models (move RewriteProposal to runner.models) (COMPLETE — 2026-03-07)
-- [ ] W3: Fix events.events → code.discovery (move from_cst_node to discovery.node_to_event)
+- [x] W3: Fix events.events → code.discovery (move from_cst_node to discovery.node_to_event) (COMPLETE — 2026-03-07)
 - [ ] W4: Decompose core.events.events into 4 bounded modules
 - [x] W5: Break LSP barrel/server/handlers cycle — ALREADY DONE (no lsp.handlers → lsp barrel edges found)
 - [ ] W6: Thin orchestration hotspots (lsp.server, agents.execution, service.api)
@@ -106,3 +106,29 @@ No core → adapter violations found (core is clean with respect to lsp/service/
 - Test runs:
   - `devenv shell -- pytest tests/unit/test_lsp_models.py tests/unit/test_unified_events.py -q` → pass.
   - `devenv shell -- python -m pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q` → pass (warnings only).
+
+## W3 Findings (2026-03-07)
+- Added discovery-owned factory:
+  - `src/remora/core/code/discovery.py`: `node_to_event(node: CSTNode) -> NodeDiscoveredEvent`
+  - Exported via `__all__`.
+- Updated runtime call sites to use `node_to_event()`:
+  - `src/remora/lsp/handlers/documents.py`
+  - `src/remora/lsp/server.py` (`_do_reparse`)
+  - `src/remora/lsp/background_scanner.py`
+- Removed event-layer coupling back to discovery:
+  - Deleted `NodeDiscoveredEvent.from_cst_node()` from `src/remora/core/events/events.py`.
+  - Removed `TYPE_CHECKING` import of `CSTNode` from `events.py`.
+  - `events.py` no longer imports from `remora.core.code.discovery`.
+- Updated tests for the new factory location:
+  - `tests/test_events.py` now validates `node_to_event(...)`.
+- Updated Tach policy:
+  - `remora.core.events.events` now `depends_on = []`.
+  - `remora.core.code.discovery` now allows `remora.core.events.events` (for `node_to_event`).
+  - `remora.lsp.background_scanner` now allows `remora.core.code.discovery`.
+- Acceptance checks:
+  - `grep -n "from remora.core.code" src/remora/core/events/events.py` → no results.
+  - `grep -n "from_cst_node" src/remora/core/events/events.py` → no results.
+  - `grep -n "from_cst_node" src tests` → no results.
+  - `devenv shell -- tach check` → pass.
+- Test runs:
+  - `devenv shell -- pytest tests/test_events.py tests/unit/test_lsp_event_completeness.py tests/unit/test_lsp_background_scan_manifest.py -q` → pass.

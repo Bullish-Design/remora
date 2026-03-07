@@ -1,9 +1,7 @@
 """Unified event types for the Remora runtime."""
 
-from __future__ import annotations
-
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -17,11 +15,6 @@ from structured_agents.events import (
     ToolResultEvent,
     TurnCompleteEvent,
 )
-
-if TYPE_CHECKING:
-
-    from remora.core.code.discovery import CSTNode
-
 
 # ============================================================================
 # Base
@@ -231,25 +224,6 @@ class NodeDiscoveredEvent(_FrozenEvent):
     start_byte: int = 0
     end_byte: int = 0
     timestamp: float = Field(default_factory=time.time)
-
-    @classmethod
-    def from_cst_node(cls, node: CSTNode) -> NodeDiscoveredEvent:
-        """Create from a CSTNode — single source of truth for field mapping."""
-        from remora.core.code.discovery import compute_source_hash
-        return cls(
-            node_id=node.node_id,
-            node_type=node.node_type,
-            name=node.name,
-            full_name=node.full_name,
-            file_path=node.file_path,
-            start_line=node.start_line,
-            end_line=node.end_line,
-            start_byte=node.start_byte,
-            end_byte=node.end_byte,
-            source_code=node.text,
-            source_hash=compute_source_hash(node.text),
-            parent_id=node.parent_id,
-        )
 
 
 class ScaffoldRequestEvent(_FrozenEvent):

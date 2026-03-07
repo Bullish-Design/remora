@@ -10,7 +10,8 @@ from typing import Any
 
 from pygls.uris import from_fs_path
 
-from remora.core.events.events import NodeDiscoveredEvent, NodeRemovedEvent
+from remora.core.code.discovery import node_to_event
+from remora.core.events.events import NodeRemovedEvent
 
 
 class BackgroundScanner:
@@ -135,7 +136,7 @@ class BackgroundScanner:
                     old_ids = {a.node_id for a in old_agents}
                     new_ids = {n.node_id for n in nodes}
 
-                    batch_events = [NodeDiscoveredEvent.from_cst_node(n) for n in nodes]
+                    batch_events = [node_to_event(n) for n in nodes]
                     for removed_id in old_ids - new_ids:
                         batch_events.append(NodeRemovedEvent(node_id=removed_id))
 
@@ -216,4 +217,3 @@ class BackgroundScanner:
 
 
 __all__ = ["BackgroundScanner"]
-

@@ -533,12 +533,37 @@ def parse_content(file_path: str, content: str, language: str | None = None) -> 
     return _parse_nodes(file_path, content, language)
 
 
+def node_to_event(node: CSTNode) -> "NodeDiscoveredEvent":
+    """Convert a CSTNode to a NodeDiscoveredEvent.
+
+    This factory lives in discovery (not on the event type) because event
+    definitions must not depend on discovery internals.
+    """
+    from remora.core.events.events import NodeDiscoveredEvent
+
+    return NodeDiscoveredEvent(
+        node_id=node.node_id,
+        node_type=node.node_type,
+        name=node.name,
+        full_name=node.full_name,
+        file_path=node.file_path,
+        start_line=node.start_line,
+        end_line=node.end_line,
+        start_byte=node.start_byte,
+        end_byte=node.end_byte,
+        source_code=node.text,
+        source_hash=compute_source_hash(node.text),
+        parent_id=node.parent_id,
+    )
+
+
 __all__ = [
     "CSTNode",
     "compute_node_id",
     "compute_source_hash",
     "discover",
     "LANGUAGE_EXTENSIONS",
+    "node_to_event",
     "parse_content",
     "parse_file",
 ]
