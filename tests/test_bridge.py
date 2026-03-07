@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import sqlite3
-import tempfile
 import time
 from pathlib import Path
 
 import pytest
-
 from remora_demo.web.graph.bridge import DBBridge
 from remora_demo.web.graph.layout import ForceLayout
-from remora_demo.web.graph.state import GraphState, GraphSnapshot
+from remora_demo.web.graph.state import GraphState
 
 
 class FakeRelay:
@@ -82,7 +79,8 @@ def _create_test_db(path: str) -> sqlite3.Connection:
 class TestGraphState:
     def test_read_empty_snapshot(self, tmp_path: Path) -> None:
         db_path = str(tmp_path / "test.db")
-        _create_test_db(db_path)
+        conn = _create_test_db(db_path)
+        conn.close()
         state = GraphState(db_path=db_path)
         snapshot = state.read_snapshot()
         assert snapshot.nodes == []
@@ -103,6 +101,7 @@ class TestGraphState:
         # id should be renamed to remora_id
         assert snapshot.nodes[0]["remora_id"] == "a"
         state.close()
+        conn.close()
 
     def test_read_node(self, tmp_path: Path) -> None:
         db_path = str(tmp_path / "test.db")
@@ -117,6 +116,7 @@ class TestGraphState:
         assert node["status"] == "active"
         assert state.read_node("nonexistent") is None
         state.close()
+        conn.close()
 
     def test_read_edges_for_node(self, tmp_path: Path) -> None:
         db_path = str(tmp_path / "test.db")
@@ -132,10 +132,12 @@ class TestGraphState:
         assert connections["children"] == ["b"]
         assert connections["callers"] == ["b"]
         state.close()
+        conn.close()
 
     def test_push_command(self, tmp_path: Path) -> None:
         db_path = str(tmp_path / "test.db")
-        _create_test_db(db_path)
+        conn = _create_test_db(db_path)
+        conn.close()
         state = GraphState(db_path=db_path)
         cmd_id = state.push_command("chat", "agent1", {"message": "hello"})
         assert cmd_id is not None
@@ -166,6 +168,7 @@ class TestGraphState:
         assert len(events) == 1
         assert events[0]["event_type"] == "StatusChanged"
         state.close()
+        conn.close()
 
 
 class TestDBBridge:
@@ -177,7 +180,11 @@ class TestDBBridge:
         layout = ForceLayout()
         relay = FakeRelay()
         bridge = DBBridge(state=state, layout=layout, relay=relay, poll_interval=0.1)
-        return conn, state, layout, relay, bridge
+        try:
+            yield conn, state, layout, relay, bridge
+        finally:
+            state.close()
+            conn.close()
 
     @pytest.mark.asyncio
     async def test_first_poll_detects_all_as_changed(self, setup) -> None:

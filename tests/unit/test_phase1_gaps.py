@@ -11,6 +11,7 @@ T7: conftest fixtures exercised via make_agent_node / make_discovered_event
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sqlite3
 from pathlib import Path
@@ -18,15 +19,13 @@ from pathlib import Path
 import pytest
 
 from remora.core.agents.agent_node import AgentNode, ToolSchema
+from remora.core.code.projections import NodeProjection
 from remora.core.events import (
-    AgentStartEvent,
     NodeDiscoveredEvent,
 )
-from remora.core.store.event_store import EventStore
-from remora.core.code.projections import NodeProjection
 from remora.core.events.subscriptions import SubscriptionPattern
+from remora.core.store.event_store import EventStore
 from remora.extensions import AgentExtension, extension_matches
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers (T7)
@@ -311,13 +310,13 @@ class TestFromRowMalformedJSON:
         }
         defaults.update(overrides)
 
-        db = sqlite3.connect(":memory:")
-        db.row_factory = sqlite3.Row
-        cols = ", ".join(defaults.keys())
-        placeholders = ", ".join("?" * len(defaults))
-        db.execute(f"CREATE TABLE nodes ({cols})")
-        db.execute(f"INSERT INTO nodes VALUES ({placeholders})", list(defaults.values()))
-        return db.execute("SELECT * FROM nodes").fetchone()
+        with contextlib.closing(sqlite3.connect(":memory:")) as db:
+            db.row_factory = sqlite3.Row
+            cols = ", ".join(defaults.keys())
+            placeholders = ", ".join("?" * len(defaults))
+            db.execute(f"CREATE TABLE nodes ({cols})")
+            db.execute(f"INSERT INTO nodes VALUES ({placeholders})", list(defaults.values()))
+            return db.execute("SELECT * FROM nodes").fetchone()
 
     def test_malformed_extra_tools(self):
         row = self._make_db_row(extra_tools="not-json")
@@ -544,27 +543,27 @@ class TestExtensionMatchesErrorIsolation:
         def dummy_matcher(ext_cls, node_type, name, **kwargs):
             return getattr(ext_cls, "matches", lambda *a, **k: False)(node_type, name)
         proj = NodeProjection(extension_matcher=dummy_matcher, extension_configs=[GoodExt, BadExt])
-        db = sqlite3.connect(":memory:")
-        db.row_factory = sqlite3.Row
-        db.executescript("""
-            CREATE TABLE nodes (
-                node_id TEXT PRIMARY KEY, node_type TEXT, name TEXT,
-                full_name TEXT, file_path TEXT, start_line INTEGER,
-                end_line INTEGER, start_byte INTEGER DEFAULT 0,
-                end_byte INTEGER DEFAULT 0, source_code TEXT,
-                source_hash TEXT, parent_id TEXT, caller_ids TEXT DEFAULT '[]',
-                callee_ids TEXT DEFAULT '[]', status TEXT DEFAULT 'idle',
-                last_trigger_event TEXT DEFAULT '', last_completed_at REAL,
-                extension_name TEXT, custom_system_prompt TEXT DEFAULT '',
-                mounted_workspaces TEXT DEFAULT '[]', extra_tools TEXT DEFAULT '[]',
-                extra_subscriptions TEXT DEFAULT '[]'
-            )
-        """)
-        event = make_discovered_event()
-        proj.apply(db, event)
+        with contextlib.closing(sqlite3.connect(":memory:")) as db:
+            db.row_factory = sqlite3.Row
+            db.executescript("""
+                CREATE TABLE nodes (
+                    node_id TEXT PRIMARY KEY, node_type TEXT, name TEXT,
+                    full_name TEXT, file_path TEXT, start_line INTEGER,
+                    end_line INTEGER, start_byte INTEGER DEFAULT 0,
+                    end_byte INTEGER DEFAULT 0, source_code TEXT,
+                    source_hash TEXT, parent_id TEXT, caller_ids TEXT DEFAULT '[]',
+                    callee_ids TEXT DEFAULT '[]', status TEXT DEFAULT 'idle',
+                    last_trigger_event TEXT DEFAULT '', last_completed_at REAL,
+                    extension_name TEXT, custom_system_prompt TEXT DEFAULT '',
+                    mounted_workspaces TEXT DEFAULT '[]', extra_tools TEXT DEFAULT '[]',
+                    extra_subscriptions TEXT DEFAULT '[]'
+                )
+            """)
+            event = make_discovered_event()
+            proj.apply(db, event)
 
-        row = db.execute("SELECT * FROM nodes WHERE node_id = ?", ("test_node_001",)).fetchone()
-        assert row["extension_name"] == "GoodAgent"
+            row = db.execute("SELECT * FROM nodes WHERE node_id = ?", ("test_node_001",)).fetchone()
+            assert row["extension_name"] == "GoodAgent"
 
 
 # ---------------------------------------------------------------------------
@@ -613,13 +612,13 @@ class TestSharedFixtures:
         """Node from make_agent_node should survive to_row/from_row."""
         node = make_agent_node(extra_tools=[_make_tool()])
         row = node.to_row()
-        db = sqlite3.connect(":memory:")
-        db.row_factory = sqlite3.Row
-        cols = ", ".join(row.keys())
-        placeholders = ", ".join("?" * len(row))
-        db.execute(f"CREATE TABLE nodes ({cols})")
-        db.execute(f"INSERT INTO nodes VALUES ({placeholders})", list(row.values()))
-        sqlite_row = db.execute("SELECT * FROM nodes").fetchone()
+        with contextlib.closing(sqlite3.connect(":memory:")) as db:
+            db.row_factory = sqlite3.Row
+            cols = ", ".join(row.keys())
+            placeholders = ", ".join("?" * len(row))
+            db.execute(f"CREATE TABLE nodes ({cols})")
+            db.execute(f"INSERT INTO nodes VALUES ({placeholders})", list(row.values()))
+            sqlite_row = db.execute("SELECT * FROM nodes").fetchone()
 
         restored = AgentNode.from_row(sqlite_row)
         assert restored.node_id == node.node_id

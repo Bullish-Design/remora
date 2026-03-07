@@ -1,0 +1,62 @@
+digraph RemoraReactiveEventLoop {
+  graph [rankdir=LR, splines=polyline, fontname="Helvetica", fontsize=11, labelloc="t", label="Remora Reactive Event Loop"];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, fillcolor="#f8fafc", color="#334155"];
+  edge [color="#475569", arrowsize=0.7];
+
+  subgraph cluster_sources {
+    label="Event Sources";
+    color="#cbd5e1";
+    lsp_input [label="LSP Handlers"];
+    file_changes [label="File Changes"];
+    agent_msgs [label="Agent Messages"];
+    kernel_obs [label="Kernel Observer"];
+  }
+
+  subgraph cluster_core {
+    label="Event Core";
+    color="#cbd5e1";
+    append [label="EventStore.append()"];
+    events_tbl [label="events table"];
+    projection [label="NodeProjection"];
+    nodes_tbl [label="nodes table"];
+    match [label="Subscription Matcher"];
+    queue [label="Trigger Queue"];
+  }
+
+  subgraph cluster_exec {
+    label="Execution";
+    color="#cbd5e1";
+    runner [label="AgentRunner"];
+    swarm [label="SwarmExecutor"];
+    kernel [label="AgentKernel"];
+    tools [label="Tools (Grail + Swarm)"];
+  }
+
+  subgraph cluster_readers {
+    label="Read Paths";
+    color="#cbd5e1";
+    lsp_render [label="CodeLens/Hover/Actions"];
+    service_api [label="Service API/SSE"];
+  }
+
+  lsp_input -> append [label="emit"];
+  file_changes -> append;
+  agent_msgs -> append;
+  kernel_obs -> append;
+
+  append -> events_tbl;
+  append -> projection;
+  projection -> nodes_tbl;
+  append -> match;
+  match -> queue;
+  queue -> runner;
+  runner -> swarm;
+  swarm -> kernel;
+  kernel -> tools [dir=both];
+  kernel -> kernel_obs [label="kernel events"];
+  swarm -> append [label="agent events"];
+
+  nodes_tbl -> lsp_render [style=dashed, label="query"];
+  events_tbl -> service_api [style=dashed, label="stream/tail"];
+  nodes_tbl -> service_api [style=dashed, label="query"];
+}

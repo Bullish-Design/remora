@@ -1,21 +1,20 @@
 """Standalone chat service for the demo."""
 
-import asyncio
 import json
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
+from sse_starlette.sse import EventSourceResponse
 from starlette.applications import Starlette
-from starlette.routing import Route
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from sse_starlette.sse import EventSourceResponse
+from starlette.routing import Route
 
-from remora.core.agents.chat import ChatSession, ChatConfig, Message
+from remora.core.agents.chat import ChatConfig, ChatSession
 from remora.core.events.event_bus import EventBus
 from remora.core.events.kernel_events import ToolCallEvent, ToolResultEvent
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -216,11 +215,8 @@ def create_app(state: ChatServiceState | None = None) -> Starlette:
     """
     chat_state = state if state is not None else globals()["state"]
 
-    application = Starlette(routes=routes)
-    application.state.chat_state = chat_state
-
-    @application.on_event("startup")
-    async def startup_event():
+    @asynccontextmanager
+    async def lifespan(_app: Starlette) -> AsyncIterator[None]:
         logger.info("Chat service starting...")
         try:
             import cairn
@@ -228,6 +224,10 @@ def create_app(state: ChatServiceState | None = None) -> Starlette:
             logger.info("cairn %s: OK", getattr(cairn, "__version__", "unknown"))
         except ImportError as e:
             logger.error(f"cairn not available: {e}")
+        yield
+
+    application = Starlette(routes=routes, lifespan=lifespan)
+    application.state.chat_state = chat_state
 
     return application
 

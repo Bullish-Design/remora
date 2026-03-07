@@ -21,9 +21,9 @@ from remora.core.events.agent_events import (
 from remora.core.events.interaction_events import AgentMessageEvent
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
-from remora.runner.models import RewriteProposal
 from remora.lsp.runtime_ops import do_cursor_update, do_reparse
 from remora.lsp.tooling import discover_tools_for_agent as _discover_tools_for_agent
+from remora.runner.models import RewriteProposal
 
 if TYPE_CHECKING:
     from remora.core.events.subscriptions import SubscriptionRegistry
@@ -263,6 +263,13 @@ class RemoraLanguageServer(LanguageServer):
         except Exception:
             logger.warning("Failed to close LazyGraph", exc_info=True)
 
+    def __del__(self) -> None:
+        # Finalizer safeguard for tests that forget explicit shutdown.
+        try:
+            self.shutdown()
+        except Exception:
+            pass
+
     async def discover_tools_for_agent(self, agent: Any) -> list[Any]:
         return await _discover_tools_for_agent(agent)
 
@@ -298,10 +305,22 @@ def get_server() -> RemoraLanguageServer:
     global _server
     if _server is None:
         _server = RemoraLanguageServer()
-        atexit.register(_server.shutdown)
+        atexit.register(shutdown_server)
     return _server
+
+
+def shutdown_server() -> None:
+    """Shutdown and clear the global server singleton."""
+    global _server
+    if _server is None:
+        return
+    try:
+        _server.shutdown()
+    finally:
+        _server = None
 
 __all__ = [
     "RemoraLanguageServer",
     "get_server",
+    "shutdown_server",
 ]

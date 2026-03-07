@@ -1,0 +1,74 @@
+digraph RemoraArchitectureLayers {
+  graph [rankdir=LR, splines=polyline, fontname="Helvetica", fontsize=11, labelloc="t", label="Remora Architecture Layers"];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, fillcolor="#f8fafc", color="#334155"];
+  edge [color="#475569", arrowsize=0.7];
+
+  subgraph cluster_interfaces {
+    label="Interfaces";
+    color="#cbd5e1";
+    neovim [label="Neovim (LSP Client)"];
+    dashboard [label="Web Dashboard"];
+    graph_ui [label="Graph UI"];
+  }
+
+  subgraph cluster_entrypoints {
+    label="Entrypoints";
+    color="#cbd5e1";
+    cli_main [label="remora.cli.main"];
+    lsp_main [label="remora.lsp.__main__"];
+    adapter [label="remora.adapters.starlette"];
+    service_api [label="remora.service.api"];
+  }
+
+  subgraph cluster_runtime {
+    label="Reactive Runtime";
+    color="#cbd5e1";
+    lsp_server [label="remora.lsp.server"];
+    event_store [label="remora.core.store.event_store"];
+    subscriptions [label="remora.core.events.subscriptions"];
+    projection [label="remora.core.code.projections"];
+    runner [label="remora.runner.agent_runner"];
+    swarm [label="remora.core.agents.swarm_executor"];
+    discovery [label="remora.core.code.discovery"];
+    reconciler [label="remora.core.code.reconciler"];
+    extensions [label="remora.extensions"];
+  }
+
+  subgraph cluster_data {
+    label="Data and Environment";
+    color="#cbd5e1";
+    event_db [label=".remora/events/events.db"];
+    workspace [label="Workspace Files"];
+    nodes_view [label="nodes projection"];
+  }
+
+  neovim -> lsp_server;
+  dashboard -> service_api;
+  graph_ui -> service_api;
+
+  cli_main -> lsp_main;
+  cli_main -> service_api;
+  cli_main -> runner;
+  adapter -> service_api;
+  lsp_main -> lsp_server;
+  lsp_main -> runner;
+
+  lsp_server -> event_store;
+  service_api -> event_store;
+  discovery -> reconciler;
+  extensions -> reconciler;
+  reconciler -> event_store;
+  event_store -> subscriptions;
+  event_store -> projection;
+  subscriptions -> runner;
+  runner -> swarm;
+  swarm -> event_store [label="emit events"];
+
+  event_store -> event_db;
+  projection -> nodes_view;
+  nodes_view -> event_db;
+  lsp_server -> nodes_view [style=dashed, label="query"];
+  service_api -> nodes_view [style=dashed, label="query"];
+  discovery -> workspace;
+  swarm -> workspace [style=dashed, label="tool I/O"];
+}

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 
-import pytest
+from lsprotocol import types as lsp
+from tests.unit.conftest import make_node
 
 from remora.core.agents.agent_node import AgentNode, ToolSchema
-from tests.unit.conftest import make_node
 
 
 def _make_node(**overrides) -> AgentNode:
@@ -111,13 +112,13 @@ class TestAgentNodeSerialization:
         row = original.to_row()
 
         # Simulate SQLite row (dict with string values for JSON columns)
-        db = sqlite3.connect(":memory:")
-        db.row_factory = sqlite3.Row
-        cols = ", ".join(row.keys())
-        placeholders = ", ".join("?" * len(row))
-        db.execute(f"CREATE TABLE nodes ({cols})")
-        db.execute(f"INSERT INTO nodes VALUES ({placeholders})", list(row.values()))
-        sqlite_row = db.execute("SELECT * FROM nodes").fetchone()
+        with contextlib.closing(sqlite3.connect(":memory:")) as db:
+            db.row_factory = sqlite3.Row
+            cols = ", ".join(row.keys())
+            placeholders = ", ".join("?" * len(row))
+            db.execute(f"CREATE TABLE nodes ({cols})")
+            db.execute(f"INSERT INTO nodes VALUES ({placeholders})", list(row.values()))
+            sqlite_row = db.execute("SELECT * FROM nodes").fetchone()
 
         restored = AgentNode.from_row(sqlite_row)
         assert restored.node_id == original.node_id
@@ -129,10 +130,6 @@ class TestAgentNodeSerialization:
         assert restored.extra_subscriptions[0].event_types == ["ContentChangedEvent"]
         assert restored.extension_name == "TestAgent"
         assert restored.status == "running"
-
-
-from lsprotocol import types as lsp
-
 
 class TestAgentNodeToSystemPrompt:
     def test_basic_prompt(self):

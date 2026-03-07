@@ -7,9 +7,8 @@ from typing import Any
 
 import rustworkx as rx
 
-from remora.lsp.db import RemoraDB
-
 from remora.core.store.event_store import EventStore
+from remora.lsp.db import RemoraDB
 
 
 class LazyGraph:
@@ -111,6 +110,13 @@ class LazyGraph:
     def close(self) -> None:
         self._edges_conn.close()
 
+    def __del__(self) -> None:
+        # Finalizer safeguard for tests that forget explicit shutdown.
+        try:
+            self.close()
+        except Exception:
+            pass
+
     # ── Private: node queries (EventStore DB) ─────────────────────────────
 
     async def _get_nodes_for_file(self, file_path: str) -> list[Any]:
@@ -174,5 +180,4 @@ class LazyGraph:
                 params,
             )) as cursor:
                 return [dict(row) for row in cursor.fetchall()]
-
 

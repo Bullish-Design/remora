@@ -361,5 +361,20 @@ class SubscriptionRegistry:
             self._conn.close()
             self._conn = None
 
+    def _close_sync(self) -> None:
+        """Best-effort synchronous cleanup used by the finalizer path."""
+        self._cache = None
+        if self._shared:
+            return
+        if self._conn:
+            try:
+                self._conn.close()
+            finally:
+                self._conn = None
+
+    def __del__(self) -> None:
+        # Finalizer safeguard for tests that forget to await close().
+        self._close_sync()
+
 
 __all__ = ["Subscription", "SubscriptionPattern", "SubscriptionRegistry"]

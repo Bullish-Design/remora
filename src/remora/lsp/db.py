@@ -5,12 +5,12 @@ import asyncio
 import contextlib
 import functools
 import json
+import sqlite3
 import threading
 import time
 from pathlib import Path
 from typing import ParamSpec, TypeVar
 
-import sqlite3
 from remora.core.code.discovery import CSTNode
 
 P = ParamSpec("P")
@@ -272,3 +272,10 @@ class RemoraDB:
             # Don't close shared connection — it's owned by EventStore
             return
         self.conn.close()
+
+    def __del__(self) -> None:
+        # Finalizer safeguard for tests that forget explicit shutdown.
+        try:
+            self.close()
+        except Exception:
+            pass

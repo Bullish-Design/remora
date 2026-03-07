@@ -13,6 +13,7 @@
     pkgs.uv
     pkgs.asciinema
     pkgs.asciinema-agg
+    pkgs.just
   ];
 
   # https://devenv.sh/languages/

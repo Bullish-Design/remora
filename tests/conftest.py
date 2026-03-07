@@ -13,9 +13,8 @@ from pathlib import Path
 import pytest
 
 from remora.core.config import Config
-from remora.core.store.event_store import EventStore
 from remora.core.events.subscriptions import SubscriptionRegistry
-
+from remora.core.store.event_store import EventStore
 
 # ---------------------------------------------------------------------------
 # Real-time test progress hooks (helps identify hangs)
@@ -33,6 +32,16 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
         elapsed = time.monotonic() - _test_start_times.get(report.nodeid, time.monotonic())
         status = "PASS" if report.passed else ("FAIL" if report.failed else "SKIP")
         print(f">>> {status}: {report.nodeid} ({elapsed:.2f}s)", flush=True)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Best-effort cleanup for singleton services that hold DB connections."""
+    try:
+        from remora.lsp.server import shutdown_server
+
+        shutdown_server()
+    except Exception:
+        pass
 
 
 @pytest.fixture

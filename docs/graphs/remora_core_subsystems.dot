@@ -1,0 +1,35 @@
+digraph RemoraCoreSubsystems {
+  graph [rankdir=LR, splines=true, fontname="Helvetica", fontsize=11, labelloc="t", label="Remora Core Subsystem Dependencies"];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, fillcolor="#f8fafc", color="#334155"];
+  edge [color="#475569", arrowsize=0.7];
+
+  agents [label="remora.core.agents", fillcolor="#e2e8f0"];
+  code [label="remora.core.code"];
+  events [label="remora.core.events"];
+  store [label="remora.core.store"];
+  tools [label="remora.core.tools"];
+  config [label="remora.core.config"];
+  errors [label="remora.core.errors"];
+  manifest [label="remora.core.manifest"];
+  utils [label="remora.utils"];
+
+  agents -> events [label="7", penwidth=1.8];
+  agents -> code [label="3", penwidth=1.4];
+  agents -> config [label="3", penwidth=1.4];
+  agents -> errors [label="2", penwidth=1.2];
+  agents -> store [label="1", style=dashed];
+  agents -> tools [label="1", style=dashed];
+  agents -> manifest [label="1", style=dashed];
+
+  code -> events [label="7", penwidth=1.8];
+
+  tools -> agents [label="3", penwidth=1.4];
+  tools -> events [label="3", penwidth=1.4];
+  tools -> code [label="1", style=dashed];
+
+  store -> agents [label="1", style=dashed];
+  store -> utils [label="1", style=dashed];
+  events -> utils [label="1", style=dashed];
+  config -> errors [label="1", style=dashed];
+  config -> utils [label="1", style=dashed];
+}

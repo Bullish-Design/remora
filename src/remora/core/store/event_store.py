@@ -527,6 +527,26 @@ class EventStore:
         self._node_store = None
         self._trigger_queue = None
 
+    def _close_sync(self) -> None:
+        """Best-effort synchronous cleanup used by the finalizer path."""
+        conn = self._conn
+        read_conn = self._read_conn
+        self._conn = None
+        self._read_conn = None
+        self._node_store = None
+        self._trigger_queue = None
+
+        if conn is not None:
+            with contextlib.suppress(Exception):
+                conn.close()
+        if read_conn is not None:
+            with contextlib.suppress(Exception):
+                read_conn.close()
+
+    def __del__(self) -> None:
+        # Finalizer safeguard for tests that forget to await close().
+        self._close_sync()
+
     def _serialize_event(self, event: StructuredEvent | CoreEvent) -> str:
         """Serialize an event to JSON."""
         if hasattr(event, "model_dump"):

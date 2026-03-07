@@ -1,0 +1,43 @@
+digraph RemoraPackageDependencies {
+  graph [rankdir=LR, splines=true, fontname="Helvetica", fontsize=11, labelloc="t", label="Remora Top-Level Package Dependencies\n(aggregated from tach_module_graph.dot)"];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, fillcolor="#f8fafc", color="#334155"];
+  edge [color="#475569", arrowsize=0.7];
+
+  n___main__ [label="remora.__main__"];
+  n_cli [label="remora.cli"];
+  n_lsp [label="remora.lsp"];
+  n_service [label="remora.service"];
+  n_runner [label="remora.runner"];
+  n_core [label="remora.core", fillcolor="#e2e8f0"];
+  n_ui [label="remora.ui"];
+  n_companion [label="remora.companion"];
+  n_workspace [label="remora.workspace"];
+  n_models [label="remora.models"];
+  n_utils [label="remora.utils"];
+  n_adapters [label="remora.adapters"];
+  n_extensions [label="remora.extensions"];
+
+  n___main__ -> n_cli [label="1", penwidth=1.0, style=dashed];
+  n_adapters -> n_service [label="1", penwidth=1.0, style=dashed];
+  n_cli -> n_adapters [label="1", penwidth=1.0, style=dashed];
+  n_cli -> n_core [label="8", penwidth=1.9];
+  n_cli -> n_extensions [label="1", penwidth=1.0, style=dashed];
+  n_cli -> n_lsp [label="1", penwidth=1.0, style=dashed];
+  n_cli -> n_runner [label="1", penwidth=1.0, style=dashed];
+  n_cli -> n_service [label="1", penwidth=1.0, style=dashed];
+  n_cli -> n_workspace [label="4", penwidth=1.5];
+  n_companion -> n_core [label="17", penwidth=3.0];
+  n_core -> n_utils [label="12", penwidth=2.4];
+  n_lsp -> n_core [label="22", penwidth=3.6];
+  n_lsp -> n_extensions [label="1", penwidth=1.0, style=dashed];
+  n_lsp -> n_runner [label="6", penwidth=1.7];
+  n_models -> n_core [label="1", penwidth=1.0, style=dashed];
+  n_runner -> n_core [label="9", penwidth=2.1];
+  n_runner -> n_extensions [label="1", penwidth=1.0, style=dashed];
+  n_service -> n_core [label="14", penwidth=2.7];
+  n_service -> n_extensions [label="1", penwidth=1.0, style=dashed];
+  n_service -> n_models [label="2", penwidth=1.2];
+  n_service -> n_ui [label="4", penwidth=1.5];
+  n_service -> n_utils [label="2", penwidth=1.2];
+  n_ui -> n_core [label="3", penwidth=1.4];
+}

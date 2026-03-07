@@ -1,0 +1,69 @@
+digraph RemoraLspSubsystems {
+  graph [rankdir=LR, splines=polyline, fontname="Helvetica", fontsize=11, labelloc="t", label="Remora LSP Subsystem Dependencies"];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, fillcolor="#f8fafc", color="#334155"];
+  edge [color="#475569", arrowsize=0.7];
+
+  subgraph cluster_startup {
+    label="Startup";
+    color="#cbd5e1";
+    lsp_main [label="remora.lsp.__main__"];
+    process_lock [label="remora.lsp.process_lock"];
+    scanner [label="remora.lsp.background_scanner"];
+    setup [label="remora.lsp.server_setup"];
+  }
+
+  subgraph cluster_server {
+    label="Server Surface";
+    color="#cbd5e1";
+    server [label="remora.lsp.server"];
+    db [label="remora.lsp.db"];
+    lsp_graph [label="remora.lsp.graph"];
+    runtime [label="remora.lsp.runtime_ops"];
+    tooling [label="remora.lsp.tooling"];
+    handlers [label="remora.lsp.handlers.*"];
+    notifications [label="remora.lsp.notifications"];
+    protocols [label="remora.lsp.protocols"];
+  }
+
+  subgraph cluster_external {
+    label="Cross-Package Dependencies";
+    color="#cbd5e1";
+    runner [label="remora.runner.agent_runner"];
+    core_events [label="remora.core.events.*"];
+    core_store [label="remora.core.store.event_store"];
+    core_code [label="remora.core.code.discovery"];
+    core_tools [label="remora.core.tools.grail"];
+    core_config [label="remora.core.config"];
+    core_node [label="remora.core.agents.agent_node"];
+    extensions [label="remora.extensions"];
+  }
+
+  lsp_main -> server;
+  lsp_main -> setup;
+  lsp_main -> process_lock;
+  lsp_main -> scanner;
+
+  lsp_main -> runner;
+  lsp_main -> core_store;
+  lsp_main -> core_events;
+  lsp_main -> core_code;
+  lsp_main -> extensions;
+
+  server -> db;
+  server -> lsp_graph;
+  server -> runtime;
+  server -> tooling;
+  server -> core_events;
+
+  setup -> handlers;
+  setup -> notifications;
+  setup -> protocols;
+  handlers -> protocols;
+  runtime -> protocols;
+  runtime -> core_code;
+  runtime -> core_events;
+  lsp_graph -> db;
+  tooling -> core_node;
+  tooling -> core_config;
+  tooling -> core_tools;
+}
