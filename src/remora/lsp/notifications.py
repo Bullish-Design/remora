@@ -6,7 +6,7 @@ import time
 
 from lsprotocol import types as lsp
 
-from remora.lsp.models import LspHumanChatEvent, LspRewriteRejectedEvent
+from remora.core.events.events import HumanChatEvent, RewriteRejectedEvent
 from remora.lsp.protocols import LspServer
 
 logger = logging.getLogger("remora.lsp")
@@ -73,12 +73,11 @@ async def on_input_submitted(ls: LspServer, params: dict) -> None:
             try:
                 await asyncio.wait_for(
                     ls.emit_event(
-                        LspHumanChatEvent(
+                        HumanChatEvent(
                             agent_id=agent_id,
                             to_agent=agent_id,
                             message=message,
                             correlation_id=correlation_id,
-                            timestamp=0.0,
                         )
                     ),
                     timeout=SUBMIT_EMIT_EVENT_TIMEOUT_SECONDS,
@@ -150,12 +149,11 @@ async def on_input_submitted(ls: LspServer, params: dict) -> None:
 
             if proposal:
                 await ls.emit_event(
-                    LspRewriteRejectedEvent(
+                    RewriteRejectedEvent(
                         agent_id=proposal.agent_id,
                         proposal_id=proposal_id,
                         feedback=feedback,
                         correlation_id=proposal.correlation_id or "",
-                        timestamp=0.0,
                     )
                 )
 

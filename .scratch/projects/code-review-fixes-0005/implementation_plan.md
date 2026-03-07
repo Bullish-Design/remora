@@ -25,7 +25,7 @@ Extract Node read-model logic from the write-ahead log.
 
 ---
 
-### 3. AgentRunner Refactoring
+### 3. AgentRunner Refactoring (Completed)
 Reduce `AgentRunner` from an 800+ line god-object.
 #### [NEW] src/remora/runner/event_emitter.py
 - Extract the 7 `_emit_*` helper methods (which duplicate server methods) from `AgentRunner` into a dedicated `EventEmitter` or `LspNotifier` class.
@@ -36,7 +36,7 @@ Reduce `AgentRunner` from an 800+ line god-object.
 
 ---
 
-### 4. Unify Event Models
+### 4. Unify Event Models (Completed)
 Merge `CoreEvent` and `LspAgentEvent`.
 #### [DELETE] src/remora/runner/events.py
 - Delete this file entirely. It contains the duplicate `LspAgentEvent` hierarchy.

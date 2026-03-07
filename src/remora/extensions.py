@@ -8,10 +8,8 @@ First match wins. File-alphabetical order controls priority.
 from __future__ import annotations
 
 import importlib.util
-import inspect
 import logging
 from pathlib import Path
-from typing import Type
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +34,7 @@ class AgentExtension:
 
 
 def extension_matches(
-    ext: Type[AgentExtension],
+    ext: type[AgentExtension],
     node_type: str,
     name: str,
     *,
@@ -60,14 +58,14 @@ def extension_matches(
 
 
 # Module-level cache: {dir_path: (mtimes_dict, extensions_list)}
-_cache: dict[str, tuple[dict[Path, float], list[Type[AgentExtension]]]] = {}
+_cache: dict[str, tuple[dict[Path, float], list[type[AgentExtension]]]] = {}
 
 
 def load_extensions(
     models_dir: Path,
     *,
-    cache: dict[str, tuple[dict[Path, float], list[Type[AgentExtension]]]] | None = None,
-) -> list[Type[AgentExtension]]:
+    cache: dict[str, tuple[dict[Path, float], list[type[AgentExtension]]]] | None = None,
+) -> list[type[AgentExtension]]:
     """Load extension configs from a directory with mtime-based caching.
 
     Returns extensions sorted by filename (alphabetical).
@@ -103,7 +101,7 @@ def load_extensions(
             return cached_extensions
 
     # Reload
-    extensions: list[Type[AgentExtension]] = []
+    extensions: list[type[AgentExtension]] = []
 
     for py_file in sorted(current_mtimes.keys()):
         try:

@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+
 from pydantic import BaseModel
-from remora.core.events.events import _FrozenEvent, CursorFocusEvent, ContentChangedEvent, FileSavedEvent
+
 from remora.companion.events import (
-    CompanionContextExtracted, CompanionSearchCompleted, CompanionConnectionsFound,
-    CompanionEditSummary, CompanionTaskInferred, CompanionClaimsChecked
+    CompanionClaimsChecked,
+    CompanionConnectionsFound,
+    CompanionContextExtracted,
+    CompanionEditSummary,
+    CompanionSearchCompleted,
+    CompanionTaskInferred,
 )
-from remora.companion.state import CompanionState
 from remora.companion.handlers.base import CompanionHandler
+from remora.companion.state import CompanionState
+from remora.core.events.events import ContentChangedEvent, CursorFocusEvent, FileSavedEvent, _FrozenEvent
+
 
 # Reusing definitions from the plan
 class HandlerConfig(BaseModel):
@@ -96,3 +103,9 @@ class CompanionDispatcher:
             await self._invoke(handler_id, event)
             
         self._debounce_tasks[handler_id] = asyncio.create_task(delayed())
+
+
+__all__ = [
+    "CompanionDispatcher",
+    "HandlerConfig",
+]

@@ -23,14 +23,13 @@ from remora.utils import PathLike, normalize_path
 logger = logging.getLogger(__name__)
 
 _NOISY_EVENT_TYPES = frozenset({"NodeDiscoveredEvent", "ScaffoldRequestEvent"})
-_BATCH_APPEND_SLOW_PHASE_WARNING_MS = 1000.0
 _T = TypeVar("_T")
 
 if TYPE_CHECKING:
-    from remora.core.agents.agent_node import AgentNode
-    from remora.core.events.event_bus import EventBus
     from remora.core.code.projections import NodeProjection
+    from remora.core.events.event_bus import EventBus
     from remora.core.events.subscriptions import SubscriptionRegistry
+    from remora.core.store.node_store import NodeStore
 
 
 class EventStore:
@@ -116,11 +115,16 @@ class EventStore:
             # Mark read connection as read-only via query_only pragma
             await asyncio.to_thread(self._read_conn.execute, "PRAGMA query_only=ON")
 
-            from remora.core.store.node_store import NodeStore
-            self._node_store = NodeStore(self._read_conn, self._read_lock)
-
             await asyncio.to_thread(store_schema.create_tables, self._conn)
             await self._migrate_routing_fields()
+
+            from remora.core.store.node_store import NodeStore
+            self._node_store = NodeStore(
+                read_conn=self._read_conn,
+                read_lock=self._read_lock,
+                write_conn=self._conn,
+                write_lock=self._lock,
+            )
 
             if self._subscriptions is not None:
                 self._trigger_queue = asyncio.Queue()
@@ -185,7 +189,7 @@ class EventStore:
             raise RuntimeError("EventStore not initialized")
 
         # Prefer the model's event_type field (e.g. "HumanChatEvent") over
-        # the Python class name (e.g. "LspHumanChatEvent") so panel.lua can
+        # the Python class name (e.g. "AgentEvent") so panel.lua can
         # match on the canonical event_type string.
         event_type = getattr(event, "event_type", None) or type(event).__name__
         payload = self._serialize_event(event)
@@ -260,14 +264,10 @@ class EventStore:
         if self._conn is None:
             raise RuntimeError("EventStore not initialized")
 
-        # Pre-process all events
-        prepare_start = time.monotonic()
         prepared: list[tuple[str, str, float, float, str | None, str | None, str | None, str | None, StructuredEvent | CoreEvent]] = []
         for event in events:
             event_type = getattr(event, "event_type", None) or type(event).__name__
-            serialize_start = time.monotonic()
             payload = self._serialize_event(event)
-            serialize_ms = (time.monotonic() - serialize_start) * 1000
             timestamp = getattr(event, "timestamp", time.time())
             created_at = time.time()
             from_agent = getattr(event, "from_agent", None)
@@ -276,87 +276,14 @@ class EventStore:
             tags = getattr(event, "tags", None)
             tags_json = json.dumps(tags) if tags else None
             prepared.append((event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json, event))
-            if serialize_ms > _BATCH_APPEND_SLOW_PHASE_WARNING_MS:
-                logger.warning(
-                    "batch_append: serialize SLOW event_type=%s node_id=%s file_path=%s payload_bytes=%d source_len=%s duration_ms=%.1f",
-                    event_type,
-                    str(getattr(event, "node_id", "")),
-                    str(getattr(event, "file_path", "")),
-                    len(payload),
-                    self._source_length(event),
-                    serialize_ms,
-                )
-            elif logger.isEnabledFor(logging.DEBUG):
-                logger.debug(
-                    "batch_append: prepared event_type=%s node_id=%s file_path=%s payload_bytes=%d source_len=%s serialize_ms=%.1f",
-                    event_type,
-                    str(getattr(event, "node_id", "")),
-                    str(getattr(event, "file_path", "")),
-                    len(payload),
-                    self._source_length(event),
-                    serialize_ms,
-                )
-        prepare_ms = (time.monotonic() - prepare_start) * 1000
-        if prepare_ms > _BATCH_APPEND_SLOW_PHASE_WARNING_MS:
-            logger.warning("batch_append: prepare SLOW duration_ms=%.1f events=%d", prepare_ms, len(prepared))
-        elif logger.isEnabledFor(logging.DEBUG):
-            logger.debug("batch_append: prepare duration_ms=%.1f events=%d", prepare_ms, len(prepared))
 
         def _do_batch_append() -> tuple[list[int], list[CoreEvent]]:
             assert self._conn is not None
-            tx_start = time.monotonic()
-            begin_start = time.monotonic()
             self._begin_immediate_with_recovery("batch_append")
-            begin_ms = (time.monotonic() - begin_start) * 1000
-            if begin_ms > _BATCH_APPEND_SLOW_PHASE_WARNING_MS:
-                logger.warning(
-                    "batch_append: BEGIN IMMEDIATE SLOW duration_ms=%.1f events=%d diagnostics=%s",
-                    begin_ms,
-                    len(prepared),
-                    self._lock_diagnostics(),
-                )
-            else:
-                logger.debug("batch_append: BEGIN IMMEDIATE duration_ms=%.1f events=%d", begin_ms, len(prepared))
-
-            current_idx = 0
-            current_event_type = ""
-            current_file_path = ""
-            current_node_id = ""
             try:
                 event_ids: list[int] = []
                 all_follow_ups: list[CoreEvent] = []
-                total_insert_ms = 0.0
-                total_projection_ms = 0.0
-                for idx, (
-                    event_type,
-                    payload,
-                    timestamp,
-                    created_at,
-                    from_agent,
-                    to_agent,
-                    correlation_id,
-                    tags_json,
-                    event,
-                ) in enumerate(prepared, start=1):
-                    current_idx = idx
-                    current_event_type = event_type
-                    current_file_path = str(getattr(event, "file_path", ""))
-                    current_node_id = str(getattr(event, "node_id", ""))
-                    source_len = self._source_length(event)
-                    payload_bytes = len(payload)
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            "batch_append: event start idx=%d/%d event_type=%s node_id=%s file_path=%s payload_bytes=%d source_len=%s",
-                            idx,
-                            len(prepared),
-                            event_type,
-                            current_node_id,
-                            current_file_path,
-                            payload_bytes,
-                            source_len,
-                        )
-                    event_start = time.monotonic()
-                    insert_start = time.monotonic()
+                for event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json, event in prepared:
                     with contextlib.closing(self._conn.execute(
                         """
                         INSERT INTO events (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags)
@@ -365,133 +292,18 @@ class EventStore:
                         (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json),
                     )) as cursor:
                         event_ids.append(cursor.lastrowid or 0)
-                    insert_ms = (time.monotonic() - insert_start) * 1000
-                    total_insert_ms += insert_ms
-                    if insert_ms > _BATCH_APPEND_SLOW_PHASE_WARNING_MS:
-                        logger.warning(
-                            "batch_append: insert SLOW idx=%d/%d event_type=%s node_id=%s file_path=%s payload_bytes=%d source_len=%s duration_ms=%.1f",
-                            idx,
-                            len(prepared),
-                            event_type,
-                            current_node_id,
-                            current_file_path,
-                            payload_bytes,
-                            source_len,
-                            insert_ms,
-                        )
 
-                    projection_ms = 0.0
-                    f_ups: list[CoreEvent] = []
                     if self._projection is not None:
-                        projection_start = time.monotonic()
-                        f_ups = self._projection.apply(self._conn, event)
-                        all_follow_ups.extend(f_ups)
-                        projection_ms = (time.monotonic() - projection_start) * 1000
-                        total_projection_ms += projection_ms
-                        if projection_ms > _BATCH_APPEND_SLOW_PHASE_WARNING_MS:
-                            logger.warning(
-                                "batch_append: projection SLOW idx=%d/%d event_type=%s node_id=%s file_path=%s payload_bytes=%d source_len=%s follow_ups=%d duration_ms=%.1f",
-                                idx,
-                                len(prepared),
-                                event_type,
-                                current_node_id,
-                                current_file_path,
-                                payload_bytes,
-                                source_len,
-                                len(f_ups),
-                                projection_ms,
-                            )
+                        follow_ups = self._projection.apply(self._conn, event)
+                        all_follow_ups.extend(follow_ups)
 
-                    event_total_ms = (time.monotonic() - event_start) * 1000
-                    if event_total_ms > _BATCH_APPEND_SLOW_PHASE_WARNING_MS:
-                        logger.warning(
-                            "batch_append: event SLOW idx=%d/%d event_type=%s node_id=%s file_path=%s payload_bytes=%d source_len=%s insert_ms=%.1f projection_ms=%.1f total_ms=%.1f follow_ups=%d",
-                            idx,
-                            len(prepared),
-                            event_type,
-                            current_node_id,
-                            current_file_path,
-                            payload_bytes,
-                            source_len,
-                            insert_ms,
-                            projection_ms,
-                            event_total_ms,
-                            len(f_ups),
-                        )
-                    elif logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            "batch_append: event end idx=%d/%d event_type=%s node_id=%s file_path=%s insert_ms=%.1f projection_ms=%.1f total_ms=%.1f follow_ups=%d",
-                            idx,
-                            len(prepared),
-                            event_type,
-                            current_node_id,
-                            current_file_path,
-                            insert_ms,
-                            projection_ms,
-                            event_total_ms,
-                            len(f_ups),
-                        )
-
-                    if idx % 25 == 0:
-                        logger.debug(
-                            "batch_append: progress idx=%d/%d total_insert_ms=%.1f total_projection_ms=%.1f",
-                            idx,
-                            len(prepared),
-                            total_insert_ms,
-                            total_projection_ms,
-                        )
-
-                commit_start = time.monotonic()
                 self._conn.execute("COMMIT")
-                commit_ms = (time.monotonic() - commit_start) * 1000
-                total_ms = (time.monotonic() - tx_start) * 1000
-                if commit_ms > _BATCH_APPEND_SLOW_PHASE_WARNING_MS:
-                    logger.warning(
-                        "batch_append: COMMIT SLOW duration_ms=%.1f events=%d follow_ups=%d",
-                        commit_ms,
-                        len(prepared),
-                        len(all_follow_ups),
-                    )
-                logger.debug(
-                    "batch_append: tx complete duration_ms=%.1f events=%d follow_ups=%d total_insert_ms=%.1f total_projection_ms=%.1f commit_ms=%.1f",
-                    total_ms,
-                    len(prepared),
-                    len(all_follow_ups),
-                    total_insert_ms,
-                    total_projection_ms,
-                    commit_ms,
-                )
                 return event_ids, all_follow_ups
             except Exception:
-                logger.exception(
-                    "batch_append: failed idx=%d/%d event_type=%s node_id=%s file_path=%s; rolling back",
-                    current_idx,
-                    len(prepared),
-                    current_event_type,
-                    current_node_id,
-                    current_file_path,
-                )
                 self._conn.execute("ROLLBACK")
                 raise
 
-        locked_write_start = time.monotonic()
         event_ids, follow_ups = await self._run_locked_write_with_retries("batch_append", _do_batch_append)
-        locked_write_ms = (time.monotonic() - locked_write_start) * 1000
-        if locked_write_ms > _BATCH_APPEND_SLOW_PHASE_WARNING_MS:
-            logger.warning(
-                "batch_append: locked write SLOW duration_ms=%.1f events=%d follow_ups=%d diagnostics=%s",
-                locked_write_ms,
-                len(prepared),
-                len(follow_ups),
-                self._lock_diagnostics(),
-            )
-        else:
-            logger.debug(
-                "batch_append: locked write duration_ms=%.1f events=%d follow_ups=%d",
-                locked_write_ms,
-                len(prepared),
-                len(follow_ups),
-            )
 
         # Process triggers and bus notifications for each event
         for idx, (_, _, _, _, _, to_agent, _, _, event) in enumerate(prepared):
@@ -608,8 +420,7 @@ class EventStore:
         panel.lua can render we:
 
         1. Use the stored model ``event_type`` (e.g. ``"HumanChatEvent"``)
-           instead of the DB column which may contain the Python class name
-           (e.g. ``"LspHumanChatEvent"``).
+           instead of the DB column which may contain the Python class name.
 
         2. Promote model-specific fields into a ``payload`` sub-dict so that
            ``ev.payload.message``, ``ev.payload.content``, etc. work in Lua.
@@ -672,28 +483,6 @@ class EventStore:
                 graph_id=graph_id,
             )
 
-    async def set_node_status(self, node_id: str, status: str) -> None:
-        """Update the status field of a node directly.
-        
-        This lives on EventStore because it requires the write connection and lock.
-        """
-        if self._conn is None:
-            await self.initialize()
-        if self._conn is None:
-            raise RuntimeError("EventStore not initialized")
-        await self.nodes.set_node_status(self._conn, self._lock, node_id, status)
-
-    async def remove_nodes_for_file(self, file_path: str) -> int:
-        """Remove all nodes for a given file path. Returns count removed.
-        
-        This lives on EventStore because it requires the write connection and lock.
-        """
-        if self._conn is None:
-            await self.initialize()
-        if self._conn is None:
-            raise RuntimeError("EventStore not initialized")
-        return await self.nodes.remove_nodes_for_file(self._conn, self._lock, file_path)
-
     async def checkpoint_wal(self, mode: str = "PASSIVE") -> tuple[int, int, int]:
         """Run a WAL checkpoint and return (busy, log_frames, checkpointed_frames)."""
         if self._conn is None:
@@ -735,14 +524,8 @@ class EventStore:
         if self._read_conn:
             await asyncio.to_thread(self._read_conn.close)
             self._read_conn = None
+        self._node_store = None
         self._trigger_queue = None
-
-    def _source_length(self, event: StructuredEvent | CoreEvent) -> int | None:
-        """Return source length for events that carry source_code."""
-        source_code = getattr(event, "source_code", None)
-        if isinstance(source_code, str):
-            return len(source_code)
-        return None
 
     def _serialize_event(self, event: StructuredEvent | CoreEvent) -> str:
         """Serialize an event to JSON."""

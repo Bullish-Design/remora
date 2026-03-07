@@ -133,12 +133,12 @@ async def test_get_node_at_position_wrong_file(store: EventStore):
 @pytest.mark.asyncio
 async def test_set_node_status(store: EventStore):
     """set_node_status updates the status field."""
-    await store.set_node_status("id_foo", "running")
+    await store.nodes.set_node_status("id_foo", "running")
     node = await store.nodes.get_node("id_foo")
     assert node is not None
     assert node.status == "running"
 
-    await store.set_node_status("id_foo", "idle")
+    await store.nodes.set_node_status("id_foo", "idle")
     node = await store.nodes.get_node("id_foo")
     assert node.status == "idle"
 
@@ -146,7 +146,7 @@ async def test_set_node_status(store: EventStore):
 @pytest.mark.asyncio
 async def test_remove_nodes_for_file(store: EventStore):
     """remove_nodes_for_file removes all nodes for a file path."""
-    removed = await store.remove_nodes_for_file("/test.py")
+    removed = await store.nodes.remove_nodes_for_file("/test.py")
     assert removed == 2
 
     nodes = await store.nodes.list_nodes(file_path="/test.py")
@@ -156,5 +156,5 @@ async def test_remove_nodes_for_file(store: EventStore):
 @pytest.mark.asyncio
 async def test_remove_nodes_for_file_no_match(store: EventStore):
     """Removing from a non-existent file returns 0."""
-    removed = await store.remove_nodes_for_file("/nonexistent.py")
+    removed = await store.nodes.remove_nodes_for_file("/nonexistent.py")
     assert removed == 0

@@ -7,12 +7,11 @@ for turn state, memory, and metrics.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
-
 from cairn import AgentStateManager as CairnStateManager
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from remora.core.agents.workspace import AgentWorkspace
@@ -35,18 +34,14 @@ class AgentTurnState(BaseModel):
     last_response: str | None = None
     last_tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     accumulated_context: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-    def model_post_init(self, __context: Any) -> None:
-        """Update timestamp on any modification."""
-        pass
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def record_turn(
         self,
         response: str | None = None,
         tool_calls: list[dict[str, Any]] | None = None,
-    ) -> "AgentTurnState":
+    ) -> AgentTurnState:
         """Record a new turn with optional response and tool calls.
 
         Returns a new state instance with updated values.
@@ -57,7 +52,7 @@ class AgentTurnState(BaseModel):
             last_tool_calls=tool_calls or [],
             accumulated_context=self.accumulated_context,
             created_at=self.created_at,
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
         )
 
 
@@ -149,7 +144,7 @@ class RemoraStateManager:
     KEY_MEMORY = "memory"
     KEY_METRICS = "metrics"
 
-    def __init__(self, workspace: "AgentWorkspace", agent_id: str):
+    def __init__(self, workspace: AgentWorkspace, agent_id: str):
         """Create a state manager for an agent.
 
         Args:

@@ -1,15 +1,31 @@
 # CONTEXT: Code Review 0005 Fixes
 
-We are addressing the 22 issues raised in the `CODE_REVIEW.md` generated on 2026-03-07. 
+All planned fixes for code-review-fixes-0005 are now implemented.
 
 ## Current State
-Phase 1 (Critical Issues 1-6) has been completed.
-- `agent_node.py` import guards removed
-- `discovery.py` DRY violation fixed with `_parse_nodes` extraction
-- `dispatcher.py` EventBus API usage fixed
-- `ls/__main__.py` import path fixed
+- Phase 1 completed earlier (critical import/dispatcher/discovery fixes).
+- Phase 2 completed:
+  1. `EventStore`/`NodeStore` split finalized; node mutations moved to `event_store.nodes.*` and wrapper methods removed from `EventStore`.
+  2. `AgentRunner` emission helpers extracted to `src/remora/runner/event_emitter.py`.
+  3. Event hierarchy unified in `core.events.events`; `src/remora/runner/events.py` deleted.
+- Phase 3 completed:
+  - Simplified `EventStore.batch_append` instrumentation (removed excessive inline logging noise).
+  - Extracted workspace scan logic into `src/remora/lsp/background_scanner.py`.
+  - Unified skip-dir configuration through `Config.workspace_ignore_patterns`.
+  - Removed timestamp sentinel pattern (`timestamp=0.0`) and deprecated `asyncio.get_event_loop()` calls.
+  - Added type hints / declared server runtime attributes.
+  - Removed unused imports and dead hook (`model_post_init` no-op).
+  - Optimized `EventBus` dispatch with MRO/cache-based handler resolution.
+  - Replaced dynamic f-string node INSERT SQL with a constant statement.
+  - Added explicit `__all__` exports where called out in review.
 
-## Next Action
-Begin Phase 2 (Architectural Concerns):
-1. Delete the 20 legacy proxy files in `src/remora/core/` since we've verified standard canonical imports are securely used throughout the codebase. No import modifications necessary.
-2. Split `EventStore` in `event_store.py` by extracting Node CRUD operations into a separate `NodeStore` class.
+## Validation
+- `devenv shell -- ruff check` on all touched Python modules passed.
+- Targeted regression tests for runner/LSP/events/store passed:
+  - `tests/unit/test_event_store_nodes_query.py`
+  - `tests/unit/test_lsp_notifications.py`
+  - `tests/unit/test_lsp_models.py`
+  - `tests/unit/test_unified_events.py`
+  - `tests/unit/test_unified_runner.py`
+  - `tests/unit/test_event_bus.py`
+  - `tests/unit/test_batch8_fixes.py`

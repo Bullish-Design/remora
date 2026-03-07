@@ -8,20 +8,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from remora.core.agents.agent_node import AgentNode
-from remora.core.events.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent, ScaffoldRequestEvent
 from remora.core.agents.execution import execute_agent_turn
+from remora.core.events.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent, ScaffoldRequestEvent
 from remora.extensions import extension_matches, load_extensions
-from remora.runner.events import (
-    LspAgentErrorEvent,
-    LspAgentEvent,
-    LspAgentMessageEvent,
-    LspHumanChatEvent,
-    LspRewriteAppliedEvent,
-    LspRewriteProposalEvent,
-    LspRewriteRejectedEvent,
-    RewriteProposal,
-    generate_id,
-)
+from remora.lsp.models import RewriteProposal, generate_id
+from remora.runner.event_emitter import RunnerEventEmitter
 from remora.runner.headless import _HeadlessServer
 from remora.runner.protocols import RunnerServer
 from remora.runner.tools import build_lsp_tools
@@ -80,6 +71,7 @@ class AgentRunner:
         self._semaphore = asyncio.Semaphore(self._max_concurrency)
         self._workspace_service: CairnWorkspaceService | None = None
         self._workspace_service_root: Path | None = None
+        self._events = RunnerEventEmitter(server)
 
     @property
     def config(self) -> Config:
@@ -208,180 +200,8 @@ class AgentRunner:
         for k in stale:
             self._correlation_depth.pop(k, None)
 
-    def _supports_server_method(self, method_name: str) -> bool:
-        server_dict = getattr(self.server, "__dict__", {})
-        return hasattr(type(self.server), method_name) or method_name in server_dict
-
-    async def _call_server_method(self, method_name: str, **kwargs: Any) -> bool:
-        if not self._supports_server_method(method_name):
-            return False
-        method = getattr(self.server, method_name)
-        result = method(**kwargs)
-        if asyncio.iscoroutine(result):
-            await result
-        return True
-
-    async def _emit_agent_event(
-        self,
-        *,
-        event_type: str,
-        agent_id: str,
-        correlation_id: str,
-        summary: str,
-        payload: dict[str, Any] | None = None,
-    ) -> None:
-        if await self._call_server_method(
-            "emit_agent_event",
-            event_type=event_type,
-            agent_id=agent_id,
-            correlation_id=correlation_id,
-            summary=summary,
-            payload=payload or {},
-        ):
-            return
-        await self.server.emit_event(
-            LspAgentEvent(
-                event_type=event_type,
-                agent_id=agent_id,
-                correlation_id=correlation_id,
-                summary=summary,
-                payload=payload or {},
-                timestamp=0.0,
-            )
-        )
-
-    async def _emit_agent_error(self, *, agent_id: str, error: str, correlation_id: str) -> None:
-        if await self._call_server_method(
-            "emit_agent_error_event",
-            agent_id=agent_id,
-            error=error,
-            correlation_id=correlation_id,
-        ):
-            return
-        await self.server.emit_event(
-            LspAgentErrorEvent(
-                agent_id=agent_id,
-                error=error,
-                correlation_id=correlation_id,
-                timestamp=0.0,
-            )
-        )
-
-    async def _emit_human_chat(self, *, agent_id: str, message: str, correlation_id: str) -> None:
-        if await self._call_server_method(
-            "emit_human_chat_event",
-            agent_id=agent_id,
-            message=message,
-            correlation_id=correlation_id,
-        ):
-            return
-        await self.server.emit_event(
-            LspHumanChatEvent(
-                agent_id=agent_id,
-                to_agent=agent_id,
-                message=message,
-                correlation_id=correlation_id,
-                timestamp=0.0,
-            )
-        )
-
-    async def _emit_rewrite_rejected(
-        self,
-        *,
-        agent_id: str,
-        proposal_id: str,
-        feedback: str,
-        correlation_id: str,
-    ) -> None:
-        if await self._call_server_method(
-            "emit_rewrite_rejected_event",
-            agent_id=agent_id,
-            proposal_id=proposal_id,
-            feedback=feedback,
-            correlation_id=correlation_id,
-        ):
-            return
-        await self.server.emit_event(
-            LspRewriteRejectedEvent(
-                agent_id=agent_id,
-                proposal_id=proposal_id,
-                feedback=feedback,
-                correlation_id=correlation_id,
-                timestamp=0.0,
-            )
-        )
-
-    async def _emit_rewrite_proposal(
-        self,
-        *,
-        agent_id: str,
-        proposal_id: str,
-        diff: str,
-        correlation_id: str,
-    ) -> None:
-        if await self._call_server_method(
-            "emit_rewrite_proposal_event",
-            agent_id=agent_id,
-            proposal_id=proposal_id,
-            diff=diff,
-            correlation_id=correlation_id,
-        ):
-            return
-        await self.server.emit_event(
-            LspRewriteProposalEvent(
-                agent_id=agent_id,
-                proposal_id=proposal_id,
-                diff=diff,
-                correlation_id=correlation_id,
-                timestamp=0.0,
-            )
-        )
-
-    async def _emit_agent_message(
-        self,
-        *,
-        from_agent: str,
-        to_agent: str,
-        message: str,
-        correlation_id: str,
-    ) -> None:
-        if await self._call_server_method(
-            "emit_agent_message_event",
-            from_agent=from_agent,
-            to_agent=to_agent,
-            message=message,
-            correlation_id=correlation_id,
-        ):
-            return
-        await self.server.emit_event(
-            LspAgentMessageEvent(
-                agent_id=from_agent,
-                from_agent=from_agent,
-                to_agent=to_agent,
-                message=message,
-                correlation_id=correlation_id,
-                timestamp=0.0,
-            )
-        )
-
     async def _accept_proposal(self, proposal_id: str) -> None:
-        if await self._call_server_method("accept_proposal", proposal_id=proposal_id):
-            return
-        proposal = self.server.proposals.get(proposal_id)
-        if proposal is None:
-            return
-        del self.server.proposals[proposal_id]
-        if self.server.event_store:
-            await self.server.event_store.set_node_status(proposal.agent_id, "idle")
-        await self.server.db.update_proposal_status(proposal_id, "accepted")
-        await self.server.emit_event(
-            LspRewriteAppliedEvent(
-                agent_id=proposal.agent_id,
-                proposal_id=proposal_id,
-                correlation_id=proposal.correlation_id or "",
-                timestamp=0.0,
-            )
-        )
+        await self.server.accept_proposal(proposal_id)
 
     # ------------------------------------------------------------------
     # EventStore trigger bridge — for CLI / headless mode
@@ -431,7 +251,7 @@ class AgentRunner:
 
         if cmd_type == "chat" and agent_id:
             correlation_id = self.server.generate_correlation_id()
-            await self._emit_human_chat(
+            await self._events.emit_human_chat(
                 agent_id=agent_id,
                 message=payload.get("message", ""),
                 correlation_id=correlation_id,
@@ -448,7 +268,7 @@ class AgentRunner:
             feedback = payload.get("feedback", "")
             proposal = self.server.proposals.get(proposal_id)
             if proposal:
-                await self._emit_rewrite_rejected(
+                await self._events.emit_rewrite_rejected(
                     agent_id=proposal.agent_id,
                     proposal_id=proposal_id,
                     feedback=feedback,
@@ -507,7 +327,7 @@ class AgentRunner:
 
     async def emit_error(self, agent_id: str, error: str, correlation_id: str) -> None:
         try:
-            await self._emit_agent_error(agent_id=agent_id, error=error, correlation_id=correlation_id)
+            await self._events.emit_agent_error(agent_id=agent_id, error=error, correlation_id=correlation_id)
         except Exception:
             logger.debug("emit_error: failed to emit event for %s", agent_id, exc_info=True)
 
@@ -529,7 +349,7 @@ class AgentRunner:
 
         async with self._semaphore:
             status_start = time.monotonic()
-            await self.server.event_store.set_node_status(agent_id, "running")
+            await self.server.event_store.nodes.set_node_status(agent_id, "running")
             logger.info(
                 "execute_turn: set_node_status(running) END agent=%s duration_ms=%.1f",
                 agent_id,
@@ -604,7 +424,7 @@ class AgentRunner:
                     agent_id: str, summary: str, result_summary: str, payload: dict[str, Any]
                 ) -> None:
                     payload["result_summary"] = result_summary
-                    await self._emit_agent_event(
+                    await self._events.emit_agent_event(
                         event_type="ToolResultEvent",
                         agent_id=agent_id,
                         correlation_id=correlation_id,
@@ -632,7 +452,7 @@ class AgentRunner:
 
                 # On-kernel-event callback: forward to LSP UI
                 async def _on_kernel_event(event: Any) -> None:
-                    await self._emit_agent_event(
+                    await self._events.emit_agent_event(
                         event_type="KernelEvent",
                         agent_id=agent_id,
                         correlation_id=correlation_id,
@@ -685,7 +505,7 @@ class AgentRunner:
 
                 # Emit final text response if present
                 if result.response_text:
-                    await self._emit_agent_event(
+                    await self._events.emit_agent_event(
                         event_type="AgentTextResponse",
                         agent_id=agent_id,
                         correlation_id=correlation_id,
@@ -727,7 +547,7 @@ class AgentRunner:
                 else:
                     self._correlation_depth[depth_key] = (remaining, ts)
 
-                await self.server.event_store.set_node_status(agent_id, "idle")
+                await self.server.event_store.nodes.set_node_status(agent_id, "idle")
                 await self.server.refresh_code_lenses()
 
     async def create_proposal(self, agent: AgentNode, new_source: str, correlation_id: str) -> None:
@@ -745,7 +565,7 @@ class AgentRunner:
         )
 
         self.server.proposals[proposal_id] = proposal
-        await self.server.event_store.set_node_status(agent.node_id, "pending_approval")
+        await self.server.event_store.nodes.set_node_status(agent.node_id, "pending_approval")
         await self.server.db.store_proposal(
             proposal_id, agent.node_id, agent.source_code, new_source, proposal.diff, file_path=agent.file_path
         )
@@ -753,7 +573,7 @@ class AgentRunner:
         await self.server.publish_diagnostics(agent.file_path, [proposal])
         await self.server.refresh_code_lenses()
 
-        await self._emit_rewrite_proposal(
+        await self._events.emit_rewrite_proposal(
             agent_id=agent.node_id,
             proposal_id=proposal_id,
             diff=proposal.diff,
@@ -762,7 +582,7 @@ class AgentRunner:
 
     async def message_node(self, from_id: str, to_id: str, message: str, correlation_id: str) -> None:
 
-        await self._emit_agent_message(
+        await self._events.emit_agent_message(
             from_agent=from_id,
             to_agent=to_id,
             message=message,
@@ -823,7 +643,7 @@ class AgentRunner:
         return raw_tools
 
     async def execute_extension_tool(self, agent: AgentNode, tool_name: str, params: dict, correlation_id: str) -> None:
-        await self._emit_agent_event(
+        await self._events.emit_agent_event(
             event_type="ToolResultEvent",
             agent_id=agent.node_id,
             correlation_id=correlation_id,

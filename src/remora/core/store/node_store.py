@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import sqlite3
 
 import remora.core.store.event_store_queries as store_queries
@@ -17,7 +16,13 @@ class NodeStore:
     EventStore, reducing coupling and god-object scope.
     """
 
-    def __init__(self, read_conn: sqlite3.Connection, read_lock: asyncio.Lock):
+    def __init__(
+        self,
+        read_conn: sqlite3.Connection,
+        read_lock: asyncio.Lock,
+        write_conn: sqlite3.Connection | None = None,
+        write_lock: asyncio.Lock | None = None,
+    ):
         """Initialize the NodeStore with read access to the database.
 
         Args:
@@ -27,6 +32,13 @@ class NodeStore:
         """
         self._read_conn = read_conn
         self._read_lock = read_lock
+        self._write_conn = write_conn
+        self._write_lock = write_lock
+
+    def bind_write_backend(self, conn: sqlite3.Connection, lock: asyncio.Lock) -> None:
+        """Attach write connection/lock for node mutations."""
+        self._write_conn = conn
+        self._write_lock = lock
 
     async def get_node(self, node_id: str) -> AgentNode | None:
         """Get a single AgentNode by ID from the nodes table."""
@@ -87,29 +99,34 @@ class NodeStore:
             return None
         return AgentNode.from_row(row)
 
-    async def set_node_status(self, conn: sqlite3.Connection, lock: asyncio.Lock, node_id: str, status: str) -> None:
+    async def set_node_status(self, node_id: str, status: str) -> None:
         """Update the status field of a node directly.
-        
-        Note: This is a mutation, so it requires the write connection and lock
-        passed from the EventStore orchestrator or running within a unit of work.
+
+        Requires a bound write backend.
         """
-        async with lock:
+        if self._write_conn is None or self._write_lock is None:
+            raise RuntimeError("NodeStore write backend is not initialized")
+
+        async with self._write_lock:
             await asyncio.to_thread(
                 store_queries.update_node_status,
-                conn,
+                self._write_conn,
                 node_id=node_id,
                 status=status,
             )
 
-    async def remove_nodes_for_file(self, conn: sqlite3.Connection, lock: asyncio.Lock, file_path: str) -> int:
+    async def remove_nodes_for_file(self, file_path: str) -> int:
         """Remove all nodes for a given file path. Returns count removed.
-        
-        Note: This is a mutation, so it requires the write connection and lock.
+
+        Requires a bound write backend.
         """
-        async with lock:
+        if self._write_conn is None or self._write_lock is None:
+            raise RuntimeError("NodeStore write backend is not initialized")
+
+        async with self._write_lock:
             return await asyncio.to_thread(
                 store_queries.delete_nodes_for_file,
-                conn,
+                self._write_conn,
                 file_path=file_path,
             )
 

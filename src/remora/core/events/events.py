@@ -1,37 +1,26 @@
-"""Unified domain event types for the Remora core runtime.
-
-All events are frozen Pydantic models that can be pattern-matched.
-Re-exports structured-agents events for unified event handling.
-
-The LSP layer (``remora.lsp.models``) defines a separate set of event
-classes with the ``Lsp`` prefix (``LspAgentEvent``, ``LspAgentMessageEvent``,
-``LspAgentErrorEvent``, etc.).  Those are LSP protocol events stored in the
-LSP DB for diagnostics, proposals, and editor notifications.  The events
-in *this* module are **domain events** stored in the ``EventStore`` and
-used for subscriptions, routing, and the core execution pipeline.
-"""
+"""Unified event types for the Remora runtime."""
 
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Re-export structured-agents events
 from structured_agents.events import (
-    KernelStartEvent,
     KernelEndEvent,
-    ToolCallEvent,
-    ToolResultEvent,
+    KernelStartEvent,
     ModelRequestEvent,
     ModelResponseEvent,
+    ToolCallEvent,
+    ToolResultEvent,
     TurnCompleteEvent,
 )
 
 if TYPE_CHECKING:
+
     from remora.core.code.discovery import CSTNode
-    from structured_agents.types import RunResult
 
 
 # ============================================================================
@@ -78,6 +67,75 @@ class AgentErrorEvent(_FrozenEvent):
     agent_id: str
     error: str
     timestamp: float = Field(default_factory=time.time)
+
+
+class AgentEvent(_FrozenEvent):
+    """Generic agent-facing event envelope used by LSP/UI flows."""
+
+    event_type: str
+    correlation_id: str
+    agent_id: str | None = None
+    summary: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+    timestamp: float = Field(default_factory=time.time)
+
+
+class HumanChatEvent(AgentEvent):
+    """Human message directed to an agent."""
+
+    to_agent: str = ""
+    message: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _set_defaults(cls, values: dict[str, Any]) -> dict[str, Any]:
+        values.setdefault("event_type", "HumanChatEvent")
+        to_agent = values.get("to_agent", "")
+        if values.get("agent_id") is None:
+            values["agent_id"] = to_agent
+        values.setdefault("summary", f"Human message to {to_agent}")
+        return values
+
+
+class RewriteProposalEvent(AgentEvent):
+    """Agent proposed a code rewrite."""
+
+    proposal_id: str = ""
+    diff: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _set_defaults(cls, values: dict[str, Any]) -> dict[str, Any]:
+        values.setdefault("event_type", "RewriteProposalEvent")
+        values.setdefault("summary", f"Rewrite proposal from {values.get('agent_id', '')}")
+        return values
+
+
+class RewriteAppliedEvent(AgentEvent):
+    """Rewrite proposal accepted and applied."""
+
+    proposal_id: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _set_defaults(cls, values: dict[str, Any]) -> dict[str, Any]:
+        values.setdefault("event_type", "RewriteAppliedEvent")
+        values.setdefault("summary", f"Proposal {values.get('proposal_id', '')} accepted")
+        return values
+
+
+class RewriteRejectedEvent(AgentEvent):
+    """Rewrite proposal rejected with optional feedback."""
+
+    proposal_id: str = ""
+    feedback: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _set_defaults(cls, values: dict[str, Any]) -> dict[str, Any]:
+        values.setdefault("event_type", "RewriteRejectedEvent")
+        values.setdefault("summary", "Proposal rejected with feedback")
+        return values
 
 
 # ============================================================================
@@ -175,7 +233,7 @@ class NodeDiscoveredEvent(_FrozenEvent):
     timestamp: float = Field(default_factory=time.time)
 
     @classmethod
-    def from_cst_node(cls, node: "CSTNode") -> "NodeDiscoveredEvent":
+    def from_cst_node(cls, node: CSTNode) -> NodeDiscoveredEvent:
         """Create from a CSTNode — single source of truth for field mapping."""
         from remora.core.code.discovery import compute_source_hash
         return cls(
@@ -229,6 +287,11 @@ CoreEvent = (
     AgentStartEvent
     | AgentCompleteEvent
     | AgentErrorEvent
+    | AgentEvent
+    | HumanChatEvent
+    | RewriteProposalEvent
+    | RewriteAppliedEvent
+    | RewriteRejectedEvent
     |
     # Human-in-the-loop events
     HumanInputRequestEvent
@@ -261,6 +324,11 @@ __all__ = [
     "AgentStartEvent",
     "AgentCompleteEvent",
     "AgentErrorEvent",
+    "AgentEvent",
+    "HumanChatEvent",
+    "RewriteProposalEvent",
+    "RewriteAppliedEvent",
+    "RewriteRejectedEvent",
     "HumanInputRequestEvent",
     "HumanInputResponseEvent",
     # Reactive swarm events

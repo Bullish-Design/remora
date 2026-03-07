@@ -311,7 +311,9 @@ local function build_lines()
                 end
                 table.insert(lines, header)
 
-                local msg = (ev.payload and ev.payload.message) or ev.summary or ""
+                local msg = (ev.payload and ev.payload.message)
+                    or (ev.payload and ev.payload.content)
+                    or ev.summary or ""
                 for _, text_line in ipairs(vim.split(msg, "\n")) do
                     local ml = Line()
                     ml:append("  " .. text_line, "Comment")

@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import sqlite3
+from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
@@ -16,13 +17,67 @@ from remora.core.events.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
     AgentStartEvent,
+    CoreEvent,
     NodeDiscoveredEvent,
     NodeRemovedEvent,
-    CoreEvent,
 )
-from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
+
+_NODE_COLUMNS: tuple[str, ...] = (
+    "node_id",
+    "node_type",
+    "name",
+    "full_name",
+    "file_path",
+    "start_line",
+    "end_line",
+    "start_byte",
+    "end_byte",
+    "source_code",
+    "source_hash",
+    "parent_id",
+    "caller_ids",
+    "callee_ids",
+    "status",
+    "last_trigger_event",
+    "last_completed_at",
+    "extension_name",
+    "custom_system_prompt",
+    "mounted_workspaces",
+    "extra_tools",
+    "extra_subscriptions",
+)
+
+_INSERT_NODE_SQL = """
+INSERT INTO nodes (
+    node_id, node_type, name, full_name, file_path, start_line, end_line, start_byte, end_byte,
+    source_code, source_hash, parent_id, caller_ids, callee_ids, status, last_trigger_event,
+    last_completed_at, extension_name, custom_system_prompt, mounted_workspaces, extra_tools, extra_subscriptions
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(node_id) DO UPDATE SET
+    node_type = excluded.node_type,
+    name = excluded.name,
+    full_name = excluded.full_name,
+    file_path = excluded.file_path,
+    start_line = excluded.start_line,
+    end_line = excluded.end_line,
+    start_byte = excluded.start_byte,
+    end_byte = excluded.end_byte,
+    source_code = excluded.source_code,
+    source_hash = excluded.source_hash,
+    parent_id = excluded.parent_id,
+    status = CASE
+        WHEN nodes.status IN ('running', 'error')
+        THEN nodes.status
+        ELSE excluded.status
+    END,
+    extension_name = excluded.extension_name,
+    custom_system_prompt = excluded.custom_system_prompt,
+    mounted_workspaces = excluded.mounted_workspaces,
+    extra_tools = excluded.extra_tools,
+    extra_subscriptions = excluded.extra_subscriptions
+"""
 
 
 # Regex for stub patterns: def/class with only pass/... as body
@@ -185,38 +240,13 @@ class NodeProjection:
                                 row[key] = value
                     break
 
-        cols = ", ".join(row.keys())
-        placeholders = ", ".join("?" * len(row))
         # Upsert: on conflict, update mutable fields.
         # Status updates to 'idle' when current status is idle/scaffold.
         # Running/error status is preserved so re-discovery does not clobber
         # active lifecycle state.
         conn.execute(
-            f"""INSERT INTO nodes ({cols}) VALUES ({placeholders})
-                ON CONFLICT(node_id) DO UPDATE SET
-                    node_type = excluded.node_type,
-                    name = excluded.name,
-                    full_name = excluded.full_name,
-                    file_path = excluded.file_path,
-                    start_line = excluded.start_line,
-                    end_line = excluded.end_line,
-                    start_byte = excluded.start_byte,
-                    end_byte = excluded.end_byte,
-                    source_code = excluded.source_code,
-                    source_hash = excluded.source_hash,
-                    parent_id = excluded.parent_id,
-                    status = CASE
-                        WHEN nodes.status IN ('running', 'error')
-                        THEN nodes.status
-                        ELSE excluded.status
-                    END,
-                    extension_name = excluded.extension_name,
-                    custom_system_prompt = excluded.custom_system_prompt,
-                    mounted_workspaces = excluded.mounted_workspaces,
-                    extra_tools = excluded.extra_tools,
-                    extra_subscriptions = excluded.extra_subscriptions
-            """,
-            list(row.values()),
+            _INSERT_NODE_SQL,
+            [row[col] for col in _NODE_COLUMNS],
         )
         return []
 

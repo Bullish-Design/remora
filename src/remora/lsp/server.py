@@ -5,28 +5,29 @@ import atexit
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
-from pygls.uris import to_fs_path
 
 from remora.core.agents.agent_node import AgentNode, ToolSchema
+from remora.core.events.events import (
+    AgentEvent,
+    AgentMessageEvent,
+    HumanChatEvent,
+    RewriteAppliedEvent,
+    RewriteProposalEvent,
+    RewriteRejectedEvent,
+)
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
-from remora.runner.events import (
-    LspAgentErrorEvent,
-    LspAgentEvent,
-    LspAgentMessageEvent,
-    LspHumanChatEvent,
-    LspRewriteAppliedEvent,
-    LspRewriteProposalEvent,
-    LspRewriteRejectedEvent,
-    RewriteProposal,
-)
+from remora.lsp.models import RewriteProposal
 
 if TYPE_CHECKING:
+    from remora.core.events.subscriptions import SubscriptionRegistry
+    from remora.core.store.event_store import EventStore
     from remora.runner.agent_runner import AgentRunner
 
 logger = logging.getLogger("remora.lsp")
@@ -35,21 +36,26 @@ logger = logging.getLogger("remora.lsp")
 class RemoraLanguageServer(LanguageServer):
     def __init__(
         self,
-        event_store=None,
-        subscriptions=None,
+        event_store: EventStore | None = None,
+        subscriptions: SubscriptionRegistry | None = None,
     ):
         super().__init__(name="remora", version="0.1.0")
         self.db = RemoraDB()
         self.event_store = event_store
         self.graph = LazyGraph(self.db, event_store=event_store)
         self.proposals: dict[str, RewriteProposal] = {}
-        self.runner: "AgentRunner | None" = None
+        self.runner: AgentRunner | None = None
         self._correlation_counter = 0
         self.subscriptions = subscriptions
         # Debounce timers for didChange reparse (Gap #12) and cursor updates (Gap #13)
         self._reparse_timers: dict[str, asyncio.TimerHandle] = {}
         self._cursor_timers: dict[str, asyncio.TimerHandle] = {}
         self._last_user_activity_monotonic = 0.0
+        self._handlers_registered = False
+        self._remora_initialized_handler_registered = False
+        self._remora_startup_log: logging.Logger | None = None
+        self._remora_startup_t0 = 0.0
+        self._remora_background_scan: Callable[[], Awaitable[None]] | None = None
 
     def generate_correlation_id(self) -> str:
         self._correlation_counter += 1
@@ -76,7 +82,7 @@ class RemoraLanguageServer(LanguageServer):
         if prev is not None:
             prev.cancel()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         handle = loop.call_later(
             delay_ms / 1000.0,
             lambda: asyncio.ensure_future(self._do_reparse(uri, text)),
@@ -125,7 +131,7 @@ class RemoraLanguageServer(LanguageServer):
         if prev is not None:
             prev.cancel()
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         handle = loop.call_later(
             delay_ms / 1000.0,
             lambda: asyncio.ensure_future(self._do_cursor_update(agent_id, uri, line)),
@@ -165,34 +171,33 @@ class RemoraLanguageServer(LanguageServer):
         payload: dict[str, Any] | None = None,
     ) -> None:
         await self.emit_event(
-            LspAgentEvent(
+            AgentEvent(
                 event_type=event_type,
                 agent_id=agent_id,
                 correlation_id=correlation_id,
                 summary=summary,
                 payload=payload or {},
-                timestamp=0.0,
             )
         )
 
     async def emit_agent_error_event(self, *, agent_id: str, error: str, correlation_id: str) -> None:
         await self.emit_event(
-            LspAgentErrorEvent(
+            AgentEvent(
+                event_type="AgentErrorEvent",
                 agent_id=agent_id,
-                error=error,
                 correlation_id=correlation_id,
-                timestamp=0.0,
+                summary=f"Error: {error[:50]}",
+                payload={"error": error},
             )
         )
 
     async def emit_human_chat_event(self, *, agent_id: str, message: str, correlation_id: str) -> None:
         await self.emit_event(
-            LspHumanChatEvent(
+            HumanChatEvent(
                 agent_id=agent_id,
                 to_agent=agent_id,
                 message=message,
                 correlation_id=correlation_id,
-                timestamp=0.0,
             )
         )
 
@@ -205,12 +210,11 @@ class RemoraLanguageServer(LanguageServer):
         correlation_id: str,
     ) -> None:
         await self.emit_event(
-            LspRewriteRejectedEvent(
+            RewriteRejectedEvent(
                 agent_id=agent_id,
                 proposal_id=proposal_id,
                 feedback=feedback,
                 correlation_id=correlation_id,
-                timestamp=0.0,
             )
         )
 
@@ -223,13 +227,11 @@ class RemoraLanguageServer(LanguageServer):
         correlation_id: str,
     ) -> None:
         await self.emit_event(
-            LspAgentMessageEvent(
-                agent_id=from_agent,
+            AgentMessageEvent(
                 from_agent=from_agent,
                 to_agent=to_agent,
-                message=message,
+                content=message,
                 correlation_id=correlation_id,
-                timestamp=0.0,
             )
         )
 
@@ -242,12 +244,11 @@ class RemoraLanguageServer(LanguageServer):
         correlation_id: str,
     ) -> None:
         await self.emit_event(
-            LspRewriteProposalEvent(
+            RewriteProposalEvent(
                 agent_id=agent_id,
                 proposal_id=proposal_id,
                 diff=diff,
                 correlation_id=correlation_id,
-                timestamp=0.0,
             )
         )
 
@@ -259,20 +260,22 @@ class RemoraLanguageServer(LanguageServer):
         await self.workspace_apply_edit(lsp.ApplyWorkspaceEditParams(edit=proposal.to_workspace_edit()))
         del self.proposals[proposal_id]
         if self.event_store:
-            await self.event_store.set_node_status(proposal.agent_id, "idle")
+            await self.event_store.nodes.set_node_status(proposal.agent_id, "idle")
         await self.db.update_proposal_status(proposal_id, "accepted")
         await self.emit_event(
-            LspRewriteAppliedEvent(
+            RewriteAppliedEvent(
                 agent_id=proposal.agent_id,
                 proposal_id=proposal_id,
                 correlation_id=proposal.correlation_id or "",
-                timestamp=0.0,
             )
         )
 
     async def emit_event(self, event) -> Any:
         if not getattr(event, "timestamp", None):
-            event.timestamp = time.time()
+            if hasattr(event, "model_copy"):
+                event = event.model_copy(update={"timestamp": time.time()})
+            else:
+                event.timestamp = time.time()
 
         if self.event_store:
             await self.event_store.append("swarm", event)
@@ -363,10 +366,10 @@ def register_handlers(server: RemoraLanguageServer) -> None:
     if getattr(server, "_handlers_registered", False):
         return
     server._handlers_registered = True
-    from remora.lsp.handlers.commands import register_command_handlers
-    from remora.lsp.handlers.documents import register_document_handlers
     from remora.lsp.handlers.actions import register_action_handlers
     from remora.lsp.handlers.capabilities import register_capability_handlers
+    from remora.lsp.handlers.commands import register_command_handlers
+    from remora.lsp.handlers.documents import register_document_handlers
     from remora.lsp.handlers.hover import register_hover_handlers
     from remora.lsp.handlers.lens import register_lens_handlers
     from remora.lsp.notifications import register_notification_handlers
@@ -378,3 +381,10 @@ def register_handlers(server: RemoraLanguageServer) -> None:
     register_hover_handlers(server)
     register_lens_handlers(server)
     register_notification_handlers(server)
+
+
+__all__ = [
+    "RemoraLanguageServer",
+    "get_server",
+    "register_handlers",
+]

@@ -2,6 +2,7 @@
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
 from remora.lsp.models import (
+    LspAgentErrorEvent,
     LspAgentEvent,
     LspAgentMessageEvent,
     LspHumanChatEvent,
@@ -14,7 +15,7 @@ from remora.lsp.models import (
 from remora.lsp.server import RemoraLanguageServer
 
 __all__ = [
-    "LspAgentEvent", "LspAgentMessageEvent", "LspHumanChatEvent",
+    "LspAgentEvent", "LspAgentErrorEvent", "LspAgentMessageEvent", "LspHumanChatEvent",
     "LspRewriteAppliedEvent", "LspRewriteProposalEvent",
     "LspRewriteRejectedEvent", "RewriteProposal", "generate_id",
     "RemoraDB", "LazyGraph", "RemoraLanguageServer",
