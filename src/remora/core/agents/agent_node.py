@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 pass
 
-from remora.core.subscriptions import SubscriptionPattern
+from remora.core.events.subscriptions import SubscriptionPattern
 
 # Maps file extensions to (display name, code fence language)
 _LANG_BY_EXT: dict[str, tuple[str, str]] = {

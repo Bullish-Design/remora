@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from remora.core.agent_node import AgentNode
+from remora.core.agents.agent_node import AgentNode
 
 
 def make_node(**overrides: Any) -> AgentNode:

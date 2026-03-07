@@ -17,8 +17,8 @@ server = get_server()
 register_handlers(server)
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
-from remora.core.event_store import EventStore
-from remora.core.projections import NodeProjection
+from remora.core.store.event_store import EventStore
+from remora.core.code.projections import NodeProjection
 
 pytestmark = pytest.mark.integration
 

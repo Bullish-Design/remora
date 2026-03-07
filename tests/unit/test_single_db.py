@@ -16,10 +16,10 @@ import sqlite3
 
 import pytest
 
-from remora.core.event_store import EventStore
-from remora.core.events import NodeDiscoveredEvent
-from remora.core.projections import NodeProjection
-from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
+from remora.core.store.event_store import EventStore
+from remora.core.events.events import NodeDiscoveredEvent
+from remora.core.code.projections import NodeProjection
+from remora.core.events.subscriptions import SubscriptionPattern, SubscriptionRegistry
 
 
 class TestEventStoreWALMode:

@@ -8,17 +8,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from remora.core.config import Config
-from remora.core.discovery import discover
-from remora.core.event_bus import EventBus
-from remora.core.event_store import EventStore
-from remora.core.events import HumanInputResponseEvent
+from remora.core.code.discovery import discover
+from remora.core.events.event_bus import EventBus
+from remora.core.store.event_store import EventStore
+from remora.core.events.events import HumanInputResponseEvent
 from remora.models import ConfigSnapshot, InputResponse
 from remora.ui.projector import UiStateProjector
 from remora.utils import PathResolver
 
 if TYPE_CHECKING:
-    from remora.core.subscriptions import SubscriptionRegistry
-    from remora.core.cairn_bridge import CairnWorkspaceService
+    from remora.core.events.subscriptions import SubscriptionRegistry
+    from remora.core.agents.cairn_bridge import CairnWorkspaceService
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ async def handle_swarm_emit(request: Any, deps: ServiceDeps) -> dict[str, Any]:
     if deps.event_store is None:
         raise ValueError("event store not configured")
 
-    from remora.core.events import AgentMessageEvent, ContentChangedEvent
+    from remora.core.events.events import AgentMessageEvent, ContentChangedEvent
 
     event_type = getattr(request, "event_type", None)
     data = getattr(request, "data", {}) or {}

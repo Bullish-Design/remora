@@ -105,7 +105,7 @@ class _ChunkTrackingEventStore:
 
 
 def mock_parse_content(uri, text, language=None):
-    from remora.core.discovery import CSTNode
+    from remora.core.code.discovery import CSTNode
     nodes = []
     for idx in range(20):
         node_id = f"{uri}#{idx}"
@@ -137,7 +137,7 @@ async def test_background_scan_saves_partial_manifest_before_completion(
     fake_server = _FakeServer(str(tmp_path), db)
 
     import remora.lsp.__main__ as lsp_main_mod
-    import remora.lsp.runner as runner_mod
+    import remora.runner.agent_runner as runner_mod
 
     monkeypatch.setattr(lsp_main_mod, "_setup_logging", lambda: logging.getLogger("test"))
     monkeypatch.setattr(lsp_main_mod, "_get_server", lambda: fake_server)
@@ -186,7 +186,7 @@ async def test_background_scan_uses_aggressive_preemption_settings(
     fake_server.event_store = event_store
 
     import remora.lsp.__main__ as lsp_main_mod
-    import remora.lsp.runner as runner_mod
+    import remora.runner.agent_runner as runner_mod
 
     recorded_sleep_delays: list[float] = []
     original_sleep = asyncio.sleep

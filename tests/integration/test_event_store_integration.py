@@ -11,13 +11,13 @@ import asyncio
 
 import pytest
 
-from remora.core.event_store import EventStore
-from remora.core.events import (
+from remora.core.store.event_store import EventStore
+from remora.core.events.events import (
     AgentMessageEvent,
     ContentChangedEvent,
     ManualTriggerEvent,
 )
-from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
+from remora.core.events.subscriptions import SubscriptionPattern, SubscriptionRegistry
 
 
 @pytest.mark.asyncio

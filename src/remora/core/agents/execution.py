@@ -17,18 +17,19 @@ from typing import TYPE_CHECKING, Any, cast
 
 from structured_agents import Message, build_client
 
-from remora.core.agent_context import AgentContext
-from remora.core.agent_node import AgentNode
-from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
-from remora.core.discovery import CSTNode
-from remora.core.event_store import EventStore
-from remora.core.events import AgentMessageEvent, ScaffoldRequestEvent
-from remora.core.kernel_factory import create_kernel
+from remora.core.agents.agent_context import AgentContext
+from remora.core.agents.agent_node import AgentNode
+from remora.core.agents.cairn_bridge import CairnWorkspaceService, SyncMode
+from remora.core.code.discovery import CSTNode
+from remora.core.store.event_store import EventStore
+from remora.core.events.events import AgentMessageEvent, ScaffoldRequestEvent
+from remora.core.agents.kernel_factory import create_kernel
 from remora.core.manifest import load_manifest
-from remora.core.subscriptions import SubscriptionRegistry
+from remora.core.events.subscriptions import SubscriptionRegistry
 from remora.core.tools.grail import build_virtual_fs, discover_grail_tools
-from remora.core.workspace import AgentWorkspace, CairnDataProvider
+from remora.core.agents.workspace import AgentWorkspace, CairnDataProvider
 from remora.utils import PathResolver
+from remora.utils.languages import EXTENSION_TO_LANGUAGE as _LANG_TAGS
 
 if TYPE_CHECKING:
     from remora.core.config import Config
@@ -52,21 +53,6 @@ class ExecutionResult:
 # ---------------------------------------------------------------------------
 # Helpers (extracted from SwarmExecutor)
 # ---------------------------------------------------------------------------
-
-_LANG_TAGS: dict[str, str] = {
-    ".py": "python",
-    ".js": "javascript",
-    ".ts": "typescript",
-    ".md": "markdown",
-    ".toml": "toml",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".json": "json",
-    ".sh": "bash",
-    ".rs": "rust",
-    ".go": "go",
-}
-
 
 def _lang_tag_for(file_path: str) -> str:
     suffix = Path(file_path).suffix.lower()

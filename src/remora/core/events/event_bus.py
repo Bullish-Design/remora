@@ -15,9 +15,10 @@ from typing import Any
 
 from structured_agents.events import Event as StructuredEvent
 
-from remora.core.events import CoreEvent
+from remora.core.events.events import CoreEvent
 
-logger = logging.getLogger(__name__)
+# Preserve historical logger name for compatibility with existing tests and tooling.
+logger = logging.getLogger("remora.core.event_bus")
 _NOISY_EVENT_NAMES = frozenset({"NodeDiscoveredEvent", "ScaffoldRequestEvent"})
 
 EventHandler = Callable[[Any], Any]

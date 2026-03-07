@@ -15,13 +15,13 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from remora.core.discovery import CSTNode, compute_source_hash, discover
-from remora.core.events import ContentChangedEvent, NodeDiscoveredEvent, NodeRemovedEvent
-from remora.core.subscriptions import SubscriptionRegistry
+from remora.core.code.discovery import CSTNode, compute_source_hash, discover
+from remora.core.events.events import ContentChangedEvent, NodeDiscoveredEvent, NodeRemovedEvent
+from remora.core.events.subscriptions import SubscriptionRegistry
 from remora.utils import PathLike, normalize_path, to_project_relative
 
 if TYPE_CHECKING:
-    from remora.core.event_store import EventStore
+    from remora.core.store.event_store import EventStore
 
 logger = logging.getLogger(__name__)
 

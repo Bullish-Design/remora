@@ -12,7 +12,7 @@ from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
 from pygls.uris import to_fs_path
 
-from remora.core.agent_node import AgentNode, ToolSchema
+from remora.core.agents.agent_node import AgentNode, ToolSchema
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
 from remora.lsp.models import RewriteProposal
@@ -73,8 +73,8 @@ class RemoraLanguageServer(LanguageServer):
 
     async def _do_reparse(self, uri: str, text: str) -> None:
         """Execute the actual debounced reparse for *uri*."""
-        from remora.core.discovery import parse_content
-        from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
+        from remora.core.code.discovery import parse_content
+        from remora.core.events.events import NodeDiscoveredEvent, NodeRemovedEvent
 
         self._reparse_timers.pop(uri, None)
         try:
@@ -122,7 +122,7 @@ class RemoraLanguageServer(LanguageServer):
 
     async def _do_cursor_update(self, agent_id: str | None, uri: str, line: int) -> None:
         """Execute the actual debounced cursor update."""
-        from remora.core.events import CursorFocusEvent
+        from remora.core.events.events import CursorFocusEvent
 
         self._cursor_timers.pop(uri, None)
         try:

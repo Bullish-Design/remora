@@ -1,15 +1,15 @@
 """Core Remora runtime (framework-agnostic)."""
 
-from remora.core.agent_context import AgentContext
-from remora.core.agent_node import AgentNode, ToolSchema as AgentToolSchema
-from remora.core.state_manager import (
+from remora.core.agents.agent_context import AgentContext
+from remora.core.agents.agent_node import AgentNode, ToolSchema as AgentToolSchema
+from remora.core.agents.state_manager import (
     AgentExecutionMetrics,
     AgentMemory,
     AgentTurnState,
 )
-from remora.core.cairn_bridge import CairnWorkspaceService
-from remora.core.cairn_externals import CairnExternals
-from remora.core.kernel_factory import create_kernel
+from remora.core.agents.cairn_bridge import CairnWorkspaceService
+from remora.core.agents.cairn_externals import CairnExternals
+from remora.core.agents.kernel_factory import create_kernel
 from remora.core.manifest import BundleManifest, load_manifest
 from remora.core.config import (
     Config,
@@ -17,9 +17,9 @@ from remora.core.config import (
     load_config,
     serialize_config,
 )
-from remora.core.state_manager import RemoraStateManager
+from remora.core.agents.state_manager import RemoraStateManager
 
-from remora.core.discovery import (
+from remora.core.code.discovery import (
     CSTNode,
     LANGUAGE_EXTENSIONS,
     compute_node_id,
@@ -32,9 +32,9 @@ from remora.core.errors import (
     RemoraError,
     WorkspaceError,
 )
-from remora.core.event_bus import EventBus, EventHandler
-from remora.core.event_store import EventStore
-from remora.core.events import (
+from remora.core.events.event_bus import EventBus, EventHandler
+from remora.core.store.event_store import EventStore
+from remora.core.events.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
     AgentMessageEvent,
@@ -54,16 +54,16 @@ from remora.core.events import (
     ToolResultEvent,
     TurnCompleteEvent,
 )
-from remora.core.projections import NodeProjection
-from remora.core.reconciler import (
+from remora.core.code.projections import NodeProjection
+from remora.core.code.reconciler import (
     get_agent_dir,
     get_agent_workspace_path,
     reconcile_on_startup,
 )
-from remora.core.subscriptions import Subscription, SubscriptionPattern, SubscriptionRegistry
-from remora.core.swarm_executor import SwarmExecutor
+from remora.core.events.subscriptions import Subscription, SubscriptionPattern, SubscriptionRegistry
+from remora.core.agents.swarm_executor import SwarmExecutor
 from remora.core.tools import RemoraGrailTool, build_virtual_fs, discover_grail_tools
-from remora.core.workspace import AgentWorkspace, CairnDataProvider
+from remora.core.agents.workspace import AgentWorkspace, CairnDataProvider
 
 __all__ = [
     "AgentCompleteEvent",

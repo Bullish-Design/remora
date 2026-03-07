@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from remora.core.event_store import EventStore
-from remora.core.events import AgentStartEvent
+from remora.core.store.event_store import EventStore
+from remora.core.events.events import AgentStartEvent
 
 
 @pytest.mark.asyncio

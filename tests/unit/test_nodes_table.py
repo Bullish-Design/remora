@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from remora.core.event_store import EventStore
+from remora.core.store.event_store import EventStore
 
 
 @pytest.fixture

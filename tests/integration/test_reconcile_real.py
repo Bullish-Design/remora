@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from remora.core.event_store import EventStore
-from remora.core.projections import NodeProjection
-from remora.core.reconciler import reconcile_on_startup
-from remora.core.subscriptions import SubscriptionRegistry
+from remora.core.store.event_store import EventStore
+from remora.core.code.projections import NodeProjection
+from remora.core.code.reconciler import reconcile_on_startup
+from remora.core.events.subscriptions import SubscriptionRegistry
 
 
 pytestmark = pytest.mark.integration

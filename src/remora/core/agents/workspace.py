@@ -22,7 +22,7 @@ from typing import Any, Awaitable, Callable
 from cairn.runtime import workspace_manager as cairn_workspace_manager
 
 from remora.core.config import Config
-from remora.core.discovery import CSTNode
+from remora.core.code.discovery import CSTNode
 from remora.core.errors import WorkspaceError
 from remora.utils import PathLike, PathResolver, normalize_path
 

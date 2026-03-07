@@ -15,9 +15,9 @@ from typing import Any
 
 from structured_agents.types import ToolCall, ToolResult, ToolSchema
 
-from remora.core.agent_context import AgentContext
-from remora.core.discovery import compute_node_id, compute_source_hash
-from remora.core.events import NodeDiscoveredEvent, ScaffoldRequestEvent
+from remora.core.agents.agent_context import AgentContext
+from remora.core.code.discovery import compute_node_id, compute_source_hash
+from remora.core.events.events import NodeDiscoveredEvent, ScaffoldRequestEvent
 
 
 _VALID_NODE_TYPES = {"class", "function", "file"}

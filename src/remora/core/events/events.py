@@ -30,7 +30,7 @@ from structured_agents.events import (
 )
 
 if TYPE_CHECKING:
-    from remora.core.discovery import CSTNode
+    from remora.core.code.discovery import CSTNode
     from structured_agents.types import RunResult
 
 
@@ -177,7 +177,7 @@ class NodeDiscoveredEvent(_FrozenEvent):
     @classmethod
     def from_cst_node(cls, node: "CSTNode") -> "NodeDiscoveredEvent":
         """Create from a CSTNode — single source of truth for field mapping."""
-        from remora.core.discovery import compute_source_hash
+        from remora.core.code.discovery import compute_source_hash
         return cls(
             node_id=node.node_id,
             node_type=node.node_type,

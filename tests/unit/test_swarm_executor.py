@@ -18,17 +18,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from remora.core.agent_node import AgentNode
+from remora.core.agents.agent_node import AgentNode
 from remora.core.config import Config
-from remora.core.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent
-from remora.core.execution import (
+from remora.core.events.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent
+from remora.core.agents.execution import (
     _lang_tag_for,
     _agent_node_to_cst_node,
     _resolve_bundle_path,
     _resolve_model_name,
     _build_prompt,
 )
-from remora.core.swarm_executor import SwarmExecutor
+from remora.core.agents.swarm_executor import SwarmExecutor
 from remora.utils import PathResolver
 
 
@@ -353,7 +353,7 @@ class TestSwarmExecutorDomainEvents:
     @patch("remora.core.swarm_executor.build_client")
     @patch("remora.core.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
     async def test_emits_start_and_complete_events(self, mock_exec, mock_build_client, tmp_path):
-        from remora.core.execution import ExecutionResult
+        from remora.core.agents.execution import ExecutionResult
 
         mock_build_client.return_value = MagicMock()
         mock_exec.return_value = ExecutionResult(response_text="Done.", kernel_events=[])
@@ -428,8 +428,8 @@ class TestSwarmExecutorDomainEvents:
     @patch("remora.core.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
     async def test_scaffold_trigger_adds_scaffold_tag(self, mock_exec, mock_build_client, tmp_path):
         """When trigger_event is ScaffoldRequestEvent, AgentCompleteEvent should have tags=('scaffold',)."""
-        from remora.core.events import ScaffoldRequestEvent
-        from remora.core.execution import ExecutionResult
+        from remora.core.events.events import ScaffoldRequestEvent
+        from remora.core.agents.execution import ExecutionResult
 
         mock_build_client.return_value = MagicMock()
         mock_exec.return_value = ExecutionResult(response_text="Scaffolded.", kernel_events=[])
@@ -468,8 +468,8 @@ class TestSwarmExecutorDomainEvents:
     @patch("remora.core.swarm_executor.execute_agent_turn", new_callable=AsyncMock)
     async def test_non_scaffold_trigger_has_no_tags(self, mock_exec, mock_build_client, tmp_path):
         """When trigger_event is not ScaffoldRequestEvent, AgentCompleteEvent tags should be empty."""
-        from remora.core.events import ContentChangedEvent
-        from remora.core.execution import ExecutionResult
+        from remora.core.events.events import ContentChangedEvent
+        from remora.core.agents.execution import ExecutionResult
 
         mock_build_client.return_value = MagicMock()
         mock_exec.return_value = ExecutionResult(response_text="Done.", kernel_events=[])
@@ -513,7 +513,7 @@ class TestSwarmToolsEndToEnd:
     @pytest.fixture
     async def registry(self):
         """Create a real SubscriptionRegistry with in-memory SQLite."""
-        from remora.core.subscriptions import SubscriptionRegistry
+        from remora.core.events.subscriptions import SubscriptionRegistry
 
         reg = SubscriptionRegistry(db_path=":memory:")
         await reg.initialize()
@@ -522,8 +522,8 @@ class TestSwarmToolsEndToEnd:
 
     def _make_context(self, registry) -> "AgentContext":
         """Build an AgentContext with real registry callbacks."""
-        from remora.core.agent_context import AgentContext
-        from remora.core.subscriptions import SubscriptionRegistry
+        from remora.core.agents.agent_context import AgentContext
+        from remora.core.events.subscriptions import SubscriptionRegistry
 
         async def _register_sub(agent_id: str, pattern) -> None:
             await registry.register(agent_id, pattern)
@@ -578,7 +578,7 @@ class TestSwarmToolsEndToEnd:
     @pytest.mark.asyncio
     async def test_unsubscribe_tool_removes_subscription(self, registry):
         """UnsubscribeTool.execute() should remove the subscription from the registry."""
-        from remora.core.subscriptions import SubscriptionPattern
+        from remora.core.events.subscriptions import SubscriptionPattern
         from remora.core.tools.swarm import UnsubscribeTool
 
         # Pre-register a subscription
@@ -632,7 +632,7 @@ class TestSwarmToolsEndToEnd:
     @pytest.mark.asyncio
     async def test_subscribe_tool_matches_events(self, registry):
         """A subscription created by SubscribeTool should match events via get_matching_agents."""
-        from remora.core.events import ContentChangedEvent
+        from remora.core.events.events import ContentChangedEvent
         from remora.core.tools.swarm import SubscribeTool
 
         ctx = self._make_context(registry)

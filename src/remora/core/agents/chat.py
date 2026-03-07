@@ -9,12 +9,12 @@ import uuid
 
 from pydantic import BaseModel, Field
 
-from remora.core.discovery import discover
-from remora.core.event_bus import EventBus
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.code.discovery import discover
+from remora.core.events.event_bus import EventBus
+from remora.core.agents.cairn_bridge import CairnWorkspaceService
 from remora.core.config import Config
-from remora.core.kernel_factory import create_kernel
-from remora.core.workspace import AgentWorkspace
+from remora.core.agents.kernel_factory import create_kernel
+from remora.core.agents.workspace import AgentWorkspace
 from structured_agents import Tool
 from structured_agents.types import Message as KernelMessage, ToolCall, ToolResult, ToolSchema
 

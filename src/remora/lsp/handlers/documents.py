@@ -6,8 +6,8 @@ from pathlib import Path
 from lsprotocol import types as lsp
 from pygls.uris import to_fs_path
 
-from remora.core.discovery import CSTNode, parse_content
-from remora.core.events import ContentChangedEvent, FileSavedEvent, NodeDiscoveredEvent, NodeRemovedEvent
+from remora.core.code.discovery import CSTNode, parse_content
+from remora.core.events.events import ContentChangedEvent, FileSavedEvent, NodeDiscoveredEvent, NodeRemovedEvent
 from remora.lsp.models import RewriteProposal
 from remora.lsp.server import RemoraLanguageServer
 

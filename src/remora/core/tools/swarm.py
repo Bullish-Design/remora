@@ -7,9 +7,9 @@ from typing import Any
 
 from structured_agents.types import ToolCall, ToolResult, ToolSchema
 
-from remora.core.agent_context import AgentContext
-from remora.core.events import AgentMessageEvent
-from remora.core.subscriptions import SubscriptionPattern
+from remora.core.agents.agent_context import AgentContext
+from remora.core.events.events import AgentMessageEvent
+from remora.core.events.subscriptions import SubscriptionPattern
 
 
 class SwarmTool:

@@ -4,8 +4,8 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from remora.core.events import AgentMessageEvent, ContentChangedEvent
-from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
+from remora.core.events.events import AgentMessageEvent, ContentChangedEvent
+from remora.core.events.subscriptions import SubscriptionPattern, SubscriptionRegistry
 from remora.core.tools.swarm import SubscribeTool
 
 
@@ -162,7 +162,7 @@ class TestSubscribeToolPattern:
         async def fake_register(agent_id: str, pattern: SubscriptionPattern) -> None:
             captured_patterns.append(pattern)
 
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
         from unittest.mock import AsyncMock
 
         ctx = AgentContext(
@@ -201,7 +201,7 @@ class TestSubscribeToolPattern:
         async def fake_register(agent_id: str, pattern: SubscriptionPattern) -> None:
             captured_patterns.append(pattern)
 
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
         from unittest.mock import AsyncMock
 
         ctx = AgentContext(
@@ -346,7 +346,7 @@ class TestSubscriptionCache:
 def test_subscription_pattern_is_pydantic_model() -> None:
     """SubscriptionPattern should be a Pydantic BaseModel, not a stdlib dataclass."""
     from pydantic import BaseModel
-    from remora.core.subscriptions import Subscription
+    from remora.core.events.subscriptions import Subscription
 
     assert issubclass(SubscriptionPattern, BaseModel), "SubscriptionPattern should be a Pydantic BaseModel"
     assert issubclass(Subscription, BaseModel), "Subscription should be a Pydantic BaseModel"

@@ -166,7 +166,7 @@ def workspace_sync(
     async def _sync() -> None:
         from cairn.runtime.workspace_manager import open_workspace as cairn_open_workspace
 
-        from remora.core.workspace import AgentWorkspace
+        from remora.core.agents.workspace import AgentWorkspace
         from remora.workspace.sync import WorkspaceSync
 
         ws = await cairn_open_workspace(Path(workspace_path), readonly=False)
@@ -274,7 +274,7 @@ def workspace_sandbox(
 
                 # Sync back if requested
                 if sync_back and result.exit_code == 0:
-                    from remora.core.workspace import AgentWorkspace
+                    from remora.core.agents.workspace import AgentWorkspace
                     from remora.workspace.sync import WorkspaceSync
 
                     agent_ws = AgentWorkspace(ws, agent_id="cli-sandbox")

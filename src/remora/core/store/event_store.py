@@ -14,10 +14,10 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from structured_agents.events import Event as StructuredEvent
 
-import remora.core.event_store_connection as store_connection
-import remora.core.event_store_queries as store_queries
-import remora.core.event_store_schema as store_schema
-from remora.core.events import CoreEvent
+import remora.core.store.event_store_connection as store_connection
+import remora.core.store.event_store_queries as store_queries
+import remora.core.store.event_store_schema as store_schema
+from remora.core.events.events import CoreEvent
 from remora.utils import PathLike, normalize_path
 
 logger = logging.getLogger(__name__)
@@ -27,10 +27,10 @@ _BATCH_APPEND_SLOW_PHASE_WARNING_MS = 1000.0
 _T = TypeVar("_T")
 
 if TYPE_CHECKING:
-    from remora.core.agent_node import AgentNode
-    from remora.core.event_bus import EventBus
-    from remora.core.projections import NodeProjection
-    from remora.core.subscriptions import SubscriptionRegistry
+    from remora.core.agents.agent_node import AgentNode
+    from remora.core.events.event_bus import EventBus
+    from remora.core.code.projections import NodeProjection
+    from remora.core.events.subscriptions import SubscriptionRegistry
 
 
 class EventStore:
@@ -666,7 +666,7 @@ class EventStore:
 
         Uses the dedicated read connection to avoid blocking on write operations.
         """
-        from remora.core.agent_node import AgentNode
+        from remora.core.agents.agent_node import AgentNode
 
         if self._read_conn is None:
             await self.initialize()
@@ -703,7 +703,7 @@ class EventStore:
                      is ``None`` (the default), ``SELECT *`` is used and full
                      ``AgentNode`` objects are returned.
         """
-        from remora.core.agent_node import AgentNode
+        from remora.core.agents.agent_node import AgentNode
 
         if self._read_conn is None:
             await self.initialize()
@@ -732,7 +732,7 @@ class EventStore:
         With WAL mode, this read doesn't need the lock since readers and writers
         don't block each other.
         """
-        from remora.core.agent_node import AgentNode
+        from remora.core.agents.agent_node import AgentNode
 
         if self._read_conn is None:
             await self.initialize()

@@ -1,3 +1,9 @@
-"""Compatibility wrapper for moved core events module."""
+"""Compatibility alias for moved core events module."""
 
-from remora.core.events.events import *  # noqa: F401,F403
+from __future__ import annotations
+
+import sys as _sys
+
+import remora.core.events.events as _target
+
+_sys.modules[__name__] = _target

@@ -212,9 +212,9 @@ async def test_real_vllm_multi_agent_interaction(tmp_path):
     4. Agent B emits response back to A
     """
     try:
-        from remora.core.event_store import EventStore
-        from remora.core.events import AgentMessageEvent
-        from remora.core.subscriptions import SubscriptionRegistry, SubscriptionPattern
+        from remora.core.store.event_store import EventStore
+        from remora.core.events.events import AgentMessageEvent
+        from remora.core.events.subscriptions import SubscriptionRegistry, SubscriptionPattern
     except ImportError:
         pytest.skip("remora core not available")
 

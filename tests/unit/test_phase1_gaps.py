@@ -17,14 +17,14 @@ from pathlib import Path
 
 import pytest
 
-from remora.core.agent_node import AgentNode, ToolSchema
-from remora.core.events import (
+from remora.core.agents.agent_node import AgentNode, ToolSchema
+from remora.core.events.events import (
     AgentStartEvent,
     NodeDiscoveredEvent,
 )
-from remora.core.event_store import EventStore
-from remora.core.projections import NodeProjection
-from remora.core.subscriptions import SubscriptionPattern
+from remora.core.store.event_store import EventStore
+from remora.core.code.projections import NodeProjection
+from remora.core.events.subscriptions import SubscriptionPattern
 from remora.extensions import AgentExtension, extension_matches
 
 

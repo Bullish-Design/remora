@@ -51,11 +51,11 @@ def swarm_start(
     if lsp:
 
         async def _prepare_lsp():
-            from remora.core.event_bus import EventBus
-            from remora.core.event_store import EventStore
-            from remora.core.projections import NodeProjection
-            from remora.core.reconciler import reconcile_on_startup
-            from remora.core.subscriptions import SubscriptionRegistry
+            from remora.core.events.event_bus import EventBus
+            from remora.core.store.event_store import EventStore
+            from remora.core.code.projections import NodeProjection
+            from remora.core.code.reconciler import reconcile_on_startup
+            from remora.core.events.subscriptions import SubscriptionRegistry
 
             root = Path(project_root) if project_root else Path.cwd()
             swarm_path = root / ".remora"
@@ -110,12 +110,12 @@ def swarm_start(
     root = Path(project_root) if project_root else Path.cwd()
 
     async def _start() -> None:
-        from remora.core.event_bus import EventBus
-        from remora.core.event_store import EventStore
-        from remora.core.projections import NodeProjection
-        from remora.core.subscriptions import SubscriptionRegistry
-        from remora.core.reconciler import reconcile_on_startup
-        from remora.lsp.runner import AgentRunner
+        from remora.core.events.event_bus import EventBus
+        from remora.core.store.event_store import EventStore
+        from remora.core.code.projections import NodeProjection
+        from remora.core.events.subscriptions import SubscriptionRegistry
+        from remora.core.code.reconciler import reconcile_on_startup
+        from remora.runner.agent_runner import AgentRunner
 
         swarm_path = root / ".remora"
         event_store_path = swarm_path / "events" / "events.db"
@@ -193,10 +193,10 @@ def swarm_reconcile(project_root: str | None, config_path: str | None) -> None:
     root = Path(project_root) if project_root else Path.cwd()
 
     async def _reconcile() -> None:
-        from remora.core.subscriptions import SubscriptionRegistry
-        from remora.core.reconciler import reconcile_on_startup
-        from remora.core.event_store import EventStore
-        from remora.core.projections import NodeProjection
+        from remora.core.events.subscriptions import SubscriptionRegistry
+        from remora.core.code.reconciler import reconcile_on_startup
+        from remora.core.store.event_store import EventStore
+        from remora.core.code.projections import NodeProjection
 
         swarm_path = root / ".remora"
         subscriptions_path = swarm_path / "subscriptions.db"
@@ -247,7 +247,7 @@ def swarm_list(project_root: str | None) -> None:
         click.echo("No event store found. Run 'remora swarm reconcile' first.")
         return
 
-    from remora.core.event_store import EventStore
+    from remora.core.store.event_store import EventStore
 
     async def _list() -> None:
         event_store = EventStore(event_store_path)
@@ -285,8 +285,8 @@ def swarm_emit(event_type: str, data: str | None, project_root: str | None) -> N
             raise click.ClickException("Data must be valid JSON")
 
     async def _emit() -> None:
-        from remora.core.event_store import EventStore
-        from remora.core.events import AgentMessageEvent, ContentChangedEvent
+        from remora.core.store.event_store import EventStore
+        from remora.core.events.events import AgentMessageEvent, ContentChangedEvent
 
         swarm_path = root / ".remora"
         event_store_path = swarm_path / "events" / "events.db"

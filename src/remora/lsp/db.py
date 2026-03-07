@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import ParamSpec, TypeVar
 
 import sqlite3
-from remora.core.discovery import CSTNode
+from remora.core.code.discovery import CSTNode
 
 P = ParamSpec("P")
 R = TypeVar("R")

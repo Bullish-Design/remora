@@ -13,7 +13,7 @@ from textwrap import dedent
 
 import pytest
 
-from remora.core.discovery import (
+from remora.core.code.discovery import (
     CSTNode,
     _parse_file,
     discover,

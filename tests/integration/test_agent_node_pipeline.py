@@ -6,16 +6,16 @@ from pathlib import Path
 
 import pytest
 
-from remora.core.agent_node import AgentNode
-from remora.core.event_store import EventStore
-from remora.core.events import (
+from remora.core.agents.agent_node import AgentNode
+from remora.core.store.event_store import EventStore
+from remora.core.events.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
     AgentStartEvent,
     NodeDiscoveredEvent,
     NodeRemovedEvent,
 )
-from remora.core.projections import NodeProjection
+from remora.core.code.projections import NodeProjection
 from remora.extensions import AgentExtension
 
 

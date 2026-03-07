@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from remora.core.discovery import CSTNode, compute_node_id, discover, parse_content
+from remora.core.code.discovery import CSTNode, compute_node_id, discover, parse_content
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 SAMPLE_PY = FIXTURE_DIR / "sample.py"

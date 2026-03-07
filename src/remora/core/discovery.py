@@ -1,3 +1,9 @@
-"""Compatibility wrapper for moved discovery module."""
+"""Compatibility alias for moved discovery module."""
 
-from remora.core.code.discovery import *  # noqa: F401,F403
+from __future__ import annotations
+
+import sys as _sys
+
+import remora.core.code.discovery as _target
+
+_sys.modules[__name__] = _target

@@ -99,8 +99,8 @@ def _run_server(
 
     log.debug("Server module loaded (handlers registered) in %.1fms", (time.monotonic() - t0) * 1000)
 
-    log.debug("Importing remora.lsp.runner ...")
-    from remora.lsp.runner import AgentRunner
+    log.debug("Importing remora.runner.agent_runner ...")
+    from remora.runner.agent_runner import AgentRunner
 
     log.debug("Runner module loaded in %.1fms", (time.monotonic() - t0) * 1000)
 
@@ -282,13 +282,13 @@ def _run_server(
 
                 await _pause_for_user_activity()
 
-                from remora.core.discovery import parse_content
+                from remora.core.code.discovery import parse_content
                 text = await asyncio.to_thread(fpath.read_text, encoding="utf-8", errors="replace")
                 uri = from_fs_path(str(fpath))
                 nodes = await asyncio.to_thread(parse_content, uri, text)
                 # Emit events to EventStore (batched per file for efficiency)
                 if server.event_store:
-                    from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
+                    from remora.core.events.events import NodeDiscoveredEvent, NodeRemovedEvent
 
                     old_agents = await server.event_store.list_nodes(file_path=uri)
                     old_ids = {a.node_id for a in old_agents}
@@ -390,6 +390,10 @@ def _run_server(
 
     log.info("Starting IO transport (waiting for client on stdin) ...")
     def _run_async_cleanup(coro) -> None:
+        if coro is None:
+            return
+        if not asyncio.iscoroutine(coro):
+            return
         try:
             running_loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -428,10 +432,10 @@ def main() -> None:
     from pathlib import Path
     
     async def _prepare():
-        from remora.core.event_bus import EventBus
-        from remora.core.event_store import EventStore
-        from remora.core.projections import NodeProjection
-        from remora.core.subscriptions import SubscriptionRegistry
+        from remora.core.events.event_bus import EventBus
+        from remora.core.store.event_store import EventStore
+        from remora.core.code.projections import NodeProjection
+        from remora.core.events.subscriptions import SubscriptionRegistry
 
         root = Path.cwd()
         swarm_path = root / ".remora"

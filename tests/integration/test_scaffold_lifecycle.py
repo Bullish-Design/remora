@@ -14,14 +14,14 @@ import asyncio
 import pytest
 from pathlib import Path
 
-from remora.core.agent_node import AgentNode, ToolSchema
-from remora.core.event_store import EventStore
-from remora.core.events import (
+from remora.core.agents.agent_node import AgentNode, ToolSchema
+from remora.core.store.event_store import EventStore
+from remora.core.events.events import (
     NodeDiscoveredEvent,
     ScaffoldRequestEvent,
 )
-from remora.core.projections import NodeProjection, _is_stub
-from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
+from remora.core.code.projections import NodeProjection, _is_stub
+from remora.core.events.subscriptions import SubscriptionPattern, SubscriptionRegistry
 
 pytestmark = pytest.mark.skip(reason="Scaffold projection disabled until AST-based detection lands")
 

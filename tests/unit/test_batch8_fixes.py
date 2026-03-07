@@ -14,8 +14,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from remora.core.config import Config
-from remora.core.event_bus import EventBus
-from remora.core.events import AgentStartEvent, AgentCompleteEvent, AgentErrorEvent
+from remora.core.events.event_bus import EventBus
+from remora.core.events.events import AgentStartEvent, AgentCompleteEvent, AgentErrorEvent
 from remora.ui.projector import UiStateProjector
 
 
@@ -87,8 +87,8 @@ class TestDuplicatePromptContext:
     passed as kernel messages (requires_context=False avoids duplication)."""
 
     def test_prompt_without_context_excludes_history(self):
-        from remora.core.execution import _agent_node_to_cst_node, _build_prompt
-        from remora.core.agent_node import AgentNode
+        from remora.core.agents.execution import _agent_node_to_cst_node, _build_prompt
+        from remora.core.agents.agent_node import AgentNode
         from remora.utils import PathResolver
 
         node = AgentNode(
@@ -116,8 +116,8 @@ class TestDuplicatePromptContext:
         assert "Recent Chat History" not in prompt
 
     def test_prompt_with_context_includes_history(self):
-        from remora.core.execution import _agent_node_to_cst_node, _build_prompt
-        from remora.core.agent_node import AgentNode
+        from remora.core.agents.execution import _agent_node_to_cst_node, _build_prompt
+        from remora.core.agents.agent_node import AgentNode
         from remora.utils import PathResolver
 
         node = AgentNode(
@@ -216,7 +216,7 @@ class TestDeduplicateIgnorePatterns:
 
     def test_walk_directory_uses_config_patterns(self):
         from remora.core.config import DEFAULT_IGNORE_PATTERNS
-        from remora.core.discovery import _walk_directory
+        from remora.core.code.discovery import _walk_directory
 
         # The function should accept ignore_patterns parameter
         # (After fix, it reads from config or accepts a parameter)
@@ -288,7 +288,7 @@ class TestEventBusErrorPolicy:
         bus.subscribe_all(bad_handler)
 
         # Should not raise
-        from remora.core.events import AgentStartEvent
+        from remora.core.events.events import AgentStartEvent
 
         await bus.emit(AgentStartEvent(graph_id="g", agent_id="a1", node_name="a1"))
 
@@ -302,7 +302,7 @@ class TestEventBusErrorPolicy:
 
         bus.subscribe_all(bad_handler)
 
-        from remora.core.events import AgentStartEvent
+        from remora.core.events.events import AgentStartEvent
 
         with pytest.raises(ValueError, match="boom"):
             await bus.emit(AgentStartEvent(graph_id="g", agent_id="a1", node_name="a1"))
@@ -338,7 +338,7 @@ class TestLLMClientConnectionPooling:
     """8.1 — SwarmExecutor should create the LLM client once in __init__ and reuse it."""
 
     def test_client_created_once_in_init(self):
-        from remora.core.swarm_executor import SwarmExecutor
+        from remora.core.agents.swarm_executor import SwarmExecutor
 
         config = Config()
         executor = SwarmExecutor(
@@ -355,7 +355,7 @@ class TestLLMClientConnectionPooling:
 
     def test_client_reused_across_calls(self):
         """The same client instance should be used on each _run_kernel call."""
-        from remora.core.swarm_executor import SwarmExecutor
+        from remora.core.agents.swarm_executor import SwarmExecutor
 
         config = Config()
         executor = SwarmExecutor(
@@ -379,7 +379,7 @@ class TestIncrementalWorkspaceSync:
 
     def test_sync_tracks_mtimes(self):
         """After fix: CairnWorkspaceService should have an _mtimes dict."""
-        from remora.core.cairn_bridge import CairnWorkspaceService
+        from remora.core.agents.cairn_bridge import CairnWorkspaceService
 
         config = Config()
         svc = CairnWorkspaceService(
@@ -400,7 +400,7 @@ class TestLightweightListNodes:
     def test_list_nodes_has_columns_param(self):
         """The list_nodes method should accept a columns keyword arg."""
         import inspect
-        from remora.core.event_store import EventStore
+        from remora.core.store.event_store import EventStore
 
         sig = inspect.signature(EventStore.list_nodes)
         assert "columns" in sig.parameters
@@ -454,7 +454,7 @@ class TestEnsureFileSyncedStub:
     @pytest.mark.asyncio
     async def test_syncs_existing_file(self, tmp_path):
         """ensure_file_synced should read from disk and write to stable workspace."""
-        from remora.core.cairn_bridge import CairnWorkspaceService
+        from remora.core.agents.cairn_bridge import CairnWorkspaceService
 
         config = Config()
         svc = CairnWorkspaceService(
@@ -482,7 +482,7 @@ class TestEnsureFileSyncedStub:
     @pytest.mark.asyncio
     async def test_returns_false_for_missing_file(self, tmp_path):
         """ensure_file_synced should return False when the file doesn't exist."""
-        from remora.core.cairn_bridge import CairnWorkspaceService
+        from remora.core.agents.cairn_bridge import CairnWorkspaceService
 
         config = Config()
         svc = CairnWorkspaceService(
@@ -576,8 +576,8 @@ class TestChatHistoryLimitConfigurable:
         assert config.chat_history_limit == 5  # sensible default
 
     def test_build_prompt_uses_config_limit(self):
-        from remora.core.execution import _agent_node_to_cst_node, _build_prompt
-        from remora.core.agent_node import AgentNode
+        from remora.core.agents.execution import _agent_node_to_cst_node, _build_prompt
+        from remora.core.agents.agent_node import AgentNode
         from remora.utils import PathResolver
 
         config = Config()
@@ -622,7 +622,7 @@ class TestCascadeCorrelationIDs:
 
     def test_run_from_event_store_generates_new_correlation_ids(self):
         """When correlation_id is missing from an event, the runner should generate one."""
-        from remora.lsp.runner import AgentRunner
+        from remora.runner.agent_runner import AgentRunner
 
         runner = AgentRunner.create_headless(event_store=MagicMock())
         # Mock event with no correlation_id

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pydantic import BaseModel
-from remora.core.events import _FrozenEvent, CursorFocusEvent, ContentChangedEvent, FileSavedEvent
+from remora.core.events.events import _FrozenEvent, CursorFocusEvent, ContentChangedEvent, FileSavedEvent
 from remora.companion.events import (
     CompanionContextExtracted, CompanionSearchCompleted, CompanionConnectionsFound,
     CompanionEditSummary, CompanionTaskInferred, CompanionClaimsChecked

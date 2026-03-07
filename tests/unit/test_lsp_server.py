@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from remora.core.agent_node import AgentNode, ToolSchema
+from remora.core.agents.agent_node import AgentNode, ToolSchema
 from tests.unit.conftest import make_node as _make_node
 
 
@@ -26,7 +26,7 @@ def test_server_imports_core_tool_schema():
     source = inspect.getsource(RemoraLanguageServer.discover_tools_for_agent)
     # The function should reference ToolSchema — check that the return annotation
     # or body uses the core ToolSchema (dataclass, not Pydantic)
-    from remora.core.agent_node import ToolSchema as CoreToolSchema
+    from remora.core.agents.agent_node import ToolSchema as CoreToolSchema
     from pydantic import BaseModel
 
     assert issubclass(CoreToolSchema, BaseModel), "Core ToolSchema should be a Pydantic BaseModel"

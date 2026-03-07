@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from remora.core.events import _FrozenEvent
+from remora.core.events.events import _FrozenEvent
 from remora.companion.events import CompanionSearchCompleted, CompanionConnectionsFound, CompanionConnection
 from remora.companion.handlers.base import CompanionHandlerBase
 from remora.companion.state import CompanionState

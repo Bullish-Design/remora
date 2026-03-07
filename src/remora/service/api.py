@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import Any, AsyncIterator, TYPE_CHECKING
 
 from remora.core.config import Config, load_config
-from remora.core.event_bus import EventBus
-from remora.core.event_store import EventStore
-from remora.core.projections import NodeProjection
-from remora.core.subscriptions import SubscriptionRegistry
-from remora.core.cairn_bridge import CairnWorkspaceService
+from remora.core.events.event_bus import EventBus
+from remora.core.store.event_store import EventStore
+from remora.core.code.projections import NodeProjection
+from remora.core.events.subscriptions import SubscriptionRegistry
+from remora.core.agents.cairn_bridge import CairnWorkspaceService
 from remora.models import ConfigSnapshot, InputResponse
 from remora.service.datastar import render_patch, render_shell
 from remora.service.handlers import (

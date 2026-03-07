@@ -1,3 +1,9 @@
-"""Compatibility wrapper for moved subscriptions module."""
+"""Compatibility alias for moved subscriptions module."""
 
-from remora.core.events.subscriptions import *  # noqa: F401,F403
+from __future__ import annotations
+
+import sys as _sys
+
+import remora.core.events.subscriptions as _target
+
+_sys.modules[__name__] = _target

@@ -15,7 +15,7 @@ import time
 import pytest
 from pydantic import BaseModel
 
-from remora.core.events import (
+from remora.core.events.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
     AgentMessageEvent,

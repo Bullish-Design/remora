@@ -20,12 +20,12 @@ class TestKernelFactoryExists:
     """create_kernel must be importable and callable."""
 
     def test_importable(self):
-        from remora.core.kernel_factory import create_kernel
+        from remora.core.agents.kernel_factory import create_kernel
 
         assert callable(create_kernel)
 
     def test_returns_agent_kernel(self):
-        from remora.core.kernel_factory import create_kernel
+        from remora.core.agents.kernel_factory import create_kernel
         from structured_agents.kernel import AgentKernel
 
         kernel = create_kernel(
@@ -36,7 +36,7 @@ class TestKernelFactoryExists:
         assert isinstance(kernel, AgentKernel)
 
     def test_accepts_tools(self):
-        from remora.core.kernel_factory import create_kernel
+        from remora.core.agents.kernel_factory import create_kernel
 
         mock_tool = MagicMock()
         kernel = create_kernel(
@@ -48,7 +48,7 @@ class TestKernelFactoryExists:
         assert kernel is not None
 
     def test_accepts_observer(self):
-        from remora.core.kernel_factory import create_kernel
+        from remora.core.agents.kernel_factory import create_kernel
 
         observer = MagicMock()
         kernel = create_kernel(
@@ -60,7 +60,7 @@ class TestKernelFactoryExists:
         assert kernel is not None
 
     def test_accepts_timeout(self):
-        from remora.core.kernel_factory import create_kernel
+        from remora.core.agents.kernel_factory import create_kernel
 
         kernel = create_kernel(
             model_name="test-model",
@@ -72,7 +72,7 @@ class TestKernelFactoryExists:
 
     def test_accepts_grammar_config(self):
         """Grammar config should be forwarded to build a ConstraintPipeline."""
-        from remora.core.kernel_factory import create_kernel
+        from remora.core.agents.kernel_factory import create_kernel
 
         # None grammar_config should be fine (no pipeline)
         kernel = create_kernel(
@@ -85,7 +85,7 @@ class TestKernelFactoryExists:
 
     def test_accepts_existing_client(self):
         """If a pre-built client is passed, it should be reused (no new client)."""
-        from remora.core.kernel_factory import create_kernel
+        from remora.core.agents.kernel_factory import create_kernel
 
         mock_client = MagicMock()
         kernel = create_kernel(

@@ -1,3 +1,9 @@
-"""Compatibility wrapper for moved agent_node module."""
+"""Compatibility alias for moved agent_node module."""
 
-from remora.core.agents.agent_node import *  # noqa: F401,F403
+from __future__ import annotations
+
+import sys as _sys
+
+import remora.core.agents.agent_node as _target
+
+_sys.modules[__name__] = _target

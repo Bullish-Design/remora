@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from remora.core.discovery import CSTNode, discover
+from remora.core.code.discovery import CSTNode, discover
 
 
 pytestmark = pytest.mark.integration

@@ -1,3 +1,9 @@
-"""Compatibility wrapper for moved cairn_externals module."""
+"""Compatibility alias for moved cairn_externals module."""
 
-from remora.core.agents.cairn_externals import *  # noqa: F401,F403
+from __future__ import annotations
+
+import sys as _sys
+
+import remora.core.agents.cairn_externals as _target
+
+_sys.modules[__name__] = _target

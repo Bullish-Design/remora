@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from remora.core.events import _FrozenEvent, ContentChangedEvent
+from remora.core.events.events import _FrozenEvent, ContentChangedEvent
 from remora.companion.events import CompanionEditSummary
 from remora.companion.handlers.base import CompanionHandlerBase
 from remora.companion.state import CompanionState

@@ -20,7 +20,7 @@ class TestChatConfigFromConfig:
     """ChatConfig.from_config() should mirror Config's LLM fields."""
 
     def test_from_config_copies_model_fields(self) -> None:
-        from remora.core.chat import ChatConfig
+        from remora.core.agents.chat import ChatConfig
 
         cfg = Config(
             model_base_url="http://my-server:9000/v1",
@@ -33,7 +33,7 @@ class TestChatConfigFromConfig:
         assert chat_cfg.model_api_key == "sk-secret"
 
     def test_from_config_preserves_workspace_and_prompt(self) -> None:
-        from remora.core.chat import ChatConfig
+        from remora.core.agents.chat import ChatConfig
 
         cfg = Config()
         chat_cfg = ChatConfig.from_config(cfg, workspace_path="/ws", system_prompt="sys")
@@ -42,7 +42,7 @@ class TestChatConfigFromConfig:
 
     def test_from_config_uses_config_defaults(self) -> None:
         """When Config uses defaults, ChatConfig should too."""
-        from remora.core.chat import ChatConfig
+        from remora.core.agents.chat import ChatConfig
 
         cfg = Config()
         chat_cfg = ChatConfig.from_config(cfg, workspace_path="/ws", system_prompt="sys")
@@ -52,7 +52,7 @@ class TestChatConfigFromConfig:
 
     def test_chatconfig_defaults_match_config_defaults(self) -> None:
         """ChatConfig bare defaults should now align with Config bare defaults."""
-        from remora.core.chat import ChatConfig
+        from remora.core.agents.chat import ChatConfig
 
         cfg = Config()
         chat_cfg = ChatConfig(workspace_path="/ws", system_prompt="sys")
@@ -110,7 +110,7 @@ class TestLspMainUsesConfig:
         monkeypatch.setattr(lsp_main_mod, "_get_server", lambda: fake_server)
 
         # Monkeypatch AgentRunner in the runner module
-        import remora.lsp.runner as runner_mod
+        import remora.runner.agent_runner as runner_mod
 
         monkeypatch.setattr(runner_mod, "AgentRunner", FakeRunner)
 
@@ -150,7 +150,7 @@ class TestNoHardcodedLLMValues:
 
     def test_chat_config_no_hardcoded_model(self) -> None:
         import inspect
-        from remora.core.chat import ChatConfig
+        from remora.core.agents.chat import ChatConfig
 
         source = inspect.getsource(ChatConfig)
         assert "Qwen/Qwen3-4B-Instruct-2507-FP8" not in source

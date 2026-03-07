@@ -1,3 +1,9 @@
-"""Compatibility wrapper for moved projections module."""
+"""Compatibility alias for moved projections module."""
 
-from remora.core.code.projections import *  # noqa: F401,F403
+from __future__ import annotations
+
+import sys as _sys
+
+import remora.core.code.projections as _target
+
+_sys.modules[__name__] = _target

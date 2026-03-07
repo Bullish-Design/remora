@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from remora.core.agent_node import AgentNode
-from remora.core.event_store import EventStore
-from remora.core.events import (
+from remora.core.agents.agent_node import AgentNode
+from remora.core.store.event_store import EventStore
+from remora.core.events.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
     AgentStartEvent,
@@ -18,7 +18,7 @@ from remora.core.events import (
     NodeRemovedEvent,
     ScaffoldRequestEvent,
 )
-from remora.core.projections import NodeProjection
+from remora.core.code.projections import NodeProjection
 from remora.extensions import AgentExtension
 
 
@@ -424,7 +424,7 @@ class TestScaffoldFollowUpEvents:
         is a wildcard (no event_types filter). ScaffoldRequestEvent has to_agent=node_id,
         so the subscription should match.
         """
-        from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
+        from remora.core.events.subscriptions import SubscriptionPattern, SubscriptionRegistry
 
         registry = SubscriptionRegistry(connection=store._conn, lock=store._lock)
 

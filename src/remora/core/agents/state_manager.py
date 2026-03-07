@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from cairn import AgentStateManager as CairnStateManager
 
 if TYPE_CHECKING:
-    from remora.core.workspace import AgentWorkspace
+    from remora.core.agents.workspace import AgentWorkspace
 
 logger = logging.getLogger(__name__)
 

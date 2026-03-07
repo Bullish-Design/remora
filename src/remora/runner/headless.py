@@ -31,6 +31,16 @@ class _HeadlessServer:
         self.db = _HeadlessDB()
         self.proposals: dict[str, Any] = {}
         self.subscriptions = None
+        self.workspace = None
 
     def generate_correlation_id(self) -> str:
         return uuid.uuid4().hex[:12]
+
+    async def emit_event(self, event: Any) -> Any:
+        return event
+
+    async def refresh_code_lenses(self) -> None:
+        return None
+
+    async def publish_diagnostics(self, uri: str, proposals: list[Any]) -> None:
+        return None

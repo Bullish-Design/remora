@@ -16,12 +16,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from remora.core.agent_node import AgentNode
-from remora.core.event_store import EventStore
-from remora.core.events import ManualTriggerEvent
-from remora.core.projections import NodeProjection
-from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
-from remora.lsp.runner import AgentRunner
+from remora.core.agents.agent_node import AgentNode
+from remora.core.store.event_store import EventStore
+from remora.core.events.events import ManualTriggerEvent
+from remora.core.code.projections import NodeProjection
+from remora.core.events.subscriptions import SubscriptionPattern, SubscriptionRegistry
+from remora.runner.agent_runner import AgentRunner
 
 
 def _make_agent_node(node_id: str = "agent_a", **overrides) -> AgentNode:
@@ -167,7 +167,7 @@ async def test_concurrent_trigger_handling(runner_components):
     # Enqueue 5 triggers directly (bypass cooldown)
     for i in range(5):
         await runner.queue.put(
-            __import__("remora.lsp.runner", fromlist=["Trigger"]).Trigger(
+            __import__("remora.runner.agent_runner", fromlist=["Trigger"]).Trigger(
                 agent_id=f"agent_{i}",
                 correlation_id=f"corr_{i}",
             )

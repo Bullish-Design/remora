@@ -11,9 +11,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from sse_starlette.sse import EventSourceResponse
 
-from remora.core.chat import ChatSession, ChatConfig, Message
-from remora.core.event_bus import EventBus
-from remora.core.events import ToolCallEvent, ToolResultEvent
+from remora.core.agents.chat import ChatSession, ChatConfig, Message
+from remora.core.events.event_bus import EventBus
+from remora.core.events.events import ToolCallEvent, ToolResultEvent
 
 import logging
 

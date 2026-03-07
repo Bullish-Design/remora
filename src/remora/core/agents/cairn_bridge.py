@@ -16,9 +16,9 @@ from cairn.runtime import workspace_manager as cairn_workspace_manager
 from cairn.runtime.workspace_manager import open_workspace as cairn_open_workspace
 
 from remora.core.config import Config, DEFAULT_IGNORE_PATTERNS
-from remora.core.cairn_externals import CairnExternals
+from remora.core.agents.cairn_externals import CairnExternals
 from remora.core.errors import WorkspaceError
-from remora.core.workspace import AgentWorkspace
+from remora.core.agents.workspace import AgentWorkspace
 from remora.utils import PathLike, PathResolver, normalize_path
 
 logger = logging.getLogger(__name__)

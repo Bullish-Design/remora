@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from remora.utils import PathLike, normalize_path
 
 if TYPE_CHECKING:
-    from remora.core.events import CoreEvent
+    from remora.core.events.events import CoreEvent
 
 logger = logging.getLogger(__name__)
 

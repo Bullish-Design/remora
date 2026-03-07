@@ -20,23 +20,9 @@ from tree_sitter import Language, Parser, QueryCursor, Query
 from pydantic import BaseModel, ConfigDict
 
 from remora.utils import PathLike, normalize_path
+from remora.utils.languages import EXTENSION_TO_LANGUAGE as LANGUAGE_EXTENSIONS
 
 logger = logging.getLogger(__name__)
-
-# Language extension mapping
-LANGUAGE_EXTENSIONS: dict[str, str] = {
-    ".py": "python",
-    ".md": "markdown",
-    ".toml": "toml",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".json": "json",
-    ".js": "javascript",
-    ".ts": "typescript",
-    ".go": "go",
-    ".rs": "rust",
-}
-
 
 # ============================================================================
 # Data Types
@@ -100,7 +86,7 @@ def _get_query_dir() -> Path:
 
     This correctly resolves the path regardless of installation method.
     """
-    return Path(importlib.resources.files("remora")) / "queries"  # type: ignore[arg-type]
+    return Path(importlib.resources.files("remora")) / "ts_queries"  # type: ignore[arg-type]
 
 
 def _load_queries(language: str, query_pack: str = "remora_core") -> str | None:
@@ -450,7 +436,7 @@ def discover(
     """Scan source paths with tree-sitter and return discovered nodes.
 
     Uses thread pool for parallel file parsing. Language is auto-detected
-    from file extension. Custom .scm queries are loaded from queries/ dir.
+    from file extension. Custom .scm queries are loaded from ts_queries/ dir.
 
     Args:
         paths: Files or directories to scan

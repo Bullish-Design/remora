@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from remora.core.chat import (
+from remora.core.agents.chat import (
     AgentResponse,
     ChatConfig,
     ChatSession,
@@ -21,7 +21,7 @@ from remora.core.chat import (
     build_chat_tools,
 )
 from remora.core.config import Config
-from remora.core.event_bus import EventBus
+from remora.core.events.event_bus import EventBus
 
 
 # ── Message ────────────────────────────────────────────────────────────────

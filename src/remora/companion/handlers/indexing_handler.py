@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from remora.core.events import _FrozenEvent, FileSavedEvent
+from remora.core.events.events import _FrozenEvent, FileSavedEvent
 from remora.companion.events import CompanionIndexUpdated
 from remora.companion.handlers.base import CompanionHandlerBase
 from remora.companion.state import CompanionState

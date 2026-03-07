@@ -298,7 +298,7 @@ class TestSwarmStart:
             patch("remora.core.event_store.EventStore", return_value=mock_store),
             patch("remora.core.event_bus.EventBus", return_value=mock_bus),
             patch("remora.core.reconciler.reconcile_on_startup", mock_reconcile),
-            patch("remora.lsp.runner.AgentRunner.create_headless", return_value=mock_runner),
+            patch("remora.runner.agent_runner.AgentRunner.create_headless", return_value=mock_runner),
             patch("asyncio.Event", return_value=original_event),
         ):
             result = _invoke(

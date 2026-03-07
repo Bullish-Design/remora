@@ -7,7 +7,7 @@ from typing import Any, AsyncIterator
 
 import pytest
 
-from remora.core.cairn_bridge import CairnWorkspaceService, SyncMode
+from remora.core.agents.cairn_bridge import CairnWorkspaceService, SyncMode
 from remora.core.config import Config
 from remora.utils import PathResolver
 from tests.integration.helpers import agentfs_available_sync

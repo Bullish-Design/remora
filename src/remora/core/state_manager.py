@@ -1,3 +1,9 @@
-"""Compatibility wrapper for moved state_manager module."""
+"""Compatibility alias for moved state_manager module."""
 
-from remora.core.agents.state_manager import *  # noqa: F401,F403
+from __future__ import annotations
+
+import sys as _sys
+
+import remora.core.agents.state_manager as _target
+
+_sys.modules[__name__] = _target

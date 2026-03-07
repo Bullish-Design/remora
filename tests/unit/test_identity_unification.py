@@ -17,12 +17,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from remora.core.agent_node import AgentNode
+from remora.core.agents.agent_node import AgentNode
 from remora.core.config import Config
-from remora.core.event_store import EventStore
-from remora.core.events import NodeDiscoveredEvent, NodeRemovedEvent
-from remora.core.projections import NodeProjection
-from remora.core.subscriptions import SubscriptionRegistry
+from remora.core.store.event_store import EventStore
+from remora.core.events.events import NodeDiscoveredEvent, NodeRemovedEvent
+from remora.core.code.projections import NodeProjection
+from remora.core.events.subscriptions import SubscriptionRegistry
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ class TestReconcilerUsesEventStore:
     @pytest.mark.asyncio
     async def test_reconcile_creates_nodes_in_event_store(self, tmp_path: Path):
         """New discovered nodes should appear in EventStore.nodes table."""
-        from remora.core.reconciler import reconcile_on_startup
+        from remora.core.code.reconciler import reconcile_on_startup
 
         project_root = tmp_path / "project"
         (project_root / "src").mkdir(parents=True)
@@ -127,7 +127,7 @@ class TestReconcilerUsesEventStore:
     @pytest.mark.asyncio
     async def test_reconcile_does_not_create_jsonl_files(self, tmp_path: Path):
         """Reconciler should NOT create agent state JSONL files."""
-        from remora.core.reconciler import reconcile_on_startup
+        from remora.core.code.reconciler import reconcile_on_startup
 
         project_root = tmp_path / "project"
         (project_root / "src").mkdir(parents=True)
@@ -166,7 +166,7 @@ class TestReconcilerUsesEventStore:
     @pytest.mark.asyncio
     async def test_reconcile_orphans_removed_nodes(self, tmp_path: Path):
         """Nodes that disappear from source should be removed from EventStore."""
-        from remora.core.reconciler import reconcile_on_startup
+        from remora.core.code.reconciler import reconcile_on_startup
 
         project_root = tmp_path / "project"
         src_dir = project_root / "src"
@@ -226,7 +226,7 @@ class TestReconcilerUsesEventStore:
     async def test_reconcile_updates_changed_nodes(self, tmp_path: Path):
         """Nodes that change should be re-upserted in EventStore."""
         import asyncio
-        from remora.core.reconciler import reconcile_on_startup
+        from remora.core.code.reconciler import reconcile_on_startup
 
         project_root = tmp_path / "project"
         src_dir = project_root / "src"
@@ -286,7 +286,7 @@ class TestReconcilerUsesEventStore:
     async def test_reconcile_signature_no_swarm_state_param(self):
         """reconcile_on_startup should not require a swarm_state parameter."""
         import inspect
-        from remora.core.reconciler import reconcile_on_startup
+        from remora.core.code.reconciler import reconcile_on_startup
 
         sig = inspect.signature(reconcile_on_startup)
         param_names = list(sig.parameters.keys())
@@ -303,7 +303,7 @@ class TestSwarmExecutorUsesAgentNode:
 
     def test_resolve_bundle_path_with_agent_node(self, tmp_path):
         """_resolve_bundle_path should work with AgentNode."""
-        from remora.core.execution import _resolve_bundle_path
+        from remora.core.agents.execution import _resolve_bundle_path
 
         config = _make_config(tmp_path, bundle_mapping={"function": "code"})
         node = _make_agent_node(node_type="function")
@@ -312,7 +312,7 @@ class TestSwarmExecutorUsesAgentNode:
 
     def test_build_prompt_with_agent_node(self, tmp_path):
         """_build_prompt should work with AgentNode."""
-        from remora.core.execution import _build_prompt, _agent_node_to_cst_node
+        from remora.core.agents.execution import _build_prompt, _agent_node_to_cst_node
         from remora.utils import PathResolver
 
         config = _make_config(tmp_path)
@@ -328,7 +328,7 @@ class TestSwarmExecutorUsesAgentNode:
     def test_executor_constructor_no_swarm_state_param(self, mock_build_client, tmp_path):
         """SwarmExecutor should not require a swarm_state parameter."""
         import inspect
-        from remora.core.swarm_executor import SwarmExecutor
+        from remora.core.agents.swarm_executor import SwarmExecutor
 
         sig = inspect.signature(SwarmExecutor.__init__)
         param_names = list(sig.parameters.keys())
@@ -338,7 +338,7 @@ class TestSwarmExecutorUsesAgentNode:
     def test_run_agent_accepts_agent_node(self, mock_build_client, tmp_path):
         """run_agent type annotation should accept AgentNode."""
         import inspect
-        from remora.core.swarm_executor import SwarmExecutor
+        from remora.core.agents.swarm_executor import SwarmExecutor
 
         sig = inspect.signature(SwarmExecutor.run_agent)
         # First param after self should accept AgentNode
@@ -489,7 +489,7 @@ class TestAgentNodeSufficiency:
 
     def test_agent_node_to_cst_node(self):
         """Can create a CSTNode from AgentNode fields for data_provider."""
-        from remora.core.discovery import CSTNode
+        from remora.core.code.discovery import CSTNode
 
         node = _make_agent_node()
         cst = CSTNode(

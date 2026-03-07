@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from remora.core.agent_context import AgentContext
+from remora.core.agents.agent_context import AgentContext
 from remora.core.tools.spawn_child import SpawnChildTool
 
 

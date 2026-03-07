@@ -23,12 +23,12 @@ class TestAgentContextModel:
     """AgentContext must be a typed Pydantic model."""
 
     def test_is_pydantic(self):
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
 
         assert issubclass(AgentContext, BaseModel), "AgentContext must be a Pydantic BaseModel"
 
     def test_required_fields(self):
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
 
         fields = AgentContext.model_fields
         assert "agent_id" in fields
@@ -41,13 +41,13 @@ class TestAgentContextModel:
 
     def test_cairn_externals_field(self):
         """AgentContext should carry Cairn file-system externals."""
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
 
         fields = AgentContext.model_fields
         assert "cairn_externals" in fields
 
     def test_construct_with_all_fields(self):
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
 
         emit = AsyncMock()
         register = AsyncMock()
@@ -71,7 +71,7 @@ class TestAgentContextModel:
 
     def test_correlation_id_optional(self):
         """correlation_id should default to None."""
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
 
         ctx = AgentContext(
             agent_id="a",
@@ -85,7 +85,7 @@ class TestAgentContextModel:
 
     def test_cairn_externals_default_empty(self):
         """cairn_externals should default to empty dict."""
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
 
         ctx = AgentContext(
             agent_id="a",
@@ -102,7 +102,7 @@ class TestAgentContextAsExternals:
     """as_externals() must return flat dict for backward compat."""
 
     def test_as_externals_returns_dict(self):
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
 
         emit = AsyncMock()
         ctx = AgentContext(
@@ -128,7 +128,7 @@ class TestAgentContextAsExternals:
         assert "write_file" in ext
 
     def test_as_externals_includes_correlation_id(self):
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
 
         ctx = AgentContext(
             agent_id="a",
@@ -147,7 +147,7 @@ class TestSwarmToolsAcceptContext:
     """Swarm tools must accept AgentContext."""
 
     def test_build_swarm_tools_with_context(self):
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
         from remora.core.tools.swarm import build_swarm_tools
 
         ctx = AgentContext(
@@ -162,7 +162,7 @@ class TestSwarmToolsAcceptContext:
         assert len(tools) == 5
 
     def test_send_message_tool_uses_context(self):
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
         from remora.core.tools.swarm import SendMessageTool
 
         ctx = AgentContext(
@@ -177,7 +177,7 @@ class TestSwarmToolsAcceptContext:
         assert tool._context.agent_id == "sender"
 
     async def test_send_message_executes(self):
-        from remora.core.agent_context import AgentContext
+        from remora.core.agents.agent_context import AgentContext
         from remora.core.tools.swarm import SendMessageTool
 
         emit = AsyncMock()

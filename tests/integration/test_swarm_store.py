@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
-from remora.core.events import AgentMessageEvent, ContentChangedEvent, FileSavedEvent
+from remora.core.events.subscriptions import SubscriptionPattern, SubscriptionRegistry
+from remora.core.events.events import AgentMessageEvent, ContentChangedEvent, FileSavedEvent
 
 
 @pytest.mark.asyncio

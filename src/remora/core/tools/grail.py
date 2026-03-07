@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable, Mapping
 import grail
 from structured_agents.types import ToolCall, ToolSchema, ToolResult
 
-from remora.core.agent_context import AgentContext
+from remora.core.agents.agent_context import AgentContext
 from remora.core.tools.swarm import SwarmTool, build_swarm_tools
 
 logger = logging.getLogger(__name__)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from remora.core.events import _FrozenEvent, CursorFocusEvent, ContentChangedEvent, FileSavedEvent
+from remora.core.events.events import _FrozenEvent, CursorFocusEvent, ContentChangedEvent, FileSavedEvent
 
 class CompanionState:
     """Read-only projection of companion event stream.

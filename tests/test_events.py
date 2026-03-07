@@ -1,8 +1,8 @@
 import pytest
 
 def test_node_discovered_event_from_cst_node():
-    from remora.core.discovery import CSTNode, compute_node_id, compute_source_hash
-    from remora.core.events import NodeDiscoveredEvent
+    from remora.core.code.discovery import CSTNode, compute_node_id, compute_source_hash
+    from remora.core.events.events import NodeDiscoveredEvent
 
     node = CSTNode(
         node_id=compute_node_id("test.py", "function", "test.foo"),

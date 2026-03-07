@@ -17,8 +17,8 @@ from typing import Any, Callable, Coroutine
 
 from structured_agents.types import ToolCall, ToolResult, ToolSchema
 
-from remora.core.agent_node import AgentNode
-from remora.core.event_store import EventStore
+from remora.core.agents.agent_node import AgentNode
+from remora.core.store.event_store import EventStore
 
 logger = logging.getLogger(__name__)
 

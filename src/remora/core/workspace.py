@@ -1,3 +1,9 @@
-"""Compatibility wrapper for moved workspace module."""
+"""Compatibility alias for moved workspace module."""
 
-from remora.core.agents.workspace import *  # noqa: F401,F403
+from __future__ import annotations
+
+import sys as _sys
+
+import remora.core.agents.workspace as _target
+
+_sys.modules[__name__] = _target

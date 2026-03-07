@@ -7,7 +7,7 @@ import sqlite3
 
 import pytest
 
-from remora.core.agent_node import AgentNode, ToolSchema
+from remora.core.agents.agent_node import AgentNode, ToolSchema
 from tests.unit.conftest import make_node
 
 
@@ -66,7 +66,7 @@ class TestAgentNodeSerialization:
         assert row["mounted_workspaces"] == "[]"
 
     def test_to_row_with_json_fields(self):
-        from remora.core.subscriptions import SubscriptionPattern
+        from remora.core.events.subscriptions import SubscriptionPattern
 
         tool = ToolSchema(
             name="run_test",
@@ -88,7 +88,7 @@ class TestAgentNodeSerialization:
         assert tools_data[0]["name"] == "run_test"
 
     def test_from_row_round_trip(self):
-        from remora.core.subscriptions import SubscriptionPattern
+        from remora.core.events.subscriptions import SubscriptionPattern
 
         tool = ToolSchema(
             name="run_test",

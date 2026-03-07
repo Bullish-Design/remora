@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from remora.core.config import Config
-from remora.core.event_bus import EventBus
-from remora.core.events import HumanInputResponseEvent
+from remora.core.events.event_bus import EventBus
+from remora.core.events.events import HumanInputResponseEvent
 from remora.models import ConfigSnapshot, InputResponse
 from remora.service.handlers import (
     ServiceDeps,

@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from remora.core.events import (
+from remora.core.events.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
     AgentMessageEvent,
@@ -29,7 +29,7 @@ from remora.core.events import (
     NodeRemovedEvent,
     ScaffoldRequestEvent,
 )
-from remora.core.subscriptions import SubscriptionPattern
+from remora.core.events.subscriptions import SubscriptionPattern
 
 
 # ---------------------------------------------------------------------------
@@ -299,7 +299,7 @@ def test_tags_filter_matches_when_overlapping(tags, ts):
 @settings(max_examples=10, deadline=None)
 def test_event_store_replay_preserves_order(events, tmp_path_factory):
     """Events appended to EventStore are replayed in insertion order."""
-    from remora.core.event_store import EventStore
+    from remora.core.store.event_store import EventStore
 
     tmp_path = tmp_path_factory.mktemp("eventstore")
 
@@ -340,7 +340,7 @@ def test_event_store_replay_preserves_order(events, tmp_path_factory):
 @settings(max_examples=10, deadline=None)
 def test_event_store_delete_removes_all(n_events, tmp_path_factory):
     """Deleting a graph removes all its events."""
-    from remora.core.event_store import EventStore
+    from remora.core.store.event_store import EventStore
 
     tmp_path = tmp_path_factory.mktemp("eventstore")
 
@@ -378,7 +378,7 @@ def test_event_store_delete_removes_all(n_events, tmp_path_factory):
 @settings(max_examples=10, deadline=None)
 def test_event_store_graph_isolation(graph_ids, tmp_path_factory):
     """Events in different graphs are isolated from each other."""
-    from remora.core.event_store import EventStore
+    from remora.core.store.event_store import EventStore
 
     tmp_path = tmp_path_factory.mktemp("eventstore")
 

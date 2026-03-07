@@ -10,7 +10,7 @@ from typing import Any
 
 from structured_agents.events import Event as StructuredEvent
 
-from remora.core.events import (
+from remora.core.events.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
     AgentStartEvent,

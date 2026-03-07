@@ -12,7 +12,7 @@ import sqlite3
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from remora.core.events import (
+from remora.core.events.events import (
     AgentCompleteEvent,
     AgentErrorEvent,
     AgentStartEvent,

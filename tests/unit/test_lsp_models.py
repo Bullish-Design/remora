@@ -1,7 +1,7 @@
 # tests/unit/test_lsp_models.py
 from __future__ import annotations
 
-from remora.core.agent_node import AgentNode, ToolSchema
+from remora.core.agents.agent_node import AgentNode, ToolSchema
 from remora.lsp.models import (
     LspHumanChatEvent,
     RewriteProposal,

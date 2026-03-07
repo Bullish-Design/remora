@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from remora.core.agent_node import AgentNode
-from remora.core.event_store import EventStore
-from remora.core.projections import NodeProjection
+from remora.core.agents.agent_node import AgentNode
+from remora.core.store.event_store import EventStore
+from remora.core.code.projections import NodeProjection
 
 
 def _make_agent_node(**overrides: Any) -> AgentNode:
@@ -76,7 +76,7 @@ def mock_server(event_store: EventStore) -> MagicMock:
 @pytest.fixture
 def runner(mock_server: MagicMock):
     """Create an AgentRunner with the mock server."""
-    from remora.lsp.runner import AgentRunner
+    from remora.runner.agent_runner import AgentRunner
 
     return AgentRunner(mock_server)
 
@@ -94,7 +94,7 @@ class TestDispatchCommand:
             "payload": '{"tool_name": "test_tool", "params": {}}',
         }
 
-        with patch("remora.lsp.runner.AgentRunner.execute_extension_tool", new_callable=AsyncMock) as mock_ext:
+        with patch("remora.runner.agent_runner.AgentRunner.execute_extension_tool", new_callable=AsyncMock) as mock_ext:
             await runner._dispatch_command(cmd)
 
             mock_ext.assert_called_once()
@@ -113,14 +113,14 @@ class TestExecuteTurn:
     @pytest.mark.asyncio
     async def test_sets_status_via_event_store(self, runner, event_store):
         """execute_turn should use event_store.set_node_status, not db.set_status."""
-        from remora.core.execution import ExecutionResult
-        from remora.lsp.runner import Trigger
+        from remora.core.agents.execution import ExecutionResult
+        from remora.runner.agent_runner import Trigger
 
         trigger = Trigger(agent_id="rm_abc12", correlation_id="corr_1")
 
         with (
             patch(
-                "remora.lsp.runner.execute_agent_turn",
+                "remora.runner.agent_runner.execute_agent_turn",
                 new_callable=AsyncMock,
                 return_value=ExecutionResult(response_text="ok", kernel_events=[]),
             ),
@@ -135,14 +135,14 @@ class TestExecuteTurn:
     @pytest.mark.asyncio
     async def test_gets_node_from_event_store(self, runner, mock_server, event_store):
         """execute_turn should get node from EventStore, not RemoraDB."""
-        from remora.core.execution import ExecutionResult
-        from remora.lsp.runner import Trigger
+        from remora.core.agents.execution import ExecutionResult
+        from remora.runner.agent_runner import Trigger
 
         trigger = Trigger(agent_id="rm_abc12", correlation_id="corr_1")
 
         with (
             patch(
-                "remora.lsp.runner.execute_agent_turn",
+                "remora.runner.agent_runner.execute_agent_turn",
                 new_callable=AsyncMock,
                 return_value=ExecutionResult(response_text="ok", kernel_events=[]),
             ),
@@ -155,7 +155,7 @@ class TestExecuteTurn:
     @pytest.mark.asyncio
     async def test_execute_agent_turn_timeout_emits_error(self, runner, event_store):
         """execute_turn should surface a timeout as an agent error and recover to idle."""
-        from remora.lsp.runner import Trigger
+        from remora.runner.agent_runner import Trigger
 
         trigger = Trigger(agent_id="rm_abc12", correlation_id="corr_timeout")
 
@@ -163,8 +163,8 @@ class TestExecuteTurn:
             await asyncio.sleep(0.05)
 
         with (
-            patch("remora.lsp.runner.EXECUTE_AGENT_TURN_TIMEOUT_SECONDS", 0.01),
-            patch("remora.lsp.runner.execute_agent_turn", new=AsyncMock(side_effect=_slow_execute)),
+            patch("remora.runner.agent_runner.EXECUTE_AGENT_TURN_TIMEOUT_SECONDS", 0.01),
+            patch("remora.runner.agent_runner.execute_agent_turn", new=AsyncMock(side_effect=_slow_execute)),
             patch.object(runner, "emit_error", new_callable=AsyncMock) as mock_emit_error,
         ):
             await runner.execute_turn(trigger)
@@ -199,7 +199,7 @@ class TestApplyExtensions:
 
         agent = _make_agent_node()
 
-        with patch("remora.lsp.runner.load_extensions", return_value=[TestExt]):
+        with patch("remora.runner.agent_runner.load_extensions", return_value=[TestExt]):
             result = runner.apply_extensions(agent)
 
         assert result.custom_system_prompt == "You are a test agent."
@@ -209,7 +209,7 @@ class TestApplyExtensions:
         """apply_extensions with no matches should return agent unchanged."""
         agent = _make_agent_node()
 
-        with patch("remora.lsp.runner.load_extensions", return_value=[]):
+        with patch("remora.runner.agent_runner.load_extensions", return_value=[]):
             result = runner.apply_extensions(agent)
 
         assert result.custom_system_prompt == ""

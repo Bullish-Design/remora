@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from lsprotocol import types as lsp
 
-from remora.core.events import CursorFocusEvent
+from remora.core.events.events import CursorFocusEvent
 
 
 # ============================================================================
@@ -216,8 +216,8 @@ class TestDoReparse:
     @pytest.mark.asyncio
     async def test_do_reparse_updates_nodes(self, tmp_path: Path):
         """_do_reparse should parse and emit NodeDiscoveredEvents."""
-        from remora.core.event_store import EventStore
-        from remora.core.projections import NodeProjection
+        from remora.core.store.event_store import EventStore
+        from remora.core.code.projections import NodeProjection
         from remora.lsp.server import RemoraLanguageServer
         srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
         srv._reparse_timers = {}
@@ -248,9 +248,9 @@ class TestDoReparse:
     @pytest.mark.asyncio
     async def test_do_reparse_removes_orphans(self, tmp_path: Path):
         """_do_reparse should emit NodeRemovedEvent for nodes no longer in source."""
-        from remora.core.event_store import EventStore
-        from remora.core.events import NodeDiscoveredEvent
-        from remora.core.projections import NodeProjection
+        from remora.core.store.event_store import EventStore
+        from remora.core.events.events import NodeDiscoveredEvent
+        from remora.core.code.projections import NodeProjection
         from remora.lsp.server import RemoraLanguageServer
         srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
         srv._reparse_timers = {}
@@ -284,8 +284,8 @@ class TestDoReparse:
     @pytest.mark.asyncio
     async def test_do_reparse_does_not_emit_content_changed(self, tmp_path: Path):
         """_do_reparse must not emit ContentChangedEvent or FileSavedEvent."""
-        from remora.core.event_store import EventStore
-        from remora.core.projections import NodeProjection
+        from remora.core.store.event_store import EventStore
+        from remora.core.code.projections import NodeProjection
         from remora.lsp.server import RemoraLanguageServer
         srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
         srv._reparse_timers = {}
@@ -370,8 +370,8 @@ class TestDoCursorUpdate:
     @pytest.mark.asyncio
     async def test_do_cursor_update_writes_db_and_emits_event(self, tmp_path: Path):
         """_do_cursor_update should write to DB and emit CursorFocusEvent."""
-        from remora.core.event_store import EventStore
-        from remora.core.projections import NodeProjection
+        from remora.core.store.event_store import EventStore
+        from remora.core.code.projections import NodeProjection
         from remora.lsp.server import RemoraLanguageServer
 
         srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
@@ -402,8 +402,8 @@ class TestDoCursorUpdate:
     @pytest.mark.asyncio
     async def test_do_cursor_update_with_null_agent_id(self, tmp_path: Path):
         """CursorFocusEvent should work with agent_id=None (cursor not on an agent)."""
-        from remora.core.event_store import EventStore
-        from remora.core.projections import NodeProjection
+        from remora.core.store.event_store import EventStore
+        from remora.core.code.projections import NodeProjection
         from remora.lsp.server import RemoraLanguageServer
 
         srv = RemoraLanguageServer.__new__(RemoraLanguageServer)

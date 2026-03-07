@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from remora.core.state_manager import (
+from remora.core.agents.state_manager import (
     AgentExecutionMetrics,
     AgentMemory,
     AgentTurnState,
@@ -260,7 +260,7 @@ class TestRemoraStateManager:
             "remora.core.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
-            from remora.core.state_manager import RemoraStateManager
+            from remora.core.agents.state_manager import RemoraStateManager
 
             manager = RemoraStateManager(mock_workspace, "agent-1")
             state = await manager.get_turn_state()
@@ -277,7 +277,7 @@ class TestRemoraStateManager:
             "remora.core.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
-            from remora.core.state_manager import RemoraStateManager
+            from remora.core.agents.state_manager import RemoraStateManager
 
             manager = RemoraStateManager(mock_workspace, "agent-1")
             state = await manager.get_turn_state()
@@ -290,7 +290,7 @@ class TestRemoraStateManager:
             "remora.core.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
-            from remora.core.state_manager import RemoraStateManager
+            from remora.core.agents.state_manager import RemoraStateManager
 
             manager = RemoraStateManager(mock_workspace, "agent-1")
             state = AgentTurnState(turn_number=3)
@@ -307,7 +307,7 @@ class TestRemoraStateManager:
             "remora.core.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
-            from remora.core.state_manager import RemoraStateManager
+            from remora.core.agents.state_manager import RemoraStateManager
 
             manager = RemoraStateManager(mock_workspace, "agent-1")
             new_state = await manager.record_turn(response="Hello")
@@ -323,7 +323,7 @@ class TestRemoraStateManager:
             "remora.core.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
-            from remora.core.state_manager import RemoraStateManager
+            from remora.core.agents.state_manager import RemoraStateManager
 
             manager = RemoraStateManager(mock_workspace, "agent-1")
             memory = await manager.get_memory()
@@ -337,7 +337,7 @@ class TestRemoraStateManager:
             "remora.core.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
-            from remora.core.state_manager import RemoraStateManager
+            from remora.core.agents.state_manager import RemoraStateManager
 
             manager = RemoraStateManager(mock_workspace, "agent-1")
             memory = AgentMemory(facts=["fact1"])
@@ -351,7 +351,7 @@ class TestRemoraStateManager:
             "remora.core.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
-            from remora.core.state_manager import RemoraStateManager
+            from remora.core.agents.state_manager import RemoraStateManager
 
             manager = RemoraStateManager(mock_workspace, "agent-1")
             metrics = await manager.get_metrics()
@@ -368,7 +368,7 @@ class TestRemoraStateManager:
             "remora.core.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
-            from remora.core.state_manager import RemoraStateManager
+            from remora.core.agents.state_manager import RemoraStateManager
 
             manager = RemoraStateManager(mock_workspace, "agent-1")
             turn = await manager.increment_turn()
@@ -383,7 +383,7 @@ class TestRemoraStateManager:
             "remora.core.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
-            from remora.core.state_manager import RemoraStateManager
+            from remora.core.agents.state_manager import RemoraStateManager
 
             manager = RemoraStateManager(mock_workspace, "agent-1")
             turn = await manager.get_turn()
@@ -397,7 +397,7 @@ class TestRemoraStateManager:
             "remora.core.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
-            from remora.core.state_manager import RemoraStateManager
+            from remora.core.agents.state_manager import RemoraStateManager
 
             manager = RemoraStateManager(mock_workspace, "agent-1")
             await manager.set("custom_key", "custom_value")
@@ -413,7 +413,7 @@ class TestRemoraStateManager:
             "remora.core.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
-            from remora.core.state_manager import RemoraStateManager
+            from remora.core.agents.state_manager import RemoraStateManager
 
             manager = RemoraStateManager(mock_workspace, "my-agent")
             assert manager.agent_id == "my-agent"
@@ -426,7 +426,7 @@ class TestRemoraStateManager:
             "remora.core.state_manager.CairnStateManager",
             return_value=mock_cairn_state,
         ):
-            from remora.core.state_manager import RemoraStateManager
+            from remora.core.agents.state_manager import RemoraStateManager
 
             manager = RemoraStateManager(mock_workspace, "agent-1")
             count = await manager.clear_all()

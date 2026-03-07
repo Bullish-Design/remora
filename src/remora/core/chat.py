@@ -1,3 +1,9 @@
-"""Compatibility wrapper for moved chat module."""
+"""Compatibility alias for moved chat module."""
 
-from remora.core.agents.chat import *  # noqa: F401,F403
+from __future__ import annotations
+
+import sys as _sys
+
+import remora.core.agents.chat as _target
+
+_sys.modules[__name__] = _target

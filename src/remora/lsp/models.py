@@ -1,7 +1,7 @@
 """LSP protocol event and proposal models.
 
 These models are used exclusively by the LSP server layer
-(``remora.lsp.runner``, ``remora.lsp.server``, ``remora.lsp.notifications``,
+(``remora.runner.agent_runner``, ``remora.lsp.server``, ``remora.lsp.notifications``,
 ``remora.lsp.handlers``).  They inherit from ``LspAgentEvent`` and carry
 LSP-specific fields (``event_id``, ``event_type``, ``correlation_id``,
 ``summary``, ``payload``).

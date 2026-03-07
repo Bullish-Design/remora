@@ -1,3 +1,9 @@
-"""Compatibility wrapper for moved EventStore connection helpers."""
+"""Compatibility alias for moved EventStore connection helpers."""
 
-from remora.core.store.event_store_connection import *  # noqa: F401,F403
+from __future__ import annotations
+
+import sys as _sys
+
+import remora.core.store.event_store_connection as _target
+
+_sys.modules[__name__] = _target
