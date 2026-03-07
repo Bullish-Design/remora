@@ -4,17 +4,16 @@ import asyncio
 import json
 import logging
 import time
-import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-from pydantic import BaseModel, ConfigDict, Field
 
 from remora.core.agent_node import AgentNode
 from remora.core.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent, ScaffoldRequestEvent
 from remora.core.execution import execute_agent_turn
-from remora.core.tools.lsp import build_lsp_tools
+from remora.lsp.tools import build_lsp_tools
 from remora.extensions import extension_matches, load_extensions
+from remora.lsp.runner_headless import _HeadlessServer
+from remora.lsp.runner_trigger import Trigger
 from remora.lsp.models import (
     LspAgentErrorEvent,
     LspAgentEvent,
@@ -39,51 +38,6 @@ EXECUTE_AGENT_TURN_TIMEOUT_SECONDS = 30.0
 # ---------------------------------------------------------------------------
 
 
-class Trigger(BaseModel):
-    model_config = ConfigDict(frozen=False, arbitrary_types_allowed=True)
-
-    agent_id: str
-    correlation_id: str
-    context: dict = Field(default_factory=dict)
-    trigger_event: Any = None
-
-
-class _HeadlessDB:
-    """Minimal DB stub for headless (CLI) mode — no real persistence."""
-
-    async def get_activation_chain(self, correlation_id: str) -> list[str]:
-        return []
-
-    async def add_to_chain(self, correlation_id: str, agent_id: str) -> None:
-        pass
-
-    async def store_proposal(self, *args: Any, **kwargs: Any) -> None:
-        pass
-
-    async def poll_commands(self, limit: int) -> list[dict]:
-        return []
-
-    async def mark_command_done(self, cmd_id: str) -> None:
-        pass
-
-
-class _HeadlessServer:
-    """Lightweight adapter that satisfies ``AgentRunner``'s ``server`` duck-type
-    without requiring a full LSP ``RemoraLanguageServer``.
-
-    Used by ``AgentRunner.create_headless()`` for CLI / headless operation.
-    """
-
-    def __init__(self, event_store: Any) -> None:
-        self.event_store = event_store
-        self.db = _HeadlessDB()
-        self.proposals: dict[str, Any] = {}
-        self.subscriptions = None
-
-    def generate_correlation_id(self) -> str:
-        return uuid.uuid4().hex[:12]
-
-
 class AgentRunner:
     """Unified asynchronous agent execution coordinator.
 
@@ -93,7 +47,7 @@ class AgentRunner:
 
     Agent execution is delegated to ``execute_agent_turn()`` from
     ``remora.core.execution``, with LSP-specific tools injected via
-    ``build_lsp_tools()`` from ``remora.core.tools.lsp``.
+    ``build_lsp_tools()`` from ``remora.lsp.tools``.
     """
 
     def __init__(
@@ -694,7 +648,7 @@ class AgentRunner:
 
     def get_agent_tools(self, agent: AgentNode) -> list[dict]:
         """Return the list of tools available to this agent."""
-        from remora.core.tools.lsp import build_lsp_tools
+        from remora.lsp.tools import build_lsp_tools
 
         async def _dummy(*args: Any, **kwargs: Any) -> None:
             pass

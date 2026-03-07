@@ -17,7 +17,7 @@ import pytest
 from remora.core.agent_node import AgentNode
 from remora.core.event_store import EventStore
 from remora.core.projections import NodeProjection
-from remora.core.tools.lsp import (
+from remora.lsp.tools import (
     ReadNodeTool,
     RewriteSelfTool,
     MessageNodeTool,

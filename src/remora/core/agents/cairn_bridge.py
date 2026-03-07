@@ -1,0 +1,209 @@
+"""Cairn workspace bridge for Remora.
+
+Provides stable and per-agent workspaces using Cairn runtime APIs.
+Remora does not import fsdantic directly; all workspace access flows
+through Cairn.
+"""
+
+from __future__ import annotations
+
+import logging
+from enum import Enum
+from pathlib import Path
+from typing import Any
+
+from cairn.runtime import workspace_manager as cairn_workspace_manager
+from cairn.runtime.workspace_manager import open_workspace as cairn_open_workspace
+
+from remora.core.config import Config, DEFAULT_IGNORE_PATTERNS
+from remora.core.cairn_externals import CairnExternals
+from remora.core.errors import WorkspaceError
+from remora.core.workspace import AgentWorkspace
+from remora.utils import PathLike, PathResolver, normalize_path
+
+logger = logging.getLogger(__name__)
+
+
+class SyncMode(Enum):
+    """Levels of syncing project files into the workspace."""
+
+    FULL = "full"
+    NONE = "none"
+
+
+class CairnWorkspaceService:
+    """Manage stable and agent workspaces via Cairn."""
+
+    def __init__(
+        self,
+        config: Config,
+        *,
+        graph_id: str | None = None,
+        swarm_root: PathLike | None = None,
+        project_root: PathLike | None = None,
+    ) -> None:
+        self._config = config
+        self._graph_id = graph_id or config.swarm_id or "default"
+
+        base_path = normalize_path(swarm_root or config.swarm_root)
+        self._swarm_root = base_path / self._graph_id
+        self._project_root = normalize_path(project_root or Path.cwd()).resolve()
+        self._resolver = PathResolver(self._project_root)
+        self._manager = cairn_workspace_manager.WorkspaceManager()
+        self._stable_workspace: Any | None = None
+        self._agent_workspaces: dict[str, AgentWorkspace] = {}
+        self._ignore_patterns: set[str] = set(config.workspace_ignore_patterns or DEFAULT_IGNORE_PATTERNS)
+        self._ignore_dotfiles: bool = config.workspace_ignore_dotfiles
+        self._file_mtimes: dict[str, float] = {}
+
+    @property
+    def project_root(self) -> Path:
+        return self._project_root
+
+    @property
+    def resolver(self) -> PathResolver:
+        return self._resolver
+
+    async def initialize(self, *, sync_mode: SyncMode | None = None) -> None:
+        """Initialize stable workspace and optionally sync project files."""
+        if self._stable_workspace is not None:
+            return
+
+        mode = sync_mode or SyncMode.FULL
+        self._swarm_root.mkdir(parents=True, exist_ok=True)
+        stable_path = self._swarm_root / "stable.db"
+
+        try:
+            self._stable_workspace = await cairn_open_workspace(
+                stable_path,
+                readonly=False,
+            )
+            self._manager.track_workspace(self._stable_workspace)
+        except Exception as exc:
+            raise WorkspaceError(f"Failed to create stable workspace: {exc}") from exc
+
+        if mode is SyncMode.FULL:
+            await self._sync_project_to_workspace()
+
+    async def get_agent_workspace(self, agent_id: str) -> AgentWorkspace:
+        """Get or create an agent workspace."""
+        if agent_id in self._agent_workspaces:
+            return self._agent_workspaces[agent_id]
+
+        if self._stable_workspace is None:
+            raise WorkspaceError("CairnWorkspaceService is not initialized")
+
+        workspace_path = self._swarm_root / "agents" / agent_id[:2] / agent_id / "workspace.db"
+        workspace_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            workspace = await cairn_open_workspace(
+                workspace_path,
+                readonly=False,
+            )
+            self._manager.track_workspace(workspace)
+        except Exception as exc:
+            raise WorkspaceError(f"Failed to create workspace for {agent_id}: {exc}") from exc
+
+        agent_workspace = AgentWorkspace(
+            workspace,
+            agent_id,
+            stable_workspace=self._stable_workspace,
+            ensure_file_synced=self.ensure_file_synced,
+        )
+        self._agent_workspaces[agent_id] = agent_workspace
+        return agent_workspace
+
+    def get_externals(self, agent_id: str, agent_workspace: AgentWorkspace) -> dict[str, Any]:
+        """Build Cairn external helpers for Grail tools."""
+        if self._stable_workspace is None:
+            raise WorkspaceError("CairnWorkspaceService is not initialized")
+
+        externals = CairnExternals(
+            agent_id=agent_id,
+            agent_fs=agent_workspace.cairn,
+            stable_fs=self._stable_workspace,
+            resolver=self._resolver,
+        )
+        return externals.as_externals()
+
+    async def close(self) -> None:
+        """Close all tracked workspaces."""
+        await self._manager.close_all()
+        self._agent_workspaces.clear()
+        self._stable_workspace = None
+
+    async def _sync_project_to_workspace(self) -> None:
+        """Sync project files into the stable workspace, skipping unchanged files."""
+        if self._stable_workspace is None:
+            return
+
+        for path in self._project_root.rglob("*"):
+            if path.is_dir():
+                continue
+            if self._should_ignore(path):
+                continue
+
+            if not self._resolver.is_within_project(path):
+                continue
+
+            # Incremental sync: skip files whose mtime hasn't changed
+            try:
+                current_mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            rel_path = self._resolver.to_workspace_path(path)
+            if self._file_mtimes.get(rel_path) == current_mtime:
+                continue
+
+            try:
+                payload = path.read_bytes()
+            except OSError as exc:
+                logger.debug("Failed to read %s: %s", path, exc)
+                continue
+
+            try:
+                await self._stable_workspace.files.write(rel_path, payload, mode="binary")
+                self._file_mtimes[rel_path] = current_mtime
+            except Exception as exc:
+                logger.debug("Failed to write %s to stable workspace: %s", rel_path, exc)
+
+    async def ensure_file_synced(self, rel_path: str) -> bool:
+        """Ensure a specific file is synced to the stable workspace.
+
+        Reads the file from the project root and writes it into the stable
+        workspace.  Returns ``False`` when the source file does not exist.
+        """
+        source = self._project_root / rel_path
+        if not source.exists():
+            return False
+
+        try:
+            payload = source.read_bytes()
+        except OSError as exc:
+            logger.debug("ensure_file_synced: failed to read %s: %s", source, exc)
+            return False
+
+        try:
+            await self._stable_workspace.files.write(rel_path, payload, mode="binary")
+        except Exception as exc:
+            logger.debug("ensure_file_synced: failed to write %s: %s", rel_path, exc)
+            return False
+
+        return True
+
+    def _should_ignore(self, path: Path) -> bool:
+        try:
+            rel_parts = path.relative_to(self._project_root).parts
+        except ValueError:
+            return True
+
+        for part in rel_parts:
+            if part in self._ignore_patterns:
+                return True
+            if self._ignore_dotfiles and part.startswith("."):
+                return True
+        return False
+
+
+__all__ = ["CairnWorkspaceService", "SyncMode"]
