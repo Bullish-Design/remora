@@ -49,7 +49,8 @@ def _make_agent(**overrides: Any) -> AgentNode:
 def _make_mock_server() -> MagicMock:
     server = MagicMock()
     server.event_store = MagicMock()
-    server.event_store.set_node_status = AsyncMock()
+    server.event_store.nodes = MagicMock()
+    server.event_store.nodes.set_node_status = AsyncMock()
     server.event_store.nodes.get_node = AsyncMock(return_value=_make_agent())
     server.event_store.get_events_for_correlation = AsyncMock(return_value=[])
     server.event_store.append = AsyncMock(return_value=1)
@@ -96,7 +97,7 @@ class TestExecuteTurn:
         await runner.execute_turn(trigger)
 
         # Should have set status to running, then back to idle
-        status_calls = server.event_store.set_node_status.call_args_list
+        status_calls = server.event_store.nodes.set_node_status.call_args_list
         assert status_calls[0][0] == ("rm_test1", "running")
         assert status_calls[-1][0] == ("rm_test1", "idle")
 
@@ -113,7 +114,7 @@ class TestExecuteTurn:
         error_calls = [
             c
             for c in server.emit_event.call_args_list
-            if hasattr(c[0][0], "error") and "not found" in str(c[0][0].error).lower()
+            if c[0][0].event_type == "AgentErrorEvent" and "not found" in str(c[0][0].payload.get("error", "")).lower()
         ]
         assert len(error_calls) >= 1
 
@@ -131,11 +132,12 @@ class TestExecuteTurn:
         error_calls = [
             c
             for c in server.emit_event.call_args_list
-            if hasattr(c[0][0], "error") and "connection refused" in str(c[0][0].error)
+            if c[0][0].event_type == "AgentErrorEvent"
+            and "connection refused" in str(c[0][0].payload.get("error", ""))
         ]
         assert len(error_calls) >= 1
         # Should still reset to idle
-        last_status = server.event_store.set_node_status.call_args_list[-1][0]
+        last_status = server.event_store.nodes.set_node_status.call_args_list[-1][0]
         assert last_status == ("rm_test1", "idle")
 
     @pytest.mark.asyncio
@@ -267,7 +269,7 @@ class TestCreateProposal:
 
         await runner.create_proposal(agent, "new code", "corr_1")
 
-        server.event_store.set_node_status.assert_called_once_with("rm_test1", "pending_approval")
+        server.event_store.nodes.set_node_status.assert_called_once_with("rm_test1", "pending_approval")
 
     @pytest.mark.asyncio
     async def test_proposal_publishes_diagnostics(self):

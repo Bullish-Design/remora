@@ -29,3 +29,15 @@ All planned fixes for code-review-fixes-0005 are now implemented.
   - `tests/unit/test_unified_runner.py`
   - `tests/unit/test_event_bus.py`
   - `tests/unit/test_batch8_fixes.py`
+
+## Follow-up (Post-Extraction Test Realignment)
+- User requirement: no backwards-compatibility shims; update tests to match refactored behavior.
+- Non-Turso failures from full suite were contract drift in tests after NodeStore/background-scanner/loop changes.
+- Fixed by updating tests (not runtime code):
+  - `tests/unit/test_runner_loop.py`: mock/assert against `event_store.nodes.set_node_status` async API.
+  - `tests/unit/test_lsp_background_scan_manifest.py`: detect `BackgroundScanner.run` task and include `_conn/_node_store` attrs on fake event store.
+  - `tests/unit/test_lsp_event_completeness.py`: debounce tests now run under active asyncio loop (`get_running_loop` contract).
+- Verification:
+  - `devenv shell -- uv sync --extra dev`
+  - `devenv shell -- pytest tests/unit/test_runner_loop.py tests/unit/test_lsp_background_scan_manifest.py tests/unit/test_lsp_event_completeness.py -q`
+  - Result: all targeted non-Turso tests pass.

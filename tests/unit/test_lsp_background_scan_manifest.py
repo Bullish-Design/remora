@@ -88,6 +88,8 @@ class _ChunkTrackingEventStore:
     def __init__(self) -> None:
         self.chunk_sizes: list[int] = []
         self.nodes = self
+        self._conn = None
+        self._node_store = None
 
     async def list_nodes(self, file_path: str):
         _ = file_path
@@ -127,6 +129,12 @@ def mock_parse_content(uri, text, language=None):
     return nodes
 
 
+def _is_background_scan_task(task: asyncio.Task) -> bool:
+    coro = task.get_coro()
+    qualname = getattr(coro, "__qualname__", "")
+    return "BackgroundScanner.run" in qualname
+
+
 @pytest.mark.asyncio
 async def test_background_scan_saves_partial_manifest_before_completion(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -159,7 +167,7 @@ async def test_background_scan_saves_partial_manifest_before_completion(
     initialized_handler = fake_server._features[lsp.INITIALIZED]
     await initialized_handler(lsp.InitializedParams())
 
-    scan_task = next(t for t in scheduled_tasks if t.get_coro().__name__ == "_background_scan")
+    scan_task = next(t for t in scheduled_tasks if _is_background_scan_task(t))
 
     await asyncio.wait_for(db.entered_block.wait(), timeout=5.0)
     scan_task.cancel()
@@ -217,7 +225,7 @@ async def test_background_scan_uses_aggressive_preemption_settings(
     initialized_handler = fake_server._features[lsp.INITIALIZED]
     await initialized_handler(lsp.InitializedParams())
 
-    scan_task = next(t for t in scheduled_tasks if t.get_coro().__name__ == "_background_scan")
+    scan_task = next(t for t in scheduled_tasks if _is_background_scan_task(t))
     await asyncio.wait_for(scan_task, timeout=5.0)
 
     assert event_store.chunk_sizes == [8, 8, 4]

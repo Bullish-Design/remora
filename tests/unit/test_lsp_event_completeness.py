@@ -131,7 +131,8 @@ class TestDidChangeHandler:
 class TestScheduleReparse:
     """Debounce mechanics for schedule_reparse."""
 
-    def test_schedule_reparse_stores_timer(self):
+    @pytest.mark.asyncio
+    async def test_schedule_reparse_stores_timer(self):
         """schedule_reparse should store a timer handle for the URI."""
         from remora.lsp.server import RemoraLanguageServer
 
@@ -141,19 +142,17 @@ class TestScheduleReparse:
         srv.event_store = None
         srv.watcher = MagicMock()
 
-        loop = asyncio.new_event_loop()
         try:
-            with patch("asyncio.get_event_loop", return_value=loop):
-                srv.schedule_reparse("file:///a.py", "code", delay_ms=500)
-                assert "file:///a.py" in srv._reparse_timers
+            srv.schedule_reparse("file:///a.py", "code", delay_ms=500)
+            assert "file:///a.py" in srv._reparse_timers
         finally:
             # Cancel the timer to clean up
             timer = srv._reparse_timers.get("file:///a.py")
             if timer:
                 timer.cancel()
-            loop.close()
 
-    def test_schedule_reparse_cancels_previous_timer(self):
+    @pytest.mark.asyncio
+    async def test_schedule_reparse_cancels_previous_timer(self):
         """A second call for the same URI should cancel the first timer."""
         from remora.lsp.server import RemoraLanguageServer
 
@@ -163,23 +162,21 @@ class TestScheduleReparse:
         srv.event_store = None
         srv.watcher = MagicMock()
 
-        loop = asyncio.new_event_loop()
         try:
-            with patch("asyncio.get_event_loop", return_value=loop):
-                srv.schedule_reparse("file:///a.py", "code1", delay_ms=500)
-                first_timer = srv._reparse_timers["file:///a.py"]
+            srv.schedule_reparse("file:///a.py", "code1", delay_ms=500)
+            first_timer = srv._reparse_timers["file:///a.py"]
 
-                srv.schedule_reparse("file:///a.py", "code2", delay_ms=500)
-                second_timer = srv._reparse_timers["file:///a.py"]
+            srv.schedule_reparse("file:///a.py", "code2", delay_ms=500)
+            second_timer = srv._reparse_timers["file:///a.py"]
 
-                assert first_timer.cancelled()
-                assert not second_timer.cancelled()
+            assert first_timer.cancelled()
+            assert not second_timer.cancelled()
         finally:
             for t in srv._reparse_timers.values():
                 t.cancel()
-            loop.close()
 
-    def test_schedule_reparse_independent_uris(self):
+    @pytest.mark.asyncio
+    async def test_schedule_reparse_independent_uris(self):
         """Different URIs should have independent timers."""
         from remora.lsp.server import RemoraLanguageServer
 
@@ -189,20 +186,17 @@ class TestScheduleReparse:
         srv.event_store = None
         srv.watcher = MagicMock()
 
-        loop = asyncio.new_event_loop()
         try:
-            with patch("asyncio.get_event_loop", return_value=loop):
-                srv.schedule_reparse("file:///a.py", "code1", delay_ms=500)
-                srv.schedule_reparse("file:///b.py", "code2", delay_ms=500)
+            srv.schedule_reparse("file:///a.py", "code1", delay_ms=500)
+            srv.schedule_reparse("file:///b.py", "code2", delay_ms=500)
 
-                assert "file:///a.py" in srv._reparse_timers
-                assert "file:///b.py" in srv._reparse_timers
-                assert not srv._reparse_timers["file:///a.py"].cancelled()
-                assert not srv._reparse_timers["file:///b.py"].cancelled()
+            assert "file:///a.py" in srv._reparse_timers
+            assert "file:///b.py" in srv._reparse_timers
+            assert not srv._reparse_timers["file:///a.py"].cancelled()
+            assert not srv._reparse_timers["file:///b.py"].cancelled()
         finally:
             for t in srv._reparse_timers.values():
                 t.cancel()
-            loop.close()
 
 
 # ============================================================================
@@ -314,7 +308,8 @@ class TestDoReparse:
 class TestScheduleCursorUpdate:
     """Debounce mechanics for schedule_cursor_update."""
 
-    def test_schedule_cursor_update_stores_timer(self):
+    @pytest.mark.asyncio
+    async def test_schedule_cursor_update_stores_timer(self):
         from remora.lsp.server import RemoraLanguageServer
 
         srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
@@ -323,17 +318,15 @@ class TestScheduleCursorUpdate:
         srv.db = MagicMock()
         srv.event_store = None
 
-        loop = asyncio.new_event_loop()
         try:
-            with patch("asyncio.get_event_loop", return_value=loop):
-                srv.schedule_cursor_update("agent-1", "file:///a.py", 10, delay_ms=200)
-                assert "file:///a.py" in srv._cursor_timers
+            srv.schedule_cursor_update("agent-1", "file:///a.py", 10, delay_ms=200)
+            assert "file:///a.py" in srv._cursor_timers
         finally:
             for t in srv._cursor_timers.values():
                 t.cancel()
-            loop.close()
 
-    def test_schedule_cursor_update_cancels_previous(self):
+    @pytest.mark.asyncio
+    async def test_schedule_cursor_update_cancels_previous(self):
         from remora.lsp.server import RemoraLanguageServer
 
         srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
@@ -342,21 +335,18 @@ class TestScheduleCursorUpdate:
         srv.db = MagicMock()
         srv.event_store = None
 
-        loop = asyncio.new_event_loop()
         try:
-            with patch("asyncio.get_event_loop", return_value=loop):
-                srv.schedule_cursor_update("a1", "file:///a.py", 5, delay_ms=200)
-                first = srv._cursor_timers["file:///a.py"]
+            srv.schedule_cursor_update("a1", "file:///a.py", 5, delay_ms=200)
+            first = srv._cursor_timers["file:///a.py"]
 
-                srv.schedule_cursor_update("a2", "file:///a.py", 10, delay_ms=200)
-                second = srv._cursor_timers["file:///a.py"]
+            srv.schedule_cursor_update("a2", "file:///a.py", 10, delay_ms=200)
+            second = srv._cursor_timers["file:///a.py"]
 
-                assert first.cancelled()
-                assert not second.cancelled()
+            assert first.cancelled()
+            assert not second.cancelled()
         finally:
             for t in srv._cursor_timers.values():
                 t.cancel()
-            loop.close()
 
 
 # ============================================================================
