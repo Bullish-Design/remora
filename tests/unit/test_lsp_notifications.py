@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 from tests.unit.conftest import make_node as _make_node
@@ -10,11 +10,12 @@ from tests.unit.conftest import make_node as _make_node
 
 @pytest.fixture()
 def mock_server():
-    """Create a mock server with event_store and db."""
-    with patch("remora.lsp.notifications.server") as srv:
-        srv.event_store = AsyncMock()
-        srv.db = AsyncMock()
-        yield srv
+    """Create a mock server."""
+    srv = MagicMock()
+    srv.event_store = AsyncMock()
+    srv.db = AsyncMock()
+    srv.emit_event = AsyncMock()
+    return srv
 
 
 @pytest.mark.asyncio()
@@ -25,7 +26,7 @@ async def test_cursor_moved_reads_from_event_store(mock_server):
 
     from remora.lsp.notifications import on_cursor_moved
 
-    await on_cursor_moved({"uri": "/tmp/test.py", "line": 15})
+    await on_cursor_moved(mock_server, {"uri": "/tmp/test.py", "line": 15})
 
     mock_server.event_store.get_node_at_position.assert_awaited_once_with("/tmp/test.py", 15)
     # After Workstream D, on_cursor_moved delegates to schedule_cursor_update (debounced)
@@ -43,7 +44,7 @@ async def test_cursor_moved_no_node_found(mock_server):
 
     from remora.lsp.notifications import on_cursor_moved
 
-    await on_cursor_moved({"uri": "/tmp/test.py", "line": 5})
+    await on_cursor_moved(mock_server, {"uri": "/tmp/test.py", "line": 5})
 
     mock_server.event_store.get_node_at_position.assert_awaited_once_with("/tmp/test.py", 5)
     mock_server.schedule_cursor_update.assert_called_once_with(None, "/tmp/test.py", 5, delay_ms=200)
@@ -64,7 +65,7 @@ async def test_cursor_moved_uses_node_id_not_remora_id(mock_server):
 
     from remora.lsp.notifications import on_cursor_moved
 
-    await on_cursor_moved({"uri": "/tmp/test.py", "line": 3})
+    await on_cursor_moved(mock_server, {"uri": "/tmp/test.py", "line": 3})
 
     # The agent_id passed to schedule_cursor_update should be node.node_id
     mock_server.schedule_cursor_update.assert_called_once_with("rm_xyz789", "/tmp/test.py", 3, delay_ms=200)
@@ -79,16 +80,17 @@ async def test_input_submitted_emits_and_triggers_runner(mock_server):
 
     from remora.lsp import notifications
 
-    with patch.object(notifications, "emit_event", new_callable=AsyncMock) as mock_emit:
-        await notifications.on_input_submitted({"agent_id": "rm_agent", "input": "hello"})
+    print("BEFORE", mock_server.emit_event.mock_calls)
+    await notifications.on_input_submitted(mock_server, {"agent_id": "rm_agent", "input": "hello"})
+    print("AFTER", mock_server.emit_event.mock_calls)
 
-    mock_emit.assert_awaited_once()
+    mock_server.emit_event.assert_awaited_once()
     mock_server.runner.trigger.assert_awaited_once_with("rm_agent", "corr_test_1")
 
 
 @pytest.mark.asyncio()
 async def test_input_submitted_emit_timeout_skips_runner(
-    mock_server: AsyncMock,
+    mock_server: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ):
     """If emit_event stalls, handler should timeout and not trigger runner."""
@@ -104,7 +106,7 @@ async def test_input_submitted_emit_timeout_skips_runner(
     async def _slow_emit(_event):
         await __import__("asyncio").sleep(0.2)
 
-    with patch.object(notifications, "emit_event", new=AsyncMock(side_effect=_slow_emit)):
-        await notifications.on_input_submitted({"agent_id": "rm_agent", "input": "hello"})
+    mock_server.emit_event.side_effect = _slow_emit
+    await notifications.on_input_submitted(mock_server, {"agent_id": "rm_agent", "input": "hello"})
 
     mock_server.runner.trigger.assert_not_awaited()

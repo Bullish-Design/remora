@@ -48,7 +48,7 @@ from remora.core.events import (
     ModelResponseEvent,
     NodeDiscoveredEvent,
     NodeRemovedEvent,
-    RemoraEvent,
+    CoreEvent,
     ScaffoldRequestEvent,
     ToolCallEvent,
     ToolResultEvent,
@@ -61,7 +61,6 @@ from remora.core.reconciler import (
     reconcile_on_startup,
 )
 from remora.core.subscriptions import Subscription, SubscriptionPattern, SubscriptionRegistry
-from remora.lsp.runner import AgentRunner
 from remora.core.swarm_executor import SwarmExecutor
 from remora.core.tools import RemoraGrailTool, build_virtual_fs, discover_grail_tools
 from remora.core.workspace import AgentWorkspace, CairnDataProvider
@@ -75,7 +74,6 @@ __all__ = [
     "AgentMessageEvent",
     "AgentNode",
     "AgentStartEvent",
-    "AgentRunner",
     "AgentToolSchema",
     "AgentTurnState",
     "AgentWorkspace",
@@ -104,7 +102,7 @@ __all__ = [
     "NodeProjection",
     "NodeRemovedEvent",
     "RemoraError",
-    "RemoraEvent",
+    "CoreEvent",
     "RemoraGrailTool",
     "RemoraStateManager",
     "ScaffoldRequestEvent",

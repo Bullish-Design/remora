@@ -20,7 +20,7 @@ from remora.core.events import (
     KernelStartEvent,
     ModelRequestEvent,
     ModelResponseEvent,
-    RemoraEvent,
+    CoreEvent,
     ToolCallEvent,
     ToolResultEvent,
     TurnCompleteEvent,
@@ -60,7 +60,7 @@ def _to_jsonable(value: Any) -> Any:
     return str(value)
 
 
-def normalize_event(event: StructuredEvent | RemoraEvent) -> dict[str, Any]:
+def normalize_event(event: StructuredEvent | CoreEvent) -> dict[str, Any]:
     """Wrap an event in a UI-friendly envelope."""
     kind = _event_kind(event)
     timestamp = getattr(event, "timestamp", None) or time.time()
@@ -75,7 +75,7 @@ def normalize_event(event: StructuredEvent | RemoraEvent) -> dict[str, Any]:
     }
 
 
-def _event_kind(event: StructuredEvent | RemoraEvent) -> EventKind:
+def _event_kind(event: StructuredEvent | CoreEvent) -> EventKind:
     if isinstance(event, (AgentStartEvent, AgentCompleteEvent, AgentErrorEvent)):
         return EventKind.AGENT
     if isinstance(event, (HumanInputRequestEvent, HumanInputResponseEvent)):
@@ -91,7 +91,7 @@ def _event_kind(event: StructuredEvent | RemoraEvent) -> EventKind:
     return EventKind.EVENT
 
 
-def _event_payload(event: StructuredEvent | RemoraEvent) -> dict[str, Any]:
+def _event_payload(event: StructuredEvent | CoreEvent) -> dict[str, Any]:
     if hasattr(event, "model_dump"):
         payload: dict[str, Any] = event.model_dump()
     elif is_dataclass(event):
@@ -127,7 +127,7 @@ class UiStateProjector:
             pass
         self.recent_targets.appendleft(cleaned)
 
-    def record(self, event: StructuredEvent | RemoraEvent) -> None:
+    def record(self, event: StructuredEvent | CoreEvent) -> None:
         envelope = normalize_event(event)
         self.events.append(envelope)
 

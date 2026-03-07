@@ -15,7 +15,7 @@ from typing import Any
 
 from structured_agents.events import Event as StructuredEvent
 
-from remora.core.events import RemoraEvent
+from remora.core.events import CoreEvent
 
 logger = logging.getLogger(__name__)
 _NOISY_EVENT_NAMES = frozenset({"NodeDiscoveredEvent", "ScaffoldRequestEvent"})
@@ -35,7 +35,7 @@ class EventBus:
         self._all_handlers: list[EventHandler] = []
         self._error_policy = error_policy
 
-    async def emit(self, event: StructuredEvent | RemoraEvent) -> None:
+    async def emit(self, event: StructuredEvent | CoreEvent) -> None:
         event_type = type(event)
         event_name = event_type.__name__
         agent_id = getattr(event, "agent_id", None) or getattr(event, "to_agent", None)
@@ -79,17 +79,17 @@ class EventBus:
             self._all_handlers.remove(handler)
 
     @asynccontextmanager
-    async def stream(self, *event_types: type[Any]) -> AsyncIterator[AsyncIterator[StructuredEvent | RemoraEvent]]:
-        queue: asyncio.Queue[StructuredEvent | RemoraEvent] = asyncio.Queue()
+    async def stream(self, *event_types: type[Any]) -> AsyncIterator[AsyncIterator[StructuredEvent | CoreEvent]]:
+        queue: asyncio.Queue[StructuredEvent | CoreEvent] = asyncio.Queue()
         filter_types = set(event_types) if event_types else None
 
-        def enqueue(event: StructuredEvent | RemoraEvent) -> None:
+        def enqueue(event: StructuredEvent | CoreEvent) -> None:
             if filter_types is None or any(isinstance(event, et) for et in filter_types):
                 queue.put_nowait(event)
 
         self.subscribe_all(enqueue)
 
-        async def iterate() -> AsyncIterator[StructuredEvent | RemoraEvent]:
+        async def iterate() -> AsyncIterator[StructuredEvent | CoreEvent]:
             while True:
                 event = await queue.get()
                 yield event
@@ -102,13 +102,13 @@ class EventBus:
     async def wait_for(
         self,
         event_type: type[Any],
-        predicate: Callable[[StructuredEvent | RemoraEvent], bool],
+        predicate: Callable[[StructuredEvent | CoreEvent], bool],
         timeout: float = 60.0,
-    ) -> StructuredEvent | RemoraEvent:
+    ) -> StructuredEvent | CoreEvent:
         loop = asyncio.get_running_loop()
-        future: asyncio.Future[StructuredEvent | RemoraEvent] = loop.create_future()
+        future: asyncio.Future[StructuredEvent | CoreEvent] = loop.create_future()
 
-        def handler(event: StructuredEvent | RemoraEvent) -> None:
+        def handler(event: StructuredEvent | CoreEvent) -> None:
             try:
                 if isinstance(event, event_type) and predicate(event):
                     if not future.done():

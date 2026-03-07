@@ -11,7 +11,10 @@ import pytest
 from lsprotocol import types as lsp
 
 from remora.lsp.handlers import actions, capabilities, commands, documents, lens
-from remora.lsp.server import server
+from remora.lsp.server import get_server, register_handlers
+
+server = get_server()
+register_handlers(server)
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
 from remora.core.event_store import EventStore
@@ -101,14 +104,14 @@ async def test_document_handlers_populate_db_and_code_lenses(tmp_path: Path, iso
         )
     )
 
-    await documents.did_open(params)
+    await documents.did_open(server, params)
 
     # Nodes now live in EventStore, not RemoraDB
     nodes = await server.event_store.list_nodes(file_path=uri)
     assert any(node.node_type == "function" for node in nodes)
 
     lens_params = lsp.CodeLensParams(text_document=lsp.TextDocumentIdentifier(uri=uri))
-    code_lenses = await lens.code_lens(lens_params)
+    code_lenses = await lens.code_lens(server, lens_params)
     assert code_lenses
     assert all(isinstance(cl.command.title, str) for cl in code_lenses)
 
@@ -117,7 +120,7 @@ async def test_document_handlers_populate_db_and_code_lenses(tmp_path: Path, iso
         range=lsp.Range(start=lsp.Position(line=0, character=0), end=lsp.Position(line=0, character=2)),
         context=lsp.CodeActionContext(diagnostics=[]),
     )
-    actions_result = await actions.code_action(action_params)
+    actions_result = await actions.code_action(server, action_params)
     commands = {act.command.command for act in actions_result if act.command}
     assert "remora.chat" in commands
     assert "remora.requestRewrite" in commands
@@ -138,14 +141,14 @@ async def test_did_save_emits_file_saved_and_content_changed_events(tmp_path: Pa
             text=source,
         )
     )
-    await documents.did_open(open_params)
+    await documents.did_open(server, open_params)
 
     # Now save it
     save_params = lsp.DidSaveTextDocumentParams(
         text_document=lsp.TextDocumentIdentifier(uri=uri),
         text=source,
     )
-    await documents.did_save(save_params)
+    await documents.did_save(server, save_params)
 
     # Replay the "files" stream and check for FileSavedEvent + ContentChangedEvent
     events = [record async for record in server.event_store.replay("files")]

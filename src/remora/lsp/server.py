@@ -227,33 +227,27 @@ def get_server() -> RemoraLanguageServer:
     return _server
 
 
-def register_handlers() -> None:
-    """Force import of handler modules so they register on the server singleton."""
-    from remora.lsp.handlers import actions, capabilities, commands, documents, hover, lens  # noqa: F401
-    from remora.lsp import notifications  # noqa: F401
+def register_handlers(server: RemoraLanguageServer) -> None:
+    """Register LSP handlers on the given server instance.
 
+    Must be called AFTER server creation, BEFORE server.start_io().
+    Handlers use pygls's built-in LanguageServer parameter injection.
+    """
+    if getattr(server, "_handlers_registered", False):
+        return
+    server._handlers_registered = True
+    from remora.lsp.handlers.commands import register_command_handlers
+    from remora.lsp.handlers.documents import register_document_handlers
+    from remora.lsp.handlers.actions import register_action_handlers
+    from remora.lsp.handlers.capabilities import register_capability_handlers
+    from remora.lsp.handlers.hover import register_hover_handlers
+    from remora.lsp.handlers.lens import register_lens_handlers
+    from remora.lsp.notifications import register_notification_handlers
 
-# Backward-compatible eager singleton — handler decorators need this at import time.
-server = get_server()
-
-
-def uri_to_path(uri: str) -> str:
-    try:
-        return to_fs_path(uri)
-    except Exception:
-        return uri
-
-
-async def refresh_code_lenses() -> None:
-    await server.refresh_code_lenses()
-
-
-async def publish_diagnostics(uri: str, proposals: list[RewriteProposal]) -> None:
-    await server.publish_diagnostics(uri, proposals)
-
-
-async def emit_event(event) -> Any:
-    return await server.emit_event(event)
-
-
-register_handlers()
+    register_command_handlers(server)
+    register_document_handlers(server)
+    register_action_handlers(server)
+    register_capability_handlers(server)
+    register_hover_handlers(server)
+    register_lens_handlers(server)
+    register_notification_handlers(server)

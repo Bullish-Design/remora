@@ -13,8 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-if TYPE_CHECKING:
-    from lsprotocol import types as lsp
+pass
 
 from remora.core.subscriptions import SubscriptionPattern
 
@@ -50,8 +49,11 @@ class ToolSchema(BaseModel):
             },
         }
 
-    def to_code_action(self, node_id: str) -> "lsp.CodeAction":
-        from lsprotocol import types as lsp
+    def to_code_action(self, node_id: str) -> Any:
+        try:
+            from lsprotocol import types as lsp
+        except ImportError:
+            return None
 
         return lsp.CodeAction(
             title=self.description,
@@ -129,8 +131,11 @@ class AgentNode(BaseModel):
 
     # --- LSP helper ---
 
-    def to_range(self) -> lsp.Range:
-        from lsprotocol import types as lsp
+    def to_range(self) -> Any:
+        try:
+            from lsprotocol import types as lsp
+        except ImportError:
+            return None
 
         return lsp.Range(
             start=lsp.Position(line=self.start_line - 1, character=0),
@@ -173,8 +178,11 @@ class AgentNode(BaseModel):
 
     # --- LSP conversions ---
 
-    def to_code_lens(self) -> lsp.CodeLens:
-        from lsprotocol import types as lsp
+    def to_code_lens(self) -> Any:
+        try:
+            from lsprotocol import types as lsp
+        except ImportError:
+            return None
 
         status_icon = {
             "idle": "\u25cf",
@@ -194,8 +202,11 @@ class AgentNode(BaseModel):
             ),
         )
 
-    def to_hover(self, recent_events: list | None = None) -> lsp.Hover:
-        from lsprotocol import types as lsp
+    def to_hover(self, recent_events: list | None = None) -> Any:
+        try:
+            from lsprotocol import types as lsp
+        except ImportError:
+            return None
 
         lines = [
             f"## {self.name}",
@@ -221,8 +232,11 @@ class AgentNode(BaseModel):
             range=self.to_range(),
         )
 
-    def to_code_actions(self) -> list[lsp.CodeAction]:
-        from lsprotocol import types as lsp
+    def to_code_actions(self) -> Any:
+        try:
+            from lsprotocol import types as lsp
+        except ImportError:
+            return None
 
         actions = [
             lsp.CodeAction(
@@ -257,8 +271,11 @@ class AgentNode(BaseModel):
             actions.append(tool.to_code_action(self.node_id))
         return actions
 
-    def to_document_symbol(self) -> lsp.DocumentSymbol:
-        from lsprotocol import types as lsp
+    def to_document_symbol(self) -> Any:
+        try:
+            from lsprotocol import types as lsp
+        except ImportError:
+            return None
 
         kind_map = {
             "function": lsp.SymbolKind.Function,

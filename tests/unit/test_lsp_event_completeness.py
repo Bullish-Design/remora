@@ -51,7 +51,9 @@ class TestDidChangeHandler:
 
     def test_did_change_handler_is_registered(self):
         """The didChange handler should be registered on the server."""
-        from remora.lsp.server import server
+        from remora.lsp.server import get_server, register_handlers
+        server = get_server()
+        register_handlers(server)
 
         fm = server.protocol.fm
         feature_names = set(fm.features.keys())
@@ -61,7 +63,9 @@ class TestDidChangeHandler:
     async def test_did_change_calls_schedule_reparse(self):
         """did_change should call server.schedule_reparse with the full text."""
         from remora.lsp.handlers.documents import did_change
-        from remora.lsp.server import server
+        from remora.lsp.server import get_server, register_handlers
+        server = get_server()
+        register_handlers(server)
 
         uri = "file:///test.py"
         text = "def foo():\n    return 1\n"
@@ -73,14 +77,16 @@ class TestDidChangeHandler:
         )
 
         with patch.object(server, "schedule_reparse") as mock_schedule:
-            await did_change(params)
+            await did_change(server, params)
             mock_schedule.assert_called_once_with(uri, text, delay_ms=500)
 
     @pytest.mark.asyncio
     async def test_did_change_ignores_empty_content_changes(self):
         """did_change should return early if content_changes is empty."""
         from remora.lsp.handlers.documents import did_change
-        from remora.lsp.server import server
+        from remora.lsp.server import get_server, register_handlers
+        server = get_server()
+        register_handlers(server)
 
         params = lsp.DidChangeTextDocumentParams(
             text_document=lsp.VersionedTextDocumentIdentifier(uri="file:///test.py", version=2),
@@ -88,14 +94,16 @@ class TestDidChangeHandler:
         )
 
         with patch.object(server, "schedule_reparse") as mock_schedule:
-            await did_change(params)
+            await did_change(server, params)
             mock_schedule.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_did_change_does_not_emit_content_changed_event(self):
         """didChange must NOT emit ContentChangedEvent — only didSave does."""
         from remora.lsp.handlers.documents import did_change
-        from remora.lsp.server import server
+        from remora.lsp.server import get_server, register_handlers
+        server = get_server()
+        register_handlers(server)
 
         uri = "file:///test.py"
         text = "def foo():\n    pass\n"
@@ -108,7 +116,7 @@ class TestDidChangeHandler:
 
         # schedule_reparse is the only thing that should be called
         with patch.object(server, "schedule_reparse") as mock_schedule:
-            await did_change(params)
+            await did_change(server, params)
             mock_schedule.assert_called_once()
 
         # Verify no event_store.append call happens in did_change itself
@@ -447,7 +455,9 @@ class TestOnCursorMovedDebounce:
     async def test_on_cursor_moved_calls_schedule_cursor_update(self):
         """on_cursor_moved should resolve the agent and call schedule_cursor_update."""
         from remora.lsp.notifications import on_cursor_moved
-        from remora.lsp.server import server
+        from remora.lsp.server import get_server, register_handlers
+        server = get_server()
+        register_handlers(server)
 
         mock_node = MagicMock()
         mock_node.node_id = "agent-1"
@@ -456,27 +466,31 @@ class TestOnCursorMovedDebounce:
         server.event_store.get_node_at_position = AsyncMock(return_value=mock_node)
 
         with patch.object(server, "schedule_cursor_update") as mock_schedule:
-            await on_cursor_moved({"uri": "file:///test.py", "line": 10})
+            await on_cursor_moved(server, {"uri": "file:///test.py", "line": 10})
             mock_schedule.assert_called_once_with("agent-1", "file:///test.py", 10, delay_ms=200)
 
     @pytest.mark.asyncio
     async def test_on_cursor_moved_null_agent(self):
         """When cursor is not on an agent, schedule_cursor_update gets None."""
         from remora.lsp.notifications import on_cursor_moved
-        from remora.lsp.server import server
+        from remora.lsp.server import get_server, register_handlers
+        server = get_server()
+        register_handlers(server)
 
         server.event_store = MagicMock()
         server.event_store.get_node_at_position = AsyncMock(return_value=None)
 
         with patch.object(server, "schedule_cursor_update") as mock_schedule:
-            await on_cursor_moved({"uri": "file:///test.py", "line": 5})
+            await on_cursor_moved(server, {"uri": "file:///test.py", "line": 5})
             mock_schedule.assert_called_once_with(None, "file:///test.py", 5, delay_ms=200)
 
     @pytest.mark.asyncio
     async def test_on_cursor_moved_no_direct_db_write(self):
         """on_cursor_moved should NOT directly call db.update_cursor_focus anymore."""
         from remora.lsp.notifications import on_cursor_moved
-        from remora.lsp.server import server
+        from remora.lsp.server import get_server, register_handlers
+        server = get_server()
+        register_handlers(server)
 
         mock_node = MagicMock()
         mock_node.node_id = "a1"
@@ -487,6 +501,6 @@ class TestOnCursorMovedDebounce:
         server.db.update_cursor_focus = AsyncMock()
 
         with patch.object(server, "schedule_cursor_update"):
-            await on_cursor_moved({"uri": "file:///x.py", "line": 1})
+            await on_cursor_moved(server, {"uri": "file:///x.py", "line": 1})
             # DB write should NOT happen directly — it's deferred to the debounced callback
             server.db.update_cursor_focus.assert_not_awaited()

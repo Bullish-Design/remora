@@ -27,7 +27,6 @@ from remora.lsp.models import (
 if TYPE_CHECKING:
     from remora.core.cairn_bridge import CairnWorkspaceService
     from remora.core.config import Config
-    from remora.lsp.server import RemoraLanguageServer
 
 logger = logging.getLogger("remora.lsp.runner")
 
@@ -290,7 +289,6 @@ class AgentRunner:
 
     async def _dispatch_command(self, cmd: dict) -> None:
         """Dispatch a single command from the queue."""
-        from remora.lsp.server import emit_event
 
         cmd_type = cmd["command_type"]
         agent_id = cmd.get("agent_id")
@@ -302,7 +300,7 @@ class AgentRunner:
             correlation_id = self.server.generate_correlation_id()
             from remora.lsp.models import LspHumanChatEvent
 
-            await emit_event(
+            await self.server.emit_event(
                 LspHumanChatEvent(
                     agent_id=agent_id,
                     to_agent=agent_id,
@@ -327,7 +325,7 @@ class AgentRunner:
             if proposal:
                 from remora.lsp.models import LspRewriteRejectedEvent
 
-                await emit_event(
+                await self.server.emit_event(
                     LspRewriteRejectedEvent(
                         agent_id=proposal.agent_id,
                         proposal_id=proposal_id,
@@ -400,7 +398,6 @@ class AgentRunner:
         Handles cascade tracking, status management, and code lenses,
         then delegates actual agent execution to ``execute_agent_turn()``.
         """
-        from remora.lsp.server import emit_event, refresh_code_lenses
 
         agent_id = trigger.agent_id
         correlation_id = trigger.correlation_id
@@ -419,7 +416,7 @@ class AgentRunner:
                 agent_id,
                 (time.monotonic() - status_start) * 1000,
             )
-            await refresh_code_lenses()
+            await self.server.refresh_code_lenses()
             await self.server.db.add_to_chain(correlation_id, agent_id)
 
             node_read_start = time.monotonic()
@@ -488,7 +485,7 @@ class AgentRunner:
                     agent_id: str, summary: str, result_summary: str, payload: dict[str, Any]
                 ) -> None:
                     payload["result_summary"] = result_summary
-                    await emit_event(
+                    await self.server.emit_event(
                         LspAgentEvent(
                             event_type="ToolResultEvent",
                             agent_id=agent_id,
@@ -519,7 +516,7 @@ class AgentRunner:
 
                 # On-kernel-event callback: forward to LSP UI
                 async def _on_kernel_event(event: Any) -> None:
-                    await emit_event(
+                    await self.server.emit_event(
                         LspAgentEvent(
                             event_type="KernelEvent",
                             agent_id=agent_id,
@@ -575,7 +572,7 @@ class AgentRunner:
 
                 # Emit final text response if present
                 if result.response_text:
-                    await emit_event(
+                    await self.server.emit_event(
                         LspAgentEvent(
                             event_type="AgentTextResponse",
                             agent_id=agent_id,
@@ -621,10 +618,9 @@ class AgentRunner:
                     self._correlation_depth[depth_key] = (remaining, ts)
 
                 await self.server.event_store.set_node_status(agent_id, "idle")
-                await refresh_code_lenses()
+                await self.server.refresh_code_lenses()
 
     async def create_proposal(self, agent: AgentNode, new_source: str, correlation_id: str) -> None:
-        from remora.lsp.server import emit_event, publish_diagnostics, refresh_code_lenses
 
         proposal_id = generate_id()
         proposal = RewriteProposal(
@@ -644,10 +640,10 @@ class AgentRunner:
             proposal_id, agent.node_id, agent.source_code, new_source, proposal.diff, file_path=agent.file_path
         )
 
-        await publish_diagnostics(agent.file_path, [proposal])
-        await refresh_code_lenses()
+        await self.server.publish_diagnostics(agent.file_path, [proposal])
+        await self.server.refresh_code_lenses()
 
-        await emit_event(
+        await self.server.emit_event(
             LspRewriteProposalEvent(
                 agent_id=agent.node_id,
                 proposal_id=proposal_id,
@@ -658,9 +654,8 @@ class AgentRunner:
         )
 
     async def message_node(self, from_id: str, to_id: str, message: str, correlation_id: str) -> None:
-        from remora.lsp.server import emit_event
 
-        await emit_event(
+        await self.server.emit_event(
             LspAgentMessageEvent(
                 agent_id=from_id,
                 from_agent=from_id,
@@ -673,11 +668,10 @@ class AgentRunner:
         await self.trigger(to_id, correlation_id)
 
     async def refresh_code_lens(self, agent_id: str) -> None:
-        from remora.lsp.server import refresh_code_lenses
 
         node = await self.server.event_store.get_node(agent_id)
         if node:
-            await refresh_code_lenses()
+            await self.server.refresh_code_lenses()
 
     def apply_extensions(self, agent: AgentNode) -> AgentNode:
         extensions = load_extensions(Path(".remora/models"))
@@ -728,9 +722,8 @@ class AgentRunner:
         return raw_tools
 
     async def execute_extension_tool(self, agent: AgentNode, tool_name: str, params: dict, correlation_id: str) -> None:
-        from remora.lsp.server import emit_event
 
-        await emit_event(
+        await self.server.emit_event(
             LspAgentEvent(
                 event_type="ToolResultEvent",
                 agent_id=agent.node_id,

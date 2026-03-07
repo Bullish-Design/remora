@@ -1,34 +1,43 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from lsprotocol import types as lsp
-
-from remora.core.events import ContentChangedEvent, FileSavedEvent, NodeDiscoveredEvent, NodeRemovedEvent
-from remora.lsp.models import RewriteProposal
-from remora.lsp.server import logger, publish_diagnostics, refresh_code_lenses, server, uri_to_path
-
+from pygls.uris import to_fs_path
 
 from remora.core.discovery import CSTNode, parse_content
+from remora.core.events import ContentChangedEvent, FileSavedEvent, NodeDiscoveredEvent, NodeRemovedEvent
+from remora.lsp.models import RewriteProposal
+from remora.lsp.server import RemoraLanguageServer
 
-async def _emit_node_events(uri: str, new_nodes: list[CSTNode]) -> None:
+logger = logging.getLogger("remora.lsp")
+
+
+def _uri_to_path(uri: str) -> str:
+    try:
+        return to_fs_path(uri)
+    except Exception:
+        return uri
+
+
+async def _emit_node_events(ls: RemoraLanguageServer, uri: str, new_nodes: list[CSTNode]) -> None:
     """Emit NodeDiscovered/NodeRemoved events for a file's parse results."""
-    if not server.event_store:
+    if not ls.event_store:
         return
 
-    old_agents = await server.event_store.list_nodes(file_path=uri)
+    old_agents = await ls.event_store.list_nodes(file_path=uri)
     old_ids = {a.node_id for a in old_agents}
     new_ids = {n.node_id for n in new_nodes}
 
     for orphan_id in old_ids - new_ids:
-        await server.event_store.append("nodes", NodeRemovedEvent(node_id=orphan_id))
+        await ls.event_store.append("nodes", NodeRemovedEvent(node_id=orphan_id))
 
     for node in new_nodes:
-        await server.event_store.append("nodes", NodeDiscoveredEvent.from_cst_node(node))
+        await ls.event_store.append("nodes", NodeDiscoveredEvent.from_cst_node(node))
 
 
-@server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)
-async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
+async def did_open(ls: RemoraLanguageServer, params: lsp.DidOpenTextDocumentParams) -> None:
     try:
         uri = params.text_document.uri
         text = params.text_document.text
@@ -41,15 +50,15 @@ async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
                 "did_open:   node: %s (%s) lines %d-%d", node.name, node.node_type, node.start_line, node.end_line
             )
 
-        await _emit_node_events(uri, new_nodes)
+        await _emit_node_events(ls, uri, new_nodes)
 
         # Update edges in RemoraDB (edges stay in RemoraDB for now)
-        await server.db.update_edges(new_nodes)
+        await ls.db.update_edges(new_nodes)
         logger.debug("did_open: emitted node events + updated edges")
 
-        await refresh_code_lenses()
+        await ls.refresh_code_lenses()
 
-        proposals = await server.db.get_proposals_for_file(uri)
+        proposals = await ls.db.get_proposals_for_file(uri)
         logger.debug("did_open: %d proposals for %s", len(proposals), uri)
         for p in proposals:
             proposal = RewriteProposal(
@@ -63,29 +72,28 @@ async def did_open(params: lsp.DidOpenTextDocumentParams) -> None:
                 reasoning="",
                 correlation_id="",
             )
-            server.proposals[p["proposal_id"]] = proposal
+            ls.proposals[p["proposal_id"]] = proposal
 
-        file_proposals = [p for p in server.proposals.values() if p.file_path == uri]
-        await publish_diagnostics(uri, file_proposals)
+        file_proposals = [p for p in ls.proposals.values() if p.file_path == uri]
+        await ls.publish_diagnostics(uri, file_proposals)
 
         # Discover tools for each agent node from EventStore
-        if server.event_store:
-            agents = await server.event_store.list_nodes(file_path=uri)
+        if ls.event_store:
+            agents = await ls.event_store.list_nodes(file_path=uri)
             for agent in agents:
                 # Discover tools so they are cached on the server for later use.
                 # Tools are not persisted to the node row because they are
                 # re-discovered on every file open/save, making persistence
                 # redundant for now.
-                await server.discover_tools_for_agent(agent)
+                await ls.discover_tools_for_agent(agent)
 
         # Notify client of updated agent list
-        await server.notify_agents_updated()
+        await ls.notify_agents_updated()
     except Exception:
         logger.exception("Error in did_open handler")
 
 
-@server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)
-async def did_change(params: lsp.DidChangeTextDocumentParams) -> None:
+async def did_change(ls: RemoraLanguageServer, params: lsp.DidChangeTextDocumentParams) -> None:
     """Debounced reparse on every edit — updates nodes + code lenses.
 
     Does NOT emit ContentChangedEvent (that only fires on save).
@@ -98,50 +106,54 @@ async def did_change(params: lsp.DidChangeTextDocumentParams) -> None:
         # Full-sync: the last content change contains the full document text
         text = params.content_changes[-1].text
         logger.debug("did_change: scheduling reparse for %s (%d chars)", uri, len(text))
-        server.schedule_reparse(uri, text, delay_ms=500)
+        ls.schedule_reparse(uri, text, delay_ms=500)
     except Exception:
         logger.exception("Error in did_change handler")
 
 
-@server.feature(lsp.TEXT_DOCUMENT_DID_SAVE)
-async def did_save(params: lsp.DidSaveTextDocumentParams) -> None:
+async def did_save(ls: RemoraLanguageServer, params: lsp.DidSaveTextDocumentParams) -> None:
     try:
         uri = params.text_document.uri
         logger.info("did_save: uri=%s", uri)
 
         # Prefer LSP-provided text to avoid disk read race
-        text = params.text if params.text is not None else Path(uri_to_path(uri)).read_text()
+        text = params.text if params.text is not None else Path(_uri_to_path(uri)).read_text()
         logger.debug("did_save: read %d chars from %s", len(text), uri)
 
         new_nodes = parse_content(uri, text)
         logger.info("did_save: parsed %d nodes for %s", len(new_nodes), uri)
 
-        if server.event_store:
-            await _emit_node_events(uri, new_nodes)
+        if ls.event_store:
+            await _emit_node_events(ls, uri, new_nodes)
 
             # Emit file-level reactive events (Gap #10 — reactive loop)
-            await server.event_store.append("files", FileSavedEvent(path=uri))
-            await server.event_store.append("files", ContentChangedEvent(path=uri))
+            await ls.event_store.append("files", FileSavedEvent(path=uri))
+            await ls.event_store.append("files", ContentChangedEvent(path=uri))
 
         # Update edges in RemoraDB
-        await server.db.update_edges(new_nodes)
+        await ls.db.update_edges(new_nodes)
 
-        await server.graph.invalidate(uri)
+        await ls.graph.invalidate(uri)
 
-        await refresh_code_lenses()
+        await ls.refresh_code_lenses()
 
         # Notify client of updated agent list
-        await server.notify_agents_updated()
+        await ls.notify_agents_updated()
     except Exception:
         logger.exception("Error in did_save handler")
 
 
-@server.feature(lsp.TEXT_DOCUMENT_DID_CLOSE)
-async def did_close(params: lsp.DidCloseTextDocumentParams) -> None:
+async def did_close(ls: RemoraLanguageServer, params: lsp.DidCloseTextDocumentParams) -> None:
     try:
         uri = params.text_document.uri
-        to_remove = [pid for pid, p in server.proposals.items() if p.file_path == uri]
+        to_remove = [pid for pid, p in ls.proposals.items() if p.file_path == uri]
         for pid in to_remove:
-            del server.proposals[pid]
+            del ls.proposals[pid]
     except Exception:
         logger.exception("Error in did_close handler")
+
+def register_document_handlers(server: RemoraLanguageServer) -> None:
+    server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)(did_open)
+    server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)(did_change)
+    server.feature(lsp.TEXT_DOCUMENT_DID_SAVE)(did_save)
+    server.feature(lsp.TEXT_DOCUMENT_DID_CLOSE)(did_close)

@@ -5,7 +5,7 @@ import pytest
 from structured_agents.events import ModelResponseEvent, ToolCallEvent, ToolResultEvent
 
 from remora.core.event_bus import EventBus
-from remora.core.events import RemoraEvent, ScaffoldRequestEvent
+from remora.core.events import CoreEvent, ScaffoldRequestEvent
 
 
 @pytest.mark.asyncio
@@ -13,7 +13,7 @@ async def test_emit_notifies_subscribers() -> None:
     bus = EventBus()
     received: list[ToolCallEvent] = []
 
-    async def handler(event: RemoraEvent) -> None:
+    async def handler(event: CoreEvent) -> None:
         if isinstance(event, ToolCallEvent):
             received.append(event)
 

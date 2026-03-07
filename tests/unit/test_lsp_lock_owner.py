@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from remora.lsp import _LockOwnerMetadata, _WorkspaceProcessLock
+from remora.lsp.process_lock import _LockOwnerMetadata, _WorkspaceProcessLock
 
 
 def _read_heartbeat_ms(pid_path: Path) -> int:

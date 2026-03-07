@@ -54,7 +54,12 @@ class RemoraService:
 
         if enable_event_store:
             store_path = swarm_root / "events" / "events.db"
-            projection = NodeProjection()
+            from remora.extensions import extension_matches, load_extensions
+            extensions = load_extensions(swarm_root / "models")
+            projection = NodeProjection(
+                extension_matcher=extension_matches,
+                extension_configs=extensions,
+            )
             event_store = EventStore(
                 store_path,
                 subscriptions=subscriptions,

@@ -145,7 +145,7 @@ async def test_background_scan_saves_partial_manifest_before_completion(
     monkeypatch.setattr("remora.core.config.load_config", lambda path=None: Config())
 
     with pytest.raises(_StopSentinel):
-        lsp_main_mod.main()
+        lsp_main_mod._run_server()
 
     scheduled_tasks: list[asyncio.Task] = []
 
@@ -203,7 +203,7 @@ async def test_background_scan_uses_aggressive_preemption_settings(
     monkeypatch.setattr("remora.core.discovery.parse_content", mock_parse_content)
 
     with pytest.raises(_StopSentinel):
-        lsp_main_mod.main(event_store=event_store)
+        lsp_main_mod._run_server(event_store=event_store)
 
     scheduled_tasks: list[asyncio.Task] = []
 

@@ -3,7 +3,7 @@
 Covers:
 - Event creation with all fields
 - Frozen (immutable) behavior
-- Part of RemoraEvent union
+- Part of CoreEvent union
 - model_dump / round-trip serialization
 - Timestamp auto-set
 """
@@ -15,7 +15,7 @@ import time
 import pytest
 from pydantic import BaseModel
 
-from remora.core.events import ScaffoldRequestEvent, RemoraEvent
+from remora.core.events import ScaffoldRequestEvent, CoreEvent
 
 
 class TestScaffoldRequestEventCreate:
@@ -140,10 +140,11 @@ class TestScaffoldRequestEventPydantic:
 
 
 class TestScaffoldRequestEventInUnion:
-    """ScaffoldRequestEvent must be part of the RemoraEvent union."""
-
-    def test_in_remora_event_union(self):
-        # RemoraEvent is a Union type — ScaffoldRequestEvent should be one of its members
+    """ScaffoldRequestEvent must be part of the CoreEvent union."""
+    
+    def test_in_union(self):
+        # CoreEvent is a Union type — ScaffoldRequestEvent should be one of its members
+        args = getattr(CoreEvent, "__args__", [])
         event = ScaffoldRequestEvent(
             node_id="nd_abc123",
             to_agent="nd_abc123",
@@ -151,7 +152,7 @@ class TestScaffoldRequestEventInUnion:
             parent_id=None,
         )
         # isinstance check works with Union types
-        assert isinstance(event, ScaffoldRequestEvent)
+        assert isinstance(event, CoreEvent)
 
     def test_in_all_exports(self):
         from remora.core import events

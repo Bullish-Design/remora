@@ -6,11 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
-import random
 import sqlite3
-import subprocess
-import threading
 import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, is_dataclass
@@ -18,14 +14,14 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from structured_agents.events import Event as StructuredEvent
 
-from remora.core.events import RemoraEvent
+from remora.core import event_store_connection as store_connection
+from remora.core import event_store_queries as store_queries
+from remora.core import event_store_schema as store_schema
+from remora.core.events import CoreEvent
 from remora.utils import PathLike, normalize_path
 
 logger = logging.getLogger(__name__)
 
-_LOCK_RETRY_MAX_ATTEMPTS = 10
-_LOCK_RETRY_BASE_SECONDS = 0.05
-_LOCK_RETRY_CAP_SECONDS = 1.5
 _NOISY_EVENT_TYPES = frozenset({"NodeDiscoveredEvent", "ScaffoldRequestEvent"})
 _BATCH_APPEND_SLOW_PHASE_WARNING_MS = 1000.0
 _T = TypeVar("_T")
@@ -62,7 +58,7 @@ class EventStore:
         self._subscriptions = subscriptions
         self._event_bus = event_bus
         self._projection = projection
-        self._trigger_queue: asyncio.Queue[tuple[str, int, RemoraEvent]] | None = None
+        self._trigger_queue: asyncio.Queue[tuple[str, int, CoreEvent]] | None = None
 
     def set_subscriptions(self, subscriptions: SubscriptionRegistry) -> None:
         """Set the subscription registry for trigger matching."""
@@ -112,93 +108,7 @@ class EventStore:
             # Mark read connection as read-only via query_only pragma
             await asyncio.to_thread(self._read_conn.execute, "PRAGMA query_only=ON")
 
-            await asyncio.to_thread(
-                self._conn.executescript,
-                """
-                CREATE TABLE IF NOT EXISTS events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    graph_id TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    payload TEXT NOT NULL,
-                    timestamp REAL NOT NULL,
-                    created_at REAL NOT NULL,
-                    from_agent TEXT,
-                    to_agent TEXT,
-                    correlation_id TEXT,
-                    tags TEXT
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_events_graph_id
-                ON events(graph_id);
-
-                CREATE INDEX IF NOT EXISTS idx_events_type
-                ON events(event_type);
-
-                CREATE INDEX IF NOT EXISTS idx_events_timestamp
-                ON events(timestamp);
-
-                CREATE INDEX IF NOT EXISTS idx_events_to_agent
-                ON events(to_agent);
-                """,
-            )
-
-            await asyncio.to_thread(
-                self._conn.executescript,
-                """
-                CREATE TABLE IF NOT EXISTS nodes (
-                    node_id         TEXT PRIMARY KEY,
-                    node_type       TEXT NOT NULL,
-                    name            TEXT NOT NULL,
-                    full_name       TEXT NOT NULL,
-                    file_path       TEXT NOT NULL,
-                    start_line      INTEGER NOT NULL,
-                    end_line        INTEGER NOT NULL,
-                    start_byte      INTEGER NOT NULL DEFAULT 0,
-                    end_byte        INTEGER NOT NULL DEFAULT 0,
-                    source_code     TEXT NOT NULL,
-                    source_hash     TEXT NOT NULL,
-                    parent_id       TEXT,
-                    caller_ids      TEXT NOT NULL DEFAULT '[]',
-                    callee_ids      TEXT NOT NULL DEFAULT '[]',
-                    status          TEXT NOT NULL DEFAULT 'idle',
-                    last_trigger_event TEXT NOT NULL DEFAULT '',
-                    last_completed_at  REAL,
-                    extension_name  TEXT,
-                    custom_system_prompt TEXT NOT NULL DEFAULT '',
-                    mounted_workspaces TEXT NOT NULL DEFAULT '[]',
-                    extra_tools     TEXT NOT NULL DEFAULT '[]',
-                    extra_subscriptions TEXT NOT NULL DEFAULT '[]'
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_nodes_file_path ON nodes(file_path);
-                CREATE INDEX IF NOT EXISTS idx_nodes_parent_id ON nodes(parent_id);
-                CREATE INDEX IF NOT EXISTS idx_nodes_node_type ON nodes(node_type);
-                """,
-            )
-
-            # Subscriptions table (shared with SubscriptionRegistry)
-            await asyncio.to_thread(
-                self._conn.executescript,
-                """
-                CREATE TABLE IF NOT EXISTS subscriptions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    agent_id TEXT NOT NULL,
-                    pattern_json TEXT NOT NULL,
-                    is_default INTEGER NOT NULL DEFAULT 0,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_subscriptions_agent_id
-                ON subscriptions(agent_id);
-
-                CREATE INDEX IF NOT EXISTS idx_subscriptions_is_default
-                ON subscriptions(is_default);
-                """,
-            )
-
-
-
+            await asyncio.to_thread(store_schema.create_tables, self._conn)
             await self._migrate_routing_fields()
 
             if self._subscriptions is not None:
@@ -378,7 +288,7 @@ class EventStore:
     async def append(
         self,
         graph_id: str,
-        event: StructuredEvent | RemoraEvent,
+        event: StructuredEvent | CoreEvent,
     ) -> int:
         """Append an event to the store."""
         if self._conn is None:
@@ -400,7 +310,7 @@ class EventStore:
         tags = getattr(event, "tags", None)
         tags_json = json.dumps(tags) if tags else None
 
-        def _do_append() -> tuple[int, list[RemoraEvent]]:
+        def _do_append() -> tuple[int, list[CoreEvent]]:
             assert self._conn is not None
             self._begin_immediate_with_recovery("append")
             try:
@@ -413,7 +323,7 @@ class EventStore:
                 )) as cursor:
                     ev_id = cursor.lastrowid or 0
 
-                f_ups: list[RemoraEvent] = []
+                f_ups: list[CoreEvent] = []
                 if self._projection is not None:
                     f_ups = self._projection.apply(self._conn, event)
 
@@ -448,7 +358,7 @@ class EventStore:
     async def batch_append(
         self,
         graph_id: str,
-        events: list[StructuredEvent | RemoraEvent],
+        events: list[StructuredEvent | CoreEvent],
     ) -> list[int]:
         """Append multiple events in a single transaction for better performance.
 
@@ -464,7 +374,7 @@ class EventStore:
 
         # Pre-process all events
         prepare_start = time.monotonic()
-        prepared: list[tuple[str, str, float, float, str | None, str | None, str | None, str | None, StructuredEvent | RemoraEvent]] = []
+        prepared: list[tuple[str, str, float, float, str | None, str | None, str | None, str | None, StructuredEvent | CoreEvent]] = []
         for event in events:
             event_type = getattr(event, "event_type", None) or type(event).__name__
             serialize_start = time.monotonic()
@@ -504,7 +414,7 @@ class EventStore:
         elif logger.isEnabledFor(logging.DEBUG):
             logger.debug("batch_append: prepare duration_ms=%.1f events=%d", prepare_ms, len(prepared))
 
-        def _do_batch_append() -> tuple[list[int], list[RemoraEvent]]:
+        def _do_batch_append() -> tuple[list[int], list[CoreEvent]]:
             assert self._conn is not None
             tx_start = time.monotonic()
             begin_start = time.monotonic()
@@ -526,7 +436,7 @@ class EventStore:
             current_node_id = ""
             try:
                 event_ids: list[int] = []
-                all_follow_ups: list[RemoraEvent] = []
+                all_follow_ups: list[CoreEvent] = []
                 total_insert_ms = 0.0
                 total_projection_ms = 0.0
                 for idx, (
@@ -583,7 +493,7 @@ class EventStore:
                         )
 
                     projection_ms = 0.0
-                    f_ups: list[RemoraEvent] = []
+                    f_ups: list[CoreEvent] = []
                     if self._projection is not None:
                         projection_start = time.monotonic()
                         f_ups = self._projection.apply(self._conn, event)
@@ -713,7 +623,7 @@ class EventStore:
 
         return event_ids
 
-    async def get_triggers(self) -> AsyncIterator[tuple[str, int, RemoraEvent]]:
+    async def get_triggers(self) -> AsyncIterator[tuple[str, int, CoreEvent]]:
         """Iterate over event triggers for matched subscriptions."""
         if self._trigger_queue is None:
             raise RuntimeError("EventStore subscriptions not configured")
@@ -1167,14 +1077,14 @@ class EventStore:
             self._read_conn = None
         self._trigger_queue = None
 
-    def _source_length(self, event: StructuredEvent | RemoraEvent) -> int | None:
+    def _source_length(self, event: StructuredEvent | CoreEvent) -> int | None:
         """Return source length for events that carry source_code."""
         source_code = getattr(event, "source_code", None)
         if isinstance(source_code, str):
             return len(source_code)
         return None
 
-    def _serialize_event(self, event: StructuredEvent | RemoraEvent) -> str:
+    def _serialize_event(self, event: StructuredEvent | CoreEvent) -> str:
         """Serialize an event to JSON."""
         if hasattr(event, "model_dump"):
             # Pydantic model (e.g. LSP AgentEvent subclasses)

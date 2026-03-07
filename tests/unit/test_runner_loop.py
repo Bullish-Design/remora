@@ -65,6 +65,8 @@ def _make_mock_server() -> MagicMock:
     # subscriptions
     server.subscriptions = None
     server.emit_event = AsyncMock()
+    server.refresh_code_lenses = AsyncMock()
+    server.publish_diagnostics = AsyncMock()
     return server
 
 
@@ -84,10 +86,8 @@ class TestExecuteTurn:
     """Verify execute_turn orchestration (status, chain, error handling)."""
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_turn_sets_running_then_idle(self, mock_exec, mock_emit, mock_refresh):
+    async def test_turn_sets_running_then_idle(self, mock_exec):
         mock_exec.return_value = _ok_result()
         server = _make_mock_server()
         runner = AgentRunner(server)
@@ -101,9 +101,7 @@ class TestExecuteTurn:
         assert status_calls[-1][0] == ("rm_test1", "idle")
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
-    async def test_turn_missing_node_emits_error(self, mock_emit, mock_refresh):
+    async def test_turn_missing_node_emits_error(self):
         server = _make_mock_server()
         server.event_store.get_node = AsyncMock(return_value=None)
         runner = AgentRunner(server)
@@ -120,10 +118,8 @@ class TestExecuteTurn:
         assert len(error_calls) >= 1
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_turn_execution_error_emits_error(self, mock_exec, mock_emit, mock_refresh):
+    async def test_turn_execution_error_emits_error(self, mock_exec):
         mock_exec.side_effect = RuntimeError("connection refused")
         server = _make_mock_server()
         runner = AgentRunner(server)
@@ -143,10 +139,8 @@ class TestExecuteTurn:
         assert last_status == ("rm_test1", "idle")
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_turn_adds_to_chain(self, mock_exec, mock_emit, mock_refresh):
+    async def test_turn_adds_to_chain(self, mock_exec):
         mock_exec.return_value = _ok_result()
         server = _make_mock_server()
         runner = AgentRunner(server)
@@ -157,10 +151,8 @@ class TestExecuteTurn:
         server.db.add_to_chain.assert_called_once_with("corr_1", "rm_test1")
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_turn_includes_rejection_feedback(self, mock_exec, mock_emit, mock_refresh):
+    async def test_turn_includes_rejection_feedback(self, mock_exec):
         mock_exec.return_value = _ok_result()
         server = _make_mock_server()
         runner = AgentRunner(server)
@@ -179,10 +171,8 @@ class TestExecuteTurn:
         assert len(feedback_msgs) >= 1
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_turn_emits_text_response(self, mock_exec, mock_emit, mock_refresh):
+    async def test_turn_emits_text_response(self, mock_exec):
         mock_exec.return_value = _ok_result("Hello from the agent.")
         server = _make_mock_server()
         runner = AgentRunner(server)
@@ -193,16 +183,14 @@ class TestExecuteTurn:
         # Should emit AgentTextResponse event
         text_events = [
             c
-            for c in mock_emit.call_args_list
+            for c in server.emit_event.call_args_list
             if c[0][0].event_type == "AgentTextResponse" and c[0][0].payload.get("content") == "Hello from the agent."
         ]
         assert len(text_events) == 1
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_turn_no_text_response_no_emit(self, mock_exec, mock_emit, mock_refresh):
+    async def test_turn_no_text_response_no_emit(self, mock_exec):
         mock_exec.return_value = ExecutionResult(response_text="", kernel_events=[])
         server = _make_mock_server()
         runner = AgentRunner(server)
@@ -211,14 +199,12 @@ class TestExecuteTurn:
         await runner.execute_turn(trigger)
 
         # Should NOT emit AgentTextResponse event for empty text
-        text_events = [c for c in mock_emit.call_args_list if c[0][0].event_type == "AgentTextResponse"]
+        text_events = [c for c in server.emit_event.call_args_list if c[0][0].event_type == "AgentTextResponse"]
         assert len(text_events) == 0
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_turn_passes_extra_tools(self, mock_exec, mock_emit, mock_refresh):
+    async def test_turn_passes_extra_tools(self, mock_exec):
         """execute_agent_turn is called with LSP tools in extra_tools."""
         mock_exec.return_value = _ok_result()
         server = _make_mock_server()
@@ -248,10 +234,7 @@ class TestCreateProposal:
     """Verify proposal creation stores and emits correctly."""
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
-    @patch("remora.lsp.server.publish_diagnostics", new_callable=AsyncMock)
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    async def test_proposal_stored_on_server(self, mock_refresh, mock_diag, mock_emit):
+    async def test_proposal_stored_on_server(self):
         server = _make_mock_server()
         runner = AgentRunner(server)
         agent = _make_agent()
@@ -266,24 +249,18 @@ class TestCreateProposal:
         assert proposal.correlation_id == "corr_1"
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
-    @patch("remora.lsp.server.publish_diagnostics", new_callable=AsyncMock)
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    async def test_proposal_emits_event(self, mock_refresh, mock_diag, mock_emit):
+    async def test_proposal_emits_event(self):
         server = _make_mock_server()
         runner = AgentRunner(server)
         agent = _make_agent()
 
         await runner.create_proposal(agent, "new code", "corr_1")
 
-        proposal_events = [c for c in mock_emit.call_args_list if c[0][0].event_type == "RewriteProposalEvent"]
+        proposal_events = [c for c in server.emit_event.call_args_list if c[0][0].event_type == "RewriteProposalEvent"]
         assert len(proposal_events) == 1
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
-    @patch("remora.lsp.server.publish_diagnostics", new_callable=AsyncMock)
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    async def test_proposal_sets_pending_approval(self, mock_refresh, mock_diag, mock_emit):
+    async def test_proposal_sets_pending_approval(self):
         server = _make_mock_server()
         runner = AgentRunner(server)
         agent = _make_agent()
@@ -293,18 +270,15 @@ class TestCreateProposal:
         server.event_store.set_node_status.assert_called_once_with("rm_test1", "pending_approval")
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
-    @patch("remora.lsp.server.publish_diagnostics", new_callable=AsyncMock)
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    async def test_proposal_publishes_diagnostics(self, mock_refresh, mock_diag, mock_emit):
+    async def test_proposal_publishes_diagnostics(self):
         server = _make_mock_server()
         runner = AgentRunner(server)
         agent = _make_agent()
 
         await runner.create_proposal(agent, "new code", "corr_1")
 
-        mock_diag.assert_called_once()
-        call_args = mock_diag.call_args[0]
+        server.publish_diagnostics.assert_called_once()
+        call_args = server.publish_diagnostics.call_args[0]
         assert call_args[0] == "src/mod.py"  # file_path
 
 
@@ -317,13 +291,10 @@ class TestExecuteTurnDepthTracking:
     """Verify depth tracking increments/decrements during execute_turn."""
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_depth_incremented_during_turn(self, mock_exec, mock_emit, mock_refresh):
+    async def test_depth_incremented_during_turn(self, mock_exec):
         server = _make_mock_server()
         depth_during_turn = []
-
         async def capture_depth(**kwargs):
             key = "rm_test1:corr_1"
             depth_during_turn.append(runner._correlation_depth.get(key, (0, 0)))
@@ -339,10 +310,8 @@ class TestExecuteTurnDepthTracking:
         assert depth_during_turn[0][0] == 1
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_depth_decremented_after_turn(self, mock_exec, mock_emit, mock_refresh):
+    async def test_depth_decremented_after_turn(self, mock_exec):
         mock_exec.return_value = _ok_result()
         server = _make_mock_server()
         runner = AgentRunner(server)
@@ -365,10 +334,8 @@ class TestExecuteTurnEmitsDomainEvents:
     and last_completed_at (Workstream E — Gap #11)."""
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_emits_agent_start_event(self, mock_exec, mock_emit, mock_refresh):
+    async def test_emits_agent_start_event(self, mock_exec):
         """execute_turn should append an AgentStartEvent before calling execute_agent_turn."""
         mock_exec.return_value = _ok_result()
         server = _make_mock_server()
@@ -387,10 +354,8 @@ class TestExecuteTurnEmitsDomainEvents:
         assert event.node_name == "foo"
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_emits_agent_complete_event(self, mock_exec, mock_emit, mock_refresh):
+    async def test_emits_agent_complete_event(self, mock_exec):
         """execute_turn should append an AgentCompleteEvent after successful execution."""
         mock_exec.return_value = _ok_result("Agent completed successfully.")
         server = _make_mock_server()
@@ -410,10 +375,8 @@ class TestExecuteTurnEmitsDomainEvents:
         assert event.tags == ()  # Default: no tags
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_emits_agent_error_event_on_failure(self, mock_exec, mock_emit, mock_refresh):
+    async def test_emits_agent_error_event_on_failure(self, mock_exec):
         """execute_turn should append an AgentErrorEvent when execution raises."""
         mock_exec.side_effect = RuntimeError("LLM timeout")
         server = _make_mock_server()
@@ -438,17 +401,13 @@ class TestExecuteTurnEmitsDomainEvents:
         assert len(complete_events) == 0
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_start_event_emitted_before_execution(self, mock_exec, mock_emit, mock_refresh):
+    async def test_start_event_emitted_before_execution(self, mock_exec):
         """AgentStartEvent should be appended BEFORE execute_agent_turn is called."""
         call_order = []
-
         async def track_append(graph_id, event):
             call_order.append(("append", type(event).__name__))
             return 1
-
         async def track_exec(**kwargs):
             call_order.append(("exec",))
             return _ok_result()
@@ -467,10 +426,8 @@ class TestExecuteTurnEmitsDomainEvents:
         assert start_idx < exec_idx
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_scaffold_trigger_adds_scaffold_tag(self, mock_exec, mock_emit, mock_refresh):
+    async def test_scaffold_trigger_adds_scaffold_tag(self, mock_exec):
         """When trigger carries a ScaffoldRequestEvent, AgentCompleteEvent should have tags=('scaffold',)."""
         from remora.core.events import ScaffoldRequestEvent
 
@@ -493,10 +450,8 @@ class TestExecuteTurnEmitsDomainEvents:
         assert complete_events[0][0][1].tags == ("scaffold",)
 
     @pytest.mark.asyncio
-    @patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock)
-    @patch("remora.lsp.server.emit_event", new_callable=AsyncMock)
     @patch(_EXEC_PATCH, new_callable=AsyncMock)
-    async def test_non_scaffold_trigger_has_no_tags(self, mock_exec, mock_emit, mock_refresh):
+    async def test_non_scaffold_trigger_has_no_tags(self, mock_exec):
         """When trigger carries a non-scaffold event, AgentCompleteEvent tags should be empty."""
         mock_exec.return_value = _ok_result("Done.")
         server = _make_mock_server()
@@ -531,7 +486,6 @@ class TestRunFromEventStore:
 
         event = ContentChangedEvent(path="/src/foo.py")
         triggers_yielded = [(("agent_1", 1, event))]
-
         async def fake_get_triggers():
             for t in triggers_yielded:
                 yield t
@@ -563,7 +517,6 @@ class TestRunFromEventStore:
 
         event = MagicMock()
         event.correlation_id = "corr_from_event"
-
         async def fake_get_triggers():
             yield ("agent_1", 1, event)
 
@@ -590,7 +543,6 @@ class TestRunFromEventStore:
         runner._running = True
 
         event = ContentChangedEvent(path="/src/foo.py")
-
         async def fake_get_triggers():
             yield ("agent_1", 1, event)
 
@@ -620,7 +572,6 @@ class TestRunFromEventStore:
         await runner.trigger("agent_1", "manual_corr")
 
         event = ContentChangedEvent(path="/src/foo.py")
-
         async def fake_get_triggers():
             yield ("agent_1", 1, event)
 
@@ -649,7 +600,6 @@ class TestRunFromEventStore:
         # _running starts as False
 
         event = ContentChangedEvent(path="/src/foo.py")
-
         async def fake_get_triggers():
             yield ("agent_1", 1, event)
 

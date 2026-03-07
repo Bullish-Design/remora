@@ -64,7 +64,12 @@ def swarm_start(
 
             event_bus = EventBus()
             subscriptions = SubscriptionRegistry(subscriptions_path)
-            projection = NodeProjection()
+            from remora.extensions import extension_matches, load_extensions
+            extensions = load_extensions(swarm_path / "models")
+            projection = NodeProjection(
+                extension_matcher=extension_matches,
+                extension_configs=extensions,
+            )
             event_store = EventStore(
                 event_store_path,
                 subscriptions=subscriptions,
@@ -118,7 +123,12 @@ def swarm_start(
 
         event_bus = EventBus()
         subscriptions = SubscriptionRegistry(subscriptions_path)
-        projection = NodeProjection()
+        from remora.extensions import extension_matches, load_extensions
+        extensions = load_extensions(swarm_path / "models")
+        projection = NodeProjection(
+            extension_matcher=extension_matches,
+            extension_configs=extensions,
+        )
         event_store = EventStore(
             event_store_path,
             subscriptions=subscriptions,
@@ -193,7 +203,12 @@ def swarm_reconcile(project_root: str | None, config_path: str | None) -> None:
         event_store_path = swarm_path / "events" / "events.db"
 
         subscriptions = SubscriptionRegistry(subscriptions_path)
-        projection = NodeProjection()
+        from remora.extensions import extension_matches, load_extensions
+        extensions = load_extensions(swarm_path / "models")
+        projection = NodeProjection(
+            extension_matcher=extension_matches,
+            extension_configs=extensions,
+        )
         event_store = EventStore(
             event_store_path,
             subscriptions=subscriptions,

@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 from lsprotocol import types as lsp
 
 from remora.lsp.models import LspHumanChatEvent, LspRewriteRejectedEvent
-from remora.lsp.server import emit_event, logger, server
+from remora.lsp.server import RemoraLanguageServer
+
+logger = logging.getLogger("remora.lsp")
 
 SUBMIT_EMIT_EVENT_TIMEOUT_SECONDS = 2.0
 SUBMIT_RUNNER_TRIGGER_TIMEOUT_SECONDS = 2.0
 
 
-@server.feature("$/remora/cursorMoved")
-async def on_cursor_moved(params: dict) -> None:
+async def on_cursor_moved(ls: RemoraLanguageServer, params: dict) -> None:
     """Handle cursor position updates from neovim for web graph view.
 
     Debounced (200ms): the actual DB update and CursorFocusEvent emission
@@ -30,16 +32,14 @@ async def on_cursor_moved(params: dict) -> None:
         if not uri or line is None:
             return
         # Resolve which agent (if any) the cursor is on
-        node = await server.event_store.get_node_at_position(uri, line)
+        node = await ls.event_store.get_node_at_position(uri, line)
         agent_id = node.node_id if node else None
         # Debounce: actual DB write + CursorFocusEvent emission delayed 200ms
-        server.schedule_cursor_update(agent_id, uri, line, delay_ms=200)
+        ls.schedule_cursor_update(agent_id, uri, line, delay_ms=200)
     except Exception:
         logger.debug("Error in on_cursor_moved handler", exc_info=True)
 
-
-@server.feature("$/remora/submitInput")
-async def on_input_submitted(params: dict) -> None:
+async def on_input_submitted(ls: RemoraLanguageServer, params: dict) -> None:
     try:
         logger.info("on_input_submitted: params=%r (type=%s)", params, type(params).__name__)
         # pygls may deliver params as an attrs Object (uses __slots__, no __dict__).
@@ -59,9 +59,9 @@ async def on_input_submitted(params: dict) -> None:
             agent_id = params["agent_id"]
             message = params["input"]
             logger.info("on_input_submitted: chat message to agent=%s message=%r", agent_id, message[:100])
-            server.note_user_activity("chat_submit")
+            ls.note_user_activity("chat_submit")
 
-            correlation_id = server.generate_correlation_id()
+            correlation_id = ls.generate_correlation_id()
             logger.debug("on_input_submitted: correlation_id=%s", correlation_id)
             emit_start = time.monotonic()
             logger.info(
@@ -72,7 +72,7 @@ async def on_input_submitted(params: dict) -> None:
             )
             try:
                 await asyncio.wait_for(
-                    emit_event(
+                    ls.emit_event(
                         LspHumanChatEvent(
                             agent_id=agent_id,
                             to_agent=agent_id,
@@ -93,7 +93,7 @@ async def on_input_submitted(params: dict) -> None:
                     SUBMIT_EMIT_EVENT_TIMEOUT_SECONDS,
                 )
                 try:
-                    server.window_show_message(
+                    ls.window_show_message(
                         lsp.ShowMessageParams(
                             type=lsp.MessageType.Warning,
                             message="Remora is busy processing workspace scan; chat submit timed out. Please retry.",
@@ -111,12 +111,12 @@ async def on_input_submitted(params: dict) -> None:
             )
             logger.info("on_input_submitted: HumanChatEvent emitted")
 
-            if server.runner:
+            if ls.runner:
                 logger.info("on_input_submitted: triggering runner for agent=%s corr=%s", agent_id, correlation_id)
                 trigger_start = time.monotonic()
                 try:
                     await asyncio.wait_for(
-                        server.runner.trigger(agent_id, correlation_id),
+                        ls.runner.trigger(agent_id, correlation_id),
                         timeout=SUBMIT_RUNNER_TRIGGER_TIMEOUT_SECONDS,
                     )
                 except TimeoutError:
@@ -129,7 +129,7 @@ async def on_input_submitted(params: dict) -> None:
                         SUBMIT_RUNNER_TRIGGER_TIMEOUT_SECONDS,
                     )
                     try:
-                        server.window_show_message(
+                        ls.window_show_message(
                             lsp.ShowMessageParams(
                                 type=lsp.MessageType.Warning,
                                 message="Remora runner is busy; your chat was queued but response may be delayed.",
@@ -145,11 +145,11 @@ async def on_input_submitted(params: dict) -> None:
         elif "proposal_id" in params:
             proposal_id = params["proposal_id"]
             feedback = params["input"]
-            proposal = server.proposals.get(proposal_id)
+            proposal = ls.proposals.get(proposal_id)
             logger.info("on_input_submitted: rejection feedback for proposal=%s", proposal_id)
 
             if proposal:
-                await emit_event(
+                await ls.emit_event(
                     LspRewriteRejectedEvent(
                         agent_id=proposal.agent_id,
                         proposal_id=proposal_id,
@@ -159,8 +159,8 @@ async def on_input_submitted(params: dict) -> None:
                     )
                 )
 
-                if server.runner:
-                    await server.runner.trigger(
+                if ls.runner:
+                    await ls.runner.trigger(
                         proposal.agent_id, proposal.correlation_id, context={"rejection_feedback": feedback}
                     )
         else:
@@ -168,3 +168,7 @@ async def on_input_submitted(params: dict) -> None:
 
     except Exception:
         logger.exception("Error in on_input_submitted handler")
+
+def register_notification_handlers(server: RemoraLanguageServer) -> None:
+    server.feature("$/remora/cursorMoved")(on_cursor_moved)
+    server.feature("$/remora/submitInput")(on_input_submitted)

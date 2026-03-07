@@ -18,9 +18,9 @@ from remora.core.events import (
     AgentStartEvent,
     NodeDiscoveredEvent,
     NodeRemovedEvent,
-    RemoraEvent,
+    CoreEvent,
 )
-from remora.extensions import extension_matches
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -82,10 +82,15 @@ def _dataclass_default(obj: Any) -> Any:
 class NodeProjection:
     """Projects events into the `nodes` table."""
 
-    def __init__(self, extension_configs: list[type] | None = None):
+    def __init__(
+        self,
+        extension_matcher: Callable[[type, str, str, str, str], bool] | None = None,
+        extension_configs: list[type] | None = None,
+    ):
+        self._extension_matcher = extension_matcher
         self._extension_configs = extension_configs or []
 
-    def apply(self, conn: sqlite3.Connection, event: RemoraEvent) -> list[RemoraEvent]:
+    def apply(self, conn: sqlite3.Connection, event: CoreEvent) -> list[CoreEvent]:
         """Apply a single event to the nodes table.
 
         Returns a (possibly empty) list of follow-up events that should be
@@ -106,7 +111,7 @@ class NodeProjection:
             self._project_agent_error(conn, event)
         return []
 
-    def _project_node_discovered(self, conn: sqlite3.Connection, event: NodeDiscoveredEvent) -> list[RemoraEvent]:
+    def _project_node_discovered(self, conn: sqlite3.Connection, event: NodeDiscoveredEvent) -> list[CoreEvent]:
         """Project a discovered node into the read model.
 
         Temporary behavior override (2026-03-05):
@@ -161,23 +166,24 @@ class NodeProjection:
         }
 
         # Match extension configs (first match wins)
-        for ext in self._extension_configs:
-            if extension_matches(
-                ext,
-                row["node_type"],
-                row["name"],
-                file_path=row["file_path"],
-                source_code=row["source_code"],
-            ):
-                ext_data = ext.get_extension_data()
-                for key, value in ext_data.items():
-                    if key in row:
-                        # Serialize lists/dicts to JSON strings for DB
-                        if isinstance(value, (list, dict)):
-                            row[key] = json.dumps(value, default=_dataclass_default)
-                        else:
-                            row[key] = value
-                break
+        if self._extension_matcher is not None:
+            for ext in self._extension_configs:
+                if self._extension_matcher(
+                    ext,
+                    row["node_type"],
+                    row["name"],
+                    file_path=row["file_path"],
+                    source_code=row["source_code"],
+                ):
+                    ext_data = ext.get_extension_data()
+                    for key, value in ext_data.items():
+                        if key in row:
+                            # Serialize lists/dicts to JSON strings for DB
+                            if isinstance(value, (list, dict)):
+                                row[key] = json.dumps(value, default=_dataclass_default)
+                            else:
+                                row[key] = value
+                    break
 
         cols = ", ".join(row.keys())
         placeholders = ", ".join("?" * len(row))

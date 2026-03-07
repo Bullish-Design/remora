@@ -56,6 +56,9 @@ def mock_server(event_store: EventStore) -> MagicMock:
     """Create a mock server with event_store set."""
     server = MagicMock()
     server.event_store = event_store
+    server.emit_event = AsyncMock()
+    server.refresh_code_lenses = AsyncMock()
+    server.publish_diagnostics = AsyncMock()
     server.db = MagicMock()
     server.db.get_activation_chain = AsyncMock(return_value=[])
     server.db.add_to_chain = AsyncMock()
@@ -116,8 +119,6 @@ class TestExecuteTurn:
         trigger = Trigger(agent_id="rm_abc12", correlation_id="corr_1")
 
         with (
-            patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock),
-            patch("remora.lsp.server.emit_event", new_callable=AsyncMock),
             patch(
                 "remora.lsp.runner.execute_agent_turn",
                 new_callable=AsyncMock,
@@ -140,8 +141,6 @@ class TestExecuteTurn:
         trigger = Trigger(agent_id="rm_abc12", correlation_id="corr_1")
 
         with (
-            patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock),
-            patch("remora.lsp.server.emit_event", new_callable=AsyncMock),
             patch(
                 "remora.lsp.runner.execute_agent_turn",
                 new_callable=AsyncMock,
@@ -164,8 +163,6 @@ class TestExecuteTurn:
             await asyncio.sleep(0.05)
 
         with (
-            patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock),
-            patch("remora.lsp.server.emit_event", new_callable=AsyncMock),
             patch("remora.lsp.runner.EXECUTE_AGENT_TURN_TIMEOUT_SECONDS", 0.01),
             patch("remora.lsp.runner.execute_agent_turn", new=AsyncMock(side_effect=_slow_execute)),
             patch.object(runner, "emit_error", new_callable=AsyncMock) as mock_emit_error,
@@ -225,7 +222,7 @@ class TestRefreshCodeLens:
     @pytest.mark.asyncio
     async def test_uses_event_store(self, runner, mock_server, event_store):
         """refresh_code_lens should query EventStore, not RemoraDB."""
-        with patch("remora.lsp.server.refresh_code_lenses", new_callable=AsyncMock) as mock_refresh:
+        with patch.object(mock_server, "refresh_code_lenses", new_callable=AsyncMock) as mock_refresh:
             await runner.refresh_code_lens("rm_abc12")
 
         mock_refresh.assert_called_once()

@@ -180,7 +180,9 @@ async def store_with_projection(tmp_path: Path):
                 "mounted_workspaces": ["/data/staging", "/data/prod"],
             }
 
-    projection = NodeProjection(extension_configs=[ToolExtension])
+    def dummy_matcher(ext_cls, node_type, name, **kwargs):
+        return getattr(ext_cls, "matches", lambda *a, **k: False)(node_type, name)
+    projection = NodeProjection(extension_matcher=dummy_matcher, extension_configs=[ToolExtension])
     s = EventStore(tmp_path / "proj.db", projection=projection)
     await s.initialize()
     yield s
@@ -539,7 +541,9 @@ class TestExtensionMatchesErrorIsolation:
         # BadExt is tried first; extension_matches propagates RuntimeError
         # so projection with BadExt first will fail.
         # But if GoodExt is first, it matches and BadExt is never tried.
-        proj = NodeProjection(extension_configs=[GoodExt, BadExt])
+        def dummy_matcher(ext_cls, node_type, name, **kwargs):
+            return getattr(ext_cls, "matches", lambda *a, **k: False)(node_type, name)
+        proj = NodeProjection(extension_matcher=dummy_matcher, extension_configs=[GoodExt, BadExt])
         db = sqlite3.connect(":memory:")
         db.row_factory = sqlite3.Row
         db.executescript("""

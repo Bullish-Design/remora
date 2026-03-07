@@ -120,9 +120,11 @@ class TestLspMainUsesConfig:
             "_setup_logging",
             lambda: __import__("logging").getLogger("test"),
         )
+        monkeypatch.setattr("remora.lsp.__main__.register_handlers", lambda server: None, raising=False)
+        monkeypatch.setattr("remora.lsp.server.register_handlers", lambda server: None)
 
         with pytest.raises(_StopSentinel):
-            lsp_main_mod.main()
+            lsp_main_mod._run_server()
 
         assert captured["config"] is test_config
         assert captured["config"].model_base_url == "http://test-host:1234/v1"

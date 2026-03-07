@@ -34,7 +34,10 @@ class _TestExtension(AgentExtension):
 
 @pytest.fixture
 async def store(tmp_path: Path):
-    proj = NodeProjection(extension_configs=[_TestExtension])
+    def dummy_matcher(ext_cls, node_type, name, **kwargs):
+        return getattr(ext_cls, "matches", lambda *a, **k: False)(node_type, name)
+
+    proj = NodeProjection(extension_matcher=dummy_matcher, extension_configs=[_TestExtension])
     s = EventStore(tmp_path / "test.db", projection=proj)
     await s.initialize()
     yield s

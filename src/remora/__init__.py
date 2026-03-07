@@ -41,12 +41,11 @@ from remora.core.events import (
     ModelResponseEvent,
     NodeDiscoveredEvent,
     NodeRemovedEvent,
-    RemoraEvent,
+    CoreEvent,
     ToolCallEvent,
     ToolResultEvent,
     TurnCompleteEvent,
 )
-from remora.lsp.runner import AgentRunner
 from remora.core.swarm_executor import SwarmExecutor
 from remora.core.subscriptions import Subscription, SubscriptionPattern, SubscriptionRegistry
 from remora.core.reconciler import (
@@ -83,14 +82,13 @@ __all__ = [
     "ModelResponseEvent",
     "NodeDiscoveredEvent",
     "NodeRemovedEvent",
-    "RemoraEvent",
+    "CoreEvent",
     "ToolCallEvent",
     "ToolResultEvent",
     "TurnCompleteEvent",
     "EventBus",
     "EventHandler",
     "EventStore",
-    "AgentRunner",
     "SwarmExecutor",
     "CSTNode",
     "LANGUAGE_EXTENSIONS",

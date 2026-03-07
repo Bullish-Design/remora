@@ -328,7 +328,9 @@ class TestProjectionWithCustomExtensions:
 
     @pytest.mark.asyncio
     async def test_class_gets_class_doc_generator(self, store, all_extensions):
-        proj = NodeProjection(extension_configs=all_extensions)
+        def dummy_matcher(ext_cls, node_type, name, **kwargs):
+            return getattr(ext_cls, "matches", lambda *a, **k: False)(node_type, name)
+        proj = NodeProjection(extension_matcher=dummy_matcher, extension_configs=all_extensions)
         event = self._discovered(
             node_id="cls-1",
             node_type="class",
@@ -348,7 +350,9 @@ class TestProjectionWithCustomExtensions:
 
     @pytest.mark.asyncio
     async def test_non_test_function_gets_function_test_scaffold(self, store, all_extensions):
-        proj = NodeProjection(extension_configs=all_extensions)
+        def dummy_matcher(ext_cls, node_type, name, **kwargs):
+            return getattr(ext_cls, "matches", lambda *a, **k: False)(node_type, name)
+        proj = NodeProjection(extension_matcher=dummy_matcher, extension_configs=all_extensions)
         event = self._discovered(
             node_id="fn-1",
             node_type="function",
@@ -361,7 +365,9 @@ class TestProjectionWithCustomExtensions:
 
     @pytest.mark.asyncio
     async def test_test_function_gets_test_function_extension(self, store, all_extensions):
-        proj = NodeProjection(extension_configs=all_extensions)
+        def dummy_matcher(ext_cls, node_type, name, **kwargs):
+            return getattr(ext_cls, "matches", lambda *a, **k: False)(node_type, name)
+        proj = NodeProjection(extension_matcher=dummy_matcher, extension_configs=all_extensions)
         event = self._discovered(
             node_id="fn-2",
             node_type="function",
@@ -374,7 +380,9 @@ class TestProjectionWithCustomExtensions:
 
     @pytest.mark.asyncio
     async def test_monitor_md_gets_swarm_monitor(self, store, all_extensions):
-        proj = NodeProjection(extension_configs=all_extensions)
+        def dummy_matcher(ext_cls, node_type, name, **kwargs):
+            return getattr(ext_cls, "matches", lambda *a, **k: False)(node_type, name)
+        proj = NodeProjection(extension_matcher=dummy_matcher, extension_configs=all_extensions)
         event = self._discovered(
             node_id="file-1",
             node_type="file",
@@ -394,7 +402,9 @@ class TestProjectionWithCustomExtensions:
 
     @pytest.mark.asyncio
     async def test_init_py_gets_package_init(self, store, all_extensions):
-        proj = NodeProjection(extension_configs=all_extensions)
+        def dummy_matcher(ext_cls, node_type, name, **kwargs):
+            return getattr(ext_cls, "matches", lambda *a, **k: False)(node_type, name)
+        proj = NodeProjection(extension_matcher=dummy_matcher, extension_configs=all_extensions)
         event = self._discovered(
             node_id="file-2",
             node_type="file",
@@ -409,7 +419,9 @@ class TestProjectionWithCustomExtensions:
     @pytest.mark.asyncio
     async def test_hydrate_agent_node_with_extension_data(self, store, all_extensions):
         """AgentNode.from_row() correctly deserializes extension fields."""
-        proj = NodeProjection(extension_configs=all_extensions)
+        def dummy_matcher(ext_cls, node_type, name, **kwargs):
+            return getattr(ext_cls, "matches", lambda *a, **k: False)(node_type, name)
+        proj = NodeProjection(extension_matcher=dummy_matcher, extension_configs=all_extensions)
         event = self._discovered(
             node_id="cls-2",
             node_type="class",

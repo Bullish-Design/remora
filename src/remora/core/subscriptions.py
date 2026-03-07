@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from remora.utils import PathLike, normalize_path
 
 if TYPE_CHECKING:
-    from remora.core.events import RemoraEvent
+    from remora.core.events import CoreEvent
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class SubscriptionPattern(BaseModel):
     path_glob: str | None = None
     tags: list[str] | None = None
 
-    def matches(self, event: RemoraEvent) -> bool:
+    def matches(self, event: CoreEvent) -> bool:
         """Check if this pattern matches the given event."""
         event_type = type(event).__name__
 
@@ -290,7 +290,7 @@ class SubscriptionRegistry:
         async with self._lock:
             return await asyncio.to_thread(_fetch, self._conn)
 
-    async def get_matching_agents(self, event: RemoraEvent) -> list[str]:
+    async def get_matching_agents(self, event: CoreEvent) -> list[str]:
         """Get all agent IDs whose subscriptions match the event.
 
         Uses an in-memory cache indexed by event_type for O(1) lookup.

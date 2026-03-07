@@ -74,6 +74,32 @@ class TestProjectNodeDiscovered:
         assert row["source_hash"] == "v2"
 
     @pytest.mark.asyncio
+    def dummy_matcher(self, ext_cls, node_type, name, **kwargs):
+        return getattr(ext_cls, "matches", lambda *a, **k: False)(node_type, name)
+
+    @pytest.mark.asyncio
+    async def test_extension_customizations_applied(self, store: EventStore):
+        class TestExt(AgentExtension):
+            @staticmethod
+            def matches(node_type: str, name: str) -> bool:
+                return name.startswith("test_")
+
+            @staticmethod
+            def get_extension_data() -> dict:
+                return {
+                    "extension_name": "TestAgent",
+                    "custom_system_prompt": "You run tests.",
+                }
+
+        proj = NodeProjection(extension_matcher=self.dummy_matcher, extension_configs=[TestExt])
+        event = _discovered_event(name="test_foo", full_name="function:test_foo")
+        proj.apply(store._conn, event)
+
+        row = store._conn.execute("SELECT * FROM nodes WHERE node_id = ?", ("abc123",)).fetchone()
+        assert row["extension_name"] == "TestAgent"
+        assert row["custom_system_prompt"] == "You run tests."
+
+    @pytest.mark.asyncio
     async def test_extension_matching(self, store: EventStore):
         class TestExt(AgentExtension):
             @staticmethod
@@ -87,7 +113,7 @@ class TestProjectNodeDiscovered:
                     "custom_system_prompt": "You run tests.",
                 }
 
-        proj = NodeProjection(extension_configs=[TestExt])
+        proj = NodeProjection(extension_matcher=self.dummy_matcher, extension_configs=[TestExt])
         event = _discovered_event(name="test_foo", full_name="function:test_foo")
         proj.apply(store._conn, event)
 

@@ -68,7 +68,10 @@ def _all_extensions() -> list[type]:
 async def cascade_env(tmp_path: Path):
     """Set up EventStore + SubscriptionRegistry + NodeProjection with all extensions."""
     extensions = _all_extensions()
-    projection = NodeProjection(extension_configs=extensions)
+    def dummy_matcher(ext_cls, node_type, name, **kwargs):
+        return getattr(ext_cls, "matches", lambda *a, **k: False)(node_type, name)
+
+    projection = NodeProjection(extension_matcher=dummy_matcher, extension_configs=extensions)
 
     subscriptions = SubscriptionRegistry(tmp_path / "subscriptions.db")
     await subscriptions.initialize()
