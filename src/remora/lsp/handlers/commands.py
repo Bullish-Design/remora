@@ -6,8 +6,7 @@ import time
 
 from lsprotocol import types as lsp
 
-from remora.lsp.models import LspRewriteAppliedEvent
-from remora.lsp.server import RemoraLanguageServer
+from remora.lsp.protocols import LspServer
 
 logger = logging.getLogger("remora.lsp")
 
@@ -16,7 +15,7 @@ GET_PANEL_NODE_TIMEOUT_SECONDS = 1.0
 GET_PANEL_EVENTS_TIMEOUT_SECONDS = 1.5
 
 
-async def _resolve_agent(ls: RemoraLanguageServer, args) -> str | None:
+async def _resolve_agent(ls: LspServer, args) -> str | None:
     """Resolve an agent_id from cursor context {uri, line} passed as args[0]."""
     logger.info("_resolve_agent: args=%r", args)
     ctx = args[0] if args else None
@@ -68,7 +67,7 @@ async def _resolve_agent(ls: RemoraLanguageServer, args) -> str | None:
     return None
 
 
-async def cmd_get_agent_panel(ls: RemoraLanguageServer, *args) -> dict | None:
+async def cmd_get_agent_panel(ls: LspServer, *args) -> dict | None:
     """Return agent info + tools + recent events for the agent at cursor."""
     try:
         logger.info("cmd_get_agent_panel: args=%r", args)
@@ -180,7 +179,7 @@ async def cmd_get_agent_panel(ls: RemoraLanguageServer, *args) -> dict | None:
         return None
 
 
-async def cmd_chat(ls: RemoraLanguageServer, *args) -> None:
+async def cmd_chat(ls: LspServer, *args) -> None:
     try:
         logger.info("cmd_chat: called with args=%r", args)
         agent_id = await _resolve_agent(ls, args)
@@ -211,7 +210,7 @@ async def cmd_chat(ls: RemoraLanguageServer, *args) -> None:
         logger.exception("Error in remora.chat")
 
 
-async def cmd_request_rewrite(ls: RemoraLanguageServer, *args) -> None:
+async def cmd_request_rewrite(ls: LspServer, *args) -> None:
     try:
         agent_id = await _resolve_agent(ls, args)
         if not agent_id:
@@ -238,7 +237,7 @@ async def cmd_request_rewrite(ls: RemoraLanguageServer, *args) -> None:
         logger.exception("Error in remora.requestRewrite")
 
 
-async def cmd_execute_tool(ls: RemoraLanguageServer, agent_id: str, tool_name: str, *args) -> None:
+async def cmd_execute_tool(ls: LspServer, agent_id: str, tool_name: str, *args) -> None:
     try:
         tool_params = args[0] if args else {}
         if ls.runner and ls.event_store:
@@ -249,32 +248,14 @@ async def cmd_execute_tool(ls: RemoraLanguageServer, agent_id: str, tool_name: s
         logger.exception("Error in remora.executeTool")
 
 
-async def cmd_accept_proposal(ls: RemoraLanguageServer, proposal_id: str) -> None:
+async def cmd_accept_proposal(ls: LspServer, proposal_id: str) -> None:
     try:
-        proposal = ls.proposals.get(proposal_id)
-        if not proposal:
-            return
-
-        await ls.workspace_apply_edit(lsp.ApplyWorkspaceEditParams(edit=proposal.to_workspace_edit()))
-
-        del ls.proposals[proposal_id]
-        if ls.event_store:
-            await ls.event_store.set_node_status(proposal.agent_id, "idle")
-        await ls.db.update_proposal_status(proposal_id, "accepted")
-
-        await ls.emit_event(
-            LspRewriteAppliedEvent(
-                agent_id=proposal.agent_id,
-                proposal_id=proposal_id,
-                correlation_id=proposal.correlation_id or "",
-                timestamp=0.0,
-            )
-        )
+        await ls.accept_proposal(proposal_id)
     except Exception:
         logger.exception("Error in remora.acceptProposal")
 
 
-async def cmd_reject_proposal(ls: RemoraLanguageServer, proposal_id: str) -> None:
+async def cmd_reject_proposal(ls: LspServer, proposal_id: str) -> None:
     try:
         ls.protocol.notify(
             "$/remora/requestInput",
@@ -284,14 +265,14 @@ async def cmd_reject_proposal(ls: RemoraLanguageServer, proposal_id: str) -> Non
         logger.exception("Error in remora.rejectProposal")
 
 
-async def cmd_select_agent(ls: RemoraLanguageServer, agent_id: str) -> None:
+async def cmd_select_agent(ls: LspServer, agent_id: str) -> None:
     try:
         ls.protocol.notify("$/remora/agentSelected", {"agent_id": agent_id})
     except Exception:
         logger.exception("Error in remora.selectAgent")
 
 
-async def cmd_message_node(ls: RemoraLanguageServer, agent_id: str) -> None:
+async def cmd_message_node(ls: LspServer, agent_id: str) -> None:
     try:
         ls.protocol.notify(
             "$/remora/requestInput",
@@ -301,7 +282,7 @@ async def cmd_message_node(ls: RemoraLanguageServer, agent_id: str) -> None:
         logger.exception("Error in remora.messageNode")
 
 
-def register_command_handlers(server: RemoraLanguageServer) -> None:
+def register_command_handlers(server: LspServer) -> None:
     server.command("remora.getAgentPanel")(cmd_get_agent_panel)
     server.command("remora.chat")(cmd_chat)
     server.command("remora.requestRewrite")(cmd_request_rewrite)

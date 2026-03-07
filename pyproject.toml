@@ -37,6 +37,7 @@ dependencies = [
   "lsprotocol",
   "rustworkx>=0.17.1",
   "embeddy",
+  "tach>=0.33.4",
 ]
 
 [project.optional-dependencies]

@@ -47,7 +47,7 @@ depends_on = [ "remora.core.agents.cairn_externals"]
 
 [[modules ]]
 path = "remora.lsp.server"
-depends_on = [ "remora.lsp.db", "remora.core.config", "remora.lsp.models", "remora.core.tools", "remora.lsp.notifications", "remora.lsp.graph", "remora.core.agents.agent_node", "remora.core.code.discovery", "remora.core.events.events", "remora.lsp.handlers.capabilities", "remora.lsp.handlers.hover", "remora.lsp.handlers.documents", "remora.lsp.handlers.commands", "remora.lsp.handlers.lens", "remora.lsp.handlers.actions"]
+depends_on = [ "remora.lsp.db", "remora.core.config", "remora.core.tools", "remora.lsp.notifications", "remora.lsp.graph", "remora.core.agents.agent_node", "remora.core.code.discovery", "remora.core.events.events", "remora.lsp.handlers.capabilities", "remora.lsp.handlers.hover", "remora.lsp.handlers.documents", "remora.lsp.handlers.commands", "remora.lsp.handlers.lens", "remora.lsp.handlers.actions", "remora.runner"]
 
 [[modules ]]
 path = "remora.core.workspace"
@@ -103,7 +103,7 @@ depends_on = ["remora.companion.config", "remora.companion.events"]
 
 [[modules ]]
 path = "remora.lsp.notifications"
-depends_on = ["remora.lsp.server", "remora.lsp.models"]
+depends_on = [ "remora.lsp.models", "remora.lsp"]
 
 [[modules ]]
 path = "remora.core.subscriptions"
@@ -111,7 +111,7 @@ depends_on = [ "remora.core.events.subscriptions"]
 
 [[modules ]]
 path = "remora.lsp.models"
-depends_on = []
+depends_on = ["remora.runner"]
 
 [[modules ]]
 path = "remora.workspace.sandbox"
@@ -283,7 +283,7 @@ depends_on = []
 
 [[modules ]]
 path = "remora.lsp.tools"
-depends_on = ["remora.core.store.event_store", "remora.core.agents.agent_node"]
+depends_on = [ "remora.runner"]
 
 [[modules ]]
 path = "remora.core.agents.kernel_factory"
@@ -315,7 +315,7 @@ depends_on = []
 
 [[modules ]]
 path = "remora.runner.agent_runner"
-depends_on = ["remora.core.events.events", "remora.extensions", "remora.runner.protocols", "remora.runner.trigger", "remora.core.agents.cairn_bridge", "remora.core.agents.agent_node", "remora.lsp.tools", "remora.runner.headless", "remora.lsp.handlers.commands", "remora.core.agents.execution", "remora.lsp.models", "remora.core.config"]
+depends_on = ["remora.core.events.events", "remora.extensions", "remora.runner.protocols", "remora.runner.trigger", "remora.core.agents.cairn_bridge", "remora.core.agents.agent_node", "remora.runner.headless", "remora.core.agents.execution", "remora.core.config", "remora.runner"]
 
 [[modules ]]
 path = "remora.core.agents.execution"
@@ -379,7 +379,7 @@ depends_on = []
 
 [[modules ]]
 path = "remora.lsp.handlers.documents"
-depends_on = ["remora.core.events.events", "remora.core.code.discovery", "remora.lsp.server", "remora.lsp.models"]
+depends_on = ["remora.core.events.events", "remora.core.code.discovery", "remora.lsp.models", "remora.lsp"]
 
 [[modules ]]
 path = "remora.cli.workspace"
@@ -395,7 +395,7 @@ depends_on = ["remora.core.events.events", "remora.companion.events", "remora.co
 
 [[modules ]]
 path = "remora.lsp.handlers.lens"
-depends_on = ["remora.lsp.server"]
+depends_on = [ "remora.lsp"]
 
 [[modules ]]
 path = "remora.ts_queries.markdown"
@@ -407,7 +407,7 @@ depends_on = []
 
 [[modules ]]
 path = "remora.lsp.handlers.commands"
-depends_on = ["remora.lsp.server", "remora.lsp.models"]
+depends_on = [ "remora.lsp"]
 
 [[modules ]]
 path = "remora.core.event_store_connection"
@@ -419,7 +419,7 @@ depends_on = ["remora.companion.handlers.base", "remora.core.events.events", "re
 
 [[modules ]]
 path = "remora.lsp.handlers.hover"
-depends_on = ["remora.lsp.server"]
+depends_on = [ "remora.lsp"]
 
 [[modules ]]
 path = "remora.core.code.reconciler"
@@ -443,7 +443,7 @@ depends_on = []
 
 [[modules ]]
 path = "remora.lsp.handlers.actions"
-depends_on = ["remora.lsp.server", "remora.lsp.models"]
+depends_on = [ "remora.lsp.models", "remora.lsp"]
 
 [[modules ]]
 path = "remora.core.agents.agent_node"
@@ -463,7 +463,7 @@ depends_on = []
 
 [[modules ]]
 path = "remora.lsp.handlers.capabilities"
-depends_on = ["remora.lsp.server"]
+depends_on = [ "remora.lsp"]
 
 [[modules ]]
 path = "remora.companion.handlers.sidebar_composer"
@@ -487,7 +487,7 @@ depends_on = []
 
 [[modules ]]
 path = "remora.runner"
-depends_on = ["remora.runner.agent_runner", "remora.runner.protocols", "remora.runner.trigger"]
+depends_on = ["remora.runner.agent_runner", "remora.runner.protocols", "remora.runner.trigger", "remora.core.agents.agent_node", "remora.core.store.event_store"]
 
 [[modules ]]
 path = "remora.core.code"

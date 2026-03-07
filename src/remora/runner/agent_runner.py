@@ -10,19 +10,22 @@ from typing import TYPE_CHECKING, Any
 from remora.core.agents.agent_node import AgentNode
 from remora.core.events.events import AgentCompleteEvent, AgentErrorEvent, AgentStartEvent, ScaffoldRequestEvent
 from remora.core.agents.execution import execute_agent_turn
-from remora.lsp.tools import build_lsp_tools
 from remora.extensions import extension_matches, load_extensions
-from remora.runner.headless import _HeadlessServer
-from remora.runner.protocols import RunnerServer
-from remora.runner.trigger import Trigger
-from remora.lsp.models import (
+from remora.runner.events import (
     LspAgentErrorEvent,
     LspAgentEvent,
     LspAgentMessageEvent,
+    LspHumanChatEvent,
+    LspRewriteAppliedEvent,
     LspRewriteProposalEvent,
+    LspRewriteRejectedEvent,
     RewriteProposal,
     generate_id,
 )
+from remora.runner.headless import _HeadlessServer
+from remora.runner.protocols import RunnerServer
+from remora.runner.tools import build_lsp_tools
+from remora.runner.trigger import Trigger
 
 if TYPE_CHECKING:
     from remora.core.agents.cairn_bridge import CairnWorkspaceService
@@ -48,7 +51,7 @@ class AgentRunner:
 
     Agent execution is delegated to ``execute_agent_turn()`` from
     ``remora.core.agents.execution``, with LSP-specific tools injected via
-    ``build_lsp_tools()`` from ``remora.lsp.tools``.
+    ``build_lsp_tools()`` from ``remora.runner.tools``.
     """
 
     def __init__(
@@ -205,6 +208,181 @@ class AgentRunner:
         for k in stale:
             self._correlation_depth.pop(k, None)
 
+    def _supports_server_method(self, method_name: str) -> bool:
+        server_dict = getattr(self.server, "__dict__", {})
+        return hasattr(type(self.server), method_name) or method_name in server_dict
+
+    async def _call_server_method(self, method_name: str, **kwargs: Any) -> bool:
+        if not self._supports_server_method(method_name):
+            return False
+        method = getattr(self.server, method_name)
+        result = method(**kwargs)
+        if asyncio.iscoroutine(result):
+            await result
+        return True
+
+    async def _emit_agent_event(
+        self,
+        *,
+        event_type: str,
+        agent_id: str,
+        correlation_id: str,
+        summary: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        if await self._call_server_method(
+            "emit_agent_event",
+            event_type=event_type,
+            agent_id=agent_id,
+            correlation_id=correlation_id,
+            summary=summary,
+            payload=payload or {},
+        ):
+            return
+        await self.server.emit_event(
+            LspAgentEvent(
+                event_type=event_type,
+                agent_id=agent_id,
+                correlation_id=correlation_id,
+                summary=summary,
+                payload=payload or {},
+                timestamp=0.0,
+            )
+        )
+
+    async def _emit_agent_error(self, *, agent_id: str, error: str, correlation_id: str) -> None:
+        if await self._call_server_method(
+            "emit_agent_error_event",
+            agent_id=agent_id,
+            error=error,
+            correlation_id=correlation_id,
+        ):
+            return
+        await self.server.emit_event(
+            LspAgentErrorEvent(
+                agent_id=agent_id,
+                error=error,
+                correlation_id=correlation_id,
+                timestamp=0.0,
+            )
+        )
+
+    async def _emit_human_chat(self, *, agent_id: str, message: str, correlation_id: str) -> None:
+        if await self._call_server_method(
+            "emit_human_chat_event",
+            agent_id=agent_id,
+            message=message,
+            correlation_id=correlation_id,
+        ):
+            return
+        await self.server.emit_event(
+            LspHumanChatEvent(
+                agent_id=agent_id,
+                to_agent=agent_id,
+                message=message,
+                correlation_id=correlation_id,
+                timestamp=0.0,
+            )
+        )
+
+    async def _emit_rewrite_rejected(
+        self,
+        *,
+        agent_id: str,
+        proposal_id: str,
+        feedback: str,
+        correlation_id: str,
+    ) -> None:
+        if await self._call_server_method(
+            "emit_rewrite_rejected_event",
+            agent_id=agent_id,
+            proposal_id=proposal_id,
+            feedback=feedback,
+            correlation_id=correlation_id,
+        ):
+            return
+        await self.server.emit_event(
+            LspRewriteRejectedEvent(
+                agent_id=agent_id,
+                proposal_id=proposal_id,
+                feedback=feedback,
+                correlation_id=correlation_id,
+                timestamp=0.0,
+            )
+        )
+
+    async def _emit_rewrite_proposal(
+        self,
+        *,
+        agent_id: str,
+        proposal_id: str,
+        diff: str,
+        correlation_id: str,
+    ) -> None:
+        if await self._call_server_method(
+            "emit_rewrite_proposal_event",
+            agent_id=agent_id,
+            proposal_id=proposal_id,
+            diff=diff,
+            correlation_id=correlation_id,
+        ):
+            return
+        await self.server.emit_event(
+            LspRewriteProposalEvent(
+                agent_id=agent_id,
+                proposal_id=proposal_id,
+                diff=diff,
+                correlation_id=correlation_id,
+                timestamp=0.0,
+            )
+        )
+
+    async def _emit_agent_message(
+        self,
+        *,
+        from_agent: str,
+        to_agent: str,
+        message: str,
+        correlation_id: str,
+    ) -> None:
+        if await self._call_server_method(
+            "emit_agent_message_event",
+            from_agent=from_agent,
+            to_agent=to_agent,
+            message=message,
+            correlation_id=correlation_id,
+        ):
+            return
+        await self.server.emit_event(
+            LspAgentMessageEvent(
+                agent_id=from_agent,
+                from_agent=from_agent,
+                to_agent=to_agent,
+                message=message,
+                correlation_id=correlation_id,
+                timestamp=0.0,
+            )
+        )
+
+    async def _accept_proposal(self, proposal_id: str) -> None:
+        if await self._call_server_method("accept_proposal", proposal_id=proposal_id):
+            return
+        proposal = self.server.proposals.get(proposal_id)
+        if proposal is None:
+            return
+        del self.server.proposals[proposal_id]
+        if self.server.event_store:
+            await self.server.event_store.set_node_status(proposal.agent_id, "idle")
+        await self.server.db.update_proposal_status(proposal_id, "accepted")
+        await self.server.emit_event(
+            LspRewriteAppliedEvent(
+                agent_id=proposal.agent_id,
+                proposal_id=proposal_id,
+                correlation_id=proposal.correlation_id or "",
+                timestamp=0.0,
+            )
+        )
+
     # ------------------------------------------------------------------
     # EventStore trigger bridge — for CLI / headless mode
     # ------------------------------------------------------------------
@@ -253,41 +431,28 @@ class AgentRunner:
 
         if cmd_type == "chat" and agent_id:
             correlation_id = self.server.generate_correlation_id()
-            from remora.lsp.models import LspHumanChatEvent
-
-            await self.server.emit_event(
-                LspHumanChatEvent(
-                    agent_id=agent_id,
-                    to_agent=agent_id,
-                    message=payload.get("message", ""),
-                    correlation_id=correlation_id,
-                    timestamp=0.0,
-                )
+            await self._emit_human_chat(
+                agent_id=agent_id,
+                message=payload.get("message", ""),
+                correlation_id=correlation_id,
             )
             await self.trigger(agent_id, correlation_id)
 
         elif cmd_type == "approve_proposal":
             proposal_id = payload.get("proposal_id", "")
             if proposal_id and proposal_id in self.server.proposals:
-                from remora.lsp.handlers.commands import cmd_accept_proposal
-
-                await cmd_accept_proposal(self.server, proposal_id)
+                await self._accept_proposal(proposal_id)
 
         elif cmd_type == "reject_proposal":
             proposal_id = payload.get("proposal_id", "")
             feedback = payload.get("feedback", "")
             proposal = self.server.proposals.get(proposal_id)
             if proposal:
-                from remora.lsp.models import LspRewriteRejectedEvent
-
-                await self.server.emit_event(
-                    LspRewriteRejectedEvent(
-                        agent_id=proposal.agent_id,
-                        proposal_id=proposal_id,
-                        feedback=feedback,
-                        correlation_id=proposal.correlation_id or "",
-                        timestamp=0.0,
-                    )
+                await self._emit_rewrite_rejected(
+                    agent_id=proposal.agent_id,
+                    proposal_id=proposal_id,
+                    feedback=feedback,
+                    correlation_id=proposal.correlation_id or "",
                 )
                 await self.trigger(
                     proposal.agent_id,
@@ -341,9 +506,8 @@ class AgentRunner:
         )
 
     async def emit_error(self, agent_id: str, error: str, correlation_id: str) -> None:
-        event = LspAgentErrorEvent(agent_id=agent_id, error=error, correlation_id=correlation_id, timestamp=0.0)
         try:
-            await self.server.emit_event(event)
+            await self._emit_agent_error(agent_id=agent_id, error=error, correlation_id=correlation_id)
         except Exception:
             logger.debug("emit_error: failed to emit event for %s", agent_id, exc_info=True)
 
@@ -440,15 +604,12 @@ class AgentRunner:
                     agent_id: str, summary: str, result_summary: str, payload: dict[str, Any]
                 ) -> None:
                     payload["result_summary"] = result_summary
-                    await self.server.emit_event(
-                        LspAgentEvent(
-                            event_type="ToolResultEvent",
-                            agent_id=agent_id,
-                            correlation_id=correlation_id,
-                            summary=summary,
-                            timestamp=0.0,
-                            payload=payload,
-                        )
+                    await self._emit_agent_event(
+                        event_type="ToolResultEvent",
+                        agent_id=agent_id,
+                        correlation_id=correlation_id,
+                        summary=summary,
+                        payload=payload,
                     )
 
                 lsp_tools = build_lsp_tools(
@@ -471,15 +632,12 @@ class AgentRunner:
 
                 # On-kernel-event callback: forward to LSP UI
                 async def _on_kernel_event(event: Any) -> None:
-                    await self.server.emit_event(
-                        LspAgentEvent(
-                            event_type="KernelEvent",
-                            agent_id=agent_id,
-                            correlation_id=correlation_id,
-                            summary=str(type(event).__name__),
-                            timestamp=0.0,
-                            payload={"event": str(event)},
-                        )
+                    await self._emit_agent_event(
+                        event_type="KernelEvent",
+                        agent_id=agent_id,
+                        correlation_id=correlation_id,
+                        summary=str(type(event).__name__),
+                        payload={"event": str(event)},
                     )
 
                 exec_start = time.monotonic()
@@ -527,15 +685,12 @@ class AgentRunner:
 
                 # Emit final text response if present
                 if result.response_text:
-                    await self.server.emit_event(
-                        LspAgentEvent(
-                            event_type="AgentTextResponse",
-                            agent_id=agent_id,
-                            correlation_id=correlation_id,
-                            summary=result.response_text[:200],
-                            timestamp=0.0,
-                            payload={"content": result.response_text},
-                        )
+                    await self._emit_agent_event(
+                        event_type="AgentTextResponse",
+                        agent_id=agent_id,
+                        correlation_id=correlation_id,
+                        summary=result.response_text[:200],
+                        payload={"content": result.response_text},
                     )
 
                 # Emit domain-level AgentCompleteEvent so projections
@@ -598,27 +753,20 @@ class AgentRunner:
         await self.server.publish_diagnostics(agent.file_path, [proposal])
         await self.server.refresh_code_lenses()
 
-        await self.server.emit_event(
-            LspRewriteProposalEvent(
-                agent_id=agent.node_id,
-                proposal_id=proposal_id,
-                diff=proposal.diff,
-                correlation_id=correlation_id,
-                timestamp=0.0,
-            )
+        await self._emit_rewrite_proposal(
+            agent_id=agent.node_id,
+            proposal_id=proposal_id,
+            diff=proposal.diff,
+            correlation_id=correlation_id,
         )
 
     async def message_node(self, from_id: str, to_id: str, message: str, correlation_id: str) -> None:
 
-        await self.server.emit_event(
-            LspAgentMessageEvent(
-                agent_id=from_id,
-                from_agent=from_id,
-                to_agent=to_id,
-                message=message,
-                correlation_id=correlation_id,
-                timestamp=0.0,
-            )
+        await self._emit_agent_message(
+            from_agent=from_id,
+            to_agent=to_id,
+            message=message,
+            correlation_id=correlation_id,
         )
         await self.trigger(to_id, correlation_id)
 
@@ -649,8 +797,6 @@ class AgentRunner:
 
     def get_agent_tools(self, agent: AgentNode) -> list[dict]:
         """Return the list of tools available to this agent."""
-        from remora.lsp.tools import build_lsp_tools
-
         async def _dummy(*args: Any, **kwargs: Any) -> None:
             pass
 
@@ -677,14 +823,10 @@ class AgentRunner:
         return raw_tools
 
     async def execute_extension_tool(self, agent: AgentNode, tool_name: str, params: dict, correlation_id: str) -> None:
-
-        await self.server.emit_event(
-            LspAgentEvent(
-                event_type="ToolResultEvent",
-                agent_id=agent.node_id,
-                correlation_id=correlation_id,
-                summary=f"Tool {tool_name} executed",
-                timestamp=0.0,
-                payload={"tool_name": tool_name, "params": params},
-            )
+        await self._emit_agent_event(
+            event_type="ToolResultEvent",
+            agent_id=agent.node_id,
+            correlation_id=correlation_id,
+            summary=f"Tool {tool_name} executed",
+            payload={"tool_name": tool_name, "params": params},
         )

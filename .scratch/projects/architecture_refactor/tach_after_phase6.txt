@@ -1,0 +1,63 @@
+nv2 ready - run 'nv2' to launch Neovim
+hello from devenv
+git version 2.53.0
+
+Remora dev environment ready!
+  - Run 'nv2' to launch Neovim with the remora plugin pre-configured
+  - Open a Python file to auto-start the Remora LSP
+# Module Dependencies
+remora.adapters.starlette
+remora.companion.config
+remora.companion.dispatcher
+remora.companion.events
+remora.companion.handlers
+remora.companion.indexing_service
+remora.companion.state
+remora.core
+remora.core.config
+remora.core.errors
+remora.core.events
+remora.core.manifest
+remora.core.tools
+remora.extensions
+remora.lsp
+remora.lsp.__main__
+remora.lsp.db
+remora.lsp.graph
+remora.lsp.handlers
+remora.lsp.models
+remora.lsp.notifications
+remora.lsp.server
+remora.models
+remora.service.api
+remora.service.datastar
+remora.service.handlers
+remora.ui.components
+remora.ui.projector
+remora.ui.view
+remora.utils
+remora.utils.fs
+remora.utils.path_resolver
+remora.utils.text
+remora.utils.types
+remora.workspace.inspector
+remora.workspace.sandbox
+remora.workspace.sync
+remora.workspace.validation
+# External Dependencies
+cairn
+click
+datastar-py
+embeddy
+grail
+lsprotocol
+pydantic
+pydantic-settings
+pygls
+pyyaml
+rustworkx
+sse-starlette
+starlette
+structured-agents
+tree-sitter
+uvicorn

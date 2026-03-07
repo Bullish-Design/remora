@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from lsprotocol import types as lsp
 from pygls.lsp.server import LanguageServer
@@ -15,7 +15,19 @@ from pygls.uris import to_fs_path
 from remora.core.agents.agent_node import AgentNode, ToolSchema
 from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
-from remora.lsp.models import RewriteProposal
+from remora.runner.events import (
+    LspAgentErrorEvent,
+    LspAgentEvent,
+    LspAgentMessageEvent,
+    LspHumanChatEvent,
+    LspRewriteAppliedEvent,
+    LspRewriteProposalEvent,
+    LspRewriteRejectedEvent,
+    RewriteProposal,
+)
+
+if TYPE_CHECKING:
+    from remora.runner.agent_runner import AgentRunner
 
 logger = logging.getLogger("remora.lsp")
 
@@ -142,6 +154,121 @@ class RemoraLanguageServer(LanguageServer):
     async def publish_diagnostics(self, uri: str, proposals: list[RewriteProposal]) -> None:
         diagnostics = [p.to_diagnostic() for p in proposals]
         self.text_document_publish_diagnostics(lsp.PublishDiagnosticsParams(uri=uri, diagnostics=diagnostics))
+
+    async def emit_agent_event(
+        self,
+        *,
+        event_type: str,
+        agent_id: str,
+        correlation_id: str,
+        summary: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        await self.emit_event(
+            LspAgentEvent(
+                event_type=event_type,
+                agent_id=agent_id,
+                correlation_id=correlation_id,
+                summary=summary,
+                payload=payload or {},
+                timestamp=0.0,
+            )
+        )
+
+    async def emit_agent_error_event(self, *, agent_id: str, error: str, correlation_id: str) -> None:
+        await self.emit_event(
+            LspAgentErrorEvent(
+                agent_id=agent_id,
+                error=error,
+                correlation_id=correlation_id,
+                timestamp=0.0,
+            )
+        )
+
+    async def emit_human_chat_event(self, *, agent_id: str, message: str, correlation_id: str) -> None:
+        await self.emit_event(
+            LspHumanChatEvent(
+                agent_id=agent_id,
+                to_agent=agent_id,
+                message=message,
+                correlation_id=correlation_id,
+                timestamp=0.0,
+            )
+        )
+
+    async def emit_rewrite_rejected_event(
+        self,
+        *,
+        agent_id: str,
+        proposal_id: str,
+        feedback: str,
+        correlation_id: str,
+    ) -> None:
+        await self.emit_event(
+            LspRewriteRejectedEvent(
+                agent_id=agent_id,
+                proposal_id=proposal_id,
+                feedback=feedback,
+                correlation_id=correlation_id,
+                timestamp=0.0,
+            )
+        )
+
+    async def emit_agent_message_event(
+        self,
+        *,
+        from_agent: str,
+        to_agent: str,
+        message: str,
+        correlation_id: str,
+    ) -> None:
+        await self.emit_event(
+            LspAgentMessageEvent(
+                agent_id=from_agent,
+                from_agent=from_agent,
+                to_agent=to_agent,
+                message=message,
+                correlation_id=correlation_id,
+                timestamp=0.0,
+            )
+        )
+
+    async def emit_rewrite_proposal_event(
+        self,
+        *,
+        agent_id: str,
+        proposal_id: str,
+        diff: str,
+        correlation_id: str,
+    ) -> None:
+        await self.emit_event(
+            LspRewriteProposalEvent(
+                agent_id=agent_id,
+                proposal_id=proposal_id,
+                diff=diff,
+                correlation_id=correlation_id,
+                timestamp=0.0,
+            )
+        )
+
+    async def accept_proposal(self, proposal_id: str) -> None:
+        proposal = self.proposals.get(proposal_id)
+        if proposal is None:
+            return
+
+        await self.workspace_apply_edit(lsp.ApplyWorkspaceEditParams(edit=proposal.to_workspace_edit()))
+        del self.proposals[proposal_id]
+        if self.event_store:
+            await self.event_store.set_node_status(proposal.agent_id, "idle")
+        await self.db.update_proposal_status(proposal_id, "accepted")
+        await self.emit_event(
+            LspRewriteAppliedEvent(
+                agent_id=proposal.agent_id,
+                proposal_id=proposal_id,
+                correlation_id=proposal.correlation_id or "",
+                timestamp=0.0,
+            )
+        )
 
     async def emit_event(self, event) -> Any:
         if not getattr(event, "timestamp", None):

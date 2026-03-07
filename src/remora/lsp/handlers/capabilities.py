@@ -3,11 +3,11 @@ import logging
 
 from lsprotocol import types as lsp
 
-from remora.lsp.server import RemoraLanguageServer
+from remora.lsp.protocols import LspServer
 
 logger = logging.getLogger("remora.lsp")
 
-async def on_initialize(ls: RemoraLanguageServer, params: lsp.InitializeParams) -> None:
+async def on_initialize(ls: LspServer, params: lsp.InitializeParams) -> None:
     """Log successful initialization.
 
     Command capabilities are registered automatically by pygls 2.x via the
@@ -16,6 +16,5 @@ async def on_initialize(ls: RemoraLanguageServer, params: lsp.InitializeParams) 
     """
     logger.info("Client connected (initialize received)")
 
-def register_capability_handlers(server: RemoraLanguageServer) -> None:
+def register_capability_handlers(server: LspServer) -> None:
     server.feature(lsp.INITIALIZE)(on_initialize)
-

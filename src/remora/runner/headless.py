@@ -44,3 +44,53 @@ class _HeadlessServer:
 
     async def publish_diagnostics(self, uri: str, proposals: list[Any]) -> None:
         return None
+
+    async def accept_proposal(self, proposal_id: str) -> None:
+        return None
+
+    async def emit_human_chat_event(self, *, agent_id: str, message: str, correlation_id: str) -> None:
+        return None
+
+    async def emit_rewrite_rejected_event(
+        self,
+        *,
+        agent_id: str,
+        proposal_id: str,
+        feedback: str,
+        correlation_id: str,
+    ) -> None:
+        return None
+
+    async def emit_agent_error_event(self, *, agent_id: str, error: str, correlation_id: str) -> None:
+        return None
+
+    async def emit_agent_message_event(
+        self,
+        *,
+        from_agent: str,
+        to_agent: str,
+        message: str,
+        correlation_id: str,
+    ) -> None:
+        return None
+
+    async def emit_rewrite_proposal_event(
+        self,
+        *,
+        agent_id: str,
+        proposal_id: str,
+        diff: str,
+        correlation_id: str,
+    ) -> None:
+        return None
+
+    async def emit_agent_event(
+        self,
+        *,
+        event_type: str,
+        agent_id: str,
+        correlation_id: str,
+        summary: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        return None

@@ -1,0 +1,7 @@
+nv2 ready - run 'nv2' to launch Neovim
+hello from devenv
+git version 2.53.0
+
+Remora dev environment ready!
+  - Run 'nv2' to launch Neovim with the remora plugin pre-configured
+  - Open a Python file to auto-start the Remora LSP

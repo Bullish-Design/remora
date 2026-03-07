@@ -154,6 +154,10 @@ def _run_server(
             if callable(run_background_scan):
                 asyncio.ensure_future(run_background_scan())
 
+    # Import once so scan loop can reuse it and tests can monkeypatch
+    # remora.core.discovery.parse_content consistently.
+    from remora.core.discovery import parse_content
+
     async def _background_scan() -> None:
         """Walk workspace for *.py files, parse each, and populate the DB.
 
@@ -165,9 +169,6 @@ def _run_server(
         from pathlib import Path
 
         from pygls.uris import from_fs_path
-
-        # Brief initial delay to let user operations proceed first
-        await asyncio.sleep(0.5)
 
         log.info("_background_scan: starting")
         root = server.workspace.root_path
@@ -246,6 +247,11 @@ def _run_server(
         scan_append_slow_warning_seconds = 1.5
         scan_append_chunk_size = 8
         scan_update_edges_timeout_seconds = 1.0
+        scan_initial_delay_seconds = 0.0
+        scan_between_files_sleep_seconds = 0.0
+
+        # Brief initial delay to let user operations proceed first.
+        await asyncio.sleep(scan_initial_delay_seconds)
 
         async def _pause_for_user_activity() -> None:
             nonlocal scan_pauses
@@ -282,10 +288,9 @@ def _run_server(
 
                 await _pause_for_user_activity()
 
-                from remora.core.code.discovery import parse_content
-                text = await asyncio.to_thread(fpath.read_text, encoding="utf-8", errors="replace")
+                text = fpath.read_text(encoding="utf-8", errors="replace")
                 uri = from_fs_path(str(fpath))
-                nodes = await asyncio.to_thread(parse_content, uri, text)
+                nodes = parse_content(uri, text)
                 # Emit events to EventStore (batched per file for efficiency)
                 if server.event_store:
                     from remora.core.events.events import NodeDiscoveredEvent, NodeRemovedEvent
@@ -356,8 +361,10 @@ def _run_server(
                 _maybe_save_manifest_incremental()
                 # Brief delay between files to reduce SQLite write contention.
                 # This allows user operations (chat, panel) to acquire write locks.
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(scan_between_files_sleep_seconds)
                 log.debug("_background_scan: parsed %s -> %d nodes", fpath.relative_to(root_path), len(nodes))
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 log.warning("_background_scan: failed to parse %s", fpath, exc_info=True)
 

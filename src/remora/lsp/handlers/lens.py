@@ -3,11 +3,11 @@ import logging
 
 from lsprotocol import types as lsp
 
-from remora.lsp.server import RemoraLanguageServer
+from remora.lsp.protocols import LspServer
 
 logger = logging.getLogger("remora.lsp")
 
-async def code_lens(ls: RemoraLanguageServer, params: lsp.CodeLensParams) -> list[lsp.CodeLens]:
+async def code_lens(ls: LspServer, params: lsp.CodeLensParams) -> list[lsp.CodeLens]:
     try:
         uri = params.text_document.uri
         if not ls.event_store:
@@ -19,7 +19,7 @@ async def code_lens(ls: RemoraLanguageServer, params: lsp.CodeLensParams) -> lis
         logger.exception("Error in code_lens handler")
         return []
 
-async def document_symbol(ls: RemoraLanguageServer, params: lsp.DocumentSymbolParams) -> list[lsp.DocumentSymbol]:
+async def document_symbol(ls: LspServer, params: lsp.DocumentSymbolParams) -> list[lsp.DocumentSymbol]:
     try:
         uri = params.text_document.uri
         if not ls.event_store:
@@ -31,6 +31,6 @@ async def document_symbol(ls: RemoraLanguageServer, params: lsp.DocumentSymbolPa
         logger.exception("Error in document_symbol handler")
         return []
 
-def register_lens_handlers(server: RemoraLanguageServer) -> None:
+def register_lens_handlers(server: LspServer) -> None:
     server.feature(lsp.TEXT_DOCUMENT_CODE_LENS)(code_lens)
     server.feature(lsp.TEXT_DOCUMENT_DOCUMENT_SYMBOL)(document_symbol)

@@ -9,7 +9,7 @@ from pygls.uris import to_fs_path
 from remora.core.code.discovery import CSTNode, parse_content
 from remora.core.events.events import ContentChangedEvent, FileSavedEvent, NodeDiscoveredEvent, NodeRemovedEvent
 from remora.lsp.models import RewriteProposal
-from remora.lsp.server import RemoraLanguageServer
+from remora.lsp.protocols import LspServer
 
 logger = logging.getLogger("remora.lsp")
 
@@ -21,7 +21,7 @@ def _uri_to_path(uri: str) -> str:
         return uri
 
 
-async def _emit_node_events(ls: RemoraLanguageServer, uri: str, new_nodes: list[CSTNode]) -> None:
+async def _emit_node_events(ls: LspServer, uri: str, new_nodes: list[CSTNode]) -> None:
     """Emit NodeDiscovered/NodeRemoved events for a file's parse results."""
     if not ls.event_store:
         return
@@ -37,7 +37,7 @@ async def _emit_node_events(ls: RemoraLanguageServer, uri: str, new_nodes: list[
         await ls.event_store.append("nodes", NodeDiscoveredEvent.from_cst_node(node))
 
 
-async def did_open(ls: RemoraLanguageServer, params: lsp.DidOpenTextDocumentParams) -> None:
+async def did_open(ls: LspServer, params: lsp.DidOpenTextDocumentParams) -> None:
     try:
         uri = params.text_document.uri
         text = params.text_document.text
@@ -93,7 +93,7 @@ async def did_open(ls: RemoraLanguageServer, params: lsp.DidOpenTextDocumentPara
         logger.exception("Error in did_open handler")
 
 
-async def did_change(ls: RemoraLanguageServer, params: lsp.DidChangeTextDocumentParams) -> None:
+async def did_change(ls: LspServer, params: lsp.DidChangeTextDocumentParams) -> None:
     """Debounced reparse on every edit — updates nodes + code lenses.
 
     Does NOT emit ContentChangedEvent (that only fires on save).
@@ -111,7 +111,7 @@ async def did_change(ls: RemoraLanguageServer, params: lsp.DidChangeTextDocument
         logger.exception("Error in did_change handler")
 
 
-async def did_save(ls: RemoraLanguageServer, params: lsp.DidSaveTextDocumentParams) -> None:
+async def did_save(ls: LspServer, params: lsp.DidSaveTextDocumentParams) -> None:
     try:
         uri = params.text_document.uri
         logger.info("did_save: uri=%s", uri)
@@ -143,7 +143,7 @@ async def did_save(ls: RemoraLanguageServer, params: lsp.DidSaveTextDocumentPara
         logger.exception("Error in did_save handler")
 
 
-async def did_close(ls: RemoraLanguageServer, params: lsp.DidCloseTextDocumentParams) -> None:
+async def did_close(ls: LspServer, params: lsp.DidCloseTextDocumentParams) -> None:
     try:
         uri = params.text_document.uri
         to_remove = [pid for pid, p in ls.proposals.items() if p.file_path == uri]
@@ -152,7 +152,7 @@ async def did_close(ls: RemoraLanguageServer, params: lsp.DidCloseTextDocumentPa
     except Exception:
         logger.exception("Error in did_close handler")
 
-def register_document_handlers(server: RemoraLanguageServer) -> None:
+def register_document_handlers(server: LspServer) -> None:
     server.feature(lsp.TEXT_DOCUMENT_DID_OPEN)(did_open)
     server.feature(lsp.TEXT_DOCUMENT_DID_CHANGE)(did_change)
     server.feature(lsp.TEXT_DOCUMENT_DID_SAVE)(did_save)

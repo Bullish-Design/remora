@@ -3,11 +3,11 @@ import logging
 
 from lsprotocol import types as lsp
 
-from remora.lsp.server import RemoraLanguageServer
+from remora.lsp.protocols import LspServer
 
 logger = logging.getLogger("remora.lsp")
 
-async def hover(ls: RemoraLanguageServer, params: lsp.HoverParams) -> lsp.Hover | None:
+async def hover(ls: LspServer, params: lsp.HoverParams) -> lsp.Hover | None:
     try:
         uri = params.text_document.uri
         pos = params.position
@@ -24,6 +24,5 @@ async def hover(ls: RemoraLanguageServer, params: lsp.HoverParams) -> lsp.Hover 
         logger.exception("Error in hover handler")
         return None
 
-def register_hover_handlers(server: RemoraLanguageServer) -> None:
+def register_hover_handlers(server: LspServer) -> None:
     server.feature(lsp.TEXT_DOCUMENT_HOVER)(hover)
-

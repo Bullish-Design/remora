@@ -4,11 +4,11 @@ import logging
 from lsprotocol import types as lsp
 
 from remora.lsp.models import RewriteProposal
-from remora.lsp.server import RemoraLanguageServer
+from remora.lsp.protocols import LspServer
 
 logger = logging.getLogger("remora.lsp")
 
-async def code_action(ls: RemoraLanguageServer, params: lsp.CodeActionParams) -> list[lsp.CodeAction]:
+async def code_action(ls: LspServer, params: lsp.CodeActionParams) -> list[lsp.CodeAction]:
     try:
         uri = params.text_document.uri
         range_ = params.range
@@ -31,6 +31,5 @@ async def code_action(ls: RemoraLanguageServer, params: lsp.CodeActionParams) ->
         logger.exception("Error in code_action handler")
         return []
 
-def register_action_handlers(server: RemoraLanguageServer) -> None:
+def register_action_handlers(server: LspServer) -> None:
     server.feature(lsp.TEXT_DOCUMENT_CODE_ACTION)(code_action)
-

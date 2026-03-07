@@ -7,7 +7,7 @@ import time
 from lsprotocol import types as lsp
 
 from remora.lsp.models import LspHumanChatEvent, LspRewriteRejectedEvent
-from remora.lsp.server import RemoraLanguageServer
+from remora.lsp.protocols import LspServer
 
 logger = logging.getLogger("remora.lsp")
 
@@ -15,7 +15,7 @@ SUBMIT_EMIT_EVENT_TIMEOUT_SECONDS = 2.0
 SUBMIT_RUNNER_TRIGGER_TIMEOUT_SECONDS = 2.0
 
 
-async def on_cursor_moved(ls: RemoraLanguageServer, params: dict) -> None:
+async def on_cursor_moved(ls: LspServer, params: dict) -> None:
     """Handle cursor position updates from neovim for web graph view.
 
     Debounced (200ms): the actual DB update and CursorFocusEvent emission
@@ -39,7 +39,7 @@ async def on_cursor_moved(ls: RemoraLanguageServer, params: dict) -> None:
     except Exception:
         logger.debug("Error in on_cursor_moved handler", exc_info=True)
 
-async def on_input_submitted(ls: RemoraLanguageServer, params: dict) -> None:
+async def on_input_submitted(ls: LspServer, params: dict) -> None:
     try:
         logger.info("on_input_submitted: params=%r (type=%s)", params, type(params).__name__)
         # pygls may deliver params as an attrs Object (uses __slots__, no __dict__).
@@ -169,6 +169,6 @@ async def on_input_submitted(ls: RemoraLanguageServer, params: dict) -> None:
     except Exception:
         logger.exception("Error in on_input_submitted handler")
 
-def register_notification_handlers(server: RemoraLanguageServer) -> None:
+def register_notification_handlers(server: LspServer) -> None:
     server.feature("$/remora/cursorMoved")(on_cursor_moved)
     server.feature("$/remora/submitInput")(on_input_submitted)

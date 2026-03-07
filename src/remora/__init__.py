@@ -1,5 +1,10 @@
 """Remora public API surface."""
 
+import os
+
+# Avoid startup network fetch noise in offline/dev environments.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "true")
+
 from remora.core.agents.agent_context import AgentContext
 from remora.core.agents.cairn_bridge import CairnWorkspaceService
 from remora.core.agents.cairn_externals import CairnExternals
