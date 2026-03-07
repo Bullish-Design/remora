@@ -78,6 +78,7 @@ class TestEventStoreSubscriptionsTable:
         await store.close()
 
 
+@pytest.mark.skip(reason="EventStore no longer creates RemoraDB tables")
 class TestEventStoreRemoraDBTables:
     """EventStore should create the RemoraDB operational tables."""
 

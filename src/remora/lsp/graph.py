@@ -18,6 +18,12 @@ class LazyGraph:
     Edges live in RemoraDB. Node data is fetched via EventStore.
     """
 
+    @staticmethod
+    def _extract_node_id(node: Any) -> str | None:
+        # Strict expectation: node is an AgentNode (or similar object) with a node_id attribute. No dict fallback.
+        return getattr(node, "node_id", None)
+
+
     def __init__(self, db: RemoraDB, event_store: EventStore | None = None):
         # Edges connection — RemoraDB
         self._edges_conn = sqlite3.connect(str(db.db_path), check_same_thread=False)
@@ -36,7 +42,9 @@ class LazyGraph:
 
         nodes = await self._get_nodes_for_file(file_path)
         for node in nodes:
-            nid = getattr(node, "node_id", node.get("node_id", node.get("id")))
+            nid = self._extract_node_id(node)
+            if not nid:
+                continue
             self._expanded.discard(nid)
             if nid in self.node_indices:
                 idx = self.node_indices.pop(nid)
@@ -57,12 +65,12 @@ class LazyGraph:
         neighbors = await self._get_neighborhood(node_id, depth=2)
 
         for neighbor in neighbors:
-            nid = getattr(neighbor, "node_id", neighbor.get("node_id", neighbor.get("id")))
-            if nid not in self.node_indices:
+            nid = self._extract_node_id(neighbor)
+            if nid and nid not in self.node_indices:
                 idx = self.graph.add_node(neighbor)
                 self.node_indices[nid] = idx
 
-        edges = self._get_edges_for_nodes([getattr(n, "node_id", n.get("node_id", n.get("id"))) for n in neighbors])
+        edges = self._get_edges_for_nodes([self._extract_node_id(n) for n in neighbors if self._extract_node_id(n)])
         for edge in edges:
             if edge["from_id"] in self.node_indices and edge["to_id"] in self.node_indices:
                 self.graph.add_edge(
@@ -78,8 +86,8 @@ class LazyGraph:
         for predecessor in self.graph.predecessor_indices(idx):
             edge = self.graph.get_edge_data(predecessor, idx)
             if edge == "parent_of":
-                # data could be AgentNode or dict
-                return getattr(data, "node_id", data.get("node_id", data.get("id")))
+                data = self.graph.get_node_data(predecessor)
+                return self._extract_node_id(data)
 
         return None
 
@@ -93,7 +101,10 @@ class LazyGraph:
         for predecessor in self.graph.predecessor_indices(idx):
             edge = self.graph.get_edge_data(predecessor, idx)
             if edge == "calls":
-                callers.append(getattr(data, "node_id", data.get("node_id", data.get("id"))))
+                data = self.graph.get_node_data(predecessor)
+                nid = self._extract_node_id(data)
+                if nid:
+                    callers.append(nid)
 
         return callers
 
