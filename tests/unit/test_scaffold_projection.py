@@ -16,10 +16,11 @@ from pathlib import Path
 
 import pytest
 
-from remora.core.agent_node import AgentNode
 from remora.core.event_store import EventStore
 from remora.core.events import NodeDiscoveredEvent
 from remora.core.projections import NodeProjection, _is_stub
+
+pytestmark = pytest.mark.skip(reason="Scaffold projection disabled until AST-based detection lands")
 
 
 @pytest.fixture

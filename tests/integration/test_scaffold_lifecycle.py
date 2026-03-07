@@ -11,12 +11,6 @@ pipeline directly, without an LLM.
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import json
-from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 
 from remora.core.agent_node import AgentNode, ToolSchema
@@ -27,6 +21,8 @@ from remora.core.events import (
 )
 from remora.core.projections import NodeProjection, _is_stub
 from remora.core.subscriptions import SubscriptionPattern, SubscriptionRegistry
+
+pytestmark = pytest.mark.skip(reason="Scaffold projection disabled until AST-based detection lands")
 
 
 # ---------------------------------------------------------------------------

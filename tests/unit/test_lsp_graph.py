@@ -19,6 +19,20 @@ from remora.lsp.db import RemoraDB
 from remora.lsp.graph import LazyGraph
 
 
+
+async def _update_edges(db, nodes_dict_list):
+    class MockNode:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+            if 'callee_ids' not in kwargs:
+                self.callee_ids = []
+            if 'caller_ids' not in kwargs:
+                self.caller_ids = []
+            if 'parent_id' not in kwargs:
+                self.parent_id = None
+    await db.update_edges([MockNode(**d) for d in nodes_dict_list])
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 
@@ -167,13 +181,13 @@ async def _seed_multi_file(store: EventStore) -> None:
 async def test_graph_reads_nodes_from_event_store(event_store, remora_db):
     """LazyGraph should read nodes from EventStore's DB."""
     await _seed_class_and_method(event_store)
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_method1", "parent_id": "rm_class1"},
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         parent = graph.get_parent("rm_method1")
         assert parent == "rm_class1"
@@ -185,13 +199,13 @@ async def test_graph_reads_nodes_from_event_store(event_store, remora_db):
 async def test_graph_invalidate_removes_file_nodes(event_store, remora_db):
     """LazyGraph.invalidate should remove nodes for a file."""
     await _seed_class_and_method(event_store)
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_method1", "parent_id": "rm_class1"},
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         graph.ensure_loaded("rm_class1")
         assert "rm_class1" in graph.node_indices
@@ -217,7 +231,7 @@ async def test_graph_node_queries_without_event_store(remora_db):
 async def test_graph_node_query_reads_event_store_db(event_store, remora_db):
     """LazyGraph._get_node reads from EventStore DB using node_id column."""
     await _seed_class_and_method(event_store)
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         node = graph._get_node("rm_class1")
         assert node is not None
@@ -236,7 +250,7 @@ async def test_get_callers_single_caller(event_store, remora_db):
     """get_callers returns the single caller of a function."""
     await _seed_call_graph(event_store)
     # func_a calls func_b
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_func_a", "callee_ids": ["rm_func_b"]},
             {"node_id": "rm_func_b"},
@@ -244,7 +258,7 @@ async def test_get_callers_single_caller(event_store, remora_db):
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         callers = graph.get_callers("rm_func_b")
         assert callers == ["rm_func_a"]
@@ -257,7 +271,7 @@ async def test_get_callers_multiple_callers(event_store, remora_db):
     """get_callers returns all callers when multiple functions call the same target."""
     await _seed_call_graph(event_store)
     # func_a calls func_b, func_c also calls func_b
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_func_a", "callee_ids": ["rm_func_b"]},
             {"node_id": "rm_func_c", "callee_ids": ["rm_func_b"]},
@@ -265,7 +279,7 @@ async def test_get_callers_multiple_callers(event_store, remora_db):
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         callers = graph.get_callers("rm_func_b")
         assert sorted(callers) == ["rm_func_a", "rm_func_c"]
@@ -277,7 +291,7 @@ async def test_get_callers_multiple_callers(event_store, remora_db):
 async def test_get_callers_no_callers(event_store, remora_db):
     """get_callers returns empty list for a function with no callers."""
     await _seed_call_graph(event_store)
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_func_a"},
             {"node_id": "rm_func_b"},
@@ -285,7 +299,7 @@ async def test_get_callers_no_callers(event_store, remora_db):
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         callers = graph.get_callers("rm_func_a")
         assert callers == []
@@ -298,7 +312,7 @@ async def test_get_callers_nonexistent_node(event_store, remora_db):
     """get_callers returns empty list for a node_id that doesn't exist."""
     await _seed_call_graph(event_store)
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         callers = graph.get_callers("rm_nonexistent")
         assert callers == []
@@ -314,14 +328,14 @@ async def test_get_parent_no_parent(event_store, remora_db):
     """get_parent returns None for a top-level node with no parent_of edge."""
     await _seed_class_and_method(event_store)
     # Only add the method -> class parent edge; class itself has no parent
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_class1"},
             {"node_id": "rm_method1", "parent_id": "rm_class1"},
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         parent = graph.get_parent("rm_class1")
         assert parent is None
@@ -334,7 +348,7 @@ async def test_get_parent_nonexistent_node(event_store, remora_db):
     """get_parent returns None for a node_id that doesn't exist."""
     await _seed_class_and_method(event_store)
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         parent = graph.get_parent("rm_nonexistent")
         assert parent is None
@@ -349,13 +363,13 @@ async def test_get_parent_nonexistent_node(event_store, remora_db):
 async def test_ensure_loaded_idempotent(event_store, remora_db):
     """Calling ensure_loaded twice for the same node_id must not duplicate nodes."""
     await _seed_class_and_method(event_store)
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_method1", "parent_id": "rm_class1"},
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         graph.ensure_loaded("rm_class1")
         count_after_first = len(graph.node_indices)
@@ -374,7 +388,7 @@ async def test_ensure_loaded_idempotent(event_store, remora_db):
 @pytest.mark.asyncio
 async def test_ensure_loaded_nonexistent_node(event_store, remora_db):
     """ensure_loaded for a nonexistent node is a no-op (no crash, no nodes added)."""
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         graph.ensure_loaded("rm_nonexistent")
         assert len(graph.node_indices) == 0
@@ -387,13 +401,13 @@ async def test_ensure_loaded_nonexistent_node(event_store, remora_db):
 async def test_ensure_loaded_populates_edges_in_rustworkx(event_store, remora_db):
     """ensure_loaded should add both nodes AND edges to the rustworkx graph."""
     await _seed_class_and_method(event_store)
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_method1", "parent_id": "rm_class1"},
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         graph.ensure_loaded("rm_method1")
 
@@ -428,7 +442,7 @@ async def test_invalidate_unloaded_file_is_noop(event_store, remora_db):
     """Invalidating a file that was never loaded is a harmless no-op."""
     await _seed_class_and_method(event_store)
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         # Don't load anything, just invalidate
         graph.invalidate("/tmp/test.py")
@@ -442,9 +456,9 @@ async def test_invalidate_unloaded_file_is_noop(event_store, remora_db):
 async def test_invalidate_nonexistent_file_is_noop(event_store, remora_db):
     """Invalidating a file path that doesn't match any nodes is harmless."""
     await _seed_class_and_method(event_store)
-    await remora_db.update_edges([{"node_id": "rm_method1", "parent_id": "rm_class1"}])
+    await _update_edges(remora_db, [{"node_id": "rm_method1", "parent_id": "rm_class1"}])
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         graph.ensure_loaded("rm_class1")
         count_before = len(graph.node_indices)
@@ -460,7 +474,7 @@ async def test_invalidate_clears_loaded_files(event_store, remora_db):
     """invalidate removes the file_path from loaded_files tracking."""
     await _seed_class_and_method(event_store)
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         graph.loaded_files.add("/tmp/test.py")
         assert "/tmp/test.py" in graph.loaded_files
@@ -476,14 +490,14 @@ async def test_invalidate_only_affects_target_file(event_store, remora_db):
     """Invalidating file A does not remove nodes from file B."""
     await _seed_multi_file(event_store)
     # alpha calls beta (cross-file edge)
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_alpha", "callee_ids": ["rm_beta"]},
             {"node_id": "rm_beta"},
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         graph.ensure_loaded("rm_alpha")
         assert "rm_alpha" in graph.node_indices
@@ -506,7 +520,7 @@ async def test_neighborhood_depth_traversal(event_store, remora_db):
     """_get_neighborhood should walk edges to the configured depth."""
     await _seed_deep_chain(event_store)
     # file -> class -> method -> inner_func (3 levels of parent_of edges)
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_file1"},
             {"node_id": "rm_deep_class", "parent_id": "rm_file1"},
@@ -515,7 +529,7 @@ async def test_neighborhood_depth_traversal(event_store, remora_db):
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         # Starting from the middle (rm_deep_method), depth=2 should reach both
         # neighbors up to 2 hops away
@@ -537,7 +551,7 @@ async def test_neighborhood_depth_traversal(event_store, remora_db):
 async def test_deep_get_parent_chain(event_store, remora_db):
     """get_parent should work through a 3-level deep chain."""
     await _seed_deep_chain(event_store)
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_file1"},
             {"node_id": "rm_deep_class", "parent_id": "rm_file1"},
@@ -546,7 +560,7 @@ async def test_deep_get_parent_chain(event_store, remora_db):
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         assert graph.get_parent("rm_inner_func") == "rm_deep_method"
         assert graph.get_parent("rm_deep_method") == "rm_deep_class"
@@ -565,7 +579,7 @@ async def test_mixed_parent_and_call_edges(event_store, remora_db):
     await _seed_class_and_method(event_store)
     await _seed_call_graph(event_store)
     # class -> method (parent_of), method -> func_b (calls)
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_class1"},
             {"node_id": "rm_method1", "parent_id": "rm_class1", "callee_ids": ["rm_func_b"]},
@@ -575,7 +589,7 @@ async def test_mixed_parent_and_call_edges(event_store, remora_db):
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         # method1's parent is class1
         assert graph.get_parent("rm_method1") == "rm_class1"
@@ -592,14 +606,14 @@ async def test_mixed_parent_and_call_edges(event_store, remora_db):
 async def test_get_callers_ignores_parent_edges(event_store, remora_db):
     """get_callers should only return nodes connected by 'calls' edges, not 'parent_of'."""
     await _seed_class_and_method(event_store)
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_class1"},
             {"node_id": "rm_method1", "parent_id": "rm_class1"},
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         # method1 has a parent_of predecessor (class1), but no calls predecessor
         callers = graph.get_callers("rm_method1")
@@ -613,14 +627,14 @@ async def test_get_parent_ignores_call_edges(event_store, remora_db):
     """get_parent should only return nodes connected by 'parent_of' edges, not 'calls'."""
     await _seed_call_graph(event_store)
     # func_a calls func_b — this is NOT a parent relationship
-    await remora_db.update_edges(
+    await _update_edges(remora_db, 
         [
             {"node_id": "rm_func_a", "callee_ids": ["rm_func_b"]},
             {"node_id": "rm_func_b"},
         ]
     )
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         parent = graph.get_parent("rm_func_b")
         assert parent is None
@@ -636,7 +650,7 @@ async def test_close_closes_connections(event_store, remora_db):
     """After close(), DB queries should fail."""
     await _seed_class_and_method(event_store)
 
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     # Verify it works before close
     node = graph._get_node("rm_class1")
     assert node is not None
@@ -708,7 +722,7 @@ async def test_graph_init_creates_empty_state(remora_db):
 @pytest.mark.asyncio
 async def test_graph_init_with_event_store(event_store, remora_db):
     """LazyGraph with event_store_db_path should have a nodes connection."""
-    graph = LazyGraph(db=remora_db, event_store_db_path=str(event_store._db_path))
+    graph = LazyGraph(db=remora_db, event_store=event_store)
     try:
         assert graph._nodes_conn is not None
     finally:

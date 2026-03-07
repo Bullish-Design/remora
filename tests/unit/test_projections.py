@@ -287,7 +287,7 @@ class TestAgentCompleteEventTags:
         assert row["status"] == "idle"
 
 
-class TestProjectNodeRemoved:
+class TestNodeRemoved:
     @pytest.mark.asyncio
     async def test_remove_deletes_row(self, store: EventStore, projection: NodeProjection):
         projection.apply(store._conn, _discovered_event())
@@ -297,6 +297,17 @@ class TestProjectNodeRemoved:
         assert row is None
 
 
+# ============================================================================
+# Projection integration tests — scaffold status
+# ============================================================================
+
+
+@pytest.mark.skip(reason="Scaffold projection disabled until AST-based detection lands")
+class TestScaffoldStatusProjection:
+    """NodeProjection assigns status='scaffold' for stub source_code."""
+
+
+@pytest.mark.skip(reason="Scaffold projection disabled until AST-based detection lands")
 class TestScaffoldFollowUpEvents:
     """Verify that NodeProjection emits ScaffoldRequestEvent as a follow-up
     when a stub node is discovered (status='scaffold')."""

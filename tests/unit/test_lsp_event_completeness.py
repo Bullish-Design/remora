@@ -211,6 +211,7 @@ class TestDoReparse:
         from remora.core.event_store import EventStore
         from remora.core.projections import NodeProjection
         from remora.lsp.server import RemoraLanguageServer
+        srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
         srv._reparse_timers = {}
         srv._cursor_timers = {}
 
@@ -243,6 +244,7 @@ class TestDoReparse:
         from remora.core.events import NodeDiscoveredEvent
         from remora.core.projections import NodeProjection
         from remora.lsp.server import RemoraLanguageServer
+        srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
         srv._reparse_timers = {}
         srv._cursor_timers = {}
 
@@ -277,6 +279,7 @@ class TestDoReparse:
         from remora.core.event_store import EventStore
         from remora.core.projections import NodeProjection
         from remora.lsp.server import RemoraLanguageServer
+        srv = RemoraLanguageServer.__new__(RemoraLanguageServer)
         srv._reparse_timers = {}
         srv._cursor_timers = {}
 

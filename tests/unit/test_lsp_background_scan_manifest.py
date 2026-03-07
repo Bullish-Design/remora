@@ -35,31 +35,14 @@ class _BlockingDB:
 
 
 class _FakeWatcher:
-    def parse(self, uri: str, text: str) -> list[dict]:
-        _ = text
-        node_id = f"{uri}#0"
-        return [
-            {
-                "node_id": node_id,
-                "node_type": "function",
-                "name": "fn",
-                "full_name": "fn",
-                "file_path": uri,
-                "start_line": 1,
-                "end_line": 1,
-                "source_code": "def fn(): pass",
-                "source_hash": f"hash:{node_id}",
-                "start_byte": 0,
-                "end_byte": 0,
-            }
-        ]
+    pass
 
 
 class _FakeServer:
     def __init__(self, root_path: str, db: _BlockingDB) -> None:
         self.workspace = _FakeWorkspace(root_path)
         self.db = db
-        self.watcher = _FakeWatcher()
+        self.watcher = None
         self.event_store = None
         self.subscriptions = None
         self.runner = None
@@ -121,28 +104,26 @@ class _ChunkTrackingEventStore:
         return None
 
 
-class _ManyNodesWatcher:
-    def parse(self, uri: str, text: str) -> list[dict]:
-        _ = text
-        nodes: list[dict] = []
-        for idx in range(20):
-            node_id = f"{uri}#{idx}"
-            nodes.append(
-                {
-                    "node_id": node_id,
-                    "node_type": "function",
-                    "name": f"fn_{idx}",
-                    "full_name": f"fn_{idx}",
-                    "file_path": uri,
-                    "start_line": idx + 1,
-                    "end_line": idx + 1,
-                    "source_code": f"def fn_{idx}(): pass",
-                    "source_hash": f"hash:{node_id}",
-                    "start_byte": 0,
-                    "end_byte": 0,
-                }
+def mock_parse_content(uri, text, language=None):
+    from remora.core.discovery import CSTNode
+    nodes = []
+    for idx in range(20):
+        node_id = f"{uri}#{idx}"
+        nodes.append(
+            CSTNode(
+                node_id=node_id,
+                node_type="function",
+                name=f"fn_{idx}",
+                full_name=f"fn_{idx}",
+                file_path=uri,
+                text=f"def fn_{idx}(): pass",
+                start_line=idx + 1,
+                end_line=idx + 1,
+                start_byte=0,
+                end_byte=0,
             )
-        return nodes
+        )
+    return nodes
 
 
 @pytest.mark.asyncio
@@ -203,7 +184,6 @@ async def test_background_scan_uses_aggressive_preemption_settings(
     event_store = _ChunkTrackingEventStore()
     fake_server = _FakeServer(str(tmp_path), _SimpleDB())
     fake_server.event_store = event_store
-    fake_server.watcher = _ManyNodesWatcher()
 
     import remora.lsp.__main__ as lsp_main_mod
     import remora.lsp.runner as runner_mod
@@ -220,6 +200,7 @@ async def test_background_scan_uses_aggressive_preemption_settings(
     monkeypatch.setattr(runner_mod, "AgentRunner", _FakeRunner)
     monkeypatch.setattr("remora.core.config.load_config", lambda path=None: Config())
     monkeypatch.setattr(asyncio, "sleep", _capture_sleep)
+    monkeypatch.setattr("remora.core.discovery.parse_content", mock_parse_content)
 
     with pytest.raises(_StopSentinel):
         lsp_main_mod.main(event_store=event_store)
