@@ -1,1338 +1,920 @@
-# Phase 2 Bootstrap v3: Grail-First Semantic Swarm
+# Phase 2 Bootstrap v3: Primitive-First
 
-> Refines v2 by grounding all agent interaction in the actual Grail/.pym/Cairn
-> system, clarifying the workspace as the sole interface boundary, specifying
-> graph substrate options (anchored on Rustworkx), and integrating the
-> Primitives design as the canonical turn execution model.
+> v3 is a refinement of v2's concept through the lens of the Primitives design.
+> Where v2 specified an elaborate semantic graph topology, v3 describes only
+> the substrate — the minimal ground the bootstrap needs to stand on — and
+> trusts the self-bootstrapping process to build structure on top of it.
+>
+> The two additions to v2 that prompted this refinement:
+> 1. Grail .pym scripts are the **only** agent tool interface, and they
+>    **only** read and write cairn workspaces.
+> 2. Agents need to be able to navigate the Remora graph. Rustworkx is the
+>    candidate graph library; options are discussed below.
 
 ---
 
 ## Table of Contents
 
-1. [Core Premise](#1-core-premise)
-   What v3 adds to v2's self-evolving swarm goal.
+1. [Reframing the Goal](#1-reframing-the-goal)
+   What "build up from primitives" means. What the substrate is. What it is not.
 
-2. [What Changes from v2](#2-what-changes-from-v2)
-   Diff table: tool model, graph nav, turn execution, cairn grounding.
+2. [The Substrate](#2-the-substrate)
+   The three things the runtime provides: a cairn workspace, a graph, an event bus.
 
-3. [Design Principles](#3-design-principles)
-   P1–P7 stand; P8 (cairn as interface boundary) and P9 (primitives as turn model) added.
+3. [The Cairn Boundary](#3-the-cairn-boundary)
+   Why .pym-only + cairn-only is the right constraint. How it maps to the actual
+   CairnExternals API. What gets added.
 
-4. [Semantic Graph Topology](#4-semantic-graph-topology)
-   Node kinds, edge kinds, node identity. Same as v2.
+4. [Graph Navigation](#4-graph-navigation)
+   What graph access means for agents. Options for the graph library.
+   How graph ops enter the cairn boundary.
 
-5. [Graph Substrate Options](#5-graph-substrate-options)
-   Rustworkx, NetworkX, SQLite property graph, Kuzu — pros/cons/implications/opportunities each.
-   Recommendation and rationale.
+5. [Turn Execution: The Primitives](#5-turn-execution-the-primitives)
+   TurnSchema as the canonical turn model. How it replaces bundle.yaml.
+   DEFAULT_SCHEMA and self-bootstrapping.
 
-6. [Cairn as Interface Boundary](#6-cairn-as-interface-boundary)
-   How CairnExternals enforces the boundary. BootstrapExternals: the new graph + event ops.
-   What .pym scripts can and cannot do.
+6. [The Agent Model](#6-the-agent-model)
+   BootstrapAgent: the single runtime model. Capability enum: what gates
+   access. AgentDefinition: the authoring mechanism. The capability ladder.
 
-7. [The Bootstrap Externals](#7-the-bootstrap-externals)
-   Full BootstrapExternals API: file ops (inherited), graph ops (new), event ops (new).
-   The .pym declaration pattern for each.
+7. [What Is Not Specified](#7-what-is-not-specified)
+   Deliberate omissions: node kinds, edge kinds, protocol state machines,
+   memory models. Why these should emerge, not be prescribed.
 
-8. [Composable Turn Schemas](#8-composable-turn-schemas)
-   TurnSchema absorbs TurnContract. Failure classification and retry routing.
+8. [The Bootstrap Sequence](#8-the-bootstrap-sequence)
+   How agents build themselves from the substrate up.
 
-9. [The Causal Event Bus](#9-the-causal-event-bus)
-   BootstrapEvent envelope. Grounded in existing EventBus + EventStore.
-   Causal graph queries.
-
-10. [Swarm Protocols](#10-swarm-protocols)
-    Typed state machines. DirectTask, ViolationResponse, CoverageGap.
-
-11. [The Bootstrap Tool Set (.pym Edition)](#11-the-bootstrap-tool-set-pym-edition)
-    All system tools as .pym scripts. Grail @external declarations. Privileged tools.
-
-12. [Memory as a Graph Layer](#12-memory-as-a-graph-layer)
-    memory.episode and memory.insight in the semantic graph. Recall via graph externals.
-
-13. [Substrate Reflection](#13-substrate-reflection)
-    Maintainer-only privileged .pym tools. Trial protocol activation. Safety constraints.
-
-14. [Developer Inner Loop](#14-developer-inner-loop)
-    CLI, synthetic harness (mock .pym externals), graph inspector, replay.
-
-15. [Incremental Delivery Plan](#15-incremental-delivery-plan)
-    M0–M8 milestones with deliverables and tests.
-
-16. [How This Diverges from v2](#16-how-this-diverges-from-v2)
-    Eight concrete changes and their rationale.
+9. [Delivery Plan](#9-delivery-plan)
+   Milestones, grounded in v1 reality.
 
 ---
 
-## 1. Core Premise
+## 1. Reframing the Goal
 
-v2 states: the bootstrap builds a runtime that can inspect and evolve itself.
-The swarm is the author of the next version of the swarm.
+v2's premise — the swarm is the author of its next version — is correct. But
+v2 tried to specify both the substrate *and* the things built on the substrate:
+specific node kinds (spec.requirement, test.case, memory.episode ...), specific
+edge kinds (implements, violates, asserts ...), specific protocol state machines
+(DirectTask, ViolationResponse ...). This over-specification defeats the point.
+If the structure is pre-specified, the swarm isn't building it — we are.
 
-v3 accepts this goal and adds two grounding constraints that make it
-implementable without ambiguity:
+The Primitives design points toward the right approach. `TurnSchema`,
+`ContextPipeline`, `ToolRef`, `InputGate` — six types, nothing else. These
+describe the *shape of a turn*, not the shape of the system. The system's shape
+emerges from what agents do with turns.
 
-**Constraint 1 — Grail .pym scripts are the only agent tool interface.**
-Agents do not call Python functions. They do not touch the file system
-directly. Every external operation an agent performs goes through a named
-`.pym` script. This is not a restriction imposed on agents — it is how the
-Grail runtime works. `.pym` scripts declare `@external` dependencies, and the
-Grail compiler enforces that only declared externals are available. The
-bootstrap runtime controls the externals dict. Agents can only reach what the
-runtime gives them.
+v3 applies this discipline to the whole concept:
 
-**Constraint 2 — .pym scripts can only read and write cairn workspaces.**
-The externals dict that the bootstrap runtime passes to every `.pym` script is
-the `BootstrapExternals` dict: file operations (read/write/list on the agent's
-cairn workspace), graph query operations (read-only graph traversal through the
-semantic graph), and event operations (emit an event into the causal bus, read
-recent event history). All of these are workspace-backed: the cairn layer
-mediates every access. A .pym script cannot import `httpx`, open a socket, or
-call `subprocess`. The Grail compiler rejects such scripts at load time.
+**Specify the substrate. Leave the structure to the swarm.**
 
-The consequence: the entire agent capability set is **enumerable** (it is
-exactly the set of registered `.pym` scripts in the system tool registry plus
-the agent's own cairn workspace), **testable without a live LLM** (the
-externals dict is injectable; swap real externals for mock ones), and
-**auditable** (every external call is a named function with a declared
-signature).
+The substrate is the minimal set of capabilities the runtime must provide for
+agents to be able to do anything at all:
 
----
+- **A cairn workspace per agent.** A place to read and write files. This is how
+  an agent has persistent state, a role description, a schema, local tools.
 
-## 2. What Changes from v2
+- **A graph.** A queryable store of nodes and edges. The *kinds* of nodes and
+  edges it contains at any given moment are not prescribed — the bootstrap
+  process writes them. The runtime provides the ability to add, remove, and
+  query; agents decide what to put there.
 
-| Concern | v2 Approach | v3 Approach |
-|---------|-------------|-------------|
-| Tool interface | `BaseTool` Python classes with typed I/O | Grail `.pym` scripts exclusively |
-| Tool side effects | `SideEffect` enum on Python class | Cairn workspace I/O only — enforced by Grail's `@external` system |
-| Graph navigation | `InspectNode`, `QueryGraph` Python tools | `.pym` scripts calling new graph externals in `BootstrapExternals` |
-| Turn execution | `TurnContract` + bespoke `TurnExecutor` | `TurnSchema` (from Primitives) + extended bootstrap runtime |
-| Context assembly | Defined conceptually, not implemented | `ContextPipeline` + `ToolRef` (already in `primitives.py`) |
-| User input | Not addressed | `InputGate` (already in `primitives.py`) |
-| Memory access | Graph layer via direct Python API | `.pym` tools using graph externals to query memory nodes |
-| Substrate reflection | `UpdateSubscription` + `RegisterProtocol` Python tools | Privileged `.pym` tools with elevated externals |
-| Graph library | SQLite mentioned for persistence only | Rustworkx (in-memory traversal) + SQLite (storage + queries) |
-| Grail integration | `.pym` mentioned as legacy, new Python tools preferred | `.pym` is the only tool model; Python classes replaced |
-| Cairn externals | `CairnExternals` (file ops only) | `BootstrapExternals` extends with graph + event ops |
-| Testing | Synthetic `SyntheticHarness` class | Mock externals dict replaces mock Python tool classes |
+- **An event bus.** A way to emit named events and subscribe to them. The
+  specific event types that agents use are not prescribed — they are defined
+  by the agents that emit them and the agents that subscribe to them.
+
+That is the substrate. Everything else — node taxonomies, edge vocabularies,
+protocol state machines, memory models — is built by agents on top of it.
 
 ---
 
-## 3. Design Principles
+## 2. The Substrate
 
-The v2 principles P1–P7 stand unchanged. Two additions ground them in
-the actual implementation model:
+### 2.1 Cairn workspace
 
-### P1–P7 (from v2, unchanged)
+Each agent has a cairn workspace: a Cairn-backed key-value store that behaves
+like a filesystem (paths → string content). Backed by a SQLite `.db` file in
+`.remora/<swarm_id>/agents/<agent_id>/workspace.db`.
 
-- P1: Semantic graph over syntactic graph
-- P2: Contracts before code
-- P3: Failure is first-class
-- P4: Causal provenance is mandatory
-- P5: Testable without a live LLM
-- P6: The swarm knows about itself
-- P7: Protocols bound emergence
+The workspace is persistent across activations. An agent that writes
+`role.md` during its first activation finds it there on every subsequent one.
 
-### P8: Cairn is the interface boundary
+The stable workspace (`.remora/<swarm_id>/stable.db`) contains the synced
+project source files. An agent can read project files by querying the stable
+workspace; agent workspace reads fall back to stable automatically.
 
-The cairn workspace is the only surface through which agents reach the
-outside world. This is not an aspirational constraint — it is how the Grail
-runtime is implemented. A `.pym` script can only call functions that appear in
-its externals dict, and the runtime controls that dict completely.
+`CairnWorkspaceService` (v1, `core/agents/cairn_bridge.py`) manages both.
+No changes needed here for the bootstrap.
 
-In the bootstrap, the externals dict is `BootstrapExternals.as_externals()`.
-This dict contains: file operations on the agent's cairn workspace, graph
-query operations (read-only traversal of the semantic graph), and event
-operations (emit into the causal bus, read recent history). Nothing else.
+### 2.2 Graph
 
-Consequence: adding a new agent capability means adding a new entry to
-`BootstrapExternals` and writing a `.pym` script that uses it. There is no
-other path.
+A queryable directed graph accessible to agents through cairn externals. The
+graph holds whatever nodes and edges the bootstrap process has put there —
+initially seeded from the code discovery output (`CSTNode` → node, `caller_ids`
+→ edges), then extended by agents as they run.
 
-### P9: Primitives are the canonical turn model
+The runtime provides add, remove, and query operations. It does not prescribe
+what nodes or edges should exist. An agent that wants to track a relationship
+between two things adds an edge. An agent that wants to record a fact adds a
+node. The graph is the shared structured memory of the swarm.
 
-The six types in `primitives.py` — `str`, `ToolRef`, `Concat`, `InputGate`,
-`Step`, `ContextPipeline`, `TurnSchema` — are the data model for every agent
-turn. The runtime resolves a `TurnSchema` by:
+See §4 for graph library options.
 
-1. Resolving `system` (calling any `ToolRef` pre-turn reads)
-2. Running the `ContextPipeline` (each `Step` in order; outputs stored as
-   `$step_name` for later steps)
-3. Running the LLM loop with the declared `.pym` tool names
+### 2.3 Event bus
 
-`bundle.yaml` + `_build_prompt()` is replaced by `TurnSchema`. No config
-files, no hardcoded prompt assembly — just a data structure an agent can
-build, return, and store in its cairn workspace.
+An event bus with typed subscription. Backed by the existing v1 `EventBus`
+and `EventStore` (`core/events/`). Agents emit named events with a JSON
+payload. Other agents subscribe to event types and are triggered when matching
+events arrive.
+
+Causal provenance is tracked: every event carries the ID of the event that
+caused it to be emitted (or `None` for root events). This is the mechanism for
+tracing what caused what, detecting infinite loops, and enforcing depth limits.
+
+The runtime provides `emit_event` and `read_recent_events` as cairn externals.
+Agents don't interact with the EventBus directly.
 
 ---
 
-## 4. Semantic Graph Topology
+## 3. The Cairn Boundary
 
-### 4.1 Node kinds
+### 3.1 The constraint
 
-```
-code.function         A callable unit of code (maps to CSTNode node_type="function")
-code.class            A type definition (maps to CSTNode node_type="class")
-code.file             A source file (maps to CSTNode node_type="file")
-code.module           A Python module
-spec.requirement      A stated capability requirement ("the system shall...")
-spec.invariant        A property that must always hold
-spec.contract         An explicit pre/post condition pair
-test.assertion        A single test assertion tied to a spec or code node
-test.case             A test function containing assertions
-doc.section           A documentation section (maps to CSTNode node_type="section")
-doc.example           A code example in documentation
-agent.profile         A registered bootstrap agent
-agent.protocol        A registered swarm protocol definition
-memory.episode        A recorded interaction episode (short-horizon)
-memory.insight        A distilled durable memory (long-horizon)
-```
+Grail `.pym` scripts are the only agent tool interface. A `.pym` script can
+only call functions declared with `@external`. The runtime controls the
+externals dict entirely. This is not a policy — it is how the Grail compiler
+works: undeclared externals cause a compile-time error.
 
-`code.*` nodes are seeded from v1's `CSTNode` objects via `discover()`. The
-`node_id` for code nodes uses the same deterministic hash:
-`compute_node_id(file_path, node_type, full_name)`. `AgentNode.caller_ids` and
-`callee_ids` seed the initial `calls` edges. The semantic graph lives in its
-own storage (SQLite `bootstrap_nodes` + `bootstrap_edges` tables) and does not
-modify the existing `nodes` table used by v1.
+The bootstrap runtime passes every agent a `BootstrapExternals` dict. That
+dict is the complete set of things agents can do. There is no other interface.
 
-### 4.2 Edge kinds
+**Agents can only reach what is in the externals dict.**
 
-| Edge kind | From | To | Semantics | Activation |
-|-----------|------|----|-----------|------------|
-| `implements` | code.* | spec.requirement | this code satisfies this requirement | review when code changes |
-| `tests` | test.* | code.* | this test exercises this code | run when code changes |
-| `asserts` | test.assertion | spec.invariant | this assertion checks this invariant | index for violation detection |
-| `documents` | doc.section | code.* | this doc describes this code | update when code changes |
-| `violates` | code.* | spec.invariant | this code violates this invariant | immediately activates ViolationResponse |
-| `proposes_change_to` | agent.profile | code.* | open proposal against this code | activates review protocol |
-| `coordinates` | agent.profile | agent.profile | first agent delegates to second | routing hint |
-| `caused_by` | any | event | this node exists because of this event | causal provenance |
-| `remembers` | memory.episode | any | this episode involves this node | memory recall |
-| `concerns` | memory.insight | any | this insight is about this node | insight recall |
-| `specializes` | agent.profile | agent.profile | first is a specialization of second | capability inheritance |
-| `calls` | code.function | code.function | direct call relationship (from caller_ids) | seeded from v1 |
-
-### 4.3 Node identity
+### 3.2 What is in the dict today (v1 CairnExternals)
 
 ```python
-node_id = stable_hash(kind, canonical_name, anchor)
+# core/agents/cairn_externals.py — CairnExternals.as_externals()
+{
+    "read_file":      ...,  # read from agent cairn workspace
+    "write_file":     ...,  # write to agent cairn workspace
+    "list_dir":       ...,  # list workspace directory
+    "file_exists":    ...,  # check file existence
+    "search_files":   ...,  # glob pattern search in workspace
+    "search_content": ...,  # regex content search in workspace
+    "submit_result":  ...,  # signal turn complete + changed files
+    "log":            ...,  # structured log
+}
 ```
 
-For `code.*` nodes: `anchor` is the file path + qualified name (same as
-`compute_node_id` in v1). For `spec.*`, `doc.*`, `agent.*`, `memory.*` nodes:
-`anchor` is a human-assigned slug. This makes IDs stable across restarts.
+All paths are normalized through `PathResolver.to_workspace_path()` — they
+cannot escape the workspace. This is the existing enforcement.
 
-### 4.4 Graph as activation fabric
+### 3.3 What gets added for the bootstrap
 
-When an agent creates a `violates` edge, the ViolationResponse protocol
-activates — because violation-watcher agents subscribe to
-`BootstrapEdgeCreatedEvent(edge_kind="violates")` via `SubscriptionPattern`.
-Edge creation is an event. The graph and the event bus are peers: mutations to
-the graph emit events; events can trigger graph mutations.
+The bootstrap extends `CairnExternals` with graph and event operations:
+
+```python
+# BootstrapExternals adds:
+{
+    # Graph (read-only except for add/remove which are gated by role)
+    "graph_add_node":    ...,  # add a node to the graph
+    "graph_add_edge":    ...,  # add an edge to the graph
+    "graph_remove_node": ...,  # remove a node
+    "graph_remove_edge": ...,  # remove an edge
+    "graph_neighbors":   ...,  # get neighbors of a node (by edge kind, direction)
+    "graph_find_nodes":  ...,  # find nodes by kind or attribute
+    "graph_node":        ...,  # get a single node by ID
+
+    # Event
+    "emit_event":         ...,  # emit a named event into the causal bus
+    "read_recent_events": ...,  # recent events for a node or correlation
+}
+```
+
+Graph mutation ops (`graph_add_node`, `graph_add_edge`, `graph_remove_node`,
+`graph_remove_edge`) are role-gated: the runtime passes them only to agents
+whose role permits graph writes. Read-only agents receive only
+`graph_neighbors`, `graph_find_nodes`, and `graph_node`.
+
+The keys in the dict are what `.pym` scripts declare as `@external`. An agent
+that only needs to read the graph declares only the read ops. This is the
+capability model: what's in the dict is what's possible.
+
+### 3.4 All paths stay in the workspace
+
+Graph externals return data as JSON strings, not Python objects. They do not
+return live graph handles. An agent that calls `graph_neighbors(node_id,
+edge_kind="whatever")` gets back a JSON string listing neighbor node IDs and
+edge attributes. It cannot hold a reference to the graph or issue arbitrary
+traversal calls — only the declared externals.
+
+This preserves the workspace boundary. Graph data flows through the same
+read/write interface as file data. The graph is simply another kind of
+structured content accessible through cairn.
 
 ---
 
-## 5. Graph Substrate Options
+## 4. Graph Navigation
 
-The semantic graph must be queryable through cairn `.pym` tools. The graph
-library backs the `BootstrapExternals` graph query functions — agents never
-touch it directly. Below are the realistic options.
+### 4.1 What graph access means for agents
 
-### Requirements
+Agents use graph ops through `.pym` scripts — both as pre-turn reads (in the
+`ContextPipeline` via `ToolRef`) and as interactive tools (during the LLM loop).
 
-- Store typed nodes (kind, node_id, attribute dict) and typed edges (kind,
-  from_node, to_node, attribute dict)
-- Efficient neighborhood queries: "all edges of kind K from node N"
-- Multi-hop traversal: "causal ancestors of event E"
-- Pattern queries: "all function nodes with no `tests` edges"
-- Cycle detection (protocol deadlock)
-- Persistence across restarts
-- Fast enough for agent-frequency queries (dozens per turn, not millions)
+A pre-turn read might look like: call `graph_neighbors` to get the list of
+nodes that depend on this one before the LLM sees the prompt. An interactive
+tool might look like: the LLM calls `graph_add_edge` to record a relationship
+it discovered. Both go through the same externals dict.
+
+The graph is a shared substrate. Any agent can query it. Mutation is
+role-gated but not otherwise restricted — agents decide what nodes and edges
+are meaningful. The bootstrap process, not the concept document, determines
+what structure accumulates in the graph.
+
+### 4.2 Graph library options
+
+The externals need something to call into. The following are the realistic
+options for the graph implementation backing the `graph_*` externals.
 
 ---
 
-### Option A: Rustworkx + SQLite (Recommended)
+#### Option A: Rustworkx + SQLite (Recommended)
 
 **What it is:** [rustworkx](https://github.com/Qiskit/rustworkx) is a
 Rust-backed directed graph library from the Qiskit project. Used here as an
-in-memory traversal engine, with SQLite as the durable backing store.
+in-memory traversal engine; SQLite provides durable storage.
 
 **Pros:**
-- Rust-speed traversal: shortest path, cycle detection, topological sort,
-  strongly connected components — all at native speed, no Python overhead
-- `PyDiGraph` supports arbitrary Python objects as node/edge attributes
-- Actively maintained, MIT license, `pip install rustworkx` — no native build
-  tools required
-- Cycle detection maps directly to protocol deadlock detection; shortest path
-  maps directly to causal depth; topological sort maps to build dependency order
-- Scales to millions of nodes without hitting Python's GC pressure
+- Rust-speed traversal: cycle detection, shortest path, topological sort,
+  strongly connected components — all at native speed
+- `PyDiGraph` stores arbitrary Python objects as node/edge data
+- MIT license, `pip install rustworkx`, actively maintained, no native build
+  tools required beyond pip
+- Cycle detection maps to deadlock detection; shortest path maps to causal
+  depth; topological sort maps to dependency ordering — useful properties
+  that emerge naturally from the algorithm set
+- Integer-indexed internally → very cache-friendly for large traversals
 
 **Cons:**
 - No native persistence: requires a SQLite serialize/deserialize layer
-- No native property graph query language: neighborhood queries are Python
-  loops over edge lists returned by `rustworkx` API calls
-- Documentation is quantum-computing-flavored; the general graph API requires
-  reading source or the API reference directly
-- Must track the mapping `node_id (str) → rustworkx index (int)` since
-  rustworkx uses integer node indices internally
+- Integer node indices internally — need to maintain a `str node_id → int
+  rustworkx index` mapping
+- No native query language: neighborhood queries are Python loops over
+  edge lists from the Rustworkx API
+- Documentation is quantum-computing-flavored; general graph API requires
+  reading the API reference
 
 **Implications:**
-- Two systems: Rustworkx for traversal algorithms, SQLite for persistence and
-  rich neighborhood queries
-- On startup: load graph from SQLite into Rustworkx (fast — SQLite reads are
-  cheap for <100k nodes)
+- Two systems working together: Rustworkx for traversal algorithms, SQLite
+  for persistence and attribute queries
+- On startup: deserialize from SQLite into Rustworkx (fast for <100k nodes)
 - On shutdown / checkpoint: serialize Rustworkx back to SQLite
-- Simple neighborhood queries (`inspect_node`, `query_graph`) go directly to
-  SQLite (no need to touch Rustworkx for read-only lookups)
-- Rustworkx invoked when algorithmic queries are needed: cycle detection,
-  causal chain depth, transitive closure
+- Simple neighborhood queries go directly to SQLite (faster than loading
+  into Rustworkx for single-hop reads)
+- Rustworkx used only for algorithmic queries: cycle detection, depth
+  calculation, transitive closure
 
 **Opportunities:**
-- All Rustworkx algorithms become available for free: topological sort for
-  ordered dependency resolution, SCC analysis for detecting circular
-  imports/invariants, minimum spanning tree for protocol simplification
-- Because Rustworkx is indexed by integer, it can be used as a fast in-memory
-  join layer: "give me all nodes reachable from node X within 3 hops" is a
-  single Rustworkx call that returns a list of integers, then batch-resolved
-  from the `str → int` index to get node IDs
+- The full Rustworkx algorithm library is available for free once the graph
+  is loaded: SCC analysis, minimum spanning tree, betweenness centrality —
+  capabilities that could become useful as the swarm grows
+- Fast enough to keep the full graph in memory for any realistic codebase
 
 ---
 
-### Option B: NetworkX + SQLite
+#### Option B: NetworkX + SQLite
 
 **What it is:** [NetworkX](https://networkx.org/) is the de facto standard
 Python graph library. Same hybrid model as Option A but pure Python.
 
 **Pros:**
-- Best documentation of any Python graph library; well-known by all Python
-  developers; extensive Stack Overflow coverage
-- Most Pythonic API: `G.nodes[n]` is a dict, `G.edges(n, data=True)` is a
-  generator, graph operations compose naturally
-- Richest algorithm coverage in Python: NetworkX has more algorithms than
-  Rustworkx
-- Excellent ecosystem: graph visualization (matplotlib, Graphviz), analysis
-  tools, all speak NetworkX natively
-- Easiest to debug: no integer index mapping, node IDs are strings directly
+- Best documentation, widest algorithm coverage, most Pythonic API
+- Node IDs are strings directly — no integer index mapping needed
+- Richest algorithm set in Python
+- Easy to debug: `G.nodes[n]` is a plain dict
+- Lower initial learning curve
 
 **Cons:**
 - Pure Python: 10–50× slower than Rustworkx for large traversals
-- Higher memory overhead per node/edge (Python dicts vs Rust structs)
-- For Remora's expected graph sizes (<50k nodes in any realistic codebase),
-  this performance gap is academic — the bottleneck is LLM API latency, not
-  graph traversal
+- Higher memory overhead per node
 
 **Implications:**
-- Identical hybrid model to Option A: NetworkX in memory, SQLite for
-  persistence
-- No integer index mapping needed (strings as node IDs directly)
-- Could swap to Rustworkx later if profiling shows graph traversal is
-  actually a bottleneck — both expose similar DiGraph semantics
+- For Remora's expected graph sizes (code nodes in a typical project are well
+  under 100k), the performance gap is academic — LLM call latency dominates
+- Clean upgrade path: switch to Rustworkx later if profiling shows graph
+  traversal is actually a bottleneck; both expose similar `DiGraph` semantics
 
 **Opportunities:**
-- Lower barrier to contribution: most Python developers can read NetworkX code
-  without the Rustworkx learning curve
-- Cleaner debugging experience during initial development
+- Lower barrier to contribution during initial development
+- Cleaner debugging during M0–M3 when correctness matters more than speed
 
 ---
 
-### Option C: SQLite Property Graph (Custom)
+#### Option C: SQLite Property Graph (No In-Memory Library)
 
-**What it is:** Skip the in-memory graph library entirely. The graph lives
-exclusively in SQLite as a property graph schema:
+**What it is:** The graph lives entirely in SQLite as two tables
+(`bootstrap_nodes`, `bootstrap_edges`) with proper indexes.
 
 ```sql
 CREATE TABLE bootstrap_nodes (
-    node_id      TEXT PRIMARY KEY,
-    kind         TEXT NOT NULL,
-    canonical_name TEXT,
-    attrs        TEXT  -- JSON
+    node_id TEXT PRIMARY KEY,
+    kind    TEXT,
+    attrs   TEXT  -- JSON
 );
-
 CREATE TABLE bootstrap_edges (
-    edge_id      TEXT PRIMARY KEY,
-    kind         TEXT NOT NULL,
-    from_node    TEXT REFERENCES bootstrap_nodes(node_id),
-    to_node      TEXT REFERENCES bootstrap_nodes(node_id),
-    attrs        TEXT  -- JSON
+    edge_id   TEXT PRIMARY KEY,
+    kind      TEXT,
+    from_node TEXT REFERENCES bootstrap_nodes(node_id),
+    to_node   TEXT REFERENCES bootstrap_nodes(node_id),
+    attrs     TEXT  -- JSON
 );
-
 CREATE INDEX idx_edges_from_kind ON bootstrap_edges(from_node, kind);
 CREATE INDEX idx_edges_to_kind   ON bootstrap_edges(to_node, kind);
-CREATE INDEX idx_nodes_kind      ON bootstrap_nodes(kind);
 ```
 
 **Pros:**
-- Zero new dependencies: SQLite already used for EventStore,
-  SubscriptionRegistry, and v1's NodeStore
-- Native persistence: no serialize/deserialize cycle; graph mutations are
-  immediately durable
-- SQL expressiveness: complex multi-condition queries are natural
-  (e.g., "functions with `implements` edges but no `tests` edges" is a
-  LEFT JOIN + WHERE NULL)
-- Neighborhood queries are fast with proper indexes (covered by the indexes above)
+- Zero new dependencies; SQLite already used throughout v1
+- Native persistence; no serialize/deserialize cycle
+- Single-hop neighborhood queries are fast with the indexes above
 - Can JOIN graph data with event log easily (same database file)
 
 **Cons:**
 - No native graph algorithms: cycle detection requires recursive CTEs or
-  loading a subgraph into Python for traversal — both are complex
-- Each traversal hop is a SQL round-trip; deep causal chains need either
-  recursive CTEs or Python loop + multiple queries
-- `WITH RECURSIVE` CTEs for transitive closure are correct but hard to read
-  and maintain
+  loading a subgraph into Python
+- Multi-hop traversal requires recursive SQL or Python loops
 
 **Implications:**
-- This is essentially what v2 described (SQLite persistence)
-- Works well for all neighborhood queries agents actually make (node
-  inspection, edge traversal 1–2 hops)
-- Algorithmic queries (deadlock detection, causal depth) require either
-  recursive SQL or pulling a subgraph into Python
+- Works for all simple neighborhood queries agents actually need (who are my
+  neighbors? what edges do I have?)
+- Add Rustworkx on demand when algorithmic queries are needed (M4+ territory)
 
 **Opportunities:**
-- Simplest implementation path; highest confidence in correctness
-- Can add Rustworkx as a targeted accelerator layer later without changing
-  the storage model or the externals API
+- Simplest starting point; Option A can be layered on top without changing the
+  externals API at all
 
 ---
 
-### Option D: Kuzu (Embedded Graph Database)
+#### Option D: Kuzu (Embedded Graph Database)
 
 **What it is:** [Kuzu](https://kuzudb.com/) is an embedded ACID graph
-database with columnar storage and openCypher query language. Analogous to
-DuckDB but for property graphs.
+database with openCypher query language — DuckDB for property graphs.
 
 **Pros:**
-- Native property graph model with typed schemas for nodes and edges
-- Cypher query language: expressive, readable, purpose-built for graph
-  traversal. "Find all functions with no test coverage" is readable Cypher:
-  ```cypher
-  MATCH (f:code_function)
-  WHERE NOT EXISTS { MATCH (f)<-[:tests]-() }
-  RETURN f.node_id
-  ```
-- ACID transactions: concurrent graph mutations are safe
-- Built-in persistence with columnar storage (fast for analytics)
-- Actively maintained, Python API, MIT license, `pip install kuzu`
+- Native property graph model with typed schemas
+- Cypher query language: expressive multi-hop queries without Python loops
+- ACID transactions; built-in persistence; columnar storage
+- `pip install kuzu`, actively maintained
 
 **Cons:**
-- New dependency with a learning curve for contributors unfamiliar with Cypher
-- Younger project: smaller community, less production track record than SQLite
-- No native Python graph algorithm library integration (can't pass a Kuzu
-  graph directly to NetworkX or Rustworkx)
-- Adds schema migration complexity (Kuzu has typed node/edge tables that must
-  be created upfront, not free-form dicts)
+- New dependency with a Cypher learning curve
+- Younger project, smaller community
+- Typed node/edge tables require upfront schema declaration — conflicts with
+  v3's "don't prescribe structure" philosophy (node kinds would need to be
+  known in advance or stored as string attributes in a generic table)
 
 **Implications:**
-- Graph queries from `.pym` externals would ultimately execute Cypher strings
-- The most expressive option for complex pattern matching across many edge kinds
-- Positions the graph as a genuine queryable database, not a runtime artifact
+- Most expressive query language, but the schema rigidity works against v3's
+  open-ended graph philosophy
 
 **Opportunities:**
-- Could expose a `query_graph_cypher` external for privileged agents, enabling
-  arbitrary semantic graph queries without new Python code
-- Best fit if the semantic graph becomes a platform feature consumed by many
-  external tools
+- Right choice if the graph becomes a platform feature queried by many
+  external consumers
+- Could expose a `graph_query_cypher` privileged external for advanced
+  semantic queries without new Python code
 
 ---
 
-### Recommendation
+#### Recommendation
 
-**Option A (Rustworkx + SQLite)** for v3. Rationale:
+**Start with Option C (SQLite property graph) for M0–M2.** Lowest friction,
+zero new dependencies, covers all initial neighborhood queries.
 
-1. **SQLite for storage and neighborhood queries.** The `inspect_node` and
-   `query_graph` externals resolve almost entirely against SQLite with the
-   indexes above. SQLite is already in the project and requires zero new
-   dependencies.
+**Add Option A (Rustworkx) at M3–M4** when algorithmic queries appear (depth
+enforcement, cycle detection). Load relevant subgraphs on demand; SQLite
+remains the source of truth.
 
-2. **Rustworkx for algorithmic queries.** Cycle detection (protocol deadlock),
-   causal depth (max_depth guard), and transitive closure (causal scope for
-   undo semantics) are the only cases that need a real graph algorithm. Load
-   the relevant subgraph into Rustworkx on demand; discard after the query.
+This two-phase approach means the externals API doesn't change between M0
+and M4 — only the implementation backing the externals changes.
 
-3. **Clear upgrade path to Kuzu.** If the semantic graph becomes a platform
-   feature or the `query_graph_cypher` external becomes useful, the SQLite
-   backing can be replaced with Kuzu without changing the externals API.
+Option B (NetworkX) is a valid substitute for Rustworkx if the team prefers
+a pure-Python start. The upgrade path is the same.
 
-Option B is viable and has lower initial friction. Prefer it if the team
-wants to start without a new dependency and profile first. The switch from
-NetworkX to Rustworkx is low-effort since both use similar DiGraph semantics.
-
-Option C works for M0–M3 without any in-memory library. Add Option A at M4
-when deadlock detection is needed.
+Option D (Kuzu) is noted for future consideration. Its schema rigidity is a
+real friction point for v3's open-ended graph.
 
 ---
 
-## 6. Cairn as Interface Boundary
+## 5. Turn Execution: The Primitives
 
-### 6.1 How the boundary works in v1
+The six types in `primitives.py` (`str`, `ToolRef`, `Concat`, `InputGate`,
+`Step`, `ContextPipeline`, `TurnSchema`) are the canonical data model for
+every agent turn. This is the core contribution of the Primitives design, and
+it does not change in v3.
 
-In v1, `CairnExternals.as_externals()` returns the dict that the Grail runtime
-passes to every `.pym` script. This dict is the complete set of external
-functions the script can call:
+`TurnSchema` replaces `bundle.yaml` + `_build_prompt()`. Instead of a config
+file that hardcodes context assembly in Python, an agent stores a `TurnSchema`
+as `schema.json` in its cairn workspace. The runtime loads it on every
+activation and executes it:
 
-```python
-# v1 CairnExternals.as_externals() — the full dict today
-{
-    "read_file":      self.read_file,       # read from agent cairn workspace
-    "write_file":     self.write_file,      # write to agent cairn workspace
-    "list_dir":       self.list_dir,        # list workspace directory
-    "file_exists":    self.file_exists,     # check file existence
-    "search_files":   self.search_files,    # glob pattern search
-    "search_content": self.search_content,  # content regex search
-    "submit_result":  self.submit_result,   # declare turn complete + changed files
-    "log":            self.log,             # structured logging
-}
-```
+1. **Resolve `system`** — walk the `PromptNode` tree, calling any `ToolRef`
+   pre-turn reads. These are `.pym` scripts that run before the LLM sees
+   anything.
 
-A `.pym` script that tries to use any function not in this dict gets a
-compile-time error from the Grail runtime. There is no escape hatch.
+2. **Run the `ContextPipeline`** — steps execute in order. Each step's output
+   is stored as `$step_name` for interpolation in later steps' args.
 
-### 6.2 BootstrapExternals: extending the boundary
+3. **Run the LLM loop** — the LLM gets the resolved messages and the declared
+   `.pym` tool names. It calls tools, gets results, iterates up to `max_turns`.
+   When it outputs the `termination` string, the loop ends.
 
-The bootstrap runtime introduces `BootstrapExternals`, which extends
-`CairnExternals` with two new categories:
+### DEFAULT_SCHEMA
 
-**Graph operations** (read-only, backed by SQLite + Rustworkx):
-```python
-"inspect_node":       self.inspect_node,       # node details + neighbors
-"query_graph":        self.query_graph,         # edge pattern query
-"trace_causal_chain": self.trace_causal_chain,  # causal ancestors/descendants
-"find_nodes":         self.find_nodes,           # nodes by kind + attrs
-```
-
-**Event operations** (write into event slot; runtime drains to EventBus):
-```python
-"emit_event":         self.emit_event,          # emit into causal bus
-"read_recent_events": self.read_recent_events,  # read event history for a node
-```
-
-Everything else is inherited from `CairnExternals`. The externals dict passed
-to privileged agents (maintainer role) additionally includes:
+Every new agent starts with:
 
 ```python
-"update_subscription": self.update_subscription,  # privileged: modify subscriptions
-"register_protocol":   self.register_protocol,    # privileged: add new protocol
-```
-
-### 6.3 What .pym scripts can and cannot do
-
-**Can do:**
-- Read from the agent's cairn workspace (file layer)
-- Write to the agent's cairn workspace (file layer)
-- Query the semantic graph (graph ops — read-only, returns JSON strings)
-- Emit events into the causal bus (event op — write, mediated by runtime)
-- Read recent event history for nodes (event op — read-only)
-- Log messages (structured, goes to runtime logger)
-- Submit turn result (file layer — declares which files changed)
-
-**Cannot do:**
-- Import arbitrary Python modules (Grail compiler enforces this)
-- Make network calls (no external in the dict for it)
-- Access the file system outside the cairn workspace (paths are normalized
-  through `PathResolver.to_workspace_path()`)
-- Directly mutate the semantic graph (no `add_node`, `add_edge` external;
-  graph mutations happen through event processing, not direct API calls)
-- Access another agent's cairn workspace (each agent gets its own externals
-  instance bound to its own workspace)
-
-### 6.4 System tools vs. agent-local tools
-
-**System tools** are `.pym` scripts maintained by the bootstrap runtime and
-available to any agent that declares them in `TurnSchema.tools`. They live in
-the bootstrap `tools/` directory and are discovered at startup via
-`discover_grail_tools()`. They use `BootstrapExternals` (the full dict).
-
-**Agent-local tools** are `.pym` scripts an agent writes to its own cairn
-workspace via `write_file`. They are available only to the owning agent and
-use only the externals available to that agent's role. An agent with `proposal`
-role cannot write a local tool that uses `register_protocol` — that external
-isn't in its dict.
-
-The Tool Synthesis mechanism from the Primitives Walkthrough (Appendix III) is
-how agent-local tools come into being: an agent writes a `.pym` file to its
-workspace, emits a schema that references it, and the runtime discovers and
-loads it from the workspace on the next turn.
-
----
-
-## 7. The Bootstrap Externals
-
-Full `BootstrapExternals` API. Each external is callable from `.pym` scripts
-via the `@external` declaration pattern.
-
-### File operations (inherited from CairnExternals)
-
-```python
-# In a .pym script:
-@external
-async def read_file(path: str) -> str: ...
-# Returns file content as string. Returns "" if file does not exist.
-# path is relative to the agent's cairn workspace root.
-
-@external
-async def write_file(path: str, content: str) -> bool: ...
-# Writes content to agent cairn workspace. Returns True on success.
-
-@external
-async def list_dir(path: str = ".") -> list[str]: ...
-# Lists workspace directory entries (names only, not full paths).
-
-@external
-async def file_exists(path: str) -> bool: ...
-
-@external
-async def search_files(pattern: str) -> list[str]: ...
-# Glob pattern search within the cairn workspace.
-
-@external
-async def search_content(pattern: str, path: str = ".") -> list[Any]: ...
-# Regex content search within the cairn workspace.
-
-@external
-async def submit_result(summary: str, changed_files: list[str]) -> bool: ...
-# Signal turn completion. changed_files are workspace-relative paths.
-
-@external
-async def log(message: str) -> bool: ...
-```
-
-### Graph operations (new in BootstrapExternals)
-
-```python
-@external
-async def inspect_node(node_id: str, include_neighbors: bool = True) -> str: ...
-# Returns JSON:
-# {
-#   "node_id": "...",
-#   "kind": "code.function",
-#   "canonical_name": "...",
-#   "attrs": {...},
-#   "neighbors": [
-#     {"edge_kind": "tests", "direction": "in", "other_node_id": "..."},
-#     ...
-#   ]
-# }
-# Returns "{}" if node not found.
-
-@external
-async def query_graph(
-    edge_kind: str,
-    from_node: str | None = None,   # node_id filter on from side
-    to_node: str | None = None,     # node_id filter on to side
-    from_kind: str | None = None,   # node kind filter on from side
-    to_kind: str | None = None,     # node kind filter on to side
-    limit: int = 20,
-) -> str: ...
-# Returns JSON list of matching edges:
-# [{"edge_id": "...", "kind": "...", "from_node": "...", "to_node": "...",
-#   "attrs": {...}}, ...]
-
-@external
-async def find_nodes(
-    kind: str | None = None,
-    attr_filter: str = "{}",  # JSON dict of attr key/value pairs to match
-    limit: int = 20,
-) -> str: ...
-# Returns JSON list of matching nodes.
-# attr_filter is a JSON-encoded dict (string values match by equality).
-
-@external
-async def trace_causal_chain(
-    event_id: str,
-    direction: str = "descendants",  # "ancestors" | "descendants"
-    max_depth: int = 10,
-) -> str: ...
-# Traverses causal_parent_id links. Uses Rustworkx for depth calculation.
-# Returns JSON list of event summaries:
-# [{"event_id": "...", "event_type": "...", "depth": 2, "agent_id": "..."}, ...]
-```
-
-### Event operations (new in BootstrapExternals)
-
-```python
-@external
-async def emit_event(event_type: str, payload: str, target_node_id: str = "") -> str: ...
-# payload is JSON-encoded string.
-# Writes to the cairn event slot; runtime injects into EventBus with correct
-# causal envelope (causal_parent_id, depth, correlation_id set by runtime).
-# Returns JSON: {"event_id": "...", "depth": N}
-
-@external
-async def read_recent_events(
-    node_id: str = "",
-    event_types: str = "",     # comma-separated event type names, "" = all
-    limit: int = 10,
-) -> str: ...
-# Queries EventStore for recent events involving node_id.
-# Returns JSON list of event summaries.
-```
-
-### Privileged operations (maintainer role only)
-
-```python
-@external
-async def update_subscription(
-    agent_id: str,
-    add_patterns: str,    # JSON list of SubscriptionPattern dicts
-    remove_patterns: str, # JSON list of pattern IDs to remove
-) -> str: ...
-# Returns JSON: {"active_patterns": [...]}
-
-@external
-async def register_protocol(protocol_definition: str) -> str: ...
-# protocol_definition is a JSON-encoded SwarmProtocol.
-# Validates guards (max_depth >= 2, timeout > 0, etc.).
-# Returns JSON: {"protocol_id": "...", "status": "trial"}
-```
-
----
-
-## 8. Composable Turn Schemas
-
-### 8.1 TurnSchema absorbs TurnContract
-
-v2 proposed a `TurnContract` with `requires`, `produces`, `allowed_tools`,
-`budget`, and `on_failure` fields. In v3, the `TurnSchema` from `primitives.py`
-is the execution unit:
-
-```python
-TurnSchema(
-    system=...,          # PromptNode — resolved before the LLM sees anything
+DEFAULT_SCHEMA = TurnSchema(
+    system="You are a Remora agent node. Read your workspace to understand your role.",
     context=ContextPipeline(steps=(
-        Step("source", ToolRef("read_file", {"path": "$node.file_path"})),
-        Step("history", ToolRef("read_recent_events", {"node_id": "$node.id"})),
+        Step("role", ToolRef("read_file", {"path": "role.md"})),
     )),
-    tools=("propose_patch", "emit_event", "write_file"),  # .pym names
-    max_turns=5,
+    tools=("read_file", "write_file", "emit_schema"),
+    max_turns=2,
     termination="done",
 )
 ```
 
-`tools` contains `.pym` script names (without the `.pym` extension). The
-executor resolves them by looking up the bootstrap system tool registry and the
-agent's own cairn workspace (for agent-local tools).
+The `emit_schema` tool is the key: it writes the agent's own `TurnSchema`
+specification to `schema.json` in its cairn workspace. On every subsequent
+activation the runtime uses that stored schema. The agent bootstraps itself
+from nothing using only workspace files and the emit_schema tool.
 
-The `ToolRef` calls in `ContextPipeline` are **pre-turn reads** — they call
-`.pym` tools during context assembly, before the LLM sees the prompt. The LLM
-never sees these as tool calls; it sees their resolved string output.
+This is the self-bootstrapping sequence (from the Primitives Walkthrough):
 
-The `tools` in `TurnSchema.tools` are **interactive tools** — the LLM calls
-them during its turn via the standard tool-use protocol.
+```
+1. NodeDiscoveredEvent fires → runtime creates agent node
+2. Runtime activates with DEFAULT_SCHEMA
+3. Agent reads role.md → empty (new node)
+4. Agent writes role.md with a description of its purpose
+5. Agent calls emit_schema({...richer schema...})
+6. Runtime stores schema.json
+7. Next activation → runtime loads schema.json and uses it
+```
 
-All pre-turn reads and interactive tools go through the same `.pym` execution
-engine with the same `BootstrapExternals` dict. There is no separate tool
-execution path.
-
-### 8.2 Failure classification
-
-Every turn completes with one of these outcomes (from v2, unchanged):
-
-| Outcome | Meaning | Routing |
-|---------|---------|---------|
-| `SUCCESS` | Turn produced expected output | Continue protocol |
-| `PARSE_FAILURE` | LLM did not produce structured output | Retry with parse-focused reprompt |
-| `SCHEMA_MISMATCH` | Tool call args didn't match tool schema | Emit diagnostic, retry once |
-| `POLICY_DENIAL` | Agent called a tool not in `TurnSchema.tools` | Hard fail |
-| `BUDGET_EXCEEDED` | `max_turns` exhausted | Terminate, emit partial result |
-| `TIMEOUT` | Wall-clock limit exceeded | Terminate, emit diagnostic |
-| `RUNTIME_ERROR` | Unhandled exception in `.pym` execution | Emit error event |
-
-The active protocol's `on_failure` state determines routing. The executor does
-not retry indefinitely: it applies `Retry(max=2)` for `PARSE_FAILURE`, then
-routes to the protocol's failure state.
-
-### 8.3 Schema storage and evolution
-
-An agent stores its `TurnSchema` in its cairn workspace as `schema.json` (via
-the `emit_schema` system tool). The runtime loads this on every activation. If
-no `schema.json` exists, the runtime falls back to `DEFAULT_SCHEMA`.
-
-An agent can update its schema at any time by calling `emit_schema` again.
-Another agent can propose a schema change via `propose_patch` targeting the
-agent's `schema.json`. The normal review protocol applies.
+Steps 1–6 happen once. Step 7 happens every time.
 
 ---
 
-## 9. The Causal Event Bus
+## 6. The Agent Model
 
-### 9.1 Grounding in v1 EventBus
+The substrate is what the runtime provides. But we also need to specify what
+an agent *is* — the shape that all bootstrap agents share regardless of what
+they specialize into. This is the agent model: not a taxonomy of agent types,
+but the single data structure that represents any agent at runtime.
 
-v1's `EventBus` (`core/events/event_bus.py`) provides:
-- Type-based subscription with MRO resolution
-- Async/sync handler dispatch
-- `stream()` async context manager
-- `wait_for(event_type, predicate, timeout)` for synchronization
+Following v1's principle of "data over subclasses" (from `EventBased_Concept.md`:
+"There is no TestAgentNode subclass. Every agent is an AgentNode instance.
+Behavioral differences come from different field values"), the bootstrap has
+one runtime model.
 
-The bootstrap uses this EventBus directly. `BootstrapEvent` subclasses are
-registered as new event types that the existing v1 `EventBus` dispatches.
-The `EventStore` (`core/store/event_store.py`) persists them via its existing
-SQLite WAL-mode write path.
-
-### 9.2 BootstrapEvent envelope
-
-Every bootstrap event extends `BootstrapEvent`:
+### 6.1 BootstrapAgent: the runtime model
 
 ```python
-@dataclass(frozen=True)
-class BootstrapEvent:
-    event_id: str              # UUID
-    event_type: str            # discriminator (class name)
-    correlation_id: str        # top-level user request or workflow ID
-    causal_parent_id: str | None  # event that triggered this one
-    depth: int                 # causal depth from root (0 for root events)
-    agent_id: str | None       # bootstrap agent that emitted this
-    timestamp: float           # unix timestamp
-    payload: dict              # event-specific data
-```
+class BootstrapAgent(BaseModel):
+    """A bootstrap agent: graph node + turn schema + event subscriber."""
 
-When an agent calls the `emit_event` external, the runtime:
-1. Reads the current turn's `correlation_id` and `causal_parent_id` from
-   the turn context
-2. Sets `depth = causal_parent_depth + 1`
-3. Constructs the `BootstrapEvent` with these fields
-4. Appends it to `EventStore` via the existing `append()` path
-5. Emits it on the `EventBus`
-
-The agent's `.pym` script never sets `causal_parent_id` or `depth` — the
-runtime sets them. This enforces causal provenance without trusting agents.
-
-### 9.3 Causal graph queries
-
-The `trace_causal_chain` external queries the `causal_parent_id` chain in the
-`EventStore`. For depth calculation and cycle detection, it loads the relevant
-event subgraph into Rustworkx on demand:
-
-```python
-# Pseudocode for trace_causal_chain("event-id-abc", direction="descendants")
-events = event_store.get_causal_descendants("event-id-abc")
-g = rustworkx.PyDiGraph()
-node_map = {}
-for ev in events:
-    if ev.event_id not in node_map:
-        node_map[ev.event_id] = g.add_node(ev)
-    if ev.causal_parent_id and ev.causal_parent_id in node_map:
-        g.add_edge(node_map[ev.causal_parent_id], node_map[ev.event_id], None)
-return rustworkx.dag_longest_path_length(g)  # max depth
-```
-
-This is the pattern: SQLite for storage and lookup, Rustworkx invoked on
-demand for the algorithmic query, then discarded.
-
-### 9.4 Depth and budget enforcement
-
-Depth is tracked per-event, not per-agent. The `ProtocolEngine` checks
-`event.depth` against the active protocol's `max_depth` guard before
-dispatching the event to the next protocol state. Events that exceed
-`max_depth` are routed to the protocol's failure state with a
-`BUDGET_EXCEEDED` outcome — they are not silently dropped.
-
----
-
-## 10. Swarm Protocols
-
-### 10.1 Protocol anatomy
-
-```python
-@dataclass(frozen=True)
-class SwarmProtocol:
+    # Identity — also stored as a graph node (kind="agent.profile")
+    node_id: str
     name: str
-    trigger: EventPattern          # event pattern that starts this protocol
-    states: tuple[ProtocolState, ...]
-    guards: ProtocolGuards
 
-@dataclass(frozen=True)
-class ProtocolState:
+    # Capability grant — determines which externals are in this agent's dict
+    capabilities: frozenset[Capability]
+
+    # Current turn shape — loaded from schema.json in cairn workspace.
+    # None = use DEFAULT_SCHEMA.
+    schema: TurnSchema | None = None
+
+    # Runtime state (updated by the runtime after each activation)
+    status: str = "idle"   # "idle", "running", "error"
+
+    # Event subscriptions — what events trigger this agent
+    subscriptions: list[SubscriptionPattern] = Field(default_factory=list)
+
+    # Authoring origin — set during first activation
+    extension_name: str | None = None
+```
+
+There is no `DocstringBootstrapAgent` subclass or `ReviewerBootstrapAgent`
+subclass. Every bootstrap agent is a `BootstrapAgent` instance. Behavioral
+differences come from three data fields:
+
+1. `capabilities` — which externals are in the dict → what the agent can do
+2. `schema` — the TurnSchema → how the agent runs (context pipeline, tools, LLM loop)
+3. `subscriptions` — which events trigger it → when the agent runs
+
+The `BootstrapAgent` plays two roles simultaneously:
+- **Graph node** — it IS a node in the semantic graph (kind="agent.profile").
+  The graph is the source of truth; reading the graph gives you the agent.
+- **Turn executor** — its `schema` (a `TurnSchema`) describes how to run the
+  next activation completely.
+
+### 6.2 Capability: the access control mechanism
+
+The `Capability` enum determines which externals appear in an agent's dict.
+It is not a taxonomy of agent kinds — it is a precise access control:
+
+```python
+class Capability(str, Enum):
+    FILE_READ       = "file_read"       # read_file, list_dir, file_exists, search_*
+    FILE_WRITE      = "file_write"      # write_file, submit_result
+    GRAPH_READ      = "graph_read"      # graph_node, graph_neighbors, graph_find_nodes
+    GRAPH_WRITE     = "graph_write"     # graph_add_node, graph_add_edge, graph_remove_*
+    EVENT_EMIT      = "event_emit"      # emit_event
+    EVENT_READ      = "event_read"      # read_recent_events
+    SCHEMA_EVOLVE   = "schema_evolve"   # emit_schema (write schema.json to workspace)
+    TOOL_SYNTHESIZE = "tool_synthesize" # write new .pym tools to workspace
+    PRIVILEGED      = "privileged"      # update_subscription, register_protocol
+```
+
+The runtime builds the externals dict from the agent's `capabilities` frozenset.
+Two agents running the same `.pym` tool get different results if one has
+`GRAPH_WRITE` and the other doesn't — the one without it simply doesn't have
+`graph_add_node` in its dict.
+
+All new agents start with `{FILE_READ, FILE_WRITE, SCHEMA_EVOLVE}`. This is
+enough to run `DEFAULT_SCHEMA`, write `role.md`, and call `emit_schema`.
+
+### 6.3 AgentDefinition: the authoring mechanism
+
+`BootstrapAgent` is the runtime representation. `AgentDefinition` is the
+authoring representation — what developers or self-bootstrapping agents use to
+*describe* what an agent should become.
+
+The separation is intentional: you author a definition, the runtime runs the
+agent. Just as v1's extension configs (Python files, authored by developers)
+produce `AgentNode` instances at discovery time, `AgentDefinition` produces
+`BootstrapAgent` instances at activation time.
+
+```python
+class AgentDefinition(BaseModel):
+    """Describes what a bootstrap agent should be. Produces a BootstrapAgent."""
     name: str
-    agent_role: str                # role name, matched to agent.profile nodes
-    turn_schema: TurnSchema        # the TurnSchema for this state
-    on_success: str                # state name to advance to
-    on_failure: str                # state name on failure ("terminal" for end)
+    role_description: str            # written to role.md on first activation
+    capabilities: set[Capability]    # determines externals dict
+    context_steps: tuple[Step, ...] = ()
+    tools: tuple[str, ...] = ()
+    subscriptions: list[SubscriptionPattern] = Field(default_factory=list)
+    max_turns: int = 5
+    termination: str = "done"
 
-@dataclass(frozen=True)
-class ProtocolGuards:
-    max_depth: int           # causal chain depth limit (min 2)
-    max_loops: int           # times the same state can be revisited
-    timeout_seconds: float   # wall-clock limit for the whole protocol
-    require_progress: bool   # each loop must advance state
+    def to_turn_schema(self) -> TurnSchema: ...
+    def to_bootstrap_agent(self, node_id: str) -> BootstrapAgent: ...
 ```
 
-### 10.2 Initial protocol set
-
-**DirectTask** — user intent → result
-```
-trigger:    BootstrapUserIntentEvent
-states:
-  intaking:     orchestrator / TaskIntake schema → planning | failed
-  planning:     orchestrator / PlanDecompose schema → executing | human_review
-  executing:    editor / ImplementPlan schema → reviewing | failed
-  reviewing:    reviewer / ReviewOutput schema → done | executing (max_loops=2)
-  done:         [terminal]
-  human_review: [terminal, escalate]
-  failed:       [terminal, emit diagnostic]
-guards: max_depth=10, max_loops=2, timeout=300s
-```
-
-**ViolationResponse** — detected invariant violation → fix
-```
-trigger:    BootstrapEdgeCreatedEvent(edge_kind="violates")
-states:
-  triaging:   reviewer / ViolationTriage schema → patching | dismissed
-  patching:   editor / ProposePatch schema → verifying | failed
-  verifying:  reviewer / VerifyPatch schema → applying | patching (max_loops=2)
-  applying:   maintainer / ApplyPatch schema → done | failed
-  dismissed:  [terminal]
-  done:       [terminal]
-  failed:     [terminal, emit diagnostic]
-guards: max_depth=8, max_loops=2, timeout=120s
-```
-
-**CoverageGap** — missing test coverage → new test proposed
-```
-trigger:    BootstrapEdgeRemovedEvent(edge_kind="tests") |
-            BootstrapNodeDiscoveredEvent(uncovered=True)
-states:
-  assessing:  reviewer / AssessCoverage schema → generating | dismissed
-  generating: editor / GenerateTest schema → reviewing | failed
-  reviewing:  reviewer / ReviewTest schema → done | generating (max_loops=2)
-  done:       [terminal]
-guards: max_depth=6, max_loops=2, timeout=90s
-```
-
-### 10.3 Deadlock detection
-
-The `ProtocolEngine` runs Rustworkx cycle detection on the active state graph
-after each state transition. A cycle that involves `require_progress=True`
-guards is flagged immediately: the cycle cannot make progress, so it is
-terminated and a `ProtocolDeadlockEvent` is emitted. This replaces the
-informal "agents waiting for each other" failure mode with a typed, detectable,
-routable error.
-
----
-
-## 11. The Bootstrap Tool Set (.pym Edition)
-
-All system tools are `.pym` scripts discovered by `discover_grail_tools()` at
-startup. They use `@external` to declare which `BootstrapExternals` functions
-they need. The scripts live in `bootstrap/tools/`.
-
-### Graph tools
-
-**`inspect_node.pym`** — node details and neighborhood
-```python
-from grail import Input, external
-
-node_id: str = Input("node_id", description="Node ID to inspect")
-include_neighbors: bool = Input("include_neighbors", default=True)
-
-@external
-async def inspect_node(node_id: str, include_neighbors: bool = True) -> str: ...
-
-result = await inspect_node(node_id, include_neighbors)
-result  # JSON string: {node_id, kind, canonical_name, attrs, neighbors}
-```
-
-**`query_graph.pym`** — edge pattern query
-```python
-from grail import Input, external
-
-edge_kind: str = Input("edge_kind")
-from_node: str = Input("from_node", default="")
-to_node:   str = Input("to_node",   default="")
-from_kind: str = Input("from_kind", default="")
-to_kind:   str = Input("to_kind",   default="")
-limit:     int = Input("limit",     default=20)
-
-@external
-async def query_graph(edge_kind, from_node, to_node, from_kind, to_kind, limit) -> str: ...
-
-result = await query_graph(edge_kind, from_node or None, to_node or None,
-                            from_kind or None, to_kind or None, limit)
-result  # JSON list of matching edges
-```
-
-**`find_nodes.pym`** — nodes by kind and attributes
-```python
-from grail import Input, external
-
-kind:        str = Input("kind",        default="")
-attr_filter: str = Input("attr_filter", default="{}")
-limit:       int = Input("limit",       default=20)
-
-@external
-async def find_nodes(kind, attr_filter, limit) -> str: ...
-
-result = await find_nodes(kind or None, attr_filter, limit)
-result
-```
-
-**`trace_causal_chain.pym`** — causal ancestry traversal
-```python
-from grail import Input, external
-
-event_id:  str = Input("event_id")
-direction: str = Input("direction", default="descendants")
-max_depth: int = Input("max_depth", default=10)
-
-@external
-async def trace_causal_chain(event_id, direction, max_depth) -> str: ...
-
-result = await trace_causal_chain(event_id, direction, max_depth)
-result  # JSON list of event summaries with depth field
-```
-
-### Event tools
-
-**`emit_event.pym`** — emit into the causal bus
-```python
-from grail import Input, external
-import json
-
-event_type:     str = Input("event_type")
-payload:        str = Input("payload",        default="{}")
-target_node_id: str = Input("target_node_id", default="")
-
-@external
-async def emit_event(event_type, payload, target_node_id) -> str: ...
-
-result = await emit_event(event_type, payload, target_node_id)
-result  # JSON: {"event_id": "...", "depth": N}
-```
-
-**`read_recent_events.pym`** — event history for a node
-```python
-from grail import Input, external
-
-node_id:     str = Input("node_id",     default="")
-event_types: str = Input("event_types", default="")
-limit:       int = Input("limit",       default=10)
-
-@external
-async def read_recent_events(node_id, event_types, limit) -> str: ...
-
-result = await read_recent_events(node_id, event_types, limit)
-result  # JSON list of event summaries
-```
-
-### Schema tools
-
-**`emit_schema.pym`** — store a TurnSchema in cairn workspace
-```python
-from grail import Input, external
-
-schema_json: str = Input("schema_json", description="JSON-encoded TurnSchema")
-
-@external
-async def write_file(path: str, content: str) -> bool: ...
-
-# Validate and store the schema
-await write_file("schema.json", schema_json)
-{"stored": True}
-```
-
-### Proposal tools
-
-**`propose_patch.pym`** — structured code change proposal
-```python
-from grail import Input, external
-import json
-
-target_node_id: str   = Input("target_node_id")
-patch_content:  str   = Input("patch_content")
-rationale:      str   = Input("rationale")
-confidence:     float = Input("confidence", default=0.8)
-
-@external
-async def emit_event(event_type, payload, target_node_id) -> str: ...
-
-payload = json.dumps({
-    "target_node_id": target_node_id,
-    "patch_content": patch_content,
-    "rationale": rationale,
-    "confidence": confidence,
-})
-result = await emit_event("ProposePatchEvent", payload, target_node_id)
-result  # {"event_id": "...", "depth": N}
-```
-
-### Privileged tools (maintainer role only)
-
-**`update_subscription.pym`** — modify agent subscriptions
-```python
-from grail import Input, external
-
-agent_id:        str = Input("agent_id")
-add_patterns:    str = Input("add_patterns",    default="[]")
-remove_patterns: str = Input("remove_patterns", default="[]")
-
-@external
-async def update_subscription(agent_id, add_patterns, remove_patterns) -> str: ...
-
-result = await update_subscription(agent_id, add_patterns, remove_patterns)
-result  # JSON: {"active_patterns": [...]}
-```
-
-**`register_protocol.pym`** — register a new SwarmProtocol
-```python
-from grail import Input, external
-
-protocol_definition: str = Input("protocol_definition")
-
-@external
-async def register_protocol(protocol_definition: str) -> str: ...
-
-result = await register_protocol(protocol_definition)
-result  # JSON: {"protocol_id": "...", "status": "trial"}
-```
-
----
-
-## 12. Memory as a Graph Layer
-
-### 12.1 Memory is not a blob
-
-Memory lives in the semantic graph as two node kinds:
-
-**`memory.episode`** — a recorded interaction (short-horizon, ephemeral)
-- `attrs`: `{correlation_id, summary, participating_agents, outcome, timestamp, ttl_seconds}`
-- `remembers` edges to every node that was involved in the interaction
-- Eviction: episodes older than `ttl_seconds` are archived (edges removed,
-  content cleared, event log entry kept for causal provenance)
-
-**`memory.insight`** — a distilled durable observation (long-horizon, persistent)
-- `attrs`: `{content, confidence, source_episodes, created_at, last_reinforced_at}`
-- `concerns` edges to relevant code/spec/agent nodes
-- Created by the `bootstrap_maintainer` agent when patterns emerge across
-  multiple episodes
-- Eviction: only via explicit `ClearInsightEvent` or confidence decay below
-  threshold
-
-### 12.2 Memory recall via graph externals
-
-An agent that needs context about a node uses `query_graph` and `find_nodes`:
+**Capability mixin classes.** Capabilities are composed via Pydantic mixin
+baseclasses — pure marker classes that add no fields, only MRO membership.
+The runtime checks the definition's MRO to determine the capability set:
 
 ```python
-# In a .pym script's context pipeline (ToolRef in ContextPipeline):
+# Capability mixins — pure markers, no fields
+class FileReadMixin(BaseModel): pass
+class FileWriteMixin(FileReadMixin): pass     # write implies read
+class GraphReadMixin(BaseModel): pass
+class GraphWriteMixin(GraphReadMixin): pass   # write implies read
+class EventEmitMixin(BaseModel): pass
+class EventReadMixin(EventEmitMixin): pass    # read implies emit access
+class SchemaEvolveMixin(BaseModel): pass
+class ToolSynthesizeMixin(BaseModel): pass
+class PrivilegedMixin(BaseModel): pass
 
-# What recent episodes involved this function?
-episodes_json = await query_graph(
-    edge_kind="remembers",
-    to_node=node_id,
-    to_kind="code.function",
-    from_kind="memory.episode",
-    limit=5,
-)
-
-# What durable insights concern this module?
-insights_json = await query_graph(
-    edge_kind="concerns",
-    to_node=module_id,
-    from_kind="memory.insight",
-    limit=10,
-)
+# Runtime uses MRO to derive the capability frozenset — no manual listing
+def capabilities_from_definition(defn: type[AgentDefinition]) -> frozenset[Capability]:
+    return frozenset(c for mixin, c in MIXIN_CAPABILITY_MAP.items()
+                     if issubclass(defn, mixin))
 ```
 
-Results are JSON strings the agent includes in its `ContextPipeline` output.
-No separate memory API — the graph externals serve memory recall.
-
-### 12.3 Episode recording
-
-At the end of each protocol run, the `ProtocolEngine` emits a
-`ProtocolCompleteEvent`. The `bootstrap_maintainer` agent subscribes to this
-event and creates a `memory.episode` node in the graph, adding `remembers`
-edges to every node that appeared in the correlation chain (queried via
-`trace_causal_chain`).
-
-### 12.4 Cross-agent memory sharing
-
-Because memory is in the shared semantic graph (not per-agent workspace),
-any agent with read access can query it via `query_graph`. An orchestrator
-checks whether a similar task was attempted before. A reviewer recalls whether
-a specific node was found problematic in prior interactions. Memory is a shared
-resource, not a per-agent silo.
-
----
-
-## 13. Substrate Reflection
-
-### 13.1 The meta-loop
-
-The `bootstrap_maintainer` agent has `update_subscription` and
-`register_protocol` in its externals dict (privileged role). The
-`bootstrap_orchestrator` can propose new `agent.protocol` graph nodes via
-`propose_patch`. The `bootstrap_reviewer` reviews proposed protocol changes
-before they are applied.
-
-The swarm can:
-1. Notice a recurring task pattern not covered by any protocol
-2. Propose a new protocol definition as a `agent.protocol` graph node
-3. Have the reviewer validate it (depth bounds, required capabilities, state
-   completeness)
-4. Apply it via `register_protocol`, making it active for future triggering
-
-### 13.2 Safety constraints
-
-- Only the `maintainer` role can call `update_subscription` and
-  `register_protocol` — these externals are not in other agents' dicts
-- Protocol proposals go through ViolationResponse-style review before activation
-- Newly registered protocols are tagged `"status": "trial"` for the first N
-  activations; failures during trial disable the protocol and emit
-  `TrialProtocolFailedEvent`
-- `register_protocol` validates `ProtocolGuards` at registration time:
-  `max_depth >= 2`, `timeout_seconds > 0`, all state `on_success`/`on_failure`
-  targets must be defined states
-- No agent can modify another agent's cairn workspace directly; they can only
-  propose changes via `propose_patch` targeting the agent's `schema.json` or
-  `role.md`
-
----
-
-## 14. Developer Inner Loop
-
-### 14.1 Running a single turn
-
-```bash
-# Synthetic mode — no LLM, mock externals
-remora-bootstrap run --synthetic --protocol DirectTask \
-    --input '{"objective": "explain the EventStore append path"}'
-
-# Live LLM mode
-remora-bootstrap run --protocol DirectTask \
-    --input '{"objective": "explain the EventStore append path"}'
-```
-
-Output (structured):
-```
-[TURN] DirectTask / intaking
-  schema: TaskIntake (tools: inspect_node, query_graph, read_recent_events)
-  agent: bootstrap_orchestrator
-  pre-turn reads: [inspect_node("fn:core.store.event_store.append")]
-[EVENT] TurnCompleteEvent(outcome=SUCCESS)
-[STATE] → planning
-
-[TURN] DirectTask / planning
-  ...
-[EVENT] TurnCompleteEvent(outcome=PARSE_FAILURE, reason=structured_output_missing)
-[RETRY] 1/2 with parse-focused reprompt
-[EVENT] TurnCompleteEvent(outcome=SUCCESS)
-[STATE] → executing
-```
-
-### 14.2 Synthetic test harness
-
-The synthetic harness swaps the real `BootstrapExternals` for a mock dict:
+A base definition composes what a whole family needs. Concrete definitions
+extend it with domain specifics:
 
 ```python
-class MockExternals:
-    """Injectable externals for deterministic testing."""
-
-    def __init__(self):
-        self._files: dict[str, str] = {}
-        self._graph_nodes: dict[str, dict] = {}
-        self._graph_edges: list[dict] = []
-        self._emitted_events: list[dict] = []
-
-    async def read_file(self, path: str) -> str:
-        return self._files.get(path, "")
-
-    async def write_file(self, path: str, content: str) -> bool:
-        self._files[path] = content
-        return True
-
-    async def inspect_node(self, node_id: str, include_neighbors: bool = True) -> str:
-        import json
-        return json.dumps(self._graph_nodes.get(node_id, {}))
-
-    async def query_graph(self, edge_kind, from_node=None, to_node=None,
-                          from_kind=None, to_kind=None, limit=20) -> str:
-        import json
-        matches = [e for e in self._graph_edges
-                   if e["kind"] == edge_kind
-                   and (from_node is None or e["from_node"] == from_node)
-                   and (to_node is None or e["to_node"] == to_node)]
-        return json.dumps(matches[:limit])
-
-    async def emit_event(self, event_type, payload, target_node_id="") -> str:
-        import json, uuid
-        event_id = str(uuid.uuid4())
-        self._emitted_events.append({
-            "event_id": event_id, "event_type": event_type, "payload": payload
-        })
-        return json.dumps({"event_id": event_id, "depth": 0})
-
-    # ... read_recent_events, find_nodes, trace_causal_chain, etc.
-
-    def as_externals(self) -> dict:
-        return {
-            "read_file": self.read_file,
-            "write_file": self.write_file,
-            "inspect_node": self.inspect_node,
-            "query_graph": self.query_graph,
-            "emit_event": self.emit_event,
-            # ...
-        }
-
-
-def test_propose_patch_tool():
-    externals = MockExternals()
-    externals._graph_nodes["fn:my_module.my_fn"] = {
-        "node_id": "fn:my_module.my_fn",
-        "kind": "code.function",
-        "canonical_name": "my_fn",
-        "attrs": {},
-        "neighbors": [],
-    }
-
-    # Run the propose_patch.pym script with mock externals
-    result = run_pym_tool(
-        "propose_patch",
-        args={
-            "target_node_id": "fn:my_module.my_fn",
-            "patch_content": "def my_fn(): pass",
-            "rationale": "simplify",
-            "confidence": "0.9",
-        },
-        externals=externals.as_externals(),
+class BaseCodeAgentDefinition(
+    FileWriteMixin,   # reads + writes workspace
+    GraphReadMixin,   # queries the graph
+    EventEmitMixin,   # emits events
+    SchemaEvolveMixin, # evolves its own schema
+    AgentDefinition,  # base
+):
+    """Common foundation for agents that work on code nodes."""
+    context_steps: tuple[Step, ...] = (
+        Step("source", ToolRef("read_file", {"path": "$node.file_path"})),
+        Step("history", ToolRef("read_recent_events", {"node_id": "$node.id"})),
     )
+    tools: tuple[str, ...] = ("write_file", "emit_event", "emit_schema")
 
-    assert len(externals._emitted_events) == 1
-    assert externals._emitted_events[0]["event_type"] == "ProposePatchEvent"
+
+class SignatureWatcherDefinition(BaseCodeAgentDefinition, GraphWriteMixin):
+    """Extends base — also writes graph edges to record detected relationships."""
+    name: str = "signature_watcher"
+    role_description: str = "You detect and propagate signature changes."
+    # Inherits all base steps; adds graph write capability via the mixin
 ```
 
-No LLM. No network. Fully deterministic.
+The class signature is the capability declaration. No manual `capabilities`
+set to maintain. `issubclass(SignatureWatcherDefinition, GraphWriteMixin)` is
+the runtime check that grants `GRAPH_WRITE`.
 
-### 14.3 Graph inspector
+Mixins add **no fields**, only MRO membership — avoiding all Pydantic
+diamond-inheritance field conflicts. The definition hierarchy collapses into a
+flat `frozenset[Capability]` at activation time. The runtime receives a
+`BootstrapAgent` — no class hierarchy, no MRO resolution during the turn.
 
-```bash
-# Show all nodes of a kind
-remora-bootstrap graph --nodes code.function --limit 20
+**Self-authored definitions.** An agent's first activation uses
+`DEFAULT_SCHEMA`. The agent reads its node context (code it's responsible for,
+callers, callees) and calls `emit_schema` with a richer `TurnSchema`. This is
+the agent authoring its own `AgentDefinition` — writing its own specialization
+data rather than running fixed developer-supplied code.
 
-# Show neighbors of a specific node
-remora-bootstrap graph --inspect "fn:core.store.event_store.append"
+The authoring and self-bootstrapping mechanisms are the same: both produce a
+`TurnSchema` stored in `schema.json`. The only difference is who produces it.
 
-# Show causal descendants of an event
-remora-bootstrap graph --causal-descendants "event-id-abc123"
+### 6.4 The capability ladder
 
-# Show active protocols and their current state
-remora-bootstrap protocols --active
+Capabilities are earned through demonstrated behavior, not pre-assigned:
 
-# Show recent memory episodes
-remora-bootstrap memory --episodes --limit 5
+```
+                    PRIVILEGED
+                    └─ modify substrate (subscriptions, protocols)
+                TOOL_SYNTHESIZE
+                └─ write new .pym tools to workspace
+            GRAPH_WRITE
+            └─ add/remove nodes and edges
+        GRAPH_READ + EVENT_EMIT + EVENT_READ
+        └─ query graph, participate in event flow
+    FILE_READ + FILE_WRITE + SCHEMA_EVOLVE
+    └─ read/write workspace, emit own schema
+ALL NEW AGENTS START HERE
 ```
 
-All commands are thin CLI wrappers over the same `BootstrapExternals` graph
-query functions that agents use. No separate state.
+Progression is event-driven:
+- An agent sends `RequestCapabilityEvent` with the capability needed and
+  a justification (what it has demonstrated, what it needs the capability for)
+- A privileged maintainer agent evaluates and sends `GrantCapabilityEvent`
+  or `DenyCapabilityEvent`
+- The runtime updates the agent's `capabilities` set and rebuilds its
+  externals dict for next activation
 
-### 14.4 Replay
+The mechanism is specified. The policy — what counts as justification, how
+the maintainer agent reasons, what progression looks like — is NOT specified.
+It emerges from the bootstrap process.
 
-```bash
-# Replay a specific correlation chain from the EventStore
-remora-bootstrap replay --correlation-id "abc-123"
+### 6.5 Developer visibility
 
-# Replay up to a specific event (for debugging)
-remora-bootstrap replay --correlation-id "abc-123" --until "event-id-xyz"
-```
+The agent model is designed to be legible. Because every agent is a
+`BootstrapAgent` with flat Pydantic fields stored in the graph, a developer
+can inspect the swarm state with simple graph queries:
 
-Replay executes the same `.pym` tool calls with the same inputs against the
-real graph state at that point in the event log. Because `.pym` tools are pure
-functions over the externals dict, replay is deterministic by construction.
+- What agents exist? → `graph_find_nodes(kind="agent.profile")`
+- What can agent X do? → read its `capabilities` frozenset
+- What is agent X doing right now? → read its `status` + `last_trigger_event`
+- What does agent X's turn look like? → read `schema.json` from its cairn workspace
+- What events triggered agent X recently? → `read_recent_events(node_id=X)`
+- What agents subscribe to event Y? → `SubscriptionRegistry.get_subscribers(Y)`
+
+There is no opaque internal state. The graph is the source of truth.
+`BootstrapAgent` instances are just data. The whole swarm is queryable.
+
+**Developer interaction operations:**
+
+| Operation | Mechanism |
+|-----------|-----------|
+| **Inspect** agent state | `graph_node(node_id)` / `read_recent_events(node_id)` |
+| **Read** agent schema | `read_file("schema.json")` from cairn workspace |
+| **Inject** new definition | Add `AgentDefinition` subclass → hot-reload catalog |
+| **Pause** a misbehaving agent | Set `status="paused"` in graph → runtime skips activation |
+| **Correct** a bad schema | Write new `schema.json` to cairn workspace directly |
+| **Observe** live swarm | Tail `EventStore` → stream of all agent events with causal chains |
+| **Understand** emerged structure | `graph_find_nodes(kind="*")` → histogram of what agents built |
+
+Developer-authored `AgentDefinition` classes live in `bootstrap/agents/`
+and are discovered at startup via the same mtime-cached import pattern as v1
+extension configs. The `AgentCatalog` tracks all registered definitions and
+serves them to the runtime when nodes are discovered. A `remora agents list`
+command prints the catalog; `remora inspect agent <id>` shows live state.
+
+The delivery plan (§9) includes `remora inspect` by M5.
 
 ---
 
+## 7. What Is Not Specified
+
+v3 deliberately leaves the following unspecified. These are things the
+bootstrap *process* determines, not things the concept document prescribes.
+
+### Graph node kinds
+
+v2 specified `code.function`, `code.class`, `spec.requirement`,
+`spec.invariant`, `test.case`, `memory.episode`, `memory.insight`, and more.
+v3 says: the graph can hold any nodes. The bootstrap agents decide what
+they want to track. An agent that finds it useful to represent test coverage as
+a graph edge adds that edge. One that doesn't, doesn't.
+
+The only initial seeding is from the code discovery output: `CSTNode` objects
+become nodes in the graph (with `node_id` from `compute_node_id()`). Their
+`caller_ids` and `callee_ids` become edges. Everything beyond that is built by
+agents.
+
+### Graph edge kinds
+
+v2 specified twelve named edge kinds with specific semantics and activation
+policies. v3 says: edges carry a `kind` string and an `attrs` JSON blob.
+The agents that create edges define what the kind means. If two agents agree
+that `kind="tests"` means "this node tests that node," they'll use it that
+way. The concept document doesn't dictate it.
+
+### Protocol state machines
+
+v2 specified `DirectTask`, `ViolationResponse`, and `CoverageGap` as
+first-class typed state machines with explicit states and transitions.
+v3 says: the substrate provides an event bus and subscriptions. Multi-step
+workflows emerge from agents subscribing to each other's events. If the swarm
+discovers it needs explicit state machines to prevent deadlocks, it can build
+them — and the substrate (specifically, the graph + event ops) supports that.
+But the concept document doesn't prescribe which protocols exist.
+
+### Memory model
+
+v2 specified `memory.episode` and `memory.insight` as first-class node kinds
+with specific fields, TTLs, and distillation workflows. v3 says: agents can
+write whatever they find useful to their cairn workspace or to the shared
+graph. Memory is whatever the agents make of the substrate. If episodic
+memory turns out to be useful, agents will build it from workspace files and
+graph nodes. If a different structure works better, they'll build that.
+
+### Agent roles
+
+v2 specified `orchestrator`, `editor`, `reviewer`, `maintainer` as explicit
+role kinds that gate tool access. v3 says: the externals dict is what gates
+access. Agents with graph-write access have the mutation externals in their
+dict. Agents without, don't. Role names are conventions agents may adopt;
+they are not a runtime concept.
+
+---
+
+## 8. The Bootstrap Sequence
+
+How the system builds itself from the substrate up.
+
+### Phase 0: Substrate only
+
+The runtime starts with:
+- `CairnWorkspaceService` initialized (stable workspace + per-agent workspaces)
+- Graph initialized (SQLite tables, empty)
+- `EventBus` and `EventStore` initialized (v1, no changes)
+- `BootstrapExternals` defined (file ops + graph ops + event ops)
+- System `.pym` tools discoverable from `bootstrap/tools/`
+
+The project source is synced into the stable workspace. `discover()` runs,
+producing `CSTNode` objects. The runtime adds these as nodes in the graph
+(using `graph_add_node`) and adds call relationship edges from `caller_ids`
+and `callee_ids`.
+
+No agents exist yet. No node kinds beyond "code node" exist. The graph is
+a raw call graph seeded from tree-sitter.
+
+### Phase 1: First agents
+
+`NodeDiscoveredEvent` fires for each code node. The runtime creates an
+AgentNode for each and activates it with `DEFAULT_SCHEMA`.
+
+Each agent:
+1. Reads its `role.md` (empty)
+2. Calls `write_file("role.md", ...)` to define its own role based on its
+   node type and the code it's responsible for
+3. Calls `emit_schema(...)` with a richer schema that reads its source, recent
+   events, and any workspace files it wants
+4. Outputs `"done"`
+
+Now each agent has a persisted schema. The next activation uses that schema.
+
+### Phase 2: Agents communicating
+
+Agents start seeing each other's events (via `read_recent_events`) and
+calling `emit_event` to signal each other. Patterns emerge:
+- An agent that changes a function emits an event; its callers notice and
+  check if they need to adapt
+- An agent that finds a problem writes to its workspace and emits an event
+  describing the problem; a neighboring agent picks it up
+
+Agents add edges to the shared graph to record relationships they discover.
+These edges become queryable by other agents in their context pipelines.
+
+### Phase 3: Structure accumulates
+
+Recurring patterns get crystallized. If agents keep emitting events with
+`kind="test_needed"`, some agent will subscribe to those and propose tests.
+If agents keep querying a particular relationship, they'll start recording it
+explicitly in the graph rather than recomputing it each time.
+
+The swarm decides what structure is useful. The concept document gets out of
+the way.
+
+---
+
+## 9. Delivery Plan
+
+### M0: Substrate types (1–2 days)
+
+Deliverables:
+- `BootstrapEvent` dataclass with causal envelope (`event_id`, `correlation_id`,
+  `causal_parent_id`, `depth`, `agent_id`, `timestamp`, `payload`)
+- `BootstrapExternals` class extending `CairnExternals` with stub graph and
+  event ops (stubs that raise `NotImplementedError` — wire real impls in M1–M2)
+- `TurnSchema` / `ContextPipeline` / etc. from `primitives.py` (already
+  implemented — needs integration tests against the runtime)
+- `DEFAULT_SCHEMA` constant
+- `emit_schema` system `.pym` tool (writes `schema.json` to agent workspace)
+
+Tests: type construction, serialization, `emit_schema` tool with mock externals.
+
+Not included: real graph, real event emission, real LLM.
+
+### M1: Graph substrate (2–3 days)
+
+Deliverables:
+- SQLite property graph: `bootstrap_nodes` + `bootstrap_edges` tables with
+  indexes
+- Real implementations of `graph_add_node`, `graph_add_edge`,
+  `graph_remove_node`, `graph_remove_edge`, `graph_neighbors`,
+  `graph_find_nodes`, `graph_node` in `BootstrapExternals`
+- Startup seeding: `CSTNode` → graph nodes, `caller_ids`/`callee_ids` → edges
+- System `.pym` tools: `graph_neighbors.pym`, `graph_find_nodes.pym`,
+  `graph_node.pym`
+
+Tests: CRUD, neighborhood queries, index performance, seeding from CSTNode.
+
+### M2: Event bus integration (1–2 days)
+
+Deliverables:
+- `emit_event` and `read_recent_events` real implementations in
+  `BootstrapExternals` (wiring into `EventBus` + `EventStore`)
+- `emit_event.pym` and `read_recent_events.pym` system tools
+- `BootstrapEvent` persistence in `EventStore` (append via existing path)
+- Causal envelope enforcement (runtime sets `causal_parent_id` and `depth`)
+
+Tests: event round-trip, causal depth increment, depth limit rejection.
+
+### M3: Turn executor + primitives integration (2–3 days)
+
+Deliverables:
+- Turn executor that resolves `TurnSchema`: system prompt, `ContextPipeline`,
+  LLM loop with `.pym` tools
+- `ToolRef` resolution: call named `.pym` tool via Grail, interpolate
+  `$step_name` args
+- `InputGate` resolution: pause pipeline, collect user input, resume
+- Failure classification (`PARSE_FAILURE`, `TIMEOUT`, etc.)
+- `DEFAULT_SCHEMA` runtime + `schema.json` loading per agent
+
+Tests: all failure outcomes exercised synthetically (mock externals),
+`ContextPipeline` step chaining, `InputGate` in interactive + batch modes.
+
+### M4: Rustworkx + algorithmic queries (1–2 days)
+
+Deliverables:
+- `rustworkx` added as dependency
+- `trace_causal_chain` external: loads event subgraph into Rustworkx,
+  returns causal ancestors/descendants with depth
+- Depth enforcement: `ProtocolEngine` reads `event.depth` against configured
+  `max_depth`; exceeding it emits `DepthLimitExceededEvent`
+- Cycle detection utility: used by the runtime to detect agent activation
+  loops (replacement for v1's `_check_depth_limit` cooldown heuristic)
+
+Tests: causal chain traversal, depth enforcement, cycle detection.
+
+### M5: Self-bootstrapping end-to-end (2–3 days)
+
+Deliverables:
+- Full activation flow: `NodeDiscoveredEvent` → `DEFAULT_SCHEMA` turn →
+  agent writes `role.md` + calls `emit_schema` → `schema.json` stored
+- Second activation uses stored `schema.json`
+- `emit_schema.pym` and `read_file.pym` as the minimal bootstrap tool set
+- End-to-end test with a real small Python project and a real (or mocked) LLM
+
+Tests: two-activation sequence deterministic (first uses DEFAULT, second uses
+stored), schema round-trip fidelity.
+
+### M6: Adapter integration (2–3 days)
+
+Deliverables:
+- Feature flag: `REMORA_PHASE2_RUNTIME=1`
+- When set: route agent activations through the bootstrap turn executor
+  instead of the v1 `execute_agent_turn()`
+- Neovim LSP: `HumanChatEvent` triggers a bootstrap turn on the focused
+  agent node
+- Parallel event logging: bootstrap events emitted alongside legacy v1 events
+
+Tests: end-to-end through the LSP adapter with mock LLM; CLI `remora swarm
+start` with flag set.
+
+---
+
+*This document supersedes v2 as the implementation guide for Phase 2.*
+*It specifies the substrate; what gets built on it is determined by the*
+*bootstrap process, not by this document.*
