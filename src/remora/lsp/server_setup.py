@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from remora.lsp.protocols import LspServer
+from remora.lsp.handlers.companion import register_companion_handlers
 
 
 def register_handlers(server: LspServer) -> None:
@@ -24,6 +25,7 @@ def register_handlers(server: LspServer) -> None:
     register_hover_handlers(server)
     register_lens_handlers(server)
     register_notification_handlers(server)
+    register_companion_handlers(server)
 
 
 __all__ = ["register_handlers"]
