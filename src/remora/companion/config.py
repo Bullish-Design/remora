@@ -11,7 +11,9 @@ from embeddy.config import ChunkConfig, EmbedderConfig, StoreConfig
 class IndexingConfig(BaseModel):
     """Vector search configuration (wraps embeddy)."""
 
-    embedder: EmbedderConfig = Field(default_factory=lambda: EmbedderConfig(mode="remote"))
+    embedder: EmbedderConfig = Field(
+        default_factory=lambda: EmbedderConfig(mode="remote", remote_url="http://localhost:8586")
+    )
     store: StoreConfig = Field(default_factory=lambda: StoreConfig(db_path=".companion/vectors.db"))
     chunk: ChunkConfig = Field(default_factory=ChunkConfig)
     collections: dict[str, str] = Field(

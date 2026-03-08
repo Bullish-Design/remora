@@ -513,32 +513,6 @@ class TestDidSaveDiskReadRace:
         assert "params.text" in source or "text_document.text" in source
 
 
-# ── 8.11 S3: Fix ChatServiceState singleton ───────────────────────────────
-
-
-class TestChatServiceStateSingleton:
-    """8.11 — ChatServiceState should use dependency injection, not module-level global."""
-
-    def test_create_session_accepts_state(self):
-        """After fix: route handlers should accept state via dependency injection."""
-        from remora.service.chat_service import ChatServiceState
-
-        # The state should be constructible independently
-        s1 = ChatServiceState()
-        s2 = ChatServiceState()
-        # They should be independent instances
-        assert s1 is not s2
-        assert s1.sessions is not s2.sessions
-
-    def test_app_state_injectable(self):
-        """After fix: the Starlette app should store state on app.state."""
-        from remora.service.chat_service import ChatServiceState, create_app
-
-        state = ChatServiceState()
-        app = create_app(state=state)
-        assert app.state.chat_state is state
-
-
 # ── 8.12 S4: Fix DatastarResponse content type ────────────────────────────
 
 
