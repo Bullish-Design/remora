@@ -27,6 +27,7 @@ async def start_companion(
     registry = NodeAgentRegistry(cairn_service=cairn_service, event_bus=event_bus, config=cfg)
     router = NodeAgentRouter(registry=registry, event_store=event_store)
     router.subscribe(event_bus)
+    registry._router = router
     logger.info("Companion started (max_active_agents=%d)", cfg.max_active_agents)
 
     if cfg.auto_index:

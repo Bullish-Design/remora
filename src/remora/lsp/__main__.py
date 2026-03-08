@@ -77,6 +77,8 @@ def _get_server():
 def _run_server(
     event_store=None,
     subscriptions=None,
+    event_bus=None,
+    cairn_service=None,
 ) -> None:
     """Start the Remora LSP server with agent runner."""
     t0 = time.monotonic()
@@ -112,6 +114,10 @@ def _run_server(
         if event_store._conn is not None and event_store._node_store is not None:
             event_store.nodes.bind_write_backend(event_store._conn, event_store._lock)
     server.subscriptions = subscriptions
+    server.companion_registry = None
+    server.companion_router = None
+    server._companion_event_bus = event_bus
+    server._companion_cairn_service = cairn_service
 
     log.debug("Creating AgentRunner ...")
     runner = AgentRunner(server=server, config=config)
@@ -152,6 +158,37 @@ def _run_server(
                         startup_log.warning("startup checkpoint failed", exc_info=True)
                     startup_log.info("Starting EventStore trigger bridge...")
                     asyncio.ensure_future(active_runner.run_from_event_store(ls.event_store))
+            event_bus_local = getattr(ls, "_companion_event_bus", None)
+            cairn_svc = getattr(ls, "_companion_cairn_service", None)
+            if event_bus_local and cairn_svc and ls.event_store:
+                try:
+                    from remora.companion.config import CompanionConfig
+                    from remora.companion.events import NodeAgentSidebarReady
+                    from remora.companion.startup import start_companion
+
+                    comp_config = CompanionConfig(workspace_path=root)
+                    registry = await start_companion(
+                        event_store=ls.event_store,
+                        event_bus=event_bus_local,
+                        cairn_service=cairn_svc,
+                        config=comp_config,
+                    )
+                    ls.companion_registry = registry
+                    ls.companion_router = getattr(registry, "_router", None)
+
+                    async def _push_sidebar(event: NodeAgentSidebarReady) -> None:
+                        try:
+                            ls.protocol.notify(
+                                "$/remora/companionSidebarUpdated",
+                                {"markdown": event.markdown, "node_id": event.node_id},
+                            )
+                        except Exception:
+                            pass
+
+                    event_bus_local.subscribe(NodeAgentSidebarReady, _push_sidebar)
+                    startup_log.info("Companion system started")
+                except Exception:
+                    startup_log.exception("Companion startup failed (non-fatal)")
             startup_log.info("Starting background workspace scan...")
             run_background_scan = getattr(ls, "_remora_background_scan", None)
             if callable(run_background_scan):
@@ -219,6 +256,8 @@ def main() -> None:
     
     async def _prepare():
         from remora.core.code.projections import NodeProjection
+        from remora.core.config import load_config
+        from remora.core.agents.cairn_bridge import CairnWorkspaceService, SyncMode
         from remora.core.events.event_bus import EventBus
         from remora.core.events.subscriptions import SubscriptionRegistry
         from remora.core.store.event_store import EventStore
@@ -245,8 +284,11 @@ def main() -> None:
 
         event_store.set_subscriptions(subscriptions)
         event_store.set_event_bus(event_bus)
+        config = load_config()
+        cairn_service = CairnWorkspaceService(config, project_root=root)
+        await cairn_service.initialize(sync_mode=SyncMode.FULL)
 
-        return event_store, subscriptions
+        return event_store, subscriptions, event_bus, cairn_service
 
     root = Path.cwd()
     swarm_path = root / ".remora"
@@ -290,10 +332,12 @@ def main() -> None:
     _install_signal_handlers(process_lock)
 
     try:
-        event_store, subscriptions = asyncio.run(_prepare())
+        event_store, subscriptions, event_bus, cairn_service = asyncio.run(_prepare())
         _run_server(
             event_store=event_store,
             subscriptions=subscriptions,
+            event_bus=event_bus,
+            cairn_service=cairn_service,
         )
     finally:
         watchdog.stop()
