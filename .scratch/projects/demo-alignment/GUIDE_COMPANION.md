@@ -1,420 +1,541 @@
 # Companion — Refactoring Guide
 
-**Area:** `remora_demo/companion/`
-**Components:** Runtime, LSP server, Neovim plugin, Timeline server
-**Priority:** 3 (separate product, intentional architectural separation — most issues are documentation/alignment)
+**Area:** `remora_demo/companion/` (old demo) → integrate `src/remora/companion/` (production)
+**Priority:** 1 (companion pipeline never runs in current codebase)
+**Scope:** Complete replacement of old demo companion; integration of production companion into main LSP
 
 ---
 
-## Overview
+## Table of Contents
 
-The Companion is a standalone intelligent assistant that runs alongside a developer's editing session. It monitors cursor position, file edits, and open documents, then composes a contextual sidebar with relevant information (semantic search results, task inference, related code).
-
-The Companion has a complete, multi-component implementation:
-
-| Component | Path | Purpose |
-|-----------|------|---------|
-| Runtime | `runtime.py` | Wires sensors → agents (LLM pipeline) |
-| LSP server | `lsp/server.py` | Editor ↔ runtime bridge |
-| Neovim plugin | `nvim/lua/companion/init.lua` | Editor integration (sidebar, cursor tracking) |
-| Timeline server | `timeline/server.py` | Debug web UI (agent activations + workspace state) |
-| Demo harness | `demo/` | Scripted demo scenarios |
-| Indexer | `indexing/` | Embedding-based semantic search |
-| Agents | `agents/` | Sensors, extractors, analyzers, composers |
-
-The Companion is **intentionally separate** from the main Remora LSP swarm. It is a distinct product with different semantics, different event primitives, and a different workspace model.
+1. [Architecture Overview](#1-architecture-overview) — what the production companion is and how it works
+2. [The Integration Gap](#2-the-integration-gap) — why the companion never runs today
+3. [Fix: Wire Companion into Main LSP Server](#3-fix-wire-companion-into-main-lsp-server) — changes to `__main__.py` and `server_setup.py`
+4. [Fix: Companion Sidebar Command](#4-fix-companion-sidebar-command) — `companion.getSidebar` LSP command handler
+5. [Fix: Server-Push Sidebar Updates](#5-fix-server-push-sidebar-updates) — `$/remora/companionSidebarUpdated`
+6. [Fix: Rewrite Companion Neovim Plugin](#6-fix-rewrite-companion-neovim-plugin) — connect to remora-lsp, not companion-lsp
+7. [Deprecate Old Companion LSP Server](#7-deprecate-old-companion-lsp-server) — archive `remora_demo/companion/lsp/`
+8. [CompanionConfig Setup](#8-companionconfig-setup) — how to configure the production companion
+9. [Cairn Integration (Optional)](#9-cairn-integration-optional) — workspace persistence
+10. [Acceptance Criteria](#10-acceptance-criteria)
 
 ---
 
-## Issue 1: Parallel Event System (Intentional — Document Only)
+## 1. Architecture Overview
 
-### Situation
+The production companion lives at `src/remora/companion/`. It is NOT a standalone app — it is a pipeline of event-driven handlers that plugs into the main remora LSP server's EventBus.
 
-The Companion defines its own events in `models/events.py`:
+### Event Pipeline
 
-```python
-@dataclass(frozen=True)
-class CursorMoved:
-    file: str; line: int; col: int; lingered: bool = False
-
-@dataclass(frozen=True)
-class ContentEdited:
-    file: str; start_line: int; end_line: int; text: str
-
-@dataclass(frozen=True)
-class PathChanged:
-    path: str; value: Any; previous: Any = None
+```
+[Neovim cursor move]
+    ↓  $/remora/cursorMoved (LSP notification)
+[lsp/notifications.py on_cursor_moved]
+    ↓  schedule_cursor_update(delay_ms=200)
+[lsp/runtime_ops.py do_cursor_update]
+    ↓  event_store.append("cursor", CursorFocusEvent)
+[EventStore.append]
+    ↓  event_bus.emit(CursorFocusEvent)          ← KEY: triggers companion
+[CompanionDispatcher (via EventBus subscription)]
+    ↓  ContextExtractorHandler.handle(CursorFocusEvent, state)
+[ContextExtractorHandler]
+    ↓  reads file, extracts structure → [CompanionContextExtracted]
+    ↓  event_store.append → event_bus.emit
+[CompanionDispatcher routes CompanionContextExtracted to:]
+    ├─ SearchHandler → [CompanionSearchCompleted]
+    │      ↓  event_bus.emit → ConnectionFinderHandler → [CompanionConnectionsFound]
+    │      ↓  event_bus.emit → SidebarComposerHandler
+    ├─ TaskInferrerHandler → [CompanionTaskInferred]
+    ├─ ClaimCheckerHandler → [CompanionClaimsChecked]
+    └─ SidebarComposerHandler → [CompanionSidebarComposed]
+         ↓  markdown sidebar content stored in EventStore
+         ↓  push $/remora/companionSidebarUpdated to Neovim
 ```
 
-The production core has similar events in `remora.core.events.interaction_events`:
-```python
-class CursorFocusEvent(_FrozenEvent):    # Pydantic, debounced
-class ContentChangedEvent(_FrozenEvent): # Pydantic, full diff
-```
+### Components
 
-### Why This Is Intentional
+| Component | File | Role |
+|-----------|------|------|
+| Entry point | `src/remora/companion/startup.py` | `start_companion()` — wires everything |
+| Config | `src/remora/companion/config.py` | `CompanionConfig` (Pydantic), `IndexingConfig` |
+| Events | `src/remora/companion/events.py` | All companion events extending `_FrozenEvent` |
+| State | `src/remora/companion/state.py` | `CompanionState` — event projection |
+| Dispatcher | `src/remora/companion/dispatcher.py` | `CompanionDispatcher` — EventBus wiring |
+| Indexing | `src/remora/companion/indexing_service.py` | `IndexingService` wrapping `embeddy` |
+| Handler base | `src/remora/companion/handlers/base.py` | `CompanionHandlerBase`, `CompanionHandler` protocol |
+| Context | `src/remora/companion/handlers/context_extractor.py` | Handles `CursorFocusEvent` |
+| Edit | `src/remora/companion/handlers/edit_summarizer.py` | Handles `ContentChangedEvent` |
+| Index | `src/remora/companion/handlers/indexing_handler.py` | Handles `FileSavedEvent` |
+| Search | `src/remora/companion/handlers/search_handler.py` | Handles `CompanionContextExtracted` |
+| Task | `src/remora/companion/handlers/task_inferrer.py` | Handles `CompanionContextExtracted` |
+| Claims | `src/remora/companion/handlers/claim_checker.py` | Handles `CompanionContextExtracted` |
+| Connections | `src/remora/companion/handlers/connection_finder.py` | Handles `CompanionSearchCompleted` |
+| Sidebar | `src/remora/companion/handlers/sidebar_composer.py` | Handles `CompanionContextExtracted`, `CompanionSearchCompleted` |
 
-- Companion events use dataclasses (simple, frozen, no schema validation)
-- Core events use Pydantic `_FrozenEvent` (serializable, schema-validated, timestamped)
-- Companion `CursorMoved` is raw/high-frequency; `CursorFocusEvent` is post-debounce
-- `PathChanged` is an internal workspace pub/sub signal — not a domain event
-
-**Do not merge** these into `remora.core.events.*`.
-
-### Action
-
-Add a docstring to `models/events.py`:
-
-```python
-"""Companion-specific event types.
-
-These are SEPARATE from remora.core.events.* and intentionally so:
-- Companion events use dataclasses; core events use Pydantic _FrozenEvent
-- CursorMoved is raw/high-frequency; CursorFocusEvent (core) is debounced
-- PathChanged is internal workspace pub/sub — not a core domain event
-
-Do not replace with core event types — semantics differ.
-
-Translation map for future integration:
-    CursorMoved(lingered=True) → CursorFocusEvent
-    ContentEdited              → ContentChangedEvent (after diff)
-    FileChanged(kind="modified") → FileSavedEvent
-    PathChanged                → (no core equivalent — internal only)
-"""
-```
-
----
-
-## Issue 2: `WorkspaceInterface` vs `CairnWorkspaceService` (Intentional — Document Only)
-
-### Situation
-
-The Companion defines its own workspace abstraction:
-```python
-class WorkspaceInterface(ABC):
-    async def read(self, path: str) -> Any: ...
-    async def write(self, path: str, value: Any) -> None: ...
-    async def list(self, pattern: str) -> list[str]: ...
-    async def delete(self, path: str) -> None: ...
-```
-
-With `InMemoryWorkspace` as the implementation. Agents communicate via workspace paths like `/companion/context/file_path`, `/companion/output/sidebar.md`.
-
-### Why This Is Intentional
-
-The companion uses `InMemoryWorkspace` for self-contained operation — no Cairn dependency needed to run a demo. The interface exists so a `CairnWorkspaceAdapter` could be added for production use without changing agent code.
-
-### Action
-
-Add docstring to `agents/base.py`:
+### Event Imports (Canonical)
 
 ```python
-class WorkspaceInterface(ABC):
-    """Workspace for agent-to-agent communication via shared paths.
+# Production companion events — all extend _FrozenEvent
+from remora.companion.events import (
+    CompanionContextExtracted, CompanionEditSummary,
+    CompanionSearchCompleted, CompanionIndexUpdated, CompanionSearchResult,
+    CompanionConnectionsFound, CompanionTaskInferred, CompanionClaimsChecked,
+    CompanionSidebarComposed,
+)
 
-    In the demo, InMemoryWorkspace provides self-contained operation.
-    In production, a CairnWorkspaceAdapter wrapping CairnWorkspaceService
-    (from remora.core.agents.cairn_bridge) could be used for a persistent,
-    multi-session workspace backed by the same Cairn workspace as the LSP swarm.
-    """
+# Core events companion subscribes to (triggers)
+from remora.core.events.interaction_events import CursorFocusEvent, ContentChangedEvent, FileSavedEvent
 ```
 
 ---
 
-## Issue 3: `InMemoryWorkspace` Synchronous Fan-out (Low — Document)
+## 2. The Integration Gap
 
-`InMemoryWorkspace.write()` synchronously calls all registered listeners during each write. If a listener does LLM inference (possible for agents that respond to path changes), writes block the caller.
+`src/remora/lsp/__main__.py` creates an `EventBus` and `EventStore` but **never calls `start_companion()`**. As a result:
 
-```python
-# NOTE: InMemoryWorkspace dispatch is synchronous fan-out.
-# All listeners run sequentially within write(). Slow agents block write callers.
-# For high-throughput use, consider an asyncio.Queue-based approach.
-```
+- `CompanionDispatcher` is never instantiated
+- No handlers subscribe to `CursorFocusEvent` via EventBus
+- The entire companion pipeline is dead code
+- `$/remora/cursorMoved` notifications reach the server, `CursorFocusEvent` is appended to EventStore and emitted on the EventBus, but no one is listening
+
+The old `remora_demo/companion/` compensated with its own standalone LSP server (`companion-lsp`) and its own `CompanionRuntime`. This entire approach is wrong:
+- Duplicates cursor tracking (`$/companion/cursorMoved` vs `$/remora/cursorMoved`)
+- Duplicates event models (custom dataclasses vs `_FrozenEvent`)
+- Uses a separate LSP server that the Neovim plugin must connect to independently
+- Has no integration with `EventStore`, `EventBus`, or `CairnWorkspaceService`
 
 ---
 
-## Issue 4: LSP Handler Pattern Divergence (Medium)
+## 3. Fix: Wire Companion into Main LSP Server
 
-### Situation
+### Change to `src/remora/lsp/__main__.py`
 
-`CompanionLanguageServer` uses the old pre-refactor pattern:
+In the `_prepare()` coroutine, after creating `event_store`, call `start_companion()`:
+
 ```python
-_server: CompanionLanguageServer | None = None
+async def _prepare():
+    from remora.core.code.projections import NodeProjection
+    from remora.core.events.event_bus import EventBus
+    from remora.core.events.subscriptions import SubscriptionRegistry
+    from remora.core.store.event_store import EventStore
+    from remora.companion.startup import start_companion          # ADD
+    from remora.companion.config import CompanionConfig           # ADD
 
-def get_server(config=None) -> CompanionLanguageServer:
-    global _server
-    if _server is None:
-        _server = CompanionLanguageServer(config)
-        _register_handlers(_server)   # ← nested decorator registration
-    return _server
+    root = Path.cwd()
+    swarm_path = root / ".remora"
+    event_store_path = swarm_path / "events" / "events.db"
+    subscriptions_path = swarm_path / "subscriptions.db"
 
-def _register_handlers(server):
-    @server.feature(lsp.INITIALIZE)
-    async def on_initialize(...): ...
+    event_bus = EventBus()
+    subscriptions = SubscriptionRegistry(subscriptions_path)
+    # ... projection, event_store setup (unchanged) ...
+
+    # Wire companion pipeline into shared EventBus                 # ADD
+    companion_config = CompanionConfig(                            # ADD
+        workspace_path=root,                                       # ADD
+        auto_index=True,                                           # ADD
+    )                                                              # ADD
+    await start_companion(                                         # ADD
+        event_store=event_store,                                   # ADD
+        event_bus=event_bus,                                       # ADD
+        cairn_service=None,   # wire Cairn here when available     # ADD
+        config=companion_config,                                   # ADD
+    )                                                              # ADD
+
+    return event_store, subscriptions
 ```
 
-`RemoraLanguageServer` uses the current pattern:
+`start_companion()` is async and returns the `CompanionDispatcher`. It:
+1. Creates `CompanionState`
+2. Creates `IndexingService` (wraps `embeddy` for vector search)
+3. Instantiates all 8 handlers
+4. Creates `CompanionDispatcher` — which subscribes all handlers to EventBus
+5. Optionally indexes the workspace (if `auto_index=True` and `IndexingService` is available)
+
+After this, every `CursorFocusEvent` emitted by `do_cursor_update()` will trigger the companion pipeline.
+
+---
+
+## 4. Fix: Companion Sidebar Command
+
+The Neovim companion plugin needs to retrieve the current sidebar content. Add a `workspace/executeCommand` handler to the main LSP server.
+
+### New file: `src/remora/lsp/handlers/companion.py`
+
 ```python
-# server_setup.py — called explicitly:
+"""Companion sidebar command handlers for the Remora LSP server."""
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from remora.lsp.protocols import LspServer
+
+logger = logging.getLogger("remora.lsp.companion")
+
+
+def register_companion_handlers(server: LspServer) -> None:
+    """Register companion-specific workspace commands."""
+
+    @server.command("companion.getSidebar")
+    async def cmd_get_sidebar(ls, args) -> dict:
+        """Return the current companion sidebar markdown."""
+        if ls.event_store is None:
+            return {"markdown": "", "timestamp": 0.0}
+        try:
+            # Query EventStore for the latest CompanionSidebarComposed event
+            events = await ls.event_store.get_recent_events_by_type(
+                "CompanionSidebarComposed", limit=1
+            )
+            if events:
+                latest = events[0]
+                payload = latest.get("payload", {})
+                return {
+                    "markdown": payload.get("markdown", ""),
+                    "timestamp": latest.get("timestamp", 0.0),
+                }
+        except Exception:
+            logger.exception("companion.getSidebar failed")
+        return {"markdown": "", "timestamp": 0.0}
+
+    @server.command("companion.getState")
+    async def cmd_get_state(ls, args) -> dict:
+        """Return the current companion state for debugging."""
+        if ls.event_store is None:
+            return {}
+        try:
+            events = await ls.event_store.get_recent_events_by_type(
+                "CompanionContextExtracted", limit=1
+            )
+            if events:
+                latest = events[0]
+                return latest.get("payload", {})
+        except Exception:
+            logger.exception("companion.getState failed")
+        return {}
+```
+
+### Wire into `src/remora/lsp/server_setup.py`
+
+```python
+from remora.lsp.handlers.companion import register_companion_handlers
+
 def register_handlers(server: RemoraLanguageServer) -> None:
-    ...  # explicit function calls, no nested decorators
+    if server._handlers_registered:
+        return
+    server._handlers_registered = True
+    # ... existing registrations ...
+    register_companion_handlers(server)     # ADD
 ```
 
-### Fix
-
-Extract handler registration to `companion_server_setup.py` and update `start_server()`:
+**Note:** If `EventStore` doesn't yet have a `get_recent_events_by_type()` method, add one to `event_store_queries.py` or use the existing query methods. Alternatively, query directly:
 
 ```python
-# companion/lsp/companion_server_setup.py
-def register_handlers(server: CompanionLanguageServer) -> None:
-    @server.feature(lsp.INITIALIZE)
-    async def on_initialize(params): ...
-
-    @server.feature("$/companion/cursorMoved")
-    async def on_cursor_moved(params): ...
-    # etc.
-
-# companion/lsp/server.py — simplified:
-def start_server(workspace_path=None, ...) -> None:
-    config = CompanionConfig(...)
-    server = CompanionLanguageServer(config)
-    register_handlers(server)
-    server.start_io()
+# Direct query approach (no new EventStore method needed):
+async def _get_latest_sidebar(event_store) -> dict | None:
+    rows = await event_store.query_events(
+        event_type="CompanionSidebarComposed", limit=1, order="DESC"
+    )
+    return rows[0] if rows else None
 ```
-
-Remove `get_server()` singleton entirely. `start_server()` is already the intended entry point.
 
 ---
 
-## Issue 5: `$/companion/getSidebar` Protocol Mismatch (Medium)
+## 5. Fix: Server-Push Sidebar Updates
 
-### Situation
+When `SidebarComposerHandler` produces a `CompanionSidebarComposed` event, the server should push it to the Neovim client immediately rather than waiting for a poll.
 
-The Neovim plugin (`nvim/lua/companion/init.lua`) uses `client.request()` to call `$/companion/getSidebar`:
+### Subscribe to CompanionSidebarComposed in `__main__.py`
 
-```lua
-client.request("$/companion/getSidebar", {}, function(err, result)
-    if result and result.markdown then
-        update_sidebar_content(result.markdown)
-    end
-end)
-```
-
-The LSP spec defines `$/...` methods as **notifications only** — they cannot be requests (they have no defined response). Using `client.request()` for a `$/...` method is spec-violating. It works with pygls in practice (pygls echoes the return value of feature handlers back as a response), but:
-- Other LSP clients may reject or ignore the request
-- pygls behavior may change in future versions
-
-### Fix Option A (Recommended): Use `workspace/executeCommand`
-
-Align with how `remora.lsp` implements similar functionality:
+After calling `start_companion()`, subscribe a push callback to the EventBus:
 
 ```python
-# companion/lsp/server.py
-def _register_handlers(server):
-    ...
-    server.command("companion.getSidebar")(cmd_get_sidebar)
+from remora.companion.events import CompanionSidebarComposed
 
-async def cmd_get_sidebar(ls, *args):
-    sidebar = await ls.runtime.get_sidebar()
-    return {"markdown": sidebar or "", "timestamp": 0.0}
+def _make_sidebar_push_callback(server):
+    async def _push_sidebar(event: CompanionSidebarComposed) -> None:
+        try:
+            server.protocol.notify(
+                "$/remora/companionSidebarUpdated",
+                {
+                    "markdown": event.markdown,
+                    "timestamp": event.timestamp,
+                }
+            )
+        except Exception:
+            pass  # Server may not be connected yet
+    return _push_sidebar
 ```
 
-```lua
--- companion/nvim/lua/companion/init.lua
-client.request("workspace/executeCommand", {
-    command = "companion.getSidebar",
-    arguments = {},
-}, function(err, result) ... end)
-```
-
-### Fix Option B: Server-Push Instead of Pull
-
-The Neovim plugin already has a handler for `$/companion/sidebarUpdated`:
-```lua
-vim.lsp.handlers["$/companion/sidebarUpdated"] = function(_, result)
-    if result and result.markdown then
-        update_sidebar_content(result.markdown)
-    end
-end
-```
-
-But the server **never sends this notification** — the push handler is dead client code. To complete the push model, add a server-side push after each agent pipeline completes:
+This callback must be registered AFTER the server is initialized (in the `_on_initialized` handler):
 
 ```python
-# In CompanionRuntime, after sidebar is composed:
-async def _maybe_push_sidebar(self) -> None:
-    sidebar = await self.get_sidebar()
-    if self._lsp_server:
-        self._lsp_server.protocol.notify(
-            "$/companion/sidebarUpdated",
-            {"markdown": sidebar, "timestamp": time.time()}
+@server.feature(lsp.INITIALIZED)
+async def _on_initialized(*args) -> None:
+    # ... existing startup code ...
+    if event_bus is not None:
+        event_bus.subscribe(
+            CompanionSidebarComposed,
+            _make_sidebar_push_callback(server)
         )
 ```
 
-This is cleaner than polling from the client. The polling fallback in `refresh_sidebar()` can remain as a fallback.
-
-### Current Status
-
-The pull model works today (pygls handles it). The push model is wired on the client but missing on the server. Either fix is acceptable; Fix A is lower-risk (spec-compliant), Fix B is architecturally superior (event-driven).
-
----
-
-## Issue 6: `$/companion/sidebarUpdated` Push — Dead Client Code
-
-The Lua plugin registers a handler for `$/companion/sidebarUpdated` (line 225-229 in `init.lua`), but the companion LSP server has no code that calls `server.protocol.notify("$/companion/sidebarUpdated", ...)`. The push handler is never triggered.
-
-See Issue 5 Fix Option B for how to implement the server-side push.
-
----
-
-## Issue 7: `on_initialize` Config Mutation (Low)
+**Wire `event_bus` into `_run_server()`** — currently `__main__.py` passes only `event_store` and `subscriptions` to `_run_server()`. Add `event_bus` as a third parameter:
 
 ```python
-@server.feature(lsp.INITIALIZE)
-async def on_initialize(params):
-    if params.root_uri:
-        root_path = to_fs_path(params.root_uri)
-        server.config.workspace_path = Path(root_path)  # ← mutates config
-```
-
-`CompanionConfig` is a `@dataclass` (not frozen), so this works but silently overrides any `workspace_path` passed to `start_server()`. Use `dataclasses.replace` to create a new config:
-
-```python
-import dataclasses
-
-async def on_initialize(params):
-    if params.root_uri:
-        root_path = to_fs_path(params.root_uri)
-        server.config = dataclasses.replace(server.config, workspace_path=Path(root_path))
-    await server.ensure_runtime_started()
+def _run_server(event_store=None, subscriptions=None, event_bus=None) -> None:
+    ...
+    # Store event_bus on server for later use
+    server.event_bus = event_bus
 ```
 
 ---
 
-## Issue 8: `$/companion/getSidebar` Returns Stale Timestamp (Low)
+## 6. Fix: Rewrite Companion Neovim Plugin
 
-```python
-return {"markdown": sidebar or "", "timestamp": 0.0}  # TODO: track actual timestamp
-```
+**`remora_demo/companion/nvim/lua/companion/init.lua`** must be completely rewritten.
 
-The constant `0.0` means clients that check timestamp to avoid re-rendering will either always re-render or never re-render depending on their comparison. Track the real timestamp when the sidebar was composed:
+### What changes
 
-```python
-# In CompanionRuntime:
-self._sidebar_updated_at: float = 0.0
+| Old (wrong) | New (correct) |
+|-------------|---------------|
+| Connects to separate `companion-lsp` server | Connects to main `remora-lsp` server |
+| Sends `$/companion/cursorMoved` | Removed — cursor already tracked by `$/remora/cursorMoved` in `init.lua` |
+| `client.request("$/companion/getSidebar", ...)` (spec violation) | `client.request("workspace/executeCommand", {command="companion.getSidebar"}, ...)` |
+| Dead `$/companion/sidebarUpdated` handler | Live `$/remora/companionSidebarUpdated` handler |
+| Separate plugin startup/client management | Reuses `remora` LSP client from `remora.init.lua` |
 
-async def get_sidebar(self) -> str:
-    ...  # existing logic
-    # After composing:
-    self._sidebar_updated_at = time.time()
-    return self._sidebar_text
+### New companion plugin design
 
-# In on_get_sidebar handler:
-return {
-    "markdown": sidebar or "",
-    "timestamp": server.runtime._sidebar_updated_at,
-}
-```
-
----
-
-## Issue 9: Timeline Server Uses `SimpleHTTPRequestHandler` in asyncio Process (Low)
-
-`TimelineServer.start()` runs `HTTPServer` in a background thread using `threading.Thread`. The `TimelineHandler` accesses `self.runtime` which is the `CompanionRuntime` (an asyncio object). Accessing asyncio objects from a thread without an event loop is unsafe.
-
-Specifically, `_serve_activations()` calls `self.runtime.get_activations()` — if `get_activations()` is a coroutine, this will raise `RuntimeError: no running event loop`.
-
-```python
-def _serve_activations(self):
-    if self.runtime:
-        activations = self.runtime.get_activations()  # ← safe only if sync
-```
-
-### Fix
-
-Ensure `get_activations()` is a synchronous method (not async) that reads from a thread-safe in-memory list populated by the async runtime. Or replace the `SimpleHTTPRequestHandler` with a proper async ASGI server (e.g., Starlette) run in the same event loop.
-
----
-
-## Issue 10: `refresh_sidebar()` Race Condition (Low)
-
-The companion Lua plugin's `refresh_sidebar()` function:
+The companion plugin should be a **lightweight Neovim plugin** that:
+1. Waits for the `remora` LSP client to connect (no separate server)
+2. Opens a sidebar window and populates it with `companion.getSidebar`
+3. Handles `$/remora/companionSidebarUpdated` push to auto-refresh
 
 ```lua
-function M.refresh_sidebar()
-    local client = get_client({ silent = true })
-    client.notify("$/companion/cursorMoved", ctx)   -- 1. send cursor
-    vim.defer_fn(function()
-        client.request("$/companion/getSidebar", ...) -- 2. request sidebar
-    end, 200)                                          -- fixed 200ms wait
+-- remora_demo/companion/nvim/lua/companion/init.lua
+-- Companion sidebar plugin — connects to the main remora-lsp server.
+-- Does NOT start its own LSP. Requires remora.setup() to be called first.
+
+local M = {}
+local _sidebar_win = nil
+local _sidebar_buf = nil
+
+-- Get the active remora LSP client (same one panel.lua uses)
+local function get_remora_client()
+    local clients = vim.lsp.get_clients({ name = "remora" })
+    return clients and clients[1] or nil
 end
+
+-- Update sidebar buffer content
+local function update_sidebar(markdown)
+    if not _sidebar_buf or not vim.api.nvim_buf_is_valid(_sidebar_buf) then
+        return
+    end
+    local lines = vim.split(markdown or "No companion context yet.", "\n")
+    vim.api.nvim_buf_set_option(_sidebar_buf, "modifiable", true)
+    vim.api.nvim_buf_set_lines(_sidebar_buf, 0, -1, false, lines)
+    vim.api.nvim_buf_set_option(_sidebar_buf, "modifiable", false)
+end
+
+-- Open or focus the companion sidebar window
+local function open_sidebar()
+    if _sidebar_win and vim.api.nvim_win_is_valid(_sidebar_win) then
+        vim.api.nvim_set_current_win(_sidebar_win)
+        return
+    end
+    -- Create scratch buffer
+    _sidebar_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_option(_sidebar_buf, "filetype", "markdown")
+    vim.api.nvim_buf_set_option(_sidebar_buf, "modifiable", false)
+    vim.api.nvim_buf_set_name(_sidebar_buf, "Companion Sidebar")
+    -- Open right split
+    vim.cmd("botright vsplit")
+    _sidebar_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(_sidebar_win, _sidebar_buf)
+    vim.api.nvim_win_set_width(_sidebar_win, 50)
+    vim.api.nvim_win_set_option(_sidebar_win, "wrap", true)
+    vim.api.nvim_win_set_option(_sidebar_win, "winfixwidth", true)
+    -- Return to previous window
+    vim.cmd("wincmd p")
+end
+
+-- Fetch sidebar via workspace/executeCommand
+local function fetch_sidebar()
+    local client = get_remora_client()
+    if not client then return end
+    client.request("workspace/executeCommand", {
+        command = "companion.getSidebar",
+        arguments = {},
+    }, function(err, result)
+        if err or not result then return end
+        update_sidebar(result.markdown)
+    end)
+end
+
+-- Register push notification handler (called from setup())
+local function register_push_handler()
+    vim.lsp.handlers["$/remora/companionSidebarUpdated"] = function(_, result)
+        if result and result.markdown then
+            update_sidebar(result.markdown)
+        end
+    end
+end
+
+function M.setup()
+    register_push_handler()
+
+    -- Commands
+    vim.api.nvim_create_user_command("CompanionSidebar", function()
+        open_sidebar()
+        fetch_sidebar()
+    end, { desc = "Open companion sidebar" })
+
+    vim.api.nvim_create_user_command("CompanionRefresh", function()
+        fetch_sidebar()
+    end, { desc = "Refresh companion sidebar" })
+end
+
+return M
 ```
 
-The 200ms wait is a heuristic — it assumes agents complete within 200ms. If agents are slow (e.g., LLM inference), the sidebar content will be stale. If agents are fast, 200ms is wasteful latency.
+### Installation
 
-The proper fix is the server-push model (Issue 5 Fix B): server notifies client when sidebar is ready, client updates without polling.
+```lua
+-- In user's init.lua — companion uses the SAME remora-lsp:
+require("remora").setup({ ... })  -- start remora-lsp
+require("companion").setup()      -- attach companion sidebar to same client
+```
 
----
-
-## Neovim Plugin (`nvim/lua/companion/init.lua`) — Status
-
-The companion Neovim plugin is well-implemented:
-
-- Uses `vim.lsp.config["companion"]` / `vim.lsp.enable("companion")` ✅ (Neovim 0.11+ API)
-- Sends `$/companion/cursorMoved` on `CursorHold` ✅
-- Has `CompanionSidebar`, `CompanionRefresh`, `CompanionStatus` commands ✅
-- Handles `$/companion/sidebarUpdated` push (wired, server not yet implemented) ⚠️
-- Uses `client.request("$/companion/getSidebar", ...)` ⚠️ (spec concern, see Issue 5)
-
-The plugin does NOT need major changes if Issue 5 is resolved at the server level (workspace/executeCommand or push model).
+**No separate server startup needed.** The companion pipeline runs inside remora-lsp.
 
 ---
 
-## Timeline Server (`timeline/server.py`) — Status
+## 7. Deprecate Old Companion LSP Server
 
-- Self-contained HTML debug UI — no external dependencies ✅
-- Renders agent activations and workspace state ✅
-- Runs in a daemon thread ⚠️ (see Issue 9: thread-safety with asyncio runtime)
-- `_serve_workspace()` accesses `workspace._data` directly (private API) ⚠️
+The following files are **obsolete** once companion is integrated into the main LSP server:
 
-Fix for private API access:
+| File | Status |
+|------|--------|
+| `remora_demo/companion/lsp/server.py` | Delete — replaced by integration in `lsp/__main__.py` |
+| `remora_demo/companion/runtime.py` | Delete — replaced by `src/remora/companion/startup.py` |
+| `remora_demo/companion/timeline/server.py` | Delete — or keep as debug tool (no companion LSP server to reference) |
+| `remora_demo/companion/demo/` | Archive — demo scenarios can be re-created against real pipeline |
+| `remora_demo/companion/agents/` | Delete — replaced by `src/remora/companion/handlers/` |
+| `remora_demo/companion/models/` | Delete — replaced by `src/remora/companion/events.py` |
+| `remora_demo/companion/indexing/` | Delete — replaced by `src/remora/companion/indexing_service.py` |
+
+**Keep:**
+- `remora_demo/companion/nvim/lua/companion/` — rewrite (see Section 6)
+
+The `src/remora/companion/` package is the authoritative implementation. The old demo is a historical artifact.
+
+---
+
+## 8. CompanionConfig Setup
+
+`CompanionConfig` in `src/remora/companion/config.py` uses `embeddy` for vector search configuration:
+
 ```python
-# Add to InMemoryWorkspace:
-def snapshot(self) -> dict[str, Any]:
-    """Return a copy of the current workspace state for debugging."""
-    return dict(self._data)
+from remora.companion.config import CompanionConfig, IndexingConfig
+from embeddy.config import EmbedderConfig, StoreConfig, ChunkConfig
 
-# In timeline/server.py:
-def _serve_workspace(self):
-    if self.runtime and hasattr(self.runtime, "_workspace"):
-        data = self.runtime._workspace.snapshot()
+config = CompanionConfig(
+    workspace_path=Path.cwd(),
+    indexing=IndexingConfig(
+        embedder=EmbedderConfig(model="Qwen/Qwen3-Embedding-0.6B"),
+        store=StoreConfig(path=".remora/companion/vectors"),
+        chunk=ChunkConfig(size=256, overlap=32),
+    ),
+    session_id=None,              # auto-generated if None
+    sidebar_output_path=None,     # file to mirror sidebar to (optional)
+    auto_index=True,              # index workspace on startup
+)
+```
+
+For simpler setups, `CompanionConfig()` uses sensible defaults. The minimum config for `start_companion()` is:
+
+```python
+CompanionConfig(workspace_path=Path.cwd())
+```
+
+### If `embeddy` is not available
+
+The `IndexingService` wraps `embeddy`. If `embeddy` is not installed, `SearchHandler` will not find results. The rest of the pipeline (ContextExtractor, TaskInferrer, ClaimChecker, SidebarComposer) still works — it just won't show related content.
+
+`start_companion()` should guard against `ImportError` when creating `IndexingService`:
+
+```python
+# In startup.py (check existing implementation):
+try:
+    indexing_service = IndexingService(config.indexing)
+except ImportError:
+    indexing_service = None   # search disabled, rest of pipeline runs
 ```
 
 ---
 
-## Summary of Changes
+## 9. Cairn Integration (Optional)
 
-| Issue | Area | Priority | Work |
-|-------|------|----------|------|
-| Document event system separation | `models/events.py` | High | Docstring |
-| Document workspace abstraction boundary | `agents/base.py` | High | Docstring |
-| LSP handler pattern: extract `companion_server_setup.py` | `lsp/server.py` | Medium | Refactor |
-| `$/companion/getSidebar` protocol: use `workspace/executeCommand` or push | `lsp/server.py`, `nvim/` | Medium | Align protocol |
-| Implement `$/companion/sidebarUpdated` push in server | `lsp/server.py` | Medium | Wire push notification |
-| Fix `on_initialize` config mutation | `lsp/server.py` | Low | `dataclasses.replace` |
-| Track real sidebar timestamp | `runtime.py`, `lsp/server.py` | Low | Track `_sidebar_updated_at` |
-| Fix `TimelineHandler` thread-safety | `timeline/server.py` | Low | Make `get_activations()` sync-safe |
-| Fix `_serve_workspace()` private API | `timeline/server.py` | Low | Add `workspace.snapshot()` |
-| Document `InMemoryWorkspace` sync fan-out | `models/workspace.py` | Low | Code comment |
-| Fix `refresh_sidebar()` race (heuristic 200ms) | `nvim/lua/companion/init.lua` | Low | Needs push model first |
+`start_companion()` accepts `cairn_service: CairnWorkspaceService | None`. When `None`, handlers use their default in-memory state. When provided, `CompanionHandlerBase.initialize(cairn_service)` gives each handler an `AgentWorkspace` backed by Cairn for persistent state across sessions.
+
+To wire Cairn:
+
+```python
+from remora.core.agents.cairn_bridge import CairnWorkspaceService
+
+cairn_service = CairnWorkspaceService(...)  # or load from config
+await start_companion(event_store, event_bus, cairn_service, config)
+```
+
+This is optional for the initial integration. Pass `cairn_service=None` to start.
+
+---
+
+## 10. Acceptance Criteria
+
+- [ ] `start_companion()` is called in `src/remora/lsp/__main__.py`
+- [ ] `CompanionDispatcher` subscribes to `CursorFocusEvent`, `ContentChangedEvent`, `FileSavedEvent` on the EventBus
+- [ ] Moving cursor in Neovim triggers `ContextExtractorHandler` (verify via log: `EventBus.emit: CursorFocusEvent ... handlers for CursorFocusEvent`)
+- [ ] `workspace/executeCommand` `companion.getSidebar` registered in `server_setup.py`
+- [ ] `CompanionSidebar` command in Neovim opens sidebar and fetches content
+- [ ] `$/remora/companionSidebarUpdated` pushed to client after each `SidebarComposerHandler` run
+- [ ] Old `remora_demo/companion/lsp/server.py` and `runtime.py` deleted
+- [ ] Old companion Neovim plugin replaced with new minimal plugin
+- [ ] `devenv shell -- tach check` passes
+- [ ] Full test suite passes
 
 ---
 
 ## Verification
 
 ```bash
-devenv shell -- python -c "from remora_demo.companion.runtime import CompanionRuntime, CompanionConfig; print('OK')"
-devenv shell -- python -c "from remora_demo.companion.lsp.server import start_server; print('OK')"
-devenv shell -- python -c "from remora_demo.companion.timeline.server import TimelineServer; print('OK')"
-devenv shell -- python -m pytest remora_demo/companion/test_e2e.py -v
+# Check companion imports
+devenv shell -- python -c "from remora.companion.startup import start_companion; print('OK')"
+devenv shell -- python -c "from remora.companion.config import CompanionConfig; print('OK')"
+devenv shell -- python -c "from remora.companion.dispatcher import CompanionDispatcher; print('OK')"
+
+# Check integration
+devenv shell -- python -c "
+from remora.core.events.event_bus import EventBus
+from remora.companion.startup import start_companion
+from remora.companion.config import CompanionConfig
+import asyncio, pathlib
+
+async def test():
+    from remora.core.store.event_store import EventStore
+    from remora.core.events.subscriptions import SubscriptionRegistry
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmp:
+        store = EventStore(os.path.join(tmp, 'events.db'))
+        await store.initialize()
+        bus = EventBus()
+        store.set_event_bus(bus)
+        dispatcher = await start_companion(store, bus, None, CompanionConfig(workspace_path=pathlib.Path(tmp)))
+        print('Companion started OK')
+        print(f'EventBus handlers: {len(bus._handlers)} event types subscribed')
+
+asyncio.run(test())
+"
 ```

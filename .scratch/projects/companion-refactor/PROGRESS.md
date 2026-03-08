@@ -6,65 +6,121 @@
 
 ---
 
-## Phase 1: Event Model Migration
+## Pre-Work
 
 | # | Task | Status |
 |---|------|--------|
-| 1.1 | Create `src/remora/companion/events.py` with Pydantic event models | pending |
-| 1.2 | Add companion events to `RemoraEvent` union | pending |
-| 1.3 | Write tests for new event models | pending |
-| 1.4 | Create compatibility aliases in old location | pending |
-| 1.5 | Update agents to import from new location | pending |
+| 0.1 | Create project workspace + concept doc | done |
+| 0.2 | Write COMPANION_REFACTOR_GUIDE.md | done |
 
-## Phase 2: Subscription Integration
+## Phase 0: Deletion
 
 | # | Task | Status |
 |---|------|--------|
-| 2.1 | Design companion subscription patterns | pending |
-| 2.2 | Add `subscriptions()` to each agent | pending |
-| 2.3 | Write subscription matching tests | pending |
-| 2.4 | Update `AgentBase` to use `SubscriptionPattern` | pending |
+| 0.1 | Delete companion/handlers/ directory | pending |
+| 0.2 | Delete companion/dispatcher.py | pending |
+| 0.3 | Delete companion/state.py | pending |
+| 0.4 | Delete companion/startup.py | pending |
+| 0.5 | Delete companion/events.py | pending |
+| 0.6 | Delete companion/config.py | pending |
+| 0.7 | Delete core/agents/chat.py | pending |
+| 0.8 | Delete remora_demo/companion/ | pending |
 
-## Phase 3: EventStore-Backed Workspace
-
-| # | Task | Status |
-|---|------|--------|
-| 3.1 | Create `EventStoreWorkspace` class | pending |
-| 3.2 | Add workspace projection for replay | pending |
-| 3.3 | Write workspace tests | pending |
-| 3.4 | Keep `InMemoryWorkspace` for unit tests | pending |
-
-## Phase 4: Runtime Refactor
+## Phase 1: New Events
 
 | # | Task | Status |
 |---|------|--------|
-| 4.1 | Create agent registry | pending |
-| 4.2 | Add `@companion_agent` decorator | pending |
-| 4.3 | Refactor `CompanionRuntime.start()` | pending |
-| 4.4 | Refactor event dispatch | pending |
-| 4.5 | Eliminate `_on_path_change()` | pending |
-| 4.6 | Wire activation tracking | pending |
-| 4.7 | Write runtime tests | pending |
+| 1.1 | Write companion/events.py (NodeAgent* events) | pending |
 
-## Phase 5: Package Relocation
+## Phase 2: New Config
 
 | # | Task | Status |
 |---|------|--------|
-| 5.1 | Create `src/remora/companion/` package | pending |
-| 5.2 | Move core modules | pending |
-| 5.3 | Update all imports | pending |
-| 5.4 | Update `pyproject.toml` | pending |
-| 5.5 | Add compatibility shims | pending |
-| 5.6 | Update test imports | pending |
-| 5.7 | Keep demo code in `remora_demo/` | pending |
+| 2.1 | Write companion/config.py (Cairn required) | pending |
 
-## Phase 6: Test Migration and Cleanup
+## Phase 3: Node Workspace
 
 | # | Task | Status |
 |---|------|--------|
-| 6.1 | Remove compatibility aliases | pending |
-| 6.2 | Remove old subscription matching code | pending |
-| 6.3 | Remove `_on_path_change()` dead code | pending |
-| 6.4 | Add integration test | pending |
-| 6.5 | Update documentation | pending |
-| 6.6 | Final test run | pending |
+| 3.1 | Write companion/node_workspace.py | pending |
+
+## Phase 4: MicroSwarms
+
+| # | Task | Status |
+|---|------|--------|
+| 4.1 | Write companion/swarms/__init__.py | pending |
+| 4.2 | Write companion/swarms/base.py | pending |
+| 4.3 | Write companion/swarms/summarizer.py | pending |
+| 4.4 | Write companion/swarms/categorizer.py | pending |
+| 4.5 | Write companion/swarms/linker.py | pending |
+| 4.6 | Write companion/swarms/reflection.py | pending |
+
+## Phase 5: Links
+
+| # | Task | Status |
+|---|------|--------|
+| 5.1 | Write companion/links/types.py | pending |
+| 5.2 | Write companion/links/resolver.py | pending |
+
+## Phase 6: Sidebar Composer
+
+| # | Task | Status |
+|---|------|--------|
+| 6.1 | Write companion/sidebar/composer.py | pending |
+
+## Phase 7: NodeAgent
+
+| # | Task | Status |
+|---|------|--------|
+| 7.1 | Write companion/node_agent.py | pending |
+
+## Phase 8: Registry
+
+| # | Task | Status |
+|---|------|--------|
+| 8.1 | Write companion/registry.py | pending |
+
+## Phase 9: Router
+
+| # | Task | Status |
+|---|------|--------|
+| 9.1 | Write companion/router.py | pending |
+
+## Phase 10: Startup
+
+| # | Task | Status |
+|---|------|--------|
+| 10.1 | Write companion/startup.py | pending |
+| 10.2 | Write companion/__init__.py | pending |
+
+## Phase 11: LSP Integration
+
+| # | Task | Status |
+|---|------|--------|
+| 11.1 | Write lsp/handlers/companion.py | pending |
+| 11.2 | Update lsp/server_setup.py | pending |
+
+## Phase 12: __main__.py Wiring
+
+| # | Task | Status |
+|---|------|--------|
+| 12.1 | Update lsp/__main__.py: CairnWorkspaceService init | pending |
+| 12.2 | Update lsp/__main__.py: pass to _run_server() | pending |
+| 12.3 | Update lsp/__main__.py: _on_initialized subscriber | pending |
+
+## Phase 13: Tests
+
+| # | Task | Status |
+|---|------|--------|
+| 13.1 | Write tests/unit/companion/test_node_workspace.py | pending |
+| 13.2 | Write tests/unit/companion/test_swarms.py | pending |
+| 13.3 | Write tests/unit/companion/test_node_agent.py | pending |
+| 13.4 | Write tests/unit/companion/test_registry.py | pending |
+| 13.5 | Run full test suite — confirm passes | pending |
+| 13.6 | Run tach check — confirm 0 violations | pending |
+
+## Phase 14: Neovim Plugin
+
+| # | Task | Status |
+|---|------|--------|
+| 14.1 | Rewrite remora_demo/companion/nvim/lua/companion/init.lua | pending |

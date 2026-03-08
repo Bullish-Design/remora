@@ -4,6 +4,51 @@
 > - **NO SUBAGENTS** — Do ALL work directly.
 > - **NEVER STOP AFTER COMPACTION** — Resume immediately.
 
+## D1: Cairn is required, not optional
+
+**Decision:** `CairnWorkspaceService` is a required parameter to `start_companion()`.
+There is no `cairn_service=None` fallback anywhere in the new companion code.
+
+**Rationale:** The entire value proposition is persistence. Without Cairn, notes are lost,
+history is lost. Treating Cairn as optional would produce dead code paths.
+
+## D2: CursorFocusEvent.focused_agent_id IS the node_id
+
+**Decision:** `NodeAgentRouter` uses `event.focused_agent_id` directly as node_id.
+
+**Rationale:** Already populated by the LSP notification handler with the AgentNode.node_id.
+
+## D3: No global CompanionState
+
+**Decision:** No global state projection. Each NodeAgent owns its own state (in-memory +
+Cairn workspace).
+
+**Rationale:** Global state was a symptom of the old single-pipeline design.
+
+## D4: MicroSwarms use LLM calls
+
+**Decision:** SummarizerSwarm, ReflectionSwarm, CategorizerSwarm use single-turn LLM calls.
+LinkerSwarm v1 uses text matching only.
+
+**Rationale:** Single-turn calls are cheap and produce substantially better quality than
+heuristics. LinkerSwarm uses text matching because node_id resolution is a lookup problem.
+
+## D5: All companion commands via workspace/executeCommand
+
+**Decision:** No new LSP methods. All pushes use `$/remora/companionSidebarUpdated`.
+
+**Rationale:** Zero changes to LSP capability negotiation. Simpler.
+
+## D6: Registry LRU eviction, per-node locking
+
+**Decision:** Max 20 live agents (configurable). LRU by _last_visited. Per-node asyncio.Lock
+prevents double-instantiation.
+
+## D7: ChatSession deleted — not kept
+
+**Decision:** `core/agents/chat.py` deleted in Phase 0. NodeAgent.send() replaces it
+completely. No alternative API kept alongside.
+
 ---
 
 ## Table of Contents

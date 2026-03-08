@@ -123,7 +123,7 @@ depends_on = []
 
 [[modules ]]
 path = "remora.lsp"
-depends_on = ["remora.lsp.db", "remora.lsp.graph", "remora.lsp.server"]
+depends_on = ["remora.lsp.db", "remora.lsp.graph", "remora.lsp.server", "remora.lsp.__main__"]
 
 [[modules ]]
 path = "remora.service.handlers"

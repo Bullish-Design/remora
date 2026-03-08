@@ -270,6 +270,7 @@ remora;
 "remora.lsp" -> "remora.lsp.db";
 "remora.lsp" -> "remora.lsp.graph";
 "remora.lsp" -> "remora.lsp.server";
+"remora.lsp" -> "remora.lsp.__main__";
 "remora.core.agents.cairn_bridge" -> "remora.core.agents.cairn_externals";
 "remora.core.agents.cairn_bridge" -> "remora.utils";
 "remora.core.agents.cairn_bridge" -> "remora.core.agents.workspace";
