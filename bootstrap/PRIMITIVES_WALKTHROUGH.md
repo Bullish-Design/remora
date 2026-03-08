@@ -928,3 +928,418 @@ fragment begin accumulating fitness data on it (I). The cycle runs without
 any central orchestrator, because the primitives already carry everything
 needed: tool calls in context pipelines, message_node in the tool set, and
 workspace files as shared persistent state.
+
+---
+
+## Appendix II: Three Concrete Capabilities
+
+Where the first appendix described emergent *mechanisms*, this one shows
+emergent *products* — specific useful things the system can do that would
+otherwise require bespoke tooling or manual effort.
+
+---
+
+### 1. Docstring Drift Detection
+
+**The problem:** Naive reactive agents rewrite the docstring every time a
+file is saved, even for trivial changes (whitespace, a renamed variable).
+This creates noise, wastes LLM turns, and trains the developer to ignore
+agent output. What you actually want is: only act when the code's *meaning*
+has drifted from what the docstring describes.
+
+**The capability:** A docstring agent that reads both the current docstring
+and the current implementation, asks a tool to score semantic alignment,
+and only proceeds if the alignment score falls below a threshold. Otherwise
+it exits silently. No noise, no wasted turns.
+
+```python
+schema = TurnSchema(
+    system=Concat(
+        parts=(
+            "You maintain docstrings for: ",
+            ToolRef("read_workspace_file", {"path": "role.md"}),
+            "\n\nOnly rewrite if the existing docstring is meaningfully out of date.",
+        ),
+        separator="",
+    ),
+    context=ContextPipeline(steps=(
+
+        # Read current implementation
+        Step(
+            name="code",
+            content=ToolRef("read_file", {"path": "$node.file_path"}),
+        ),
+
+        # Extract just this node's source (not the whole file)
+        Step(
+            name="node_source",
+            content=ToolRef(
+                tool="extract_node_source",
+                args={"source": "$code", "node": "$node.full_name"},
+            ),
+        ),
+
+        # Read the existing docstring separately (structured extraction)
+        Step(
+            name="current_doc",
+            content=ToolRef(
+                tool="extract_docstring",
+                args={"source": "$node_source"},
+            ),
+        ),
+
+        # Score semantic alignment: 0.0 (completely wrong) to 1.0 (accurate)
+        # Returns "" if score >= threshold, "DRIFT DETECTED: <reason>" if not.
+        # Concat skips empty parts, so if score is fine the LLM sees nothing
+        # under this step and knows to exit immediately.
+        Step(
+            name="drift_signal",
+            content=ToolRef(
+                tool="score_docstring_alignment",
+                args={
+                    "docstring": "$current_doc",
+                    "implementation": "$node_source",
+                    "threshold": "0.75",
+                },
+                extract="signal",   # "" or "DRIFT DETECTED: ..."
+            ),
+        ),
+
+    )),
+    tools=("rewrite_docstring", "message_node"),
+    max_turns=2,
+    termination="done",
+)
+```
+
+**What the LLM sees when there is no drift:**
+
+```
+[system]
+You maintain docstrings for: src/remora/core/store/event_store.py :: append()
+Only rewrite if the existing docstring is meaningfully out of date.
+
+[user]
+def append(self, graph_id: str, event: _FrozenEvent) -> None:
+    ...
+
+"""Append a frozen event to the store for the given graph."""
+
+(drift_signal is empty — skipped by Concat)
+```
+
+The LLM reads the empty context, outputs `done`, and nothing is written.
+Zero noise. One short LLM call.
+
+**What the LLM sees when drift is detected:**
+
+```
+[user]
+def append(self, graph_id: str, event: _FrozenEvent, *, flush: bool = True) -> None:
+    ...
+
+"""Append a frozen event to the store for the given graph."""
+
+DRIFT DETECTED: docstring does not mention the flush parameter added in last commit
+```
+
+Now the LLM has a specific, actionable signal. It calls `rewrite_docstring`
+with a targeted update, not a full rewrite.
+
+**The step that makes it work:** `score_docstring_alignment` returns `""` or
+a human-readable reason. Because `Concat` skips empty parts, the LLM's
+effective context is either rich (drift) or minimal (no drift). The schema
+doesn't branch — the tool does the branching by controlling what it emits.
+
+---
+
+### 2. Signature Change Propagation
+
+**The problem:** A function's signature changes — a parameter is added,
+renamed, or its type changes. Every caller in the codebase is now
+potentially broken, but finding them all, assessing each one, and proposing
+fixes is tedious. It's the kind of thing that slips through until CI fails.
+
+**The capability:** When a function node's source changes in a way that
+affects its public signature, the agent automatically finds all callers,
+reads each caller's context, assesses compatibility, and either fixes
+compatible callers directly or sends a structured impact message to the
+relevant agent nodes for them to handle.
+
+This is two schemas working together: the **signature watcher** on the
+changed function, and the **call site handler** on each caller.
+
+```python
+# Schema for the function that changed — the signature watcher
+
+watcher_schema = TurnSchema(
+    system="You detect and propagate signature changes for the function you own.",
+    context=ContextPipeline(steps=(
+
+        # What does the current signature look like?
+        Step(
+            name="current_sig",
+            content=ToolRef(
+                tool="extract_signature",
+                args={"source": "$node.file_path", "node": "$node.full_name"},
+            ),
+        ),
+
+        # What did it look like before this save? (stored in workspace)
+        Step(
+            name="previous_sig",
+            content=ToolRef(
+                tool="read_workspace_file",
+                args={"path": "last_known_signature.txt"},
+            ),
+        ),
+
+        # Diff the signatures. Returns "" if unchanged, or a structured
+        # change description: {"added": [...], "removed": [...], "renamed": {...}}
+        Step(
+            name="sig_diff",
+            content=ToolRef(
+                tool="diff_signatures",
+                args={"before": "$previous_sig", "after": "$current_sig"},
+                extract="diff",
+            ),
+        ),
+
+        # Find all call sites across the project (only runs if diff is non-empty,
+        # because if sig_diff is "" this step's output is also "" via the tool)
+        Step(
+            name="callers",
+            content=ToolRef(
+                tool="find_callers",
+                args={"function": "$node.full_name", "only_if": "$sig_diff"},
+                extract="caller_nodes",
+            ),
+        ),
+
+    )),
+    tools=("message_node", "write_workspace_file"),
+    max_turns=3,
+    termination="done",
+)
+```
+
+The watcher LLM receives the diff and the caller list. It calls
+`write_workspace_file("last_known_signature.txt", current_sig)` to update
+the baseline, then calls `message_node` once per caller with a structured
+payload describing exactly what changed and what the caller needs to update.
+
+```python
+# Schema for each call site — the call site handler
+# Activated when it receives a signature_change message
+
+callsite_schema = TurnSchema(
+    system=Concat(
+        parts=(
+            "You maintain call sites that use external functions. ",
+            "When a function you call changes its signature, update your code.",
+        ),
+        separator="",
+    ),
+    context=ContextPipeline(steps=(
+
+        # Read the incoming message (the structured change description)
+        Step(
+            name="change_notice",
+            content=ToolRef(
+                tool="read_inbox",
+                args={"node": "$node.id", "type_filter": "signature_change"},
+                extract="latest",
+            ),
+        ),
+
+        # Read the call site's current source
+        Step(
+            name="source",
+            content=ToolRef("read_file", {"path": "$node.file_path"}),
+        ),
+
+        # Find the specific call expression in this file
+        Step(
+            name="call_expr",
+            content=ToolRef(
+                tool="find_call_expression",
+                args={
+                    "source": "$source",
+                    "function": "$change_notice.function",
+                },
+                extract="expression",
+            ),
+        ),
+
+    )),
+    tools=("rewrite_self", "message_node"),
+    max_turns=2,
+    termination="done",
+)
+```
+
+**What emerges:** One function change triggers a cascade. Each caller
+handles its own update autonomously. No developer has to run a project-wide
+find-and-replace. No CI failure surfaces the issue three commits later.
+The propagation is fast because it runs in parallel — each caller agent
+activates independently when it receives the message.
+
+---
+
+### 3. Persistent Pair Programmer
+
+**The problem:** LLM assistants are stateless. Every conversation starts
+cold. You have to re-explain what you're working on, what you tried, what
+went wrong. The LLM gives generic advice because it has no accumulated
+understanding of your specific codebase, your current task, or the last
+two hours of context.
+
+**The capability:** An agent that maintains a running session model across
+multiple file saves. As you work, it observes what you change and
+accumulates a structured understanding of your task in its cairn workspace.
+When you invoke it interactively, it already knows your context. It asks
+clarifying questions grounded in what it has observed, not generic ones.
+
+```python
+# The background observer — activates on every FileSavedEvent,
+# updates the session model, never interacts with the user
+
+observer_schema = TurnSchema(
+    system="You maintain a running model of the developer's current task.",
+    context=ContextPipeline(steps=(
+
+        # What did the developer just change?
+        Step(
+            name="diff",
+            content=ToolRef(
+                tool="get_file_diff",
+                args={"path": "$node.file_path"},
+                extract="unified_diff",
+            ),
+        ),
+
+        # What does the current session model say?
+        Step(
+            name="session",
+            content=ToolRef(
+                tool="read_workspace_file",
+                args={"path": "session_model.md"},
+            ),
+        ),
+
+        # What was the last stated intent (if any)?
+        Step(
+            name="last_intent",
+            content=ToolRef(
+                tool="read_workspace_file",
+                args={"path": "current_intent.md"},
+            ),
+        ),
+
+    )),
+    # The LLM updates session_model.md based on the diff.
+    # It writes a concise running narrative: what the developer seems
+    # to be doing, what changed, what might be next.
+    tools=("write_workspace_file",),
+    max_turns=1,
+    termination="done",
+)
+
+
+# The interactive pair — activated on demand (HumanChatEvent or ManualTriggerEvent)
+# This is the schema the developer actually talks to
+
+pair_schema = TurnSchema(
+    system=Concat(
+        parts=(
+            "You are a pair programmer with full context on what the developer ",
+            "has been working on. Do not ask them to re-explain their task — ",
+            "you already know it from the session model.",
+        ),
+        separator="",
+    ),
+    context=ContextPipeline(steps=(
+
+        # Load the accumulated session model
+        Step(
+            name="session",
+            content=ToolRef(
+                tool="read_workspace_file",
+                args={"path": "session_model.md"},
+            ),
+        ),
+
+        # Load the current file the developer is in
+        Step(
+            name="current_file",
+            content=ToolRef("read_file", {"path": "$node.file_path"}),
+        ),
+
+        # Load recent events: what has happened in the swarm lately
+        Step(
+            name="recent_activity",
+            content=ToolRef(
+                tool="read_recent_events",
+                args={"limit": "20", "filter": "AgentCompleteEvent,RewriteProposalEvent"},
+                extract="summary",
+            ),
+        ),
+
+        # Ask what they want — but the prompt itself includes the session model
+        # so the user sees what the agent knows before they type
+        Step(
+            name="question",
+            content=InputGate(
+                name="user_question",
+                prompt=Concat(
+                    parts=(
+                        "Session context:\n",
+                        ToolRef("read_workspace_file", {"path": "session_model.md"}),
+                        "\n\nWhat's on your mind?",
+                    ),
+                    separator="",
+                ),
+            ),
+        ),
+
+    )),
+    tools=("rewrite_self", "message_node", "write_workspace_file", "search_codebase"),
+    max_turns=6,
+    termination="done",
+)
+```
+
+**What the developer experiences:**
+
+The developer has been refactoring `EventStore.append()` for the past
+hour — moving the flush logic into a separate method. They've saved the
+file four times. They trigger the pair and see:
+
+```
+Session context:
+- Refactoring EventStore.append() — extracting flush logic into _flush_pending()
+- append() signature unchanged externally; internal flow reorganized
+- 3 callers messaged with no-op notice (signature unchanged)
+- Last change: removed inline flush block, added call to self._flush_pending()
+
+What's on your mind?
+```
+
+They type: "why does the test keep failing"
+
+The pair already knows what they changed, which tests exist, and what the
+recent agent activity was. It doesn't ask "which test?" or "what are you
+working on?" It looks at the test file directly and reasons about it in
+context.
+
+**The session model file** is the key. It's plain text in the cairn
+workspace, updated after every file save by the silent observer. The
+interactive pair reads it as part of its context pipeline before the user
+says a word. The InputGate prompt includes it so the user can see — and
+correct — what the agent knows before the conversation starts.
+
+**What emerges:** A pair programmer that gets smarter over the course of a
+work session without any persistent infrastructure beyond a file in a
+workspace directory. The observer and the pair are two separate schemas on
+the same node, activated by different event types. They share state through
+the workspace. Neither knows the other exists at the code level.
