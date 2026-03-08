@@ -165,36 +165,66 @@ def _run_server(
                     asyncio.ensure_future(active_runner.run_from_event_store(ls.event_store))
             event_bus_local = getattr(ls, "_companion_event_bus", None)
             cairn_svc = getattr(ls, "_companion_cairn_service", None)
-            if event_bus_local and cairn_svc and ls.event_store:
+            cairn_ready = False
+            if cairn_svc is not None:
                 try:
-                    from remora.companion.config import CompanionConfig
-                    from remora.companion.events import NodeAgentSidebarReady
-                    from remora.companion.startup import start_companion
+                    from remora.core.agents.cairn_bridge import SyncMode
 
-                    workspace_path = getattr(ls.workspace, "root_path", None) or os.getcwd()
-                    comp_config = CompanionConfig(workspace_path=workspace_path)
-                    registry = await start_companion(
-                        event_store=ls.event_store,
-                        event_bus=event_bus_local,
-                        cairn_service=cairn_svc,
-                        config=comp_config,
-                    )
-                    ls.companion_registry = registry
-                    ls.companion_router = getattr(registry, "_router", None)
-
-                    async def _push_sidebar(event: NodeAgentSidebarReady) -> None:
-                        try:
-                            ls.protocol.notify(
-                                "$/remora/companionSidebarUpdated",
-                                {"markdown": event.markdown, "node_id": event.node_id},
-                            )
-                        except Exception:
-                            pass
-
-                    event_bus_local.subscribe(NodeAgentSidebarReady, _push_sidebar)
-                    startup_log.info("Companion system started")
+                    startup_log.info("Initializing Cairn runtime on LSP loop (mode=none)")
+                    await cairn_svc.initialize(sync_mode=SyncMode.NONE)
+                    cairn_ready = True
+                    startup_log.info("Cairn runtime ready on LSP loop")
                 except Exception:
-                    startup_log.exception("Companion startup failed (non-fatal)")
+                    startup_log.exception("Cairn runtime initialization failed (non-fatal)")
+            if event_bus_local and cairn_svc and cairn_ready and ls.event_store:
+                async def _start_companion_background() -> None:
+                    companion_t0 = time.monotonic()
+                    try:
+                        from pathlib import Path
+
+                        def _load_companion_bits():
+                            from remora.companion.config import CompanionConfig
+                            from remora.companion.events import NodeAgentSidebarReady
+                            from remora.companion.startup import start_companion
+
+                            return CompanionConfig, NodeAgentSidebarReady, start_companion
+
+                        CompanionConfig, NodeAgentSidebarReady, start_companion = await asyncio.to_thread(
+                            _load_companion_bits
+                        )
+
+                        workspace_path = getattr(ls.workspace, "root_path", None) or os.getcwd()
+                        comp_config = CompanionConfig(workspace_path=Path(workspace_path))
+                        registry = await start_companion(
+                            event_store=ls.event_store,
+                            event_bus=event_bus_local,
+                            cairn_service=cairn_svc,
+                            config=comp_config,
+                        )
+                        ls.companion_registry = registry
+                        ls.companion_router = getattr(registry, "_router", None)
+
+                        async def _push_sidebar(event: NodeAgentSidebarReady) -> None:
+                            try:
+                                ls.protocol.notify(
+                                    "$/remora/companionSidebarUpdated",
+                                    {"markdown": event.markdown, "node_id": event.node_id},
+                                )
+                            except Exception:
+                                pass
+
+                        event_bus_local.subscribe(NodeAgentSidebarReady, _push_sidebar)
+                        startup_log.info(
+                            "Companion system started (elapsed_ms=%.1f)",
+                            (time.monotonic() - companion_t0) * 1000,
+                        )
+                    except Exception:
+                        startup_log.exception("Companion startup failed (non-fatal)")
+
+                companion_task = getattr(ls, "_remora_companion_start_task", None)
+                if companion_task is None or companion_task.done():
+                    startup_log.info("Scheduling companion startup task")
+                    ls._remora_companion_start_task = asyncio.ensure_future(_start_companion_background())
             startup_log.info("Starting background workspace scan...")
             run_background_scan = getattr(ls, "_remora_background_scan", None)
             if callable(run_background_scan):
@@ -248,6 +278,9 @@ def _run_server(
                 _run_async_cleanup(event_store.close())
             except Exception:
                 log.warning("event store close failed", exc_info=True)
+        companion_task = getattr(server, "_remora_companion_start_task", None)
+        if companion_task is not None and not companion_task.done():
+            companion_task.cancel()
         log.info("remora-lsp shutting down")
 
 
@@ -330,6 +363,13 @@ def main() -> None:
         _bootstrap_log(
             "_prepare: Cairn initialize complete "
             f"(elapsed_ms={(time.monotonic() - cairn_t0) * 1000:.1f})"
+        )
+        cairn_handoff_t0 = time.monotonic()
+        _bootstrap_log("_prepare: Cairn runtime handoff start")
+        await cairn_service.prepare_runtime_handoff()
+        _bootstrap_log(
+            "_prepare: Cairn runtime handoff complete "
+            f"(elapsed_ms={(time.monotonic() - cairn_handoff_t0) * 1000:.1f})"
         )
         _bootstrap_log(
             f"_prepare: done total_elapsed_ms={(time.monotonic() - prepare_t0) * 1000:.1f}"

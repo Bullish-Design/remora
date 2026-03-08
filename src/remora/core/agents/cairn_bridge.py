@@ -67,6 +67,12 @@ class CairnWorkspaceService:
         self._file_mtimes: dict[str, float] = {}
         self._progress_callback = progress_callback
 
+    def _reset_runtime_state(self) -> None:
+        self._manager = cairn_workspace_manager.WorkspaceManager()
+        self._stable_workspace = None
+        self._agent_workspaces = {}
+        self._agent_workspaces_lock = asyncio.Lock()
+
     @property
     def project_root(self) -> Path:
         return self._project_root
@@ -174,8 +180,28 @@ class CairnWorkspaceService:
     async def close(self) -> None:
         """Close all tracked workspaces."""
         await self._manager.close_all()
-        self._agent_workspaces.clear()
-        self._stable_workspace = None
+        self._reset_runtime_state()
+
+    async def prepare_runtime_handoff(self) -> None:
+        """Drop loop-bound workspace handles before crossing event loops.
+
+        Stable/agent workspace objects wrap async DB connections that are bound
+        to the loop where they were opened. Startup uses a bootstrap loop, then
+        pygls serves requests on a different loop, so these handles must be
+        closed and reopened after handoff.
+        """
+        has_runtime_handles = self._stable_workspace is not None or bool(self._agent_workspaces)
+        if not has_runtime_handles:
+            self._reset_runtime_state()
+            return
+
+        self._progress("runtime handoff start (closing loop-bound workspace handles)")
+        try:
+            await self._manager.close_all()
+        except Exception as exc:
+            logger.debug("runtime handoff close_all failed: %s", exc)
+        self._reset_runtime_state()
+        self._progress("runtime handoff complete")
 
     async def _sync_project_to_workspace(self) -> None:
         """Sync project files into the stable workspace, skipping unchanged files."""
@@ -288,6 +314,9 @@ class CairnWorkspaceService:
         Reads the file from the project root and writes it into the stable
         workspace.  Returns ``False`` when the source file does not exist.
         """
+        rel_path = rel_path.lstrip("/")
+        if not rel_path:
+            return False
         source = self._project_root / rel_path
         if not source.exists():
             return False

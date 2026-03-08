@@ -1,6 +1,7 @@
 """Companion system startup."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,22 @@ if TYPE_CHECKING:
     from remora.core.store.event_store import EventStore
 
 logger = logging.getLogger("remora.companion.startup")
+
+
+def _build_indexing_service(config: CompanionConfig):
+    from remora.companion.indexing_service import IndexingService
+
+    return IndexingService(config.indexing, config.workspace_path)
+
+
+async def _start_indexing_background(config: CompanionConfig) -> None:
+    try:
+        indexing = await asyncio.to_thread(_build_indexing_service, config)
+        await indexing.initialize()
+        asyncio.create_task(indexing.index_directory(config.workspace_path))
+        logger.info("Background workspace indexing started")
+    except Exception:
+        logger.warning("Failed to start vector indexing (non-fatal)", exc_info=True)
 
 
 async def start_companion(
@@ -31,17 +48,7 @@ async def start_companion(
     logger.info("Companion started (max_active_agents=%d)", cfg.max_active_agents)
 
     if cfg.auto_index:
-        import asyncio
-
-        try:
-            from remora.companion.indexing_service import IndexingService
-
-            indexing = IndexingService(cfg.indexing)
-            await indexing.initialize()
-            asyncio.create_task(indexing.index_directory(cfg.workspace_path))
-            logger.info("Background workspace indexing started")
-        except Exception:
-            logger.warning("Failed to start vector indexing (non-fatal)", exc_info=True)
+        asyncio.create_task(_start_indexing_background(cfg))
 
     return registry
 

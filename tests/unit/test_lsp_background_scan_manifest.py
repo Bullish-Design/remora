@@ -84,12 +84,29 @@ class _SimpleDB:
         return None
 
 
+class _FakeCairnService:
+    async def initialize(self, *, sync_mode=None) -> None:
+        _ = sync_mode
+        return None
+
+
+class _FakeEventBus:
+    def __init__(self) -> None:
+        self.subscriptions: list[tuple[object, object]] = []
+
+    def subscribe(self, event_type, handler) -> None:
+        self.subscriptions.append((event_type, handler))
+
+
 class _ChunkTrackingEventStore:
     def __init__(self) -> None:
         self.chunk_sizes: list[int] = []
         self.nodes = self
         self._conn = None
         self._node_store = None
+
+    def rebind_runtime_primitives(self) -> None:
+        return None
 
     async def list_nodes(self, file_path: str):
         _ = file_path
@@ -182,6 +199,64 @@ async def test_background_scan_saves_partial_manifest_before_completion(
     for task in scheduled_tasks:
         if task is not scan_task and not task.done():
             task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_initialized_handler_does_not_block_on_companion_startup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "one_file.py").write_text("def only_fn():\n    return 1\n", encoding="utf-8")
+
+    event_store = _ChunkTrackingEventStore()
+    fake_server = _FakeServer(str(tmp_path), _SimpleDB())
+    fake_server.event_store = event_store
+    event_bus = _FakeEventBus()
+    cairn_service = _FakeCairnService()
+
+    import remora.lsp.__main__ as lsp_main_mod
+    import remora.runner.agent_runner as runner_mod
+
+    monkeypatch.setattr(lsp_main_mod, "_setup_logging", lambda: logging.getLogger("test"))
+    monkeypatch.setattr(lsp_main_mod, "_get_server", lambda: fake_server)
+    monkeypatch.setattr(runner_mod, "AgentRunner", _FakeRunner)
+    monkeypatch.setattr("remora.core.config.load_config", lambda path=None: Config())
+
+    with pytest.raises(_StopSentinel):
+        lsp_main_mod._run_server(event_store=event_store, event_bus=event_bus, cairn_service=cairn_service)
+
+    scheduled_tasks: list[asyncio.Task] = []
+
+    def _capture_ensure_future(coro):
+        task = asyncio.create_task(coro)
+        scheduled_tasks.append(task)
+        return task
+
+    companion_started = asyncio.Event()
+    unblock_companion = asyncio.Event()
+
+    class _Registry:
+        _router = None
+
+    async def _slow_start_companion(*, event_store, event_bus, cairn_service, config):
+        _ = (event_store, event_bus, cairn_service, config)
+        companion_started.set()
+        await unblock_companion.wait()
+        return _Registry()
+
+    monkeypatch.setattr(asyncio, "ensure_future", _capture_ensure_future)
+    monkeypatch.setattr("remora.companion.startup.start_companion", _slow_start_companion)
+
+    initialized_handler = fake_server._features[lsp.INITIALIZED]
+    await asyncio.wait_for(initialized_handler(lsp.InitializedParams()), timeout=0.2)
+    await asyncio.wait_for(companion_started.wait(), timeout=1.0)
+
+    unblock_companion.set()
+    await asyncio.sleep(0)
+
+    for task in scheduled_tasks:
+        if not task.done():
+            task.cancel()
+    await asyncio.gather(*scheduled_tasks, return_exceptions=True)
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,19 @@
+[project]
+name = "remora-bootstrap"
+version = "0.1.0"
+description = "Phase 2 bootstrap runtime for Remora core functionality"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "remora",
+]
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+remora = { path = "..", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/remora_bootstrap"]

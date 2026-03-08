@@ -212,16 +212,16 @@ function M.setup(opts)
     ---  line 1: pid
     ---  line 2: heartbeat epoch ms (new) or seconds (legacy)
     ---  line 3: parent pid (new)
-    --- @return {pid: integer|nil, heartbeat_ms: integer|nil, parent_pid: integer|nil}
+    --- @return {pid: integer|nil, heartbeat_ms: integer|nil, parent_pid: integer|nil, pid_path: string|nil}
     local function read_lock_owner_metadata()
         local cwd = (vim.uv and vim.uv.cwd()) or (vim.loop and vim.loop.cwd()) or vim.fn.getcwd()
         if not cwd or cwd == "" then
-            return { pid = nil, heartbeat_ms = nil, parent_pid = nil }
+            return { pid = nil, heartbeat_ms = nil, parent_pid = nil, pid_path = nil }
         end
         local pid_path = cwd .. "/.remora/lsp.pid"
         local ok, lines = pcall(vim.fn.readfile, pid_path)
         if not ok or not lines or #lines == 0 then
-            return { pid = nil, heartbeat_ms = nil, parent_pid = nil }
+            return { pid = nil, heartbeat_ms = nil, parent_pid = nil, pid_path = pid_path }
         end
         local pid = tonumber(vim.trim(lines[1] or ""))
         local heartbeat_ms = nil
@@ -236,7 +236,7 @@ function M.setup(opts)
         if lines[3] ~= nil then
             parent_pid = tonumber(vim.trim(lines[3] or ""))
         end
-        return { pid = pid, heartbeat_ms = heartbeat_ms, parent_pid = parent_pid }
+        return { pid = pid, heartbeat_ms = heartbeat_ms, parent_pid = parent_pid, pid_path = pid_path }
     end
 
     --- Build a user-facing lock hint string when lock metadata exists.
@@ -249,9 +249,20 @@ function M.setup(opts)
         end
 
         local uv = vim.uv or vim.loop
-        local alive = uv and uv.fs_stat and uv.fs_stat("/proc/" .. tostring(pid)) ~= nil
-        if not alive then
+        local proc_supported = uv and uv.fs_stat and uv.fs_stat("/proc") ~= nil
+        local alive = proc_supported and uv.fs_stat("/proc/" .. tostring(pid)) ~= nil
+        if proc_supported and not alive then
+            local pid_path = owner.pid_path
+            if pid_path and pid_path ~= "" then
+                local ok_delete, rc = pcall(vim.fn.delete, pid_path)
+                if ok_delete and rc == 0 then
+                    return nil
+                end
+            end
             return string.format("stale lock metadata found (pid=%d)", pid)
+        end
+        if not proc_supported then
+            return string.format("lock owner exists but liveness unknown (pid=%d)", pid)
         end
 
         local stale_ms = tonumber(vim.env.REMORA_LSP_STALE_OWNER_MS or "45000") or 45000

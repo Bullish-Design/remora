@@ -122,3 +122,24 @@ async def test_sync_prunes_hidden_directories_when_dotfiles_ignored(tmp_path, mo
 
     written_paths = {call.args[0] for call in workspace.files.write.await_args_list}
     assert written_paths == {"visible.py"}
+
+
+@pytest.mark.asyncio
+async def test_prepare_runtime_handoff_resets_workspace_handles(tmp_path):
+    config = Config(swarm_root=str(tmp_path / "swarm"))
+    service = CairnWorkspaceService(config=config, project_root=tmp_path / "project")
+
+    service._stable_workspace = object()
+    service._agent_workspaces = {"abc": object()}
+    old_lock = service._agent_workspaces_lock
+    old_manager = MagicMock()
+    old_manager.close_all = AsyncMock(return_value=None)
+    service._manager = old_manager
+
+    await service.prepare_runtime_handoff()
+
+    old_manager.close_all.assert_awaited_once()
+    assert service._stable_workspace is None
+    assert service._agent_workspaces == {}
+    assert service._agent_workspaces_lock is not old_lock
+    assert service._manager is not old_manager

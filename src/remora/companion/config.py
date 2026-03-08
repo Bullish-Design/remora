@@ -5,17 +5,19 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from embeddy.config import ChunkConfig, EmbedderConfig, StoreConfig
-
 
 class IndexingConfig(BaseModel):
-    """Vector search configuration (wraps embeddy)."""
+    """Vector search configuration.
 
-    embedder: EmbedderConfig = Field(
-        default_factory=lambda: EmbedderConfig(mode="remote", remote_url="http://localhost:8586")
+    Uses plain dictionaries to avoid importing embeddy during core LSP startup.
+    Embeddy config models are constructed lazily by IndexingService.
+    """
+
+    embedder: dict[str, object] = Field(
+        default_factory=lambda: {"mode": "remote", "remote_url": "http://localhost:8586"}
     )
-    store: StoreConfig = Field(default_factory=lambda: StoreConfig(db_path=".companion/vectors.db"))
-    chunk: ChunkConfig = Field(default_factory=ChunkConfig)
+    store: dict[str, object] = Field(default_factory=lambda: {"db_path": ".remora/companion/vectors.db"})
+    chunk: dict[str, object] = Field(default_factory=dict)
     collections: dict[str, str] = Field(
         default_factory=lambda: {
             "python": "python",
@@ -23,6 +25,13 @@ class IndexingConfig(BaseModel):
             "config": "config",
         }
     )
+
+    def resolve_store_db_path(self, workspace_path: Path) -> Path:
+        raw_path = str(self.store.get("db_path", ".remora/companion/vectors.db"))
+        db_path = Path(raw_path).expanduser()
+        if not db_path.is_absolute():
+            db_path = workspace_path / db_path
+        return db_path
 
 
 class CompanionConfig(BaseModel):

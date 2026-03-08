@@ -16,14 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
-from cairn.runtime import workspace_manager as cairn_workspace_manager
-
-from remora.core.config import Config
 from remora.core.code.discovery import CSTNode
-from remora.core.errors import WorkspaceError
 from remora.utils import PathLike, PathResolver, normalize_path
 
 logger = logging.getLogger(__name__)
@@ -59,7 +56,7 @@ class AgentWorkspace:
 
     async def read(self, path: PathLike) -> str:
         """Read a file from the workspace."""
-        path_str = normalize_path(path).as_posix()
+        path_str = _to_workspace_path(path)
         async with self._fs_lock:
             try:
                 return await self._workspace.files.read(path_str, mode="text")
@@ -73,19 +70,27 @@ class AgentWorkspace:
                     raise
 
             if self._ensure_file_synced is not None:
-                await self._ensure_file_synced(path_str)
-                return await self._stable_workspace.files.read(path_str, mode="text")
+                try:
+                    synced = await self._ensure_file_synced(path_str)
+                except Exception:
+                    synced = False
+                if synced:
+                    try:
+                        return await self._stable_workspace.files.read(path_str, mode="text")
+                    except Exception as exc:
+                        if not _is_missing_file_error(exc):
+                            raise
             raise FileNotFoundError(path_str)
 
     async def write(self, path: PathLike, content: str | bytes) -> None:
         """Write a file to the workspace (CoW isolated)."""
-        path_str = normalize_path(path).as_posix()
+        path_str = _to_workspace_path(path)
         async with self._fs_lock:
             await self._workspace.files.write(path_str, content)
 
     async def exists(self, path: PathLike) -> bool:
         """Check if a file exists in the workspace."""
-        path_str = normalize_path(path).as_posix()
+        path_str = _to_workspace_path(path)
         async with self._fs_lock:
             if await self._workspace.files.exists(path_str):
                 return True
@@ -95,7 +100,7 @@ class AgentWorkspace:
 
     async def list_dir(self, path: PathLike = ".") -> list[str]:
         """List directory entries in the workspace."""
-        path_str = normalize_path(path).as_posix()
+        path_str = _to_workspace_path(path)
         async with self._fs_lock:
             entries = set(await self._workspace.files.list_dir(path_str, output="name"))
             if self._stable_workspace is not None:
@@ -108,7 +113,7 @@ class AgentWorkspace:
 
     async def delete(self, path: PathLike) -> None:
         """Delete a file from the workspace."""
-        path_str = normalize_path(path).as_posix()
+        path_str = _to_workspace_path(path)
         async with self._fs_lock:
             await self._workspace.files.remove(path_str)
 
@@ -193,6 +198,8 @@ __all__ = [
 def _is_missing_file_error(exc: Exception) -> bool:
     if isinstance(exc, FileNotFoundError):
         return True
+    if exc.__class__.__name__ == "FileNotFoundError":
+        return True
     code = getattr(exc, "code", None)
     if code in {"FS_NOT_FOUND", "ENOENT"}:
         return True
@@ -201,3 +208,10 @@ def _is_missing_file_error(exc: Exception) -> bool:
         return True
     errno_value = getattr(exc, "errno", None)
     return errno_value == 2
+
+
+def _to_workspace_path(path: PathLike) -> str:
+    """Normalize path input to AgentFS workspace-relative paths."""
+    raw = normalize_path(path).as_posix()
+    stripped = raw.lstrip("/")
+    return stripped or "."
