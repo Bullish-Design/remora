@@ -787,6 +787,35 @@ function M.setup(opts)
     log.info("M.setup: user commands registered")
 
     local prefix = opts.prefix or "<leader>r"
+    local function open_companion_sidebar()
+        if vim.fn.exists(":CompanionSidebar") == 2 then
+            vim.cmd("CompanionSidebar")
+            return
+        end
+        M.toggle_panel()
+    end
+
+    local function companion_chat()
+        if vim.fn.exists(":CompanionChat") == 2 then
+            vim.cmd("CompanionChat")
+            return
+        end
+        vim.cmd("RemoraChat")
+    end
+
+    -- Add a group label to the first <space> popup (which-key) when available.
+    local wk_ok, wk = pcall(require, "which-key")
+    if wk_ok then
+        if wk.add then
+            wk.add({
+                { prefix, group = "Remora - AI Code Assistant" },
+            })
+        elseif wk.register and prefix == "<leader>r" then
+            wk.register({
+                r = { name = "+Remora - AI Code Assistant" },
+            }, { prefix = "<leader>" })
+        end
+    end
 
     vim.keymap.set(
         "n", prefix .. "a", M.toggle_panel,
@@ -811,6 +840,14 @@ function M.setup(opts)
         "n", prefix .. "n",
         function() vim.cmd("RemoraReject") end,
         { desc = "Reject proposal" }
+    )
+    vim.keymap.set(
+        "n", prefix .. "s", open_companion_sidebar,
+        { desc = "Open Companion sidebar" }
+    )
+    vim.keymap.set(
+        "n", prefix .. "m", companion_chat,
+        { desc = "Chat with Companion" }
     )
     log.info("M.setup: keymaps set with prefix=%s", prefix)
 

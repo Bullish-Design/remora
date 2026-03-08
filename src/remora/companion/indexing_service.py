@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from embeddy import Embedder, VectorStore, Pipeline, SearchService
-from embeddy.models import SearchMode, SearchResults, IngestStats
+
+from embeddy import Embedder, Pipeline, SearchService, VectorStore
+from embeddy.models import IngestStats, SearchMode, SearchResults
+
 from remora.companion.config import IndexingConfig
-from remora.companion.events import CompanionIndexUpdated, CompanionSearchResult
+
 
 class IndexingService:
     """Thin wrapper around embeddy for companion indexing and search."""
@@ -29,27 +31,15 @@ class IndexingService:
                 chunk_config=self._config.chunk,
             )
     
-    async def index_file(self, path: str) -> CompanionIndexUpdated:
+    async def index_file(self, path: str) -> IngestStats:
         collection = self._collection_for_file(path)
         pipeline = self._pipelines[collection]
-        stats: IngestStats = await pipeline.ingest_file(path)
-        return CompanionIndexUpdated(
-            file=path,
-            chunks_stored=stats.chunks_stored,
-            chunks_skipped=stats.chunks_skipped,
-            chunks_created=stats.chunks_created,
-        )
+        return await pipeline.ingest_file(path)
     
-    async def reindex_file(self, path: str) -> CompanionIndexUpdated:
+    async def reindex_file(self, path: str) -> IngestStats:
         collection = self._collection_for_file(path)
         pipeline = self._pipelines[collection]
-        stats: IngestStats = await pipeline.reindex_file(path)
-        return CompanionIndexUpdated(
-            file=path,
-            chunks_stored=stats.chunks_stored,
-            chunks_skipped=stats.chunks_skipped,
-            chunks_created=stats.chunks_created,
-        )
+        return await pipeline.reindex_file(path)
     
     async def search(
         self,
@@ -57,7 +47,7 @@ class IndexingService:
         collection: str | None = None,
         top_k: int = 10,
         mode: SearchMode = SearchMode.HYBRID,
-    ) -> list[CompanionSearchResult]:
+    ) -> list[dict[str, object]]:
         target = collection or "python"
         results: SearchResults = await self._search.search(
             query=query,
@@ -66,16 +56,16 @@ class IndexingService:
             mode=mode,
         )
         return [
-            CompanionSearchResult(
-                file=r.source_path or "",
-                chunk_text=r.content,
-                score=r.score,
-                content_type=r.content_type,
-                chunk_type=r.chunk_type,
-                start_line=r.start_line or 0,
-                end_line=r.end_line or 0,
-                name=r.name,
-            )
+            {
+                "file": r.source_path or "",
+                "chunk_text": r.content,
+                "score": r.score,
+                "content_type": r.content_type,
+                "chunk_type": r.chunk_type,
+                "start_line": r.start_line or 0,
+                "end_line": r.end_line or 0,
+                "name": r.name,
+            }
             for r in results.results
         ]
     

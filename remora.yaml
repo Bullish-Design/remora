@@ -34,7 +34,7 @@ trigger_cooldown_ms: 1000
 workspace_ignore_patterns:
   - ".git"
   - "__pycache__"
-workspace_ignore_dotfiles: false
+workspace_ignore_dotfiles: true
 
 nvim_enabled: false
 nvim_socket: "/run/user/1000/remora.sock"

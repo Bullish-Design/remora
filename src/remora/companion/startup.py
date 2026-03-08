@@ -17,9 +17,9 @@ logger = logging.getLogger("remora.companion.startup")
 
 
 async def start_companion(
-    event_store: "EventStore",
-    event_bus: "EventBus",
-    cairn_service: "CairnWorkspaceService",
+    event_store: EventStore,
+    event_bus: EventBus,
+    cairn_service: CairnWorkspaceService,
     config: CompanionConfig | None = None,
 ) -> NodeAgentRegistry:
     """Start the companion system and return the NodeAgentRegistry."""
@@ -33,9 +33,9 @@ async def start_companion(
     if cfg.auto_index:
         import asyncio
 
-        from remora.companion.indexing_service import IndexingService
-
         try:
+            from remora.companion.indexing_service import IndexingService
+
             indexing = IndexingService(cfg.indexing)
             await indexing.initialize()
             asyncio.create_task(indexing.index_directory(cfg.workspace_path))

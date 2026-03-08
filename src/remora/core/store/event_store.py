@@ -77,6 +77,17 @@ class EventStore:
         """Set the event bus for UI updates."""
         self._event_bus = event_bus
 
+    def rebind_runtime_primitives(self) -> None:
+        """Recreate asyncio primitives for the active event loop."""
+        self._lock = asyncio.Lock()
+        self._read_lock = asyncio.Lock()
+        if self._subscriptions is not None:
+            self._trigger_queue = asyncio.Queue()
+        if self._node_store is not None:
+            self._node_store.bind_read_lock(self._read_lock)
+            if self._conn is not None:
+                self._node_store.bind_write_backend(self._conn, self._lock)
+
     async def initialize(self) -> None:
         """Initialize the database and create tables."""
         async with self._lock:

@@ -10,9 +10,9 @@ from remora.lsp.protocols import LspServer
 
 logger = logging.getLogger("remora.lsp")
 
-RESOLVE_AGENT_TIMEOUT_SECONDS = 2.0
-GET_PANEL_NODE_TIMEOUT_SECONDS = 1.0
-GET_PANEL_EVENTS_TIMEOUT_SECONDS = 1.5
+RESOLVE_AGENT_TIMEOUT_SECONDS = 5.0
+GET_PANEL_NODE_TIMEOUT_SECONDS = 4.0
+GET_PANEL_EVENTS_TIMEOUT_SECONDS = 4.0
 
 
 async def _resolve_agent(ls: LspServer, args) -> str | None:

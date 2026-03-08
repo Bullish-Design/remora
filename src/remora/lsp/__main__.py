@@ -7,10 +7,17 @@ import os
 import signal
 import sys
 import time
+import traceback
 
 from lsprotocol import types as lsp
 
 from remora.lsp.process_lock import _ParentProcessWatchdog, _WorkspaceProcessLock
+
+
+def _bootstrap_log(message: str) -> None:
+    """Early startup logging before logging handlers are configured."""
+    stamp = time.strftime("%H:%M:%S")
+    print(f"remora-lsp bootstrap [{stamp}] {message}", file=sys.stderr, flush=True)
 
 
 def _install_signal_handlers(process_lock: _WorkspaceProcessLock) -> None:
@@ -108,11 +115,9 @@ def _run_server(
     log.debug("Runner module loaded in %.1fms", (time.monotonic() - t0) * 1000)
 
     server.event_store = event_store
-    # Reset the asyncio.Lock so it binds to THIS event loop (pygls)
+    # Rebind EventStore asyncio primitives so they bind to THIS event loop (pygls).
     if event_store is not None:
-        event_store._lock = asyncio.Lock()
-        if event_store._conn is not None and event_store._node_store is not None:
-            event_store.nodes.bind_write_backend(event_store._conn, event_store._lock)
+        event_store.rebind_runtime_primitives()
     server.subscriptions = subscriptions
     server.companion_registry = None
     server.companion_router = None
@@ -166,7 +171,8 @@ def _run_server(
                     from remora.companion.events import NodeAgentSidebarReady
                     from remora.companion.startup import start_companion
 
-                    comp_config = CompanionConfig(workspace_path=root)
+                    workspace_path = getattr(ls.workspace, "root_path", None) or os.getcwd()
+                    comp_config = CompanionConfig(workspace_path=workspace_path)
                     registry = await start_companion(
                         event_store=ls.event_store,
                         event_bus=event_bus_local,
@@ -255,9 +261,11 @@ def main() -> None:
     from pathlib import Path
     
     async def _prepare():
+        prepare_t0 = time.monotonic()
+        _bootstrap_log("_prepare: begin")
+        from remora.core.agents.cairn_bridge import CairnWorkspaceService, SyncMode
         from remora.core.code.projections import NodeProjection
         from remora.core.config import load_config
-        from remora.core.agents.cairn_bridge import CairnWorkspaceService, SyncMode
         from remora.core.events.event_bus import EventBus
         from remora.core.events.subscriptions import SubscriptionRegistry
         from remora.core.store.event_store import EventStore
@@ -266,11 +274,19 @@ def main() -> None:
         swarm_path = root / ".remora"
         event_store_path = swarm_path / "events" / "events.db"
         subscriptions_path = swarm_path / "subscriptions.db"
+        _bootstrap_log(f"_prepare: root={root}")
+        _bootstrap_log(f"_prepare: event_store_path={event_store_path}")
 
         event_bus = EventBus()
         subscriptions = SubscriptionRegistry(subscriptions_path)
+        _bootstrap_log("_prepare: EventBus + SubscriptionRegistry created")
         from remora.extensions import extension_matches, load_extensions
+        extensions_t0 = time.monotonic()
         extensions = load_extensions(swarm_path / "models")
+        _bootstrap_log(
+            "_prepare: extensions loaded "
+            f"(count={len(extensions)} elapsed_ms={(time.monotonic() - extensions_t0) * 1000:.1f})"
+        )
         projection = NodeProjection(
             extension_matcher=extension_matches,
             extension_configs=extensions,
@@ -281,17 +297,49 @@ def main() -> None:
             event_bus=event_bus,
             projection=projection,
         )
+        _bootstrap_log("_prepare: EventStore constructed")
 
         event_store.set_subscriptions(subscriptions)
         event_store.set_event_bus(event_bus)
+        _bootstrap_log("_prepare: EventStore wiring complete")
+        event_store_t0 = time.monotonic()
+        _bootstrap_log("_prepare: EventStore initialize start")
+        await event_store.initialize()
+        _bootstrap_log(
+            "_prepare: EventStore initialize complete "
+            f"(elapsed_ms={(time.monotonic() - event_store_t0) * 1000:.1f})"
+        )
         config = load_config()
-        cairn_service = CairnWorkspaceService(config, project_root=root)
+        _bootstrap_log(
+            "_prepare: config loaded "
+            f"(model={config.model_default} base_url={config.model_base_url})"
+        )
+        _bootstrap_log(
+            "_prepare: workspace sync config "
+            f"(ignore_dotfiles={config.workspace_ignore_dotfiles} "
+            f"ignore_patterns={list(config.workspace_ignore_patterns)})"
+        )
+        cairn_service = CairnWorkspaceService(
+            config,
+            project_root=root,
+            progress_callback=_bootstrap_log,
+        )
+        cairn_t0 = time.monotonic()
+        _bootstrap_log("_prepare: Cairn initialize start (sync_mode=FULL)")
         await cairn_service.initialize(sync_mode=SyncMode.FULL)
+        _bootstrap_log(
+            "_prepare: Cairn initialize complete "
+            f"(elapsed_ms={(time.monotonic() - cairn_t0) * 1000:.1f})"
+        )
+        _bootstrap_log(
+            f"_prepare: done total_elapsed_ms={(time.monotonic() - prepare_t0) * 1000:.1f}"
+        )
 
         return event_store, subscriptions, event_bus, cairn_service
 
     root = Path.cwd()
     swarm_path = root / ".remora"
+    _bootstrap_log(f"main: start cwd={root}")
     process_lock = _WorkspaceProcessLock(
         lock_path=swarm_path / "lsp.lock",
         pid_path=swarm_path / "lsp.pid",
@@ -326,20 +374,31 @@ def main() -> None:
         f"pid_file={process_lock.pid_path})",
         file=sys.stderr,
     )
+    _bootstrap_log("main: lock acquired")
 
     watchdog = _ParentProcessWatchdog(process_lock=process_lock)
     watchdog.start()
+    _bootstrap_log("main: watchdog started")
     _install_signal_handlers(process_lock)
+    _bootstrap_log("main: signal handlers installed")
 
     try:
+        _bootstrap_log("main: calling asyncio.run(_prepare())")
         event_store, subscriptions, event_bus, cairn_service = asyncio.run(_prepare())
+        _bootstrap_log("main: _prepare complete, entering _run_server")
         _run_server(
             event_store=event_store,
             subscriptions=subscriptions,
             event_bus=event_bus,
             cairn_service=cairn_service,
         )
+        _bootstrap_log("main: _run_server exited")
+    except Exception as exc:
+        _bootstrap_log(f"main: fatal startup exception: {exc!r}")
+        traceback.print_exc(file=sys.stderr)
+        raise
     finally:
+        _bootstrap_log("main: shutting down watchdog + releasing lock")
         watchdog.stop()
         process_lock.release()
 

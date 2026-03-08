@@ -10,11 +10,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger("remora.lsp.companion")
 
 
+def _first_arg(args: tuple) -> dict:
+    if not args:
+        return {}
+    first = args[0]
+    if isinstance(first, list):
+        if not first:
+            return {}
+        first = first[0]
+    return first if isinstance(first, dict) else {}
+
+
 def register_companion_handlers(server: "LspServer") -> None:
     """Register all companion workspace/executeCommand handlers."""
 
     @server.command("companion.getSidebar")
-    async def cmd_get_sidebar(ls, args) -> dict:
+    async def cmd_get_sidebar(ls, *args) -> dict:
         registry = getattr(ls, "companion_registry", None)
         router = getattr(ls, "companion_router", None)
         if not registry or not router:
@@ -31,11 +42,11 @@ def register_companion_handlers(server: "LspServer") -> None:
         return {"markdown": markdown, "node_id": node_id}
 
     @server.command("companion.sendMessage")
-    async def cmd_send_message(ls, args) -> dict:
+    async def cmd_send_message(ls, *args) -> dict:
         registry = getattr(ls, "companion_registry", None)
-        if not registry or not args:
+        if not registry:
             return {"error": "companion not available"}
-        params = args[0] if isinstance(args, list) else args
+        params = _first_arg(args)
         node_id = params.get("node_id") or ""
         content = params.get("content") or ""
         if not node_id or not content:
@@ -55,11 +66,11 @@ def register_companion_handlers(server: "LspServer") -> None:
             return {"error": "agent error"}
 
     @server.command("companion.writeNote")
-    async def cmd_write_note(ls, args) -> dict:
+    async def cmd_write_note(ls, *args) -> dict:
         registry = getattr(ls, "companion_registry", None)
-        if not registry or not args:
+        if not registry:
             return {"ok": False}
-        params = args[0] if isinstance(args, list) else args
+        params = _first_arg(args)
         node_id = params.get("node_id") or ""
         note = params.get("note") or ""
         if not node_id or not note:
@@ -76,11 +87,11 @@ def register_companion_handlers(server: "LspServer") -> None:
         return {"ok": True}
 
     @server.command("companion.getLinks")
-    async def cmd_get_links(ls, args) -> dict:
+    async def cmd_get_links(ls, *args) -> dict:
         registry = getattr(ls, "companion_registry", None)
-        if not registry or not args:
+        if not registry:
             return {"links": []}
-        params = args[0] if isinstance(args, list) else args
+        params = _first_arg(args)
         node_id = params.get("node_id") or ""
         agent = registry.get(node_id)
         if not agent:
@@ -101,11 +112,11 @@ def register_companion_handlers(server: "LspServer") -> None:
         }
 
     @server.command("companion.listHistory")
-    async def cmd_list_history(ls, args) -> dict:
+    async def cmd_list_history(ls, *args) -> dict:
         registry = getattr(ls, "companion_registry", None)
-        if not registry or not args:
+        if not registry:
             return {"history": []}
-        params = args[0] if isinstance(args, list) else args
+        params = _first_arg(args)
         node_id = params.get("node_id") or ""
         agent = registry.get(node_id)
         if not agent:
@@ -116,11 +127,11 @@ def register_companion_handlers(server: "LspServer") -> None:
         return {"history": [entry.to_dict() for entry in sorted(index, key=lambda e: e.timestamp, reverse=True)]}
 
     @server.command("companion.getHistory")
-    async def cmd_get_history(ls, args) -> dict:
+    async def cmd_get_history(ls, *args) -> dict:
         registry = getattr(ls, "companion_registry", None)
-        if not registry or not args:
+        if not registry:
             return {"markdown": ""}
-        params = args[0] if isinstance(args, list) else args
+        params = _first_arg(args)
         node_id = params.get("node_id") or ""
         session_id = params.get("session_id") or ""
         agent = registry.get(node_id)

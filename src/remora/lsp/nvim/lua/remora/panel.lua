@@ -33,7 +33,7 @@ M._debounce_ms = 300    -- ms to wait after last CursorHold/BufEnter
 -- Request timeout state for panel fetches
 M._request_seq = 0
 M._request_inflight = nil
-M._request_timeout_ms = 1500
+M._request_timeout_ms = 5000
 M._request_timeout_timer = nil
 M._last_fetch_error = nil
 

@@ -40,6 +40,10 @@ class NodeStore:
         self._write_conn = conn
         self._write_lock = lock
 
+    def bind_read_lock(self, lock: asyncio.Lock) -> None:
+        """Attach read lock for node queries."""
+        self._read_lock = lock
+
     async def get_node(self, node_id: str) -> AgentNode | None:
         """Get a single AgentNode by ID from the nodes table."""
         async with self._read_lock:

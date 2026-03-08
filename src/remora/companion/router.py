@@ -16,7 +16,7 @@ logger = logging.getLogger("remora.companion.router")
 class NodeAgentRouter:
     """Subscribes to core interaction events and routes them to NodeAgents."""
 
-    def __init__(self, registry: "NodeAgentRegistry", event_store: "EventStore") -> None:
+    def __init__(self, registry: NodeAgentRegistry, event_store: EventStore) -> None:
         self._registry = registry
         self._event_store = event_store
         self._active_node_id: str | None = None
@@ -59,7 +59,7 @@ class NodeAgentRouter:
 
     async def _resolve_node(self, node_id: str):
         try:
-            return await self._event_store.nodes.get(node_id)
+            return await self._event_store.nodes.get_node(node_id)
         except Exception:
             logger.debug("node lookup failed for %s", node_id)
             return None
