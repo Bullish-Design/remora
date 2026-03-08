@@ -1,60 +1,55 @@
 # Context: Phase 2 v3 Concept
 
-## Status: COMPLETE (with extensions)
+## Status: ACTIVE — YAML workspace deep-dive complete
 
-## What happened
+## Session history
 
 ### Session 1
 Wrote PHASE2_V3_BOOTSTRAP_CONCEPT.md in bootstrap/.
 
-### Session 2 (current)
-1. Wrote RESEARCH.md — v1 AgentNode pattern analysis, AgentDefinition concept,
-   Capability enum, BootstrapAgent model, capability ladder.
+### Session 2
+Wrote RESEARCH.md: v1 AgentNode pattern → bootstrap v3 mapping.
+Wrote RESEARCH_2_MIXIN_ERGONOMICS.md: mixin patterns, developer ergonomics,
+schema diffusion.
+Updated PHASE2_V3_BOOTSTRAP_CONCEPT.md with §6 "The Agent Model" (BootstrapAgent,
+Capability enum, mixin marker classes, AgentDefinition, capability ladder,
+developer visibility table).
 
-2. Updated PHASE2_V3_BOOTSTRAP_CONCEPT.md with new §6 "The Agent Model":
-   - BootstrapAgent runtime model
-   - Capability enum + mixin marker classes for composition
-   - AgentDefinition authoring model with Pydantic mixin inheritance
-   - Capability ladder (earn capabilities via RequestCapabilityEvent)
-   - Developer visibility table (inspect/inject/pause/correct/observe/understand)
-   - Renumbered §6-§8 → §7-§9
+### Session 3 (current)
+Wrote RESEARCH_3_YAML_WORKSPACE_DEFINITION.md: deep dive on YAML/TOML workspace
+definitions as the core agent model. All 10 sections complete.
 
-3. Wrote RESEARCH_2_MIXIN_ERGONOMICS.md — deep dive into:
-   - Pydantic mixin baseclasses for capability composition (full analysis)
-   - Other authoring patterns (decorators, builders, YAML, Protocol types)
-   - Developer ergonomics (6 interaction operations: inspect, inject, pause, correct, observe, understand)
-   - Schema diffusion as emergent inheritance (genome metaphor)
-   - Recommended authoring stack synthesis
+## Key decisions
 
-## Key decisions made
+1. v3 philosophy: specify the substrate only, let structure emerge.
+2. .pym scripts are the ONLY tool interface (enforced by Grail @external).
+3. Graph navigation via new graph_* externals in BootstrapExternals.
+4. Graph library: SQLite (M0-M3) + Rustworkx (M4+).
+5. Agent model: BootstrapAgent (flat runtime) + Capability enum (access control)
+   + mixin marker classes (capability composition at authoring time)
+   + AgentDefinition (Pydantic authoring model).
+6. YAML workspace definitions: the agent's cairn workspace IS its identity.
+   Contractual files: role.md, schema.yaml, capabilities.yaml.
+   Conventional files: notes.md, log.jsonl, todo.md, working_memory.md.
+7. schema.yaml format: version, name, capabilities, system, context steps,
+   tools, subscriptions, max_turns, termination.
+   Template vars: {node.*}, {agent.*}, {{role}}, {{notes}}.
+8. Composition: `extends` key (one level) + YAML anchors (inline reuse).
+   Capability presets in bootstrap/agents/capabilities/*.yaml.
+9. Pydantic bridge: developers write Pydantic AgentDefinition → serialized
+   to YAML. Agents write YAML → validated by AgentSchemaYaml.model_validate().
+   Same TurnSchema at runtime either way.
+10. Developer workflow: CRITICAL_RULES §5 — large docs use Write-append pattern,
+    NOT Edit text-matching inside the document.
 
-1. v3 is NOT "v2 + clarifications" — it's a fundamentally simpler document.
-   The philosophy shift: specify the substrate only, let structure emerge.
-
-2. The two clarifications that drove v3:
-   - .pym scripts are the ONLY tool interface (enforced by Grail @external)
-   - Agents need graph navigation (via new graph_* externals in BootstrapExternals)
-
-3. Deliberately left unspecified: node kinds, edge kinds, protocol state
-   machines, memory models, agent roles. These emerge from bootstrapping.
-
-4. Graph library recommendation: SQLite (M0-M3) + Rustworkx (M4+)
-   Options presented: Rustworkx+SQLite, NetworkX+SQLite, SQLite-only, Kuzu
-
-5. CairnExternals grounding: the v1 CairnExternals.as_externals() dict is the
-   exact enforcement mechanism. BootstrapExternals extends it with graph_* and
-   event ops. Mutation ops are role-gated.
-
-6. Agent model: BootstrapAgent (flat runtime) + Capability (enum) +
-   AgentDefinition (Pydantic authoring model with mixin composition).
-   Mixins are marker classes only (no fields) — clean diamond inheritance.
-   `capabilities_from_definition()` derives frozenset from MRO at activation.
-
-7. Developer ergonomics: 6 operations (inspect/inject/pause/correct/observe/understand)
-   all work via graph queries + cairn workspace reads. No opaque state.
-   AgentCatalog hot-reloads definitions from bootstrap/agents/*.py.
+## Process note (CRITICAL_RULES §5)
+For large documents:
+- Write ToC first, save to file
+- Append sections using Bash `cat >> file` or Write with growing content
+- NEVER use Edit to text-match inside a large document
 
 ## Output files
-/home/andrew/Documents/Projects/remora/bootstrap/PHASE2_V3_BOOTSTRAP_CONCEPT.md
-/home/andrew/Documents/Projects/remora/.scratch/projects/phase2-v3-concept/RESEARCH.md
-/home/andrew/Documents/Projects/remora/.scratch/projects/phase2-v3-concept/RESEARCH_2_MIXIN_ERGONOMICS.md
+bootstrap/PHASE2_V3_BOOTSTRAP_CONCEPT.md (updated with §6 Agent Model)
+.scratch/projects/phase2-v3-concept/RESEARCH.md
+.scratch/projects/phase2-v3-concept/RESEARCH_2_MIXIN_ERGONOMICS.md
+.scratch/projects/phase2-v3-concept/RESEARCH_3_YAML_WORKSPACE_DEFINITION.md
