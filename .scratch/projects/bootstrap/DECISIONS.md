@@ -226,3 +226,34 @@ dispatch in v1.
 **Rationale**: This keeps bootstrap progress deterministic with current v1
 subscription semantics while still appending canonical `AgentNeededEvent`
 records to EventStore for observability and replay.
+
+## D26: Runtime DB locations are resolved from one shared `RuntimePaths` object
+**Decision**: Added `RuntimePaths.from_config(config, project_root=...)` and
+used it for both LSP startup and bootstrap runner path resolution.
+
+Canonical paths:
+- EventStore DB: `<swarm_root>/events/events.db`
+- subscriptions DB: `<swarm_root>/subscriptions.db`
+- bootstrap root: `<project_root>/bootstrap`
+
+**Rationale**: Prevents drift between subsystems and keeps DB location changes
+driven by one config-derived path resolver instead of duplicated literals.
+
+## D27: Companion workspace ownership is assignment-aware
+**Decision**: Companion now resolves workspace owner IDs by checking for
+`kind=agent` graph nodes with `attrs.assigned_node_id == <focused_node_id>`.
+When found, the node sidebar uses that bootstrap agent workspace; otherwise it
+falls back to the node ID workspace.
+
+**Rationale**: This bridges bootstrap-authored workspace identity files
+(`role.md`, `schema.yaml`, synthesized tools, etc.) into the Neovim sidebar for
+the corresponding focused code node without changing node identity semantics.
+
+## D28: LSP starts bootstrap runtime loop when bootstrap is enabled
+**Decision**: `_run_server()` configures `BootstrapRunner` with shared LSP
+`EventStore`, `SubscriptionRegistry`, and `CairnWorkspaceService`, then starts
+`run_forever()` on LSP `initialized` (guarded by `config.bootstrap_enabled` and
+bootstrap-root existence).
+
+**Rationale**: This makes bootstrap reactive assignment runnable in real Neovim
+sessions while avoiding duplicate runtime primitives and extra DB wiring.

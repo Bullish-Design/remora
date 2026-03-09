@@ -1,30 +1,37 @@
 """Core Remora runtime (framework-agnostic)."""
 
 from remora.core.agents.agent_context import AgentContext
-from remora.core.agents.agent_node import AgentNode, ToolSchema as AgentToolSchema
+from remora.core.agents.agent_node import AgentNode
+from remora.core.agents.agent_node import ToolSchema as AgentToolSchema
+from remora.core.agents.cairn_bridge import CairnWorkspaceService
+from remora.core.agents.cairn_externals import CairnExternals
+from remora.core.agents.kernel_factory import create_kernel
 from remora.core.agents.state_manager import (
     AgentExecutionMetrics,
     AgentMemory,
     AgentTurnState,
+    RemoraStateManager,
 )
-from remora.core.agents.cairn_bridge import CairnWorkspaceService
-from remora.core.agents.cairn_externals import CairnExternals
-from remora.core.agents.kernel_factory import create_kernel
-from remora.core.manifest import BundleManifest, load_manifest
+from remora.core.agents.swarm_executor import SwarmExecutor
+from remora.core.agents.workspace import AgentWorkspace, CairnDataProvider
+from remora.core.code.discovery import (
+    LANGUAGE_EXTENSIONS,
+    CSTNode,
+    compute_node_id,
+    compute_source_hash,
+    discover,
+)
+from remora.core.code.projections import NodeProjection
+from remora.core.code.reconciler import (
+    get_agent_dir,
+    get_agent_workspace_path,
+    reconcile_on_startup,
+)
 from remora.core.config import (
     Config,
     ConfigError,
     load_config,
     serialize_config,
-)
-from remora.core.agents.state_manager import RemoraStateManager
-
-from remora.core.code.discovery import (
-    CSTNode,
-    LANGUAGE_EXTENSIONS,
-    compute_node_id,
-    compute_source_hash,
-    discover,
 )
 from remora.core.errors import (
     DiscoveryError,
@@ -52,17 +59,11 @@ from remora.core.events.kernel_events import (
     ToolResultEvent,
     TurnCompleteEvent,
 )
-from remora.core.store.event_store import EventStore
-from remora.core.code.projections import NodeProjection
-from remora.core.code.reconciler import (
-    get_agent_dir,
-    get_agent_workspace_path,
-    reconcile_on_startup,
-)
 from remora.core.events.subscriptions import Subscription, SubscriptionPattern, SubscriptionRegistry
-from remora.core.agents.swarm_executor import SwarmExecutor
+from remora.core.manifest import BundleManifest, load_manifest
+from remora.core.runtime_paths import RuntimePaths
+from remora.core.store.event_store import EventStore
 from remora.core.tools import RemoraGrailTool, build_virtual_fs, discover_grail_tools
-from remora.core.agents.workspace import AgentWorkspace, CairnDataProvider
 
 __all__ = [
     "AgentCompleteEvent",
@@ -80,6 +81,7 @@ __all__ = [
     "CSTNode",
     "CairnDataProvider",
     "CairnExternals",
+    "CairnWorkspaceService",
     "ContentChangedEvent",
     "create_kernel",
     "DiscoveryError",
@@ -112,6 +114,7 @@ __all__ = [
     "ToolCallEvent",
     "ToolResultEvent",
     "TurnCompleteEvent",
+    "RuntimePaths",
     "WorkspaceError",
     "build_virtual_fs",
     "compute_node_id",
@@ -121,5 +124,6 @@ __all__ = [
     "get_agent_dir",
     "get_agent_workspace_path",
     "load_config",
+    "reconcile_on_startup",
     "serialize_config",
 ]

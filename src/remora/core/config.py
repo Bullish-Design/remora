@@ -17,8 +17,8 @@ import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from remora.utils import PathLike, normalize_path
 from remora.core.errors import ConfigError
+from remora.utils import PathLike, normalize_path
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,8 @@ class Config(BaseSettings):
     max_trigger_depth: int = 5
     trigger_cooldown_ms: int = 1000
     chat_history_limit: int = 5
+    bootstrap_enabled: bool = True
+    bootstrap_poll_interval_s: float = 0.5
 
     workspace_ignore_patterns: tuple[str, ...] = DEFAULT_IGNORE_PATTERNS
     workspace_ignore_dotfiles: bool = True
@@ -92,7 +94,7 @@ def load_config(path: PathLike | None = None) -> Config:
         with open(config_path) as f:
             data = yaml.safe_load(f) or {}
     except yaml.YAMLError as e:
-        raise ConfigError(f"Invalid YAML in {config_path}: {e}")
+        raise ConfigError(f"Invalid YAML in {config_path}: {e}") from e
 
     return _build_config(data)
 

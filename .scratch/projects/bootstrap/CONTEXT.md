@@ -1,6 +1,6 @@
 # Bootstrap Implementation Project Context
 
-## Status: IN PROGRESS — M0..M8 committed+pushed; evaluating neovim runtime wiring gaps
+## Status: IN PROGRESS — M0..M8 committed+pushed; M9 runtime wiring complete (commit pending)
 
 ## Output
 - `.scratch/projects/bootstrap/IMPLEMENTATION_GUIDE.md` — implementation spec
@@ -50,6 +50,29 @@
     - run-forever stop behavior test
 - M8 runner changes were committed and pushed:
   - commit `c8814e5`
+- M9 real-runtime Neovim wiring is implemented (pending commit):
+  - added shared path resolver:
+    - `src/remora/core/runtime_paths.py` (`RuntimePaths.from_config`)
+  - updated bootstrap runner:
+    - `src/remora/bootstrap/runner.py` now uses `RuntimePaths`
+    - supports shared `EventStore` / `SubscriptionRegistry` / `CairnWorkspaceService`
+      when embedded in LSP runtime
+  - updated LSP startup:
+    - `src/remora/lsp/__main__.py` now derives paths via `RuntimePaths`
+    - configures and starts `BootstrapRunner` loop on `initialized`
+    - bootstrap task cleanup wired into shutdown path
+  - updated companion workspace routing:
+    - `src/remora/companion/startup.py` resolves workspace owner from assigned
+      bootstrap agent (`kind=agent`, `assigned_node_id=<node_id>`)
+    - `src/remora/companion/registry.py` supports owner resolver + rebinding when
+      ownership changes, so sidebars can reflect bootstrap agent workspace files
+  - updated config/common exports:
+    - `src/remora/core/config.py` adds `bootstrap_enabled`, `bootstrap_poll_interval_s`
+    - `src/remora/core/__init__.py` exports `RuntimePaths`
+  - test updates:
+    - added `tests/unit/test_runtime_paths.py`
+    - extended `tests/unit/companion/test_registry.py` for owner resolver behavior
+    - adjusted `tests/unit/bootstrap/test_runner.py` subscriptions path expectation
 
 - Previously implemented M5 artifacts:
   - added `src/remora/companion/sidebar/workspace.py`
@@ -115,6 +138,10 @@
 - `devenv shell -- pytest tests/unit/bootstrap/test_runner.py tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_coordinator.py -q`
 - `devenv shell -- pytest tests/unit/bootstrap/ -q`
 - `devenv shell -- pytest tests/integration/test_bootstrap_loop.py -q`
+- `devenv shell -- pytest tests/unit/test_runtime_paths.py tests/unit/bootstrap/test_runner.py tests/unit/companion/test_registry.py tests/unit/companion/test_startup.py -q`
+- `devenv shell -- pytest tests/unit/bootstrap/ tests/unit/companion/ -q`
+- `devenv shell -- pytest tests/unit/test_lsp_startup_sequence.py tests/unit/test_lsp_background_scan_manifest.py -q`
+- `devenv shell -- pytest tests/unit/test_runtime_paths.py tests/unit/bootstrap/test_runner.py tests/unit/companion/test_registry.py tests/unit/test_lsp_startup_sequence.py tests/unit/test_lsp_background_scan_manifest.py tests/integration/test_bootstrap_loop.py -q`
 
 ## Key decisions captured (see DECISIONS.md)
 - D19: coordinator assignment source is `agent.attrs.assigned_node_id`
@@ -124,11 +151,12 @@
 - D23: workspace sidebar section renders only when at least one bootstrap panel has content
 - D24: tool-synthesis events are emitted by activation-time before/after workspace tool diff
 - D25: bootstrap runner run-once flow is coordinator pass + direct activation (no trigger-queue dependency for initial AgentNeeded dispatch)
+- D26: LSP + bootstrap runner derive DB/layout paths from shared `RuntimePaths`
+- D27: companion workspace ownership resolves to assigned bootstrap agent when available
+- D28: LSP starts bootstrap runner loop on initialized when bootstrap is enabled
 
 ## Next step
-- Close remaining real-runtime wiring gaps (bootstrap runner startup integration,
-  bootstrap agent workspace visibility in companion sidebar, packaging of
-  bootstrap schema/tool assets).
+- Commit/push M9 runtime wiring changes.
 
 ## Post-plan verification pass (current coding pass)
 - Added new integration test:

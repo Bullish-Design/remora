@@ -340,3 +340,60 @@
 
 ### commit
 - `c8814e5` — Add bootstrap runner runtime loop and tests
+
+## 2026-03-08 — M9 implementation (completed; commit pending)
+
+### core files added
+- `src/remora/core/runtime_paths.py`
+  - Added `RuntimePaths` dataclass with `from_config(...)` resolver for:
+    - project root
+    - swarm root
+    - EventStore path
+    - subscriptions path
+    - bootstrap root
+    - models root
+
+### core files changed
+- `src/remora/core/config.py`
+  - Added `bootstrap_enabled` and `bootstrap_poll_interval_s` config fields.
+- `src/remora/core/__init__.py`
+  - Exported `RuntimePaths`.
+
+### bootstrap files changed
+- `src/remora/bootstrap/runner.py`
+  - Switched path resolution to `RuntimePaths`.
+  - Added support for shared runtime primitives (`event_store`,
+    `subscriptions`, `workspace_service`) for LSP integration.
+  - Added ownership-aware close behavior (do not close shared resources).
+
+### lsp files changed
+- `src/remora/lsp/__main__.py`
+  - `_prepare()` now derives paths via `RuntimePaths`.
+  - `_run_server()` accepts shared `config` + `runtime_paths`.
+  - Configures and starts `BootstrapRunner` loop on LSP initialized event.
+  - Adds bootstrap task cancellation/cleanup on shutdown.
+
+### companion files changed
+- `src/remora/companion/startup.py`
+  - Added assignment-aware workspace owner resolver using graph lookup:
+    `kind=agent` + `assigned_node_id=<node_id>`.
+- `src/remora/companion/registry.py`
+  - Added injectable `workspace_owner_resolver`.
+  - Added workspace-owner tracking and re-creation when ownership changes.
+
+### tests added/changed
+- `tests/unit/test_runtime_paths.py` (new)
+  - default and override path resolution coverage.
+- `tests/unit/bootstrap/test_runner.py`
+  - updated expected subscriptions path.
+- `tests/unit/companion/test_registry.py`
+  - added resolver usage and owner-change rebind tests.
+- Existing LSP startup tests exercised updated `_run_server` flow.
+
+### validation commands run
+- `devenv shell -- ruff check src/remora/core/runtime_paths.py src/remora/core/config.py src/remora/bootstrap/runner.py src/remora/lsp/__main__.py src/remora/companion/registry.py src/remora/companion/startup.py tests/unit/bootstrap/test_runner.py tests/unit/test_runtime_paths.py tests/unit/companion/test_registry.py`
+- `devenv shell -- pytest tests/unit/test_runtime_paths.py tests/unit/bootstrap/test_runner.py tests/unit/companion/test_registry.py tests/unit/companion/test_startup.py -q`
+- `devenv shell -- pytest tests/unit/bootstrap/ tests/unit/companion/ -q`
+- `devenv shell -- pytest tests/unit/test_lsp_startup_sequence.py tests/unit/test_lsp_background_scan_manifest.py -q`
+- `devenv shell -- pytest tests/integration/test_bootstrap_loop.py -q`
+- `devenv shell -- pytest tests/unit/test_runtime_paths.py tests/unit/bootstrap/test_runner.py tests/unit/companion/test_registry.py tests/unit/test_lsp_startup_sequence.py tests/unit/test_lsp_background_scan_manifest.py tests/integration/test_bootstrap_loop.py -q`

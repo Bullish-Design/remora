@@ -1,6 +1,7 @@
 """Tests for NodeAgentRegistry."""
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from remora.companion.config import CompanionConfig
 from remora.companion.registry import NodeAgentRegistry
@@ -84,3 +85,59 @@ async def test_explicit_evict():
         assert registry.get("node_abc") is not None
         await registry.evict("node_abc")
         assert registry.get("node_abc") is None
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_uses_workspace_owner_resolver():
+    cairn = MagicMock()
+    cairn.get_agent_workspace = AsyncMock(return_value=MagicMock())
+    event_bus = AsyncMock()
+    config = CompanionConfig(max_active_agents=5)
+    resolver = AsyncMock(return_value="agent-node_abc")
+    registry = NodeAgentRegistry(
+        cairn_service=cairn,
+        event_bus=event_bus,
+        config=config,
+        workspace_owner_resolver=resolver,
+    )
+    node = make_node()
+
+    with patch("remora.companion.registry.NodeAgent") as MockAgent:
+        mock_instance = AsyncMock()
+        mock_instance._last_visited = 1000.0
+        MockAgent.return_value = mock_instance
+        await registry.get_or_create(node)
+
+    resolver.assert_awaited()
+    cairn.get_agent_workspace.assert_awaited_once_with("agent-node_abc")
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_recreates_agent_when_workspace_owner_changes():
+    cairn = MagicMock()
+    cairn.get_agent_workspace = AsyncMock(side_effect=[MagicMock(), MagicMock()])
+    event_bus = AsyncMock()
+    config = CompanionConfig(max_active_agents=5)
+    resolver = AsyncMock(side_effect=["agent-node_abc", "agent-node_abc", "agent-other", "agent-other"])
+    registry = NodeAgentRegistry(
+        cairn_service=cairn,
+        event_bus=event_bus,
+        config=config,
+        workspace_owner_resolver=resolver,
+    )
+    node = make_node()
+
+    with patch("remora.companion.registry.NodeAgent") as MockAgent:
+        first = AsyncMock()
+        first._last_visited = 1.0
+        second = AsyncMock()
+        second._last_visited = 2.0
+        MockAgent.side_effect = [first, second]
+
+        a = await registry.get_or_create(node)
+        b = await registry.get_or_create(node)
+
+    assert a is first
+    assert b is second
+    assert cairn.get_agent_workspace.await_args_list[0].args[0] == "agent-node_abc"
+    assert cairn.get_agent_workspace.await_args_list[1].args[0] == "agent-other"

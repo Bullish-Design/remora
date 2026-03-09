@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -40,8 +41,31 @@ async def start_companion(
     config: CompanionConfig | None = None,
 ) -> NodeAgentRegistry:
     """Start the companion system and return the NodeAgentRegistry."""
+    async def _resolve_workspace_owner(node) -> str:
+        try:
+            raw = await event_store.nodes.read_graph(
+                {"match": {"kind": "agent", "assigned_node_id": node.node_id}}
+            )
+            rows = json.loads(raw) if raw else []
+            if isinstance(rows, list):
+                agent_ids = sorted(
+                    row.get("id")
+                    for row in rows
+                    if isinstance(row, dict) and isinstance(row.get("id"), str) and row.get("id")
+                )
+                if agent_ids:
+                    return agent_ids[0]
+        except Exception:
+            logger.debug("workspace owner lookup failed for %s", node.node_id, exc_info=True)
+        return node.node_id
+
     cfg = config or CompanionConfig()
-    registry = NodeAgentRegistry(cairn_service=cairn_service, event_bus=event_bus, config=cfg)
+    registry = NodeAgentRegistry(
+        cairn_service=cairn_service,
+        event_bus=event_bus,
+        config=cfg,
+        workspace_owner_resolver=_resolve_workspace_owner,
+    )
     router = NodeAgentRouter(registry=registry, event_store=event_store)
     router.subscribe(event_bus)
     registry._router = router

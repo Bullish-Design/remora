@@ -33,7 +33,7 @@ def test_runner_default_paths_use_existing_event_store_layout(tmp_path: Path) ->
     runner = BootstrapRunner(config)
 
     assert runner.event_store_path == tmp_path / ".remora" / "events" / "events.db"
-    assert runner.subscriptions_path == tmp_path / ".remora" / "events" / "subscriptions.db"
+    assert runner.subscriptions_path == tmp_path / ".remora" / "subscriptions.db"
 
 
 @pytest.mark.asyncio

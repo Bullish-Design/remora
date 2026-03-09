@@ -86,16 +86,27 @@ def _run_server(
     subscriptions=None,
     event_bus=None,
     cairn_service=None,
+    config=None,
+    runtime_paths=None,
 ) -> None:
     """Start the Remora LSP server with agent runner."""
     t0 = time.monotonic()
     log = _setup_logging()
     log.info("remora-lsp starting (pid=%d)", __import__("os").getpid())
 
-    log.debug("Loading configuration ...")
-    from remora.core.config import load_config
+    if config is None:
+        log.debug("Loading configuration ...")
+        from pathlib import Path
 
-    config = load_config()
+        from remora.core.config import load_config
+        from remora.core.runtime_paths import RuntimePaths
+
+        config = load_config()
+        runtime_paths = RuntimePaths.from_config(config, project_root=Path.cwd())
+    elif runtime_paths is None:
+        from remora.core.runtime_paths import RuntimePaths
+
+        runtime_paths = RuntimePaths.from_config(config)
     log.info("Config loaded: model=%s base_url=%s", config.model_default, config.model_base_url)
 
     log.debug("Importing remora.lsp.server ...")
@@ -121,13 +132,46 @@ def _run_server(
     server.subscriptions = subscriptions
     server.companion_registry = None
     server.companion_router = None
+    server.bootstrap_runner = None
     server._companion_event_bus = event_bus
     server._companion_cairn_service = cairn_service
+    server._remora_bootstrap_poll_interval_s = float(getattr(config, "bootstrap_poll_interval_s", 0.5))
 
     log.debug("Creating AgentRunner ...")
     runner = AgentRunner(server=server, config=config)
     server.runner = runner
     log.debug("AgentRunner created")
+
+    if (
+        event_store is not None
+        and subscriptions is not None
+        and cairn_service is not None
+        and bool(getattr(config, "bootstrap_enabled", True))
+    ):
+        from remora.bootstrap.runner import BootstrapRunner
+
+        if runtime_paths is not None and runtime_paths.bootstrap_root.exists():
+            bootstrap_runner = BootstrapRunner(
+                config,
+                project_root=runtime_paths.project_root,
+                bootstrap_root=runtime_paths.bootstrap_root,
+                event_store_path=runtime_paths.event_store_path,
+                subscriptions_path=runtime_paths.subscriptions_path,
+                event_store=event_store,
+                subscriptions=subscriptions,
+                workspace_service=cairn_service,
+            )
+            server.bootstrap_runner = bootstrap_runner
+            log.info(
+                "Bootstrap runner configured (bootstrap_root=%s poll_interval_s=%.2f)",
+                runtime_paths.bootstrap_root,
+                server._remora_bootstrap_poll_interval_s,
+            )
+        else:
+            log.info(
+                "Bootstrap runner disabled: bootstrap root not found (%s)",
+                runtime_paths.bootstrap_root if runtime_paths is not None else "<unknown>",
+            )
 
     if not getattr(server, "_remora_initialized_handler_registered", False):
         server._remora_initialized_handler_registered = True
@@ -163,6 +207,16 @@ def _run_server(
                         startup_log.warning("startup checkpoint failed", exc_info=True)
                     startup_log.info("Starting EventStore trigger bridge...")
                     asyncio.ensure_future(active_runner.run_from_event_store(ls.event_store))
+
+            bootstrap_runner = getattr(ls, "bootstrap_runner", None)
+            if bootstrap_runner is not None:
+                bootstrap_task = getattr(ls, "_remora_bootstrap_task", None)
+                if bootstrap_task is None or bootstrap_task.done():
+                    poll_interval = max(0.0, float(getattr(ls, "_remora_bootstrap_poll_interval_s", 0.5)))
+                    startup_log.info("Starting bootstrap runner loop...")
+                    ls._remora_bootstrap_task = asyncio.ensure_future(
+                        bootstrap_runner.run_forever(poll_interval_s=poll_interval)
+                    )
             event_bus_local = getattr(ls, "_companion_event_bus", None)
             cairn_svc = getattr(ls, "_companion_cairn_service", None)
             cairn_ready = False
@@ -273,6 +327,18 @@ def _run_server(
                 _run_async_cleanup(runner.close())
         except Exception:
             log.warning("runner close failed", exc_info=True)
+        bootstrap_task = getattr(server, "_remora_bootstrap_task", None)
+        if bootstrap_task is not None and not bootstrap_task.done():
+            bootstrap_task.cancel()
+        bootstrap_runner = getattr(server, "bootstrap_runner", None)
+        if bootstrap_runner is not None:
+            try:
+                if hasattr(bootstrap_runner, "stop"):
+                    bootstrap_runner.stop()
+                if hasattr(bootstrap_runner, "close"):
+                    _run_async_cleanup(bootstrap_runner.close())
+            except Exception:
+                log.warning("bootstrap runner close failed", exc_info=True)
         if event_store is not None:
             try:
                 _run_async_cleanup(event_store.close())
@@ -296,17 +362,21 @@ def main() -> None:
     async def _prepare():
         prepare_t0 = time.monotonic()
         _bootstrap_log("_prepare: begin")
+        from pathlib import Path
+
         from remora.core.agents.cairn_bridge import CairnWorkspaceService, SyncMode
         from remora.core.code.projections import NodeProjection
         from remora.core.config import load_config
         from remora.core.events.event_bus import EventBus
         from remora.core.events.subscriptions import SubscriptionRegistry
+        from remora.core.runtime_paths import RuntimePaths
         from remora.core.store.event_store import EventStore
 
         root = Path.cwd()
-        swarm_path = root / ".remora"
-        event_store_path = swarm_path / "events" / "events.db"
-        subscriptions_path = swarm_path / "subscriptions.db"
+        config = load_config()
+        runtime_paths = RuntimePaths.from_config(config, project_root=root)
+        event_store_path = runtime_paths.event_store_path
+        subscriptions_path = runtime_paths.subscriptions_path
         _bootstrap_log(f"_prepare: root={root}")
         _bootstrap_log(f"_prepare: event_store_path={event_store_path}")
 
@@ -315,7 +385,7 @@ def main() -> None:
         _bootstrap_log("_prepare: EventBus + SubscriptionRegistry created")
         from remora.extensions import extension_matches, load_extensions
         extensions_t0 = time.monotonic()
-        extensions = load_extensions(swarm_path / "models")
+        extensions = load_extensions(runtime_paths.models_root)
         _bootstrap_log(
             "_prepare: extensions loaded "
             f"(count={len(extensions)} elapsed_ms={(time.monotonic() - extensions_t0) * 1000:.1f})"
@@ -342,7 +412,6 @@ def main() -> None:
             "_prepare: EventStore initialize complete "
             f"(elapsed_ms={(time.monotonic() - event_store_t0) * 1000:.1f})"
         )
-        config = load_config()
         _bootstrap_log(
             "_prepare: config loaded "
             f"(model={config.model_default} base_url={config.model_base_url})"
@@ -375,7 +444,7 @@ def main() -> None:
             f"_prepare: done total_elapsed_ms={(time.monotonic() - prepare_t0) * 1000:.1f}"
         )
 
-        return event_store, subscriptions, event_bus, cairn_service
+        return event_store, subscriptions, event_bus, cairn_service, config, runtime_paths
 
     root = Path.cwd()
     swarm_path = root / ".remora"
@@ -424,13 +493,15 @@ def main() -> None:
 
     try:
         _bootstrap_log("main: calling asyncio.run(_prepare())")
-        event_store, subscriptions, event_bus, cairn_service = asyncio.run(_prepare())
+        event_store, subscriptions, event_bus, cairn_service, config, runtime_paths = asyncio.run(_prepare())
         _bootstrap_log("main: _prepare complete, entering _run_server")
         _run_server(
             event_store=event_store,
             subscriptions=subscriptions,
             event_bus=event_bus,
             cairn_service=cairn_service,
+            config=config,
+            runtime_paths=runtime_paths,
         )
         _bootstrap_log("main: _run_server exited")
     except Exception as exc:

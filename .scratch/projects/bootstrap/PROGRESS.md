@@ -1,6 +1,6 @@
 # Bootstrap Implementation Progress
 
-## Status: M8 COMPLETE + committed/pushed
+## Status: M9 implementation complete (commit pending)
 
 ## Tasks
 
@@ -63,3 +63,8 @@
 | M8.3 | Implement `src/remora/bootstrap/runner.py` + package exports | done |
 | M8.4 | Run targeted lint/tests and adjust notes | done |
 | M8.5 | Commit/push M8 implementation | done |
+| M9.1 | Wire bootstrap runner into LSP startup for real Neovim runtime | done |
+| M9.2 | Add common runtime path resolver for EventStore/subscriptions locations | done |
+| M9.3 | Route companion node workspace to assigned bootstrap agent workspace | done |
+| M9.4 | Add/adjust tests for runtime paths + companion workspace owner mapping | done |
+| M9.5 | Run targeted lint/tests and commit/push M9 changes | pending |

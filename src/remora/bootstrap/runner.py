@@ -15,6 +15,7 @@ from remora.core.agents.cairn_bridge import CairnWorkspaceService
 from remora.core.code.projections import NodeProjection
 from remora.core.config import Config
 from remora.core.events.subscriptions import SubscriptionRegistry
+from remora.core.runtime_paths import RuntimePaths
 from remora.core.store.event_store import EventStore
 
 logger = logging.getLogger(__name__)
@@ -32,24 +33,30 @@ class BootstrapRunner:
         event_store_path: Path | None = None,
         subscriptions_path: Path | None = None,
         coordinator_id: str = "coordinator",
+        event_store: EventStore | None = None,
+        subscriptions: SubscriptionRegistry | None = None,
+        workspace_service: CairnWorkspaceService | None = None,
     ) -> None:
         self.config = config
-        self.project_root = (project_root or Path(config.project_path)).resolve()
-        self.bootstrap_root = bootstrap_root or (self.project_root / "bootstrap")
+        self.paths = RuntimePaths.from_config(
+            config,
+            project_root=project_root,
+            bootstrap_root=bootstrap_root,
+        )
+        self.project_root = self.paths.project_root
+        self.bootstrap_root = self.paths.bootstrap_root
         self.coordinator_id = coordinator_id
         self.swarm_id = config.swarm_id
 
-        swarm_root = Path(config.swarm_root)
-        if not swarm_root.is_absolute():
-            swarm_root = self.project_root / swarm_root
-        events_root = swarm_root / "events"
+        self.event_store_path = event_store_path or self.paths.event_store_path
+        self.subscriptions_path = subscriptions_path or self.paths.subscriptions_path
 
-        self.event_store_path = event_store_path or (events_root / "events.db")
-        self.subscriptions_path = subscriptions_path or (events_root / "subscriptions.db")
-
-        self._subscriptions: SubscriptionRegistry | None = None
-        self._event_store: EventStore | None = None
-        self._workspace_service: CairnWorkspaceService | None = None
+        self._subscriptions: SubscriptionRegistry | None = subscriptions
+        self._event_store: EventStore | None = event_store
+        self._workspace_service: CairnWorkspaceService | None = workspace_service
+        self._owns_subscriptions = subscriptions is None
+        self._owns_event_store = event_store is None
+        self._owns_workspace_service = workspace_service is None
         self._initialized = False
         self._running = False
 
@@ -75,28 +82,33 @@ class BootstrapRunner:
         if self._initialized:
             return
 
-        subscriptions = SubscriptionRegistry(self.subscriptions_path)
-        await subscriptions.initialize()
+        subscriptions = self._subscriptions
+        if subscriptions is None:
+            subscriptions = SubscriptionRegistry(self.subscriptions_path)
+            await subscriptions.initialize()
+            self._subscriptions = subscriptions
 
-        event_store = EventStore(
-            self.event_store_path,
-            subscriptions=subscriptions,
-            projection=NodeProjection(),
-        )
-        await event_store.initialize()
+        event_store = self._event_store
+        if event_store is None:
+            event_store = EventStore(
+                self.event_store_path,
+                subscriptions=subscriptions,
+                projection=NodeProjection(),
+            )
+            await event_store.initialize()
+            self._event_store = event_store
 
-        workspace_service = CairnWorkspaceService(
-            self.config,
-            graph_id=self.swarm_id,
-            project_root=self.project_root,
-        )
+        workspace_service = self._workspace_service
+        if workspace_service is None:
+            workspace_service = CairnWorkspaceService(
+                self.config,
+                graph_id=self.swarm_id,
+                project_root=self.project_root,
+            )
+            self._workspace_service = workspace_service
 
         await seed_coordinator_node(event_store, coordinator_id=self.coordinator_id)
         await seed_modules_if_empty(event_store, self.project_root, swarm_id=self.swarm_id)
-
-        self._subscriptions = subscriptions
-        self._event_store = event_store
-        self._workspace_service = workspace_service
         self._initialized = True
 
     def _build_agent_needed_event(self, *, node_id: str, agent_id: str) -> BootstrapEvent:
@@ -162,17 +174,17 @@ class BootstrapRunner:
     async def close(self) -> None:
         self._running = False
 
-        if self._workspace_service is not None:
+        if self._workspace_service is not None and self._owns_workspace_service:
             with contextlib.suppress(Exception):
                 await self._workspace_service.close()
             self._workspace_service = None
 
-        if self._event_store is not None:
+        if self._event_store is not None and self._owns_event_store:
             with contextlib.suppress(Exception):
                 await self._event_store.close()
             self._event_store = None
 
-        if self._subscriptions is not None:
+        if self._subscriptions is not None and self._owns_subscriptions:
             with contextlib.suppress(Exception):
                 await self._subscriptions.close()
             self._subscriptions = None
