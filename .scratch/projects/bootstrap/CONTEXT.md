@@ -1,6 +1,6 @@
 # Bootstrap Implementation Project Context
 
-## Status: IN PROGRESS — M0..M7 committed+pushed; M8 runner wiring complete (commit pending)
+## Status: IN PROGRESS — M0..M8 committed+pushed; evaluating neovim runtime wiring gaps
 
 ## Output
 - `.scratch/projects/bootstrap/IMPLEMENTATION_GUIDE.md` — implementation spec
@@ -32,7 +32,7 @@
 - M7 verification artifacts were committed and pushed:
   - commit `ec5912b`
   - includes `.grail/add_tool/check.json` metadata churn (user-approved)
-- M8 bootstrap runtime wiring was implemented (pending commit):
+- M8 bootstrap runtime wiring was implemented:
   - added `src/remora/bootstrap/runner.py`
     - `BootstrapRunner` with init paths for existing DB layout
       (`.remora/events/events.db`, `.remora/events/subscriptions.db`)
@@ -48,6 +48,8 @@
     - default path layout test
     - run-once orchestration test (emit + handle)
     - run-forever stop behavior test
+- M8 runner changes were committed and pushed:
+  - commit `c8814e5`
 
 - Previously implemented M5 artifacts:
   - added `src/remora/companion/sidebar/workspace.py`
@@ -124,7 +126,9 @@
 - D25: bootstrap runner run-once flow is coordinator pass + direct activation (no trigger-queue dependency for initial AgentNeeded dispatch)
 
 ## Next step
-- Commit/push M8 runner implementation.
+- Close remaining real-runtime wiring gaps (bootstrap runner startup integration,
+  bootstrap agent workspace visibility in companion sidebar, packaging of
+  bootstrap schema/tool assets).
 
 ## Post-plan verification pass (current coding pass)
 - Added new integration test:

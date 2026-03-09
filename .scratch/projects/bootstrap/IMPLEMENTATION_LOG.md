@@ -299,7 +299,7 @@
 - `devenv shell -- pytest tests/integration/test_bootstrap_loop.py -q`
 - `devenv shell -- pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q`
 
-## 2026-03-08 — M8 implementation (completed; commit pending)
+## 2026-03-08 — M8 implementation (completed)
 
 ### bootstrap files added
 - `src/remora/bootstrap/runner.py`
@@ -337,3 +337,6 @@
 - `devenv shell -- pytest tests/unit/bootstrap/test_runner.py tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_coordinator.py -q`
 - `devenv shell -- pytest tests/unit/bootstrap/ -q`
 - `devenv shell -- pytest tests/integration/test_bootstrap_loop.py -q`
+
+### commit
+- `c8814e5` — Add bootstrap runner runtime loop and tests
