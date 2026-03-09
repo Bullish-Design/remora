@@ -1,0 +1,16 @@
+@external
+async def graph_read(selector: dict) -> str: ...
+
+node_id: str = Input("node_id")
+direction: str = Input("direction")
+
+async def graph_neighbors() -> str:
+    """Get the neighbors of a node.
+    direction: 'in' | 'out' | 'both'
+    For code nodes, neighbors are callers/callees from the code topology.
+    For generic nodes, neighbors are connected via graph_edges.
+    Returns JSON array of {id, kind, attrs, edge_kind} objects."""
+    return await graph_read({"neighbors": node_id, "dir": direction})
+
+
+await graph_neighbors()

@@ -1,0 +1,14 @@
+@external
+async def graph_read(selector: dict) -> str: ...
+
+kind: str = Input("kind")
+
+async def graph_find_nodes() -> str:
+    """Find all nodes in the graph with the given kind.
+    Works for both code kinds (function, class, module, method, file)
+    and custom kinds (agent, task, etc.).
+    Returns JSON array of {id, kind, attrs} objects."""
+    return await graph_read({"match": {"kind": kind}})
+
+
+await graph_find_nodes()

@@ -1,0 +1,14 @@
+@external
+async def graph_read(selector: dict) -> str: ...
+
+node_id: str = Input("node_id")
+
+async def graph_node() -> str:
+    """Get a single node from the shared graph by ID.
+    Works for both code nodes (functions, classes, modules) and
+    generic nodes (agents, tasks, etc.).
+    Returns JSON: {"id": str, "kind": str, "attrs": dict} or null if not found."""
+    return await graph_read({"node": node_id})
+
+
+await graph_node()

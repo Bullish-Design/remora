@@ -65,3 +65,83 @@ system_tools_dir (bootstrap/tools/) and an optional workspace_tools_dir
 
 **Rationale**: The v1 discover_grail_tools already handles compilation, error
 logging, and SwarmTool mixing. Reusing it avoids duplicating that logic.
+
+## D7: Reuse existing EventStore DB path
+**Decision**: Bootstrap reuses the existing EventStore SQLite database at:
+`.remora/events/events.db`
+
+**Rationale**: Avoids split-brain state and keeps bootstrap on the same event
+and node projection substrate as v1 runtime flows.
+
+## D8: Subscription matching strategy for bootstrap events
+**Decision**: Use a hybrid matching path in SubscriptionPattern:
+`event_name = getattr(event, "event_type", type(event).__name__)`.
+Keep class-name compatibility for existing events while enabling bootstrap's
+dynamic `event_type` envelope model.
+
+**Rationale**: Preserves v1 behavior while allowing bootstrap agents to emit
+new event types without requiring a new Python class per event.
+
+## D9: Event reads remain agent-centric for v1 bootstrap
+**Decision**: Keep `_event_read` agent-centric for now, using
+`EventStore.get_recent_events(agent_id, limit=...)`.
+Do not add node-centric event queries in M0.
+
+**Rationale**: Minimal, low-risk integration with current EventStore query
+shape. Node-centric query support can be added later as an additive feature.
+
+## D10: Code-neighbor reads are best-effort in v1
+**Decision**: Bootstrap graph neighbors for code nodes may use existing
+`caller_ids`/`callee_ids` when present, but bootstrap correctness must not
+depend on complete call-graph coverage in v1.
+
+**Rationale**: Current v1 projection does not reliably populate full call edges.
+Treating this as optional avoids coupling bootstrap correctness to incomplete
+topology data.
+
+## D11: Bootstrap graph stays in EventStore, not LSP indexer DB
+**Decision**: Add `graph_nodes`/`graph_edges` to EventStore DB and keep
+bootstrap graph logic there. Do not depend on `lsp.RemoraDB` edge tables for
+bootstrap core behavior.
+
+**Rationale**: Keeps bootstrap runtime adapter-agnostic (works outside LSP),
+and centralizes core state in EventStore.
+
+## D12: Use `file` as canonical code unit kind (with optional alias)
+**Decision**: Treat `file` as the canonical v1 code container kind in
+bootstrap. `module` can be supported as a compatibility alias in read paths.
+
+**Rationale**: Aligns with the current discovery and AgentNode model in v1,
+reducing translation overhead and ambiguity.
+
+## D13: Stage-gated implementation with verification at each milestone
+**Decision**: Implement and verify one milestone at a time (M0 first), with
+tests added and run between stages before moving forward.
+
+**Rationale**: Reduces integration risk and keeps behavior changes reviewable.
+
+## D14: Minimal extra v1 changes are allowed when required
+**Decision**: The initial "three modified v1 files" target is preferred, but
+minimal additional v1 changes are allowed if needed for correctness.
+Every extra v1 change must be documented in project notes.
+
+**Rationale**: Preserves focus while avoiding brittle constraints when runtime
+compatibility requires a small supporting change.
+
+## D15: Grail external names must be underscore-free in .pym scripts
+**Decision**: Bootstrap system tool `.pym` scripts declare externals as
+`cairn_read`, `cairn_write`, `graph_read`, `graph_write`, `event_read`,
+`event_write` (no leading `_`).
+
+**Rationale**: Current Grail/Monty type-checking treats references to
+leading-underscore external names as unresolved in script execution. Using
+underscore-free names keeps scripts executable.
+
+## D16: Bedrock exposes both canonical and Grail-safe external keys
+**Decision**: `build_bedrock()` returns both key sets:
+- canonical: `_cairn_*`, `_graph_*`, `_event_*`
+- aliases: `cairn_*`, `graph_*`, `event_*`
+
+**Rationale**: Preserves the original bedrock naming contract while enabling
+Grail scripts to bind to resolvable external names. This is additive and
+keeps v1/M0 behavior intact.

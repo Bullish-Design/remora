@@ -1,0 +1,16 @@
+@external
+async def graph_write(op: str, data: dict) -> str: ...
+
+from_id: str = Input("from_id")
+to_id: str = Input("to_id")
+kind: str = Input("kind")
+
+async def graph_add_edge() -> str:
+    """Add a directed edge to the shared graph.
+    from_id, to_id: node IDs (at least one must exist)
+    kind: edge type (e.g. 'assigned_to', 'produced', 'depends_on')
+    Returns JSON: {"from": str, "to": str, "kind": str}."""
+    return await graph_write("add_edge", {"from": from_id, "to": to_id, "kind": kind})
+
+
+await graph_add_edge()

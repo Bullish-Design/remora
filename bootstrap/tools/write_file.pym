@@ -1,0 +1,14 @@
+@external
+async def cairn_write(path: str, content: str) -> str: ...
+
+path: str = Input("path")
+content: str = Input("content")
+
+async def write_file() -> str:
+    """Write a file to this agent's workspace.
+    Creates the file if it does not exist; overwrites if it does.
+    Returns 'ok'."""
+    return await cairn_write(path, content)
+
+
+await write_file()

@@ -1,0 +1,13 @@
+@external
+async def event_read(selector: dict) -> str: ...
+
+node_id: str = Input("node_id")
+limit: int = Input("limit")
+
+async def read_recent_events() -> str:
+    """Read recent events involving a node (as sender or target).
+    Returns JSON array of event dicts, newest first."""
+    return await event_read({"node_id": node_id, "limit": limit})
+
+
+await read_recent_events()

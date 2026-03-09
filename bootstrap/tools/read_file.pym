@@ -1,0 +1,13 @@
+@external
+async def cairn_read(path: str) -> str: ...
+
+path: str = Input("path")
+
+async def read_file() -> str:
+    """Read a file from this agent's workspace.
+    Falls back to the stable (shared) workspace if the file is not in the
+    agent's own workspace. Returns empty string if not found."""
+    return await cairn_read(path)
+
+
+await read_file()

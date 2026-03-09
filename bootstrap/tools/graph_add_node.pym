@@ -1,0 +1,15 @@
+@external
+async def graph_write(op: str, data: dict) -> str: ...
+
+kind: str = Input("kind")
+attrs: dict = Input("attrs")
+
+async def graph_add_node() -> str:
+    """Add a node to the shared graph.
+    kind: the node type (e.g. 'agent', 'task') - not a code node kind
+    attrs: arbitrary JSON attributes
+    Returns JSON: {"id": str, "kind": str} with the generated ID."""
+    return await graph_write("add_node", {"kind": kind, "attrs": attrs})
+
+
+await graph_add_node()

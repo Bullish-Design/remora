@@ -1,6 +1,6 @@
 # Bootstrap Implementation Progress
 
-## Status: GUIDE COMPLETE
+## Status: M1 COMPLETE (awaiting review)
 
 ## Tasks
 
@@ -22,3 +22,18 @@
 | 14 | Write IMPLEMENTATION_GUIDE.md — §9 M6 Tool Synthesis | done |
 | 15 | Write IMPLEMENTATION_GUIDE.md — §10 Testing Plan | done |
 | 16 | Write CONTEXT.md | done |
+
+## Implementation execution (post-guide)
+
+| # | Task | Status |
+|---|------|--------|
+| M0.1 | Add EventStore graph tables (`graph_nodes`, `graph_edges`) | done |
+| M0.2 | Extend NodeStore with `read_graph()` / `write_graph()` | done |
+| M0.3 | Implement bootstrap bedrock module (`build_bedrock`, event/write/read closures) | done |
+| M0.4 | Add hybrid subscription event-name matching (`event_type` fallback) | done |
+| M0.5 | Add and run targeted M0 tests | done |
+| M1.1 | Extend `discover_grail_tools()` for bootstrap externals + workspace tools scan | done |
+| M1.2 | Add nine bootstrap system tools (`bootstrap/tools/*.pym`) | done |
+| M1.3 | Add M1 tests (tool compilation, externals, discovery behavior) | done |
+| M1.4 | Run targeted M0+M1 regression suites and ruff checks | done |
+| M2 | Turn schema loader and turn executor | pending |

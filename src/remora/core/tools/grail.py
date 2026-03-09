@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any
 
 import grail
-from structured_agents.types import ToolCall, ToolSchema, ToolResult
+from structured_agents.types import ToolCall, ToolResult, ToolSchema
 
 from remora.core.agents.agent_context import AgentContext
 from remora.core.tools.swarm import SwarmTool, build_swarm_tools
@@ -159,18 +160,25 @@ def build_virtual_fs(files: Mapping[str, str | bytes]) -> dict[str, str | bytes]
 def discover_grail_tools(
     agents_dir: Path,
     *,
-    context: AgentContext,
+    context: AgentContext | None = None,
+    externals: dict[str, Any] | None = None,
     files_provider: FilesProvider,
+    workspace_tools_dir: Path | None = None,
     limits: grail.Limits | None = None,
     grail_dir: str | Path | None = None,
 ) -> list[RemoraGrailTool | SwarmTool]:
     """Discover and load .pym tools from a directory.
 
-    Grail scripts receive the flat externals dict (via ``context.as_externals()``)
-    because the Grail runtime expects ``dict[str, Any]``. Swarm tools receive the
-    typed ``AgentContext`` directly.
+    Bootstrap mode: pass externals=bedrock_dict, context=None.
+    V1 mode: pass context=AgentContext, externals=None.
     """
-    externals_dict = context.as_externals()
+    if externals is not None:
+        externals_dict = externals
+    elif context is not None:
+        externals_dict = context.as_externals()
+    else:
+        raise ValueError("Either context or externals must be provided")
+
     tools: list[RemoraGrailTool | SwarmTool] = []
     if not agents_dir.exists():
         logger.warning("Agents directory does not exist: %s", agents_dir)
@@ -192,9 +200,41 @@ def discover_grail_tools(
             logger.warning("Failed to load %s: %s", pym_file, exc)
             continue
 
-    tools.extend(build_swarm_tools(context))
+    if workspace_tools_dir and workspace_tools_dir.exists():
+        system_externals = {
+            tool.schema.name: _make_tool_callable(tool)
+            for tool in tools
+            if isinstance(tool, RemoraGrailTool)
+        }
+        for pym_file in sorted(workspace_tools_dir.glob("*.pym")):
+            try:
+                tools.append(
+                    RemoraGrailTool(
+                        pym_file,
+                        externals=system_externals,
+                        files_provider=files_provider,
+                        limits=limits,
+                        grail_dir=grail_dir,
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Failed to load workspace tool %s: %s", pym_file, exc)
+                continue
+
+    if context is not None:
+        tools.extend(build_swarm_tools(context))
 
     return tools
 
 
-__all__ = ["GrailTool", "RemoraGrailTool", "build_virtual_fs", "discover_grail_tools"]
+def _make_tool_callable(tool: RemoraGrailTool) -> Callable[..., Awaitable[str]]:
+    """Wrap a tool as an async callable for use as @external in Grail scripts."""
+
+    async def _call(**kwargs: Any) -> str:
+        result = await tool.execute(kwargs, context=None)
+        return result.output
+
+    return _call
+
+
+__all__ = ["GrailTool", "RemoraGrailTool", "build_virtual_fs", "discover_grail_tools", "_make_tool_callable"]

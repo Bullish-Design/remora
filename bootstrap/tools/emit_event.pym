@@ -1,0 +1,14 @@
+@external
+async def event_write(event_type: str, payload: dict) -> str: ...
+
+event_type: str = Input("event_type")
+payload: dict = Input("payload")
+
+async def emit_event() -> str:
+    """Emit an event to the shared event log.
+    Notifies any agents subscribed to this event_type + node_id.
+    Returns JSON: {"event_id": int}."""
+    return await event_write(event_type, payload)
+
+
+await emit_event()

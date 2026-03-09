@@ -6,6 +6,32 @@ import contextlib
 import sqlite3
 
 
+def create_graph_tables(conn: sqlite3.Connection) -> None:
+    """Create generic bootstrap graph tables in the EventStore DB."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS graph_nodes (
+            id          TEXT PRIMARY KEY,
+            kind        TEXT NOT NULL,
+            attrs_json  TEXT NOT NULL DEFAULT '{}'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_gnode_kind ON graph_nodes(kind);
+
+        CREATE TABLE IF NOT EXISTS graph_edges (
+            from_id     TEXT NOT NULL,
+            to_id       TEXT NOT NULL,
+            kind        TEXT NOT NULL,
+            attrs_json  TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (from_id, to_id, kind)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_gedge_from ON graph_edges(from_id);
+        CREATE INDEX IF NOT EXISTS idx_gedge_to   ON graph_edges(to_id);
+        """
+    )
+
+
 def create_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -87,6 +113,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
         ON subscriptions(is_default);
         """
     )
+
+    create_graph_tables(conn)
 
 
 def migrate(conn: sqlite3.Connection) -> None:

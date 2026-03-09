@@ -145,6 +145,22 @@ async def test_pattern_matching_tags() -> None:
     assert not pattern.matches(event_no_tags)
 
 
+@pytest.mark.asyncio
+async def test_pattern_matches_dynamic_event_type_name() -> None:
+    pattern = SubscriptionPattern(event_types=["AgentNeededEvent"])
+    dynamic_event = type(
+        "BootstrapEvent",
+        (),
+        {
+            "event_type": "AgentNeededEvent",
+            "from_agent": "coordinator",
+            "to_agent": None,
+            "tags": (),
+        },
+    )()
+    assert pattern.matches(dynamic_event)
+
+
 class TestSubscribeToolPattern:
     """Verify SubscribeTool does not self-reference the subscribing agent."""
 

@@ -24,6 +24,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _event_name(event: CoreEvent) -> str:
+    """Resolve the routing event name.
+
+    Uses event.event_type when present (bootstrap/dynamic envelopes),
+    otherwise falls back to the concrete Python class name.
+    """
+    event_type = getattr(event, "event_type", None)
+    if isinstance(event_type, str) and event_type:
+        return event_type
+    return type(event).__name__
+
+
 class SubscriptionPattern(BaseModel):
     """Pattern for matching events.
 
@@ -39,7 +51,7 @@ class SubscriptionPattern(BaseModel):
 
     def matches(self, event: CoreEvent) -> bool:
         """Check if this pattern matches the given event."""
-        event_type = type(event).__name__
+        event_type = _event_name(event)
 
         if self.event_types is not None:
             if event_type not in self.event_types:
@@ -303,7 +315,7 @@ class SubscriptionRegistry:
             await self._rebuild_cache()
 
         assert self._cache is not None
-        event_type = type(event).__name__
+        event_type = _event_name(event)
 
         # Collect candidates: subscriptions indexed under this event_type + wildcards (key "")
         candidates = self._cache.get(event_type, []) + self._cache.get("", [])
