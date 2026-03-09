@@ -296,15 +296,18 @@ async def build_turn_context(
 
         logger.info("execute_agent_turn: loading chat history")
         if chat_history is None:
-            recent_events = await event_store.get_recent_events(node.node_id, limit=config.chat_history_limit)
+            recent_events = await event_store.get_agent_timeline(node.node_id, limit=config.chat_history_limit)
             chat_history = []
             for ev in reversed(recent_events):
                 payload = ev.get("payload", {})
-                if ev.get("event_type") == "AgentMessageEvent":
+                event_type = ev.get("event_type")
+                if event_type == "AgentMessageEvent":
                     if ev.get("to_agent") == node.node_id:
                         chat_history.append({"role": "user", "content": payload.get("content", "")})
                     elif ev.get("from_agent") == node.node_id:
                         chat_history.append({"role": "assistant", "content": payload.get("content", "")})
+                elif event_type == "AgentTextResponse" and ev.get("agent_id") == node.node_id:
+                    chat_history.append({"role": "assistant", "content": payload.get("content", "")})
 
         # Build scaffold context if trigger is ScaffoldRequestEvent
         scaffold_context: dict[str, Any] | None = None

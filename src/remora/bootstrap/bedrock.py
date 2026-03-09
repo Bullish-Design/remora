@@ -26,6 +26,7 @@ class BootstrapEvent(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     event_type: str
+    agent_id: str | None = None
     node_id: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     from_agent: str | None = None
@@ -62,12 +63,13 @@ def build_bedrock(
     async def _event_read(selector: dict[str, Any]) -> str:
         target_agent = str(selector.get("agent_id") or selector.get("node_id") or agent_id)
         limit = int(selector.get("limit", 10))
-        events = await event_store.get_recent_events(target_agent, limit=limit)
+        events = await event_store.get_agent_timeline(target_agent, limit=limit)
         return json.dumps(events)
 
     async def _event_write(event_type: str, payload: dict[str, Any]) -> str:
         event = BootstrapEvent(
             event_type=event_type,
+            agent_id=agent_id,
             node_id=payload.get("node_id"),
             payload=payload,
             from_agent=agent_id,

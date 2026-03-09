@@ -44,6 +44,7 @@ def row_to_event_dict(row: sqlite3.Row) -> dict[str, Any]:
         "id": row["id"],
         "graph_id": row["graph_id"],
         "event_type": event_type,
+        "agent_id": row["agent_id"],
         "payload": nested_payload,
         "summary": stored.get("summary", ""),
         "timestamp": row["timestamp"],
@@ -86,7 +87,18 @@ def fetch_replay_rows(
         return cursor.fetchall()
 
 
-def fetch_recent_event_rows(conn: sqlite3.Connection, *, agent_id: str, limit: int = 5) -> list[sqlite3.Row]:
+def fetch_agent_timeline_rows(conn: sqlite3.Connection, *, agent_id: str, limit: int = 5) -> list[sqlite3.Row]:
+    query = """
+        SELECT * FROM events
+        WHERE agent_id = ? OR from_agent = ? OR to_agent = ?
+        ORDER BY timestamp DESC, id DESC
+        LIMIT ?
+    """
+    with contextlib.closing(conn.execute(query, (agent_id, agent_id, agent_id, limit))) as cursor:
+        return cursor.fetchall()
+
+
+def fetch_routed_message_rows(conn: sqlite3.Connection, *, agent_id: str, limit: int = 5) -> list[sqlite3.Row]:
     query = """
         SELECT * FROM events
         WHERE from_agent = ? OR to_agent = ?

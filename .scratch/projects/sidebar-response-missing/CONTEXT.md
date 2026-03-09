@@ -1,40 +1,42 @@
 # Context
 
-Follow-up deep investigation completed for the sidebar-missing-response issue.
+Implementation phase completed for sidebar-response-missing, following
+`.scratch/projects/sidebar-response-missing/IMPLEMENTATION_GUIDE.md` end-to-end.
 
 What was completed in this pass:
-- Re-validated runtime evidence against the fresh environment at:
-  - `/home/andrew/Documents/Projects/remora-example-workspace/.remora/logs/`
-  - `/home/andrew/Documents/Projects/remora-example-workspace/.remora/events/events.db`
-- Reconfirmed causal chain:
-  - panel closed during input routing
-  - `AgentTextResponse` emitted successfully
-  - panel history fetch returned only one event
-  - DB evidence shows mismatch (`from_agent/to_agent` = 1 vs `payload.agent_id` = 9)
-- Performed broader architecture impact scan across:
-  - EventStore query/schema/serialization
-  - LSP command + notify path
-  - panel rendering/merge logic
-  - `turn_context` and bootstrap `event_read` consumers
-  - tests encoding current semantics
-- Rewrote project plan and investigation report with a fundamental architecture recommendation:
-  - split history APIs by intent
-  - canonical envelope parity across live + replay
-  - participant indexing/projection for timeline retrieval
+- Added typed `AgentTextResponseEvent` and registered it in core event exports/union.
+- Added `agent_id` column/index to `events` schema and migration path.
+- Updated EventStore writes (`append`, `batch_append`) to persist `agent_id`.
+- Replaced overloaded history query with:
+  - `get_agent_timeline()` / `fetch_agent_timeline_rows()`
+  - `get_routed_messages()` / `fetch_routed_message_rows()`
+- Updated replay dict normalization to include top-level `agent_id`.
+- Updated LSP live notify to include persisted `id` for live/replay dedupe parity.
+- Added `RunnerEventEmitter.emit_agent_text_response()` and switched AgentRunner callsite.
+- Updated AgentRunner and TurnContext chat history assembly to include `AgentTextResponse` assistant turns.
+- Updated panel/hover/bootstrap callsites to use `get_agent_timeline`.
+- Added `agent_id` field on `BootstrapEvent` and populated it on `_event_write`.
+- Fixed hover summary extraction for replay events (`summary` top-level fallback).
+- Updated tests:
+  - rewrote `tests/unit/test_event_store_queries.py` for new API semantics
+  - updated `tests/unit/bootstrap/test_bedrock.py`
+  - updated `tests/unit/test_execution.py` mocks to new method name
+  - added `tests/unit/test_event_store_regression.py`
 
-Current status:
-- INVESTIGATION_REVIEW.md written by second reviewer (independent pass).
-- Analysis/documentation complete for architecture direction.
-- No production code changes made in this pass.
-
-Next likely step:
-- Implement per IMPLEMENTATION_GUIDE.md (15 steps across 14 files).
-- Follow execution order at the bottom of the guide.
-- Run tests after each step as specified.
+Validation run results:
+- Passed: `tests/unit/test_event_store_queries.py -v`
+- Passed: `tests/unit/bootstrap/test_bedrock.py -v`
+- Passed: `tests/unit/test_event_store_regression.py -v`
+- Passed (additional impacted suites): `test_execution.py`, `test_runner_loop.py`,
+  `test_agent_node.py`, `test_lsp_models.py`, `test_lsp_background_scan_manifest.py`,
+  `bootstrap/test_activation.py`, `bootstrap/test_runner.py`
+- Full suite command (`pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q`)
+  still fails during collection on an existing unrelated issue:
+  `ImportError: cannot import name '_lang_tag_for' from remora.core.agents.execution`
+  in `tests/unit/test_swarm_executor.py`.
 
 Key decisions locked in:
-- `event_participants` table NOT needed — add `agent_id` column only
-- `AgentTextResponseEvent` uses `payload: dict` sub-dict (not top-level `content`) to avoid Lua changes
-- `event_type: str = "AgentTextResponse"` literal default preserves panel.lua icon/highlight keys
-- `emit_agent_text_response` calls `emit_event` directly (no `_call_server_method` indirection)
-- Both chat history paths (agent_runner correlation + turn_context timeline) include AgentTextResponse as assistant
+- No backward-compatibility shim for `get_recent_events`; all callsites moved to new APIs.
+- `AgentTextResponseEvent` keeps `payload` sub-dict (`payload["content"]`) for panel compatibility.
+- Event type literal remains `\"AgentTextResponse\"`.
+- Typed response emission uses direct `emit_event`.

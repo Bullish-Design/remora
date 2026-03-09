@@ -201,7 +201,7 @@ class AgentNode(BaseModel):
             for ev in recent_events:
                 if isinstance(ev, dict):
                     event_type = ev.get("event_type", "")
-                    summary = ev.get("payload", {}).get("summary", "")
+                    summary = ev.get("summary", "") or ev.get("payload", {}).get("summary", "")
                 else:
                     event_type = ev.event_type
                     summary = ev.summary

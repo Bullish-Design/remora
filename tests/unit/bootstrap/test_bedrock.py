@@ -15,7 +15,7 @@ def bedrock_deps():
 
     event_store = AsyncMock()
     event_store.nodes = node_store
-    event_store.get_recent_events = AsyncMock(return_value=[{"id": 1, "event_type": "X"}])
+    event_store.get_agent_timeline = AsyncMock(return_value=[{"id": 1, "event_type": "X"}])
     event_store.append = AsyncMock(return_value=42)
 
     return cairn, node_store, event_store
@@ -87,7 +87,7 @@ async def test_graph_write_delegates_to_node_store(bedrock_deps) -> None:
 
 
 @pytest.mark.asyncio
-async def test_event_read_calls_get_recent_events(bedrock_deps) -> None:
+async def test_event_read_calls_get_agent_timeline(bedrock_deps) -> None:
     _, _, event_store = bedrock_deps
     bedrock = build_bedrock(
         agent_id="agent-1",
@@ -98,7 +98,7 @@ async def test_event_read_calls_get_recent_events(bedrock_deps) -> None:
 
     payload = json.loads(await bedrock["_event_read"]({"limit": 3}))
     assert payload[0]["id"] == 1
-    event_store.get_recent_events.assert_awaited_once_with("agent-1", limit=3)
+    event_store.get_agent_timeline.assert_awaited_once_with("agent-1", limit=3)
 
 
 @pytest.mark.asyncio
@@ -119,6 +119,7 @@ async def test_event_write_appends_bootstrap_event(bedrock_deps) -> None:
     emitted = append_args.args[1]
     assert isinstance(emitted, BootstrapEvent)
     assert emitted.event_type == "AgentNeededEvent"
+    assert emitted.agent_id == "agent-1"
     assert emitted.from_agent == "agent-1"
 
 

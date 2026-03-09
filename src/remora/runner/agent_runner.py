@@ -385,8 +385,10 @@ class AgentRunner:
                         chat_history.append({"role": "user", "content": payload.get("message", "")})
                     elif event_type == "AgentMessageEvent" and to_agent == agent_id:
                         chat_history.append(
-                            {"role": "user", "content": f"[From {from_agent}]: {payload.get('message', '')}"}
+                            {"role": "user", "content": f"[From {from_agent}]: {payload.get('content', '')}"}
                         )
+                    elif event_type == "AgentTextResponse" and event.get("agent_id") == agent_id:
+                        chat_history.append({"role": "assistant", "content": payload.get("content", "")})
 
                 if trigger.context.get("rejection_feedback"):
                     chat_history.append(
@@ -482,12 +484,11 @@ class AgentRunner:
 
                 # Emit final text response if present
                 if result.response_text:
-                    await self._events.emit_agent_event(
-                        event_type="AgentTextResponse",
+                    await self._events.emit_agent_text_response(
                         agent_id=agent_id,
                         correlation_id=correlation_id,
+                        content=result.response_text,
                         summary=result.response_text[:200],
-                        payload={"content": result.response_text},
                     )
 
                 # Emit domain-level AgentCompleteEvent so projections

@@ -210,6 +210,7 @@ class EventStore:
         from_agent = getattr(event, "from_agent", None)
         to_agent = getattr(event, "to_agent", None)
         correlation_id = getattr(event, "correlation_id", None)
+        agent_id = getattr(event, "agent_id", None)
         tags = getattr(event, "tags", None)
         tags_json = json.dumps(tags) if tags else None
 
@@ -219,10 +220,21 @@ class EventStore:
             try:
                 with contextlib.closing(self._conn.execute(
                     """
-                    INSERT INTO events (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO events (graph_id, event_type, payload, timestamp, created_at, agent_id, from_agent, to_agent, correlation_id, tags)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json),
+                    (
+                        graph_id,
+                        event_type,
+                        payload,
+                        timestamp,
+                        created_at,
+                        agent_id,
+                        from_agent,
+                        to_agent,
+                        correlation_id,
+                        tags_json,
+                    ),
                 )) as cursor:
                     ev_id = cursor.lastrowid or 0
 
@@ -275,18 +287,45 @@ class EventStore:
         if self._conn is None:
             raise RuntimeError("EventStore not initialized")
 
-        prepared: list[tuple[str, str, float, float, str | None, str | None, str | None, str | None, StructuredEvent | CoreEvent]] = []
+        prepared: list[
+            tuple[
+                str,
+                str,
+                float,
+                float,
+                str | None,
+                str | None,
+                str | None,
+                str | None,
+                str | None,
+                StructuredEvent | CoreEvent,
+            ]
+        ] = []
         for event in events:
             event_type = getattr(event, "event_type", None) or type(event).__name__
             payload = self._serialize_event(event)
             timestamp = getattr(event, "timestamp", time.time())
             created_at = time.time()
+            agent_id = getattr(event, "agent_id", None)
             from_agent = getattr(event, "from_agent", None)
             to_agent = getattr(event, "to_agent", None)
             correlation_id = getattr(event, "correlation_id", None)
             tags = getattr(event, "tags", None)
             tags_json = json.dumps(tags) if tags else None
-            prepared.append((event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json, event))
+            prepared.append(
+                (
+                    event_type,
+                    payload,
+                    timestamp,
+                    created_at,
+                    agent_id,
+                    from_agent,
+                    to_agent,
+                    correlation_id,
+                    tags_json,
+                    event,
+                )
+            )
 
         def _do_batch_append() -> tuple[list[int], list[CoreEvent]]:
             assert self._conn is not None
@@ -294,13 +333,35 @@ class EventStore:
             try:
                 event_ids: list[int] = []
                 all_follow_ups: list[CoreEvent] = []
-                for event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json, event in prepared:
+                for (
+                    event_type,
+                    payload,
+                    timestamp,
+                    created_at,
+                    agent_id,
+                    from_agent,
+                    to_agent,
+                    correlation_id,
+                    tags_json,
+                    event,
+                ) in prepared:
                     with contextlib.closing(self._conn.execute(
                         """
-                        INSERT INTO events (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO events (graph_id, event_type, payload, timestamp, created_at, agent_id, from_agent, to_agent, correlation_id, tags)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (graph_id, event_type, payload, timestamp, created_at, from_agent, to_agent, correlation_id, tags_json),
+                        (
+                            graph_id,
+                            event_type,
+                            payload,
+                            timestamp,
+                            created_at,
+                            agent_id,
+                            from_agent,
+                            to_agent,
+                            correlation_id,
+                            tags_json,
+                        ),
                     )) as cursor:
                         event_ids.append(cursor.lastrowid or 0)
 
@@ -317,7 +378,7 @@ class EventStore:
         event_ids, follow_ups = await self._run_locked_write_with_retries("batch_append", _do_batch_append)
 
         # Process triggers and bus notifications for each event
-        for idx, (_, _, _, _, _, to_agent, _, _, event) in enumerate(prepared):
+        for idx, (_, _, _, _, _, _, to_agent, _, _, event) in enumerate(prepared):
             event_type = getattr(event, "event_type", None) or type(event).__name__
             if self._trigger_queue is not None and self._subscriptions is not None:
                 matching_agents = await self._subscriptions.get_matching_agents(event)
@@ -375,12 +436,12 @@ class EventStore:
         for row in rows:
             yield self._row_to_dict(row)
 
-    async def get_recent_events(
+    async def get_agent_timeline(
         self,
         agent_id: str,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
-        """Get recent events involving an agent (as sender or recipient).
+        """Get events involving an agent as subject, sender, or recipient.
 
         Uses the dedicated read connection to avoid blocking on write operations.
         Returns dicts ordered newest-first (DESC by timestamp).
@@ -392,7 +453,28 @@ class EventStore:
 
         async with self._read_lock:
             rows = await asyncio.to_thread(
-                store_queries.fetch_recent_event_rows,
+                store_queries.fetch_agent_timeline_rows,
+                self._read_conn,
+                agent_id=agent_id,
+                limit=limit,
+            )
+
+        return [self._row_to_dict(row) for row in rows]
+
+    async def get_routed_messages(
+        self,
+        agent_id: str,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Get routed messages where an agent is sender or recipient."""
+        if self._read_conn is None:
+            await self.initialize()
+        if self._read_conn is None:
+            raise RuntimeError("EventStore not initialized")
+
+        async with self._read_lock:
+            rows = await asyncio.to_thread(
+                store_queries.fetch_routed_message_rows,
                 self._read_conn,
                 agent_id=agent_id,
                 limit=limit,

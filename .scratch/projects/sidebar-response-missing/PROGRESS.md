@@ -9,3 +9,6 @@
 | Evaluate architecture options and tradeoffs | done |
 | Revise PLAN.md with fundamental-fix roadmap | done |
 | Fully rewrite INVESTIGATION_REPORT.md | done |
+| Implement full refactor from IMPLEMENTATION_GUIDE.md (steps 1-15) | done |
+| Update/extend tests for new timeline/routed APIs and AgentTextResponse semantics | done |
+| Run staged validation suites from implementation guide | done |

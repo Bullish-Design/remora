@@ -95,7 +95,7 @@ def _make_mock_event_store() -> MagicMock:
     es.append = AsyncMock()
     es.nodes.get_node = AsyncMock(return_value=None)
     es.nodes.list_nodes = AsyncMock(return_value=[])
-    es.get_recent_events = AsyncMock(return_value=[])
+    es.get_agent_timeline = AsyncMock(return_value=[])
     return es
 
 
@@ -562,7 +562,7 @@ class TestExecuteAgentTurn:
         node = _make_agent()
         config = _make_config()
         es = _make_mock_event_store()
-        es.get_recent_events = AsyncMock(
+        es.get_agent_timeline = AsyncMock(
             return_value=[
                 {
                     "event_type": "AgentMessageEvent",
@@ -604,7 +604,7 @@ class TestExecuteAgentTurn:
                 workspace_service=ws,
             )
 
-        es.get_recent_events.assert_called_once_with("rm_test1", limit=5)
+        es.get_agent_timeline.assert_called_once_with("rm_test1", limit=5)
 
     @pytest.mark.asyncio
     async def test_grail_tools_discovered_when_agents_dir_set(self):

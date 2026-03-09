@@ -246,10 +246,14 @@ class RemoraLanguageServer(LanguageServer):
             else:
                 event.timestamp = time.time()
 
+        event_id: int | None = None
         if self.event_store:
-            await self.event_store.append("swarm", event)
+            event_id = await self.event_store.append("swarm", event)
 
-        self.protocol.notify("$/remora/event", event.model_dump())
+        payload = event.model_dump()
+        if event_id is not None:
+            payload["id"] = event_id
+        self.protocol.notify("$/remora/event", payload)
         return event
 
     def shutdown(self) -> None:

@@ -3,7 +3,13 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from remora.core.events.agent_events import AgentEvent, HumanChatEvent, RewriteProposalEvent, RewriteRejectedEvent
+from remora.core.events.agent_events import (
+    AgentEvent,
+    AgentTextResponseEvent,
+    HumanChatEvent,
+    RewriteProposalEvent,
+    RewriteRejectedEvent,
+)
 from remora.core.events.interaction_events import AgentMessageEvent
 from remora.runner.protocols import RunnerServer
 
@@ -70,6 +76,24 @@ class RunnerEventEmitter:
                 correlation_id=correlation_id,
                 summary=f"Error: {error[:50]}",
                 payload={"error": error},
+            )
+        )
+
+    async def emit_agent_text_response(
+        self,
+        *,
+        agent_id: str,
+        correlation_id: str,
+        content: str,
+        summary: str,
+    ) -> None:
+        """Emit a typed AgentTextResponseEvent."""
+        await self._server.emit_event(
+            AgentTextResponseEvent(
+                agent_id=agent_id,
+                correlation_id=correlation_id,
+                summary=summary,
+                payload={"content": content},
             )
         )
 

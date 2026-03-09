@@ -44,6 +44,17 @@ class AgentErrorEvent(_FrozenEvent):
     timestamp: float = Field(default_factory=time.time)
 
 
+class AgentTextResponseEvent(_FrozenEvent):
+    """Final text response from an agent turn, displayed in the chat panel."""
+
+    event_type: str = "AgentTextResponse"
+    agent_id: str
+    correlation_id: str
+    summary: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+    timestamp: float = Field(default_factory=time.time)
+
+
 class AgentEvent(_FrozenEvent):
     """Generic agent-facing event envelope used by LSP/UI flows."""
 
@@ -137,6 +148,7 @@ __all__ = [
     "AgentStartEvent",
     "AgentCompleteEvent",
     "AgentErrorEvent",
+    "AgentTextResponseEvent",
     "AgentEvent",
     "HumanChatEvent",
     "RewriteProposalEvent",

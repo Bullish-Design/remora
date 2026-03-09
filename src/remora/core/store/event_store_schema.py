@@ -42,6 +42,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             payload TEXT NOT NULL,
             timestamp REAL NOT NULL,
             created_at REAL NOT NULL,
+            agent_id TEXT,
             from_agent TEXT,
             to_agent TEXT,
             correlation_id TEXT,
@@ -56,6 +57,9 @@ def create_tables(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_events_timestamp
         ON events(timestamp);
+
+        CREATE INDEX IF NOT EXISTS idx_events_agent_id
+        ON events(agent_id);
 
         CREATE INDEX IF NOT EXISTS idx_events_to_agent
         ON events(to_agent);
@@ -133,6 +137,9 @@ def migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE events ADD COLUMN correlation_id TEXT")
     if "tags" not in columns:
         conn.execute("ALTER TABLE events ADD COLUMN tags TEXT")
+    if "agent_id" not in columns:
+        conn.execute("ALTER TABLE events ADD COLUMN agent_id TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_agent_id ON events(agent_id)")
 
     node_columns = _get_columns("nodes")
     if "start_byte" not in node_columns:

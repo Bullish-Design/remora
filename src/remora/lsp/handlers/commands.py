@@ -129,20 +129,20 @@ async def cmd_get_agent_panel(ls: LspServer, *args) -> dict | None:
 
         # Get recent events (newest first from EventStore, reverse for chronological display)
         logger.info(
-            "cmd_get_agent_panel: get_recent_events START agent=%s limit=50 timeout_s=%.2f",
+            "cmd_get_agent_panel: get_agent_timeline START agent=%s limit=50 timeout_s=%.2f",
             agent.node_id,
             GET_PANEL_EVENTS_TIMEOUT_SECONDS,
         )
         events_start = time.monotonic()
         try:
             events = await asyncio.wait_for(
-                ls.event_store.get_recent_events(agent.node_id, limit=50),
+                ls.event_store.get_agent_timeline(agent.node_id, limit=50),
                 timeout=GET_PANEL_EVENTS_TIMEOUT_SECONDS,
             )
         except TimeoutError:
             events_duration_ms = (time.monotonic() - events_start) * 1000
             logger.warning(
-                "cmd_get_agent_panel: get_recent_events TIMEOUT agent=%s duration_ms=%.1f timeout_s=%.2f",
+                "cmd_get_agent_panel: get_agent_timeline TIMEOUT agent=%s duration_ms=%.1f timeout_s=%.2f",
                 agent.node_id,
                 events_duration_ms,
                 GET_PANEL_EVENTS_TIMEOUT_SECONDS,
@@ -150,7 +150,7 @@ async def cmd_get_agent_panel(ls: LspServer, *args) -> dict | None:
             return {"error": "Timed out loading panel events"}
         events_duration_ms = (time.monotonic() - events_start) * 1000
         logger.info(
-            "cmd_get_agent_panel: get_recent_events END agent=%s duration_ms=%.1f count=%d",
+            "cmd_get_agent_panel: get_agent_timeline END agent=%s duration_ms=%.1f count=%d",
             agent.node_id,
             events_duration_ms,
             len(events),

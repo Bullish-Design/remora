@@ -5,6 +5,7 @@ from remora.core.events.agent_events import (
     AgentErrorEvent,
     AgentEvent,
     AgentStartEvent,
+    AgentTextResponseEvent,
     HumanChatEvent,
     HumanInputRequestEvent,
     HumanInputResponseEvent,
@@ -35,6 +36,7 @@ CoreEvent = (
     | AgentCompleteEvent
     | AgentErrorEvent
     | AgentEvent
+    | AgentTextResponseEvent
     | HumanChatEvent
     | RewriteProposalEvent
     | RewriteAppliedEvent
@@ -66,6 +68,7 @@ __all__ = [
     "AgentErrorEvent",
     "AgentMessageEvent",
     "AgentStartEvent",
+    "AgentTextResponseEvent",
     "ContentChangedEvent",
     "CoreEvent",
     "CursorFocusEvent",
