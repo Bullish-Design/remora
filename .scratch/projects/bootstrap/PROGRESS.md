@@ -1,6 +1,6 @@
 # Bootstrap Implementation Progress
 
-## Status: M9 implementation complete (commit pending)
+## Status: M9 + review refactor guide implementation complete (commit pending)
 
 ## Tasks
 
@@ -68,3 +68,12 @@
 | M9.3 | Route companion node workspace to assigned bootstrap agent workspace | done |
 | M9.4 | Add/adjust tests for runtime paths + companion workspace owner mapping | done |
 | M9.5 | Run targeted lint/tests and commit/push M9 changes | pending |
+
+## Review refactoring execution (2026-03-09)
+
+| # | Task | Status |
+|---|------|--------|
+| R1 | Implement `.scratch/projects/bootstrap/REVIEW_REFACTORING_GUIDE.md` sections S1..S3, N1..N5, T2..T6, structural updates, v3-alignment updates | done |
+| R2 | Remove dead `bootstrap/src/remora_bootstrap/` package | done |
+| R3 | Run bootstrap-targeted tests + full suite verification + ruff check | done |
+| R4 | Run `tach check` | done (pre-existing architecture violations remain) |

@@ -13,6 +13,9 @@ if TYPE_CHECKING:
     from remora.core.agents.cairn_externals import CairnExternals
 
 
+# Fallback default schema used when workspace schema.yaml is missing and the
+# filesystem default cannot be loaded. The authoritative default lives in
+# bootstrap/agents/DEFAULT_SCHEMA.yaml and is preferred when available.
 DEFAULT_SCHEMA_YAML = """
 version: "1"
 name: bootstrap_default
@@ -92,6 +95,12 @@ async def load_schema(
     content = await cairn_externals.read_file("schema.yaml")
 
     if not content:
+        if system_agents_dir is not None:
+            default_path = system_agents_dir / "DEFAULT_SCHEMA.yaml"
+            if default_path.exists():
+                return TurnSchema.model_validate(
+                    _load_yaml(default_path.read_text(encoding="utf-8"))
+                )
         return TurnSchema.model_validate(_load_yaml(DEFAULT_SCHEMA_YAML))
 
     if isinstance(content, bytes):

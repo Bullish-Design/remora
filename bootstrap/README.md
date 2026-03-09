@@ -1,36 +1,33 @@
-# Remora Bootstrap (Phase 2)
+# bootstrap/ - Runtime Data for Bootstrap
 
-This directory is the Phase 2 bootstrap track for Remora.
+This directory contains runtime data files consumed by the Python bootstrap
+runtime in `src/remora/bootstrap/`.
 
-Goal:
-- Build a core set of tools, agents, and templates from scratch.
-- Treat `remora` as a library dependency.
-- Avoid coupling to repo-level `agents/` bundles and Grail `.pym` scripts.
+## Contents
 
-## Scope Boundaries
+### `tools/` (`*.pym`)
 
-The bootstrap runtime should:
-- Import Remora Python APIs directly.
-- Define its own tool, agent, and template contracts.
-- Provide a clean registry and runtime bootstrap path.
+Grail tool scripts exposed to bootstrap agents:
 
-The bootstrap runtime should not:
-- Reuse existing `agents/*/bundle.yaml` behavior.
-- Depend on Grail scripts from `.grail/` or `agents/*/tools`.
+- `read_file.pym`, `write_file.pym` - agent workspace file IO
+- `graph_node.pym`, `graph_neighbors.pym`, `graph_find_nodes.pym` - graph reads
+- `graph_add_node.pym`, `graph_add_edge.pym` - graph writes
+- `read_recent_events.pym`, `emit_event.pym` - event bus access
+- `user_question.pym` - request human input through events
 
-## Layout
+These call bedrock externals implemented in `src/remora/bootstrap/bedrock.py`.
 
-- `src/remora_bootstrap/contracts.py`: Core data contracts for tools, agents, templates.
-- `src/remora_bootstrap/registry.py`: In-memory registry for bootstrap primitives.
-- `src/remora_bootstrap/runtime.py`: Runtime that loads Remora config and serves bootstrap primitives.
-- `src/remora_bootstrap/tools/`: Bootstrap-native tool definitions.
-- `src/remora_bootstrap/agents/`: Bootstrap-native agent definitions.
-- `src/remora_bootstrap/templates/`: Bootstrap-native prompt templates.
+### `agents/` (`*.yaml`)
 
-## Local Development
+Bootstrap schema defaults:
 
-From this directory, install with local editable sources so `remora` is consumed like a normal library dependency.
+- `DEFAULT_SCHEMA.yaml` - fallback schema for new empty workspaces
+- `base_code_agent.yaml` - baseline schema for code-node agents
+- `coordinator.yaml` - target schema for a future LLM coordinator (currently aspirational)
 
-Example:
-- `uv sync`
-- `uv run python -m remora_bootstrap`
+Agent workspaces can override these by writing their own `schema.yaml`.
+
+## Relationship to `src/remora/bootstrap/`
+
+- `src/remora/bootstrap/` = Python runtime engine
+- `bootstrap/` = runtime data loaded by that engine

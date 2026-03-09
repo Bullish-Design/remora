@@ -3,9 +3,9 @@
 from remora.bootstrap.activation import ActivationResult, default_agent_id, handle_agent_needed
 from remora.bootstrap.bedrock import (
     BootstrapEvent,
-    _extract_workspace_tools,
-    _make_files_provider,
     build_bedrock,
+    extract_workspace_tools,
+    make_files_provider,
 )
 from remora.bootstrap.coordinator import AgentNeededPlan, emit_agent_needed_events, find_unassigned_modules
 from remora.bootstrap.runner import BootstrapRunner, run_bootstrap
@@ -25,8 +25,8 @@ __all__ = [
     "handle_agent_needed",
     "BootstrapEvent",
     "build_bedrock",
-    "_make_files_provider",
-    "_extract_workspace_tools",
+    "make_files_provider",
+    "extract_workspace_tools",
     "AgentNeededPlan",
     "find_unassigned_modules",
     "emit_agent_needed_events",

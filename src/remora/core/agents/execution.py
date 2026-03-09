@@ -17,16 +17,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 from structured_agents import Message, build_client
 
-from remora.core.agents.kernel_factory import create_kernel
+from remora.core.agents.kernel_factory import create_kernel, extract_response_text
 from remora.core.agents.turn_context import (
     CairnDataProvider,
     CairnWorkspaceService,
     TurnContext,
-    _lang_tag_for,
-    _agent_node_to_cst_node,
     _build_prompt,
-    _resolve_bundle_path,
-    _resolve_model_name,
     build_turn_context,
     build_virtual_fs,
     discover_grail_tools,
@@ -204,17 +200,7 @@ async def execute_agent_turn(
             await kernel.close()
 
         # Extract response text
-        response_text = ""
-        if hasattr(result, "final_message") and result.final_message:
-            msg = result.final_message
-            if hasattr(msg, "content") and msg.content:
-                response_text = msg.content
-            else:
-                response_text = str(result)
-        elif hasattr(result, "content") and result.content:
-            response_text = result.content
-        else:
-            response_text = str(result)
+        response_text = extract_response_text(result)
 
         logger.info(
             "execute_agent_turn: completed for %s — %d chars response, %d kernel events",

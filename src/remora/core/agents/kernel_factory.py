@@ -9,10 +9,10 @@ from typing import Any
 
 from structured_agents import (
     AgentKernel,
-    build_client,
-    get_response_parser,
     ConstraintPipeline,
     NullObserver,
+    build_client,
+    get_response_parser,
 )
 
 
@@ -75,4 +75,18 @@ def create_kernel(
     )
 
 
-__all__ = ["create_kernel"]
+def extract_response_text(result: Any) -> str:
+    """Extract text content from an AgentKernel run result."""
+    if hasattr(result, "final_message") and result.final_message:
+        message = result.final_message
+        if hasattr(message, "content") and message.content:
+            return message.content
+        return str(result)
+
+    if hasattr(result, "content") and result.content:
+        return result.content
+
+    return str(result)
+
+
+__all__ = ["create_kernel", "extract_response_text"]

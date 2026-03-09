@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from remora.bootstrap.bedrock import BootstrapEvent, _extract_workspace_tools, _make_files_provider, build_bedrock
+from remora.bootstrap.bedrock import BootstrapEvent, build_bedrock, extract_workspace_tools, make_files_provider
 from remora.bootstrap.schema_loader import TurnSchema, load_schema
 from remora.bootstrap.turn_executor import TurnExecutor, TurnResult
 from remora.core.agents.cairn_bridge import CairnWorkspaceService, SyncMode
@@ -339,7 +339,7 @@ async def handle_agent_needed(
         event_store=event_store,
         swarm_id=swarm_id,
     )
-    files_provider = await _make_files_provider(cairn_externals)
+    files_provider = await make_files_provider(cairn_externals)
 
     node_attrs = await _read_node_attrs(event_store, node_id)
     await _ensure_subject_matter_expert_workspace(
@@ -357,7 +357,7 @@ async def handle_agent_needed(
     tool_files_before = await _list_workspace_tool_files(cairn_externals)
 
     with tempfile.TemporaryDirectory(prefix="remora-bootstrap-") as tmp_dir:
-        extracted_tools_dir = await _extract_workspace_tools(cairn_externals, Path(tmp_dir))
+        extracted_tools_dir = await extract_workspace_tools(cairn_externals, Path(tmp_dir))
         tools = discover_grail_tools(
             tools_dir,
             context=None,

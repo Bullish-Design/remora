@@ -53,22 +53,23 @@ async def test_run_once_emits_and_handles_unassigned_modules(
 
     plans = [AgentNeededPlan(node_id="module:src/app.py", agent_id="agent-app")]
     find_mock = AsyncMock(return_value=plans)
-    emit_mock = AsyncMock(return_value=1)
+    emit_mock = AsyncMock()
     handle_mock = AsyncMock(return_value=SimpleNamespace(node_id="module:src/app.py", agent_id="agent-app"))
-    monkeypatch.setattr("remora.bootstrap.runner.find_unassigned_modules", find_mock)
-    monkeypatch.setattr("remora.bootstrap.runner.emit_agent_needed_events", emit_mock)
+    monkeypatch.setattr("remora.bootstrap.runner.find_unassigned_nodes", find_mock)
     monkeypatch.setattr("remora.bootstrap.runner.handle_agent_needed", handle_mock)
 
     runner = BootstrapRunner(config, bootstrap_root=bootstrap_root)
     try:
         await runner.initialize()
+        monkeypatch.setattr(runner, "_emit_events_for_plans", emit_mock)
+        event_store_ref = runner.event_store
         handled = await runner.run_once()
     finally:
         await runner.close()
 
     assert handled == 1
     emit_mock.assert_awaited_once()
-    find_mock.assert_awaited_once()
+    find_mock.assert_awaited_once_with(event_store_ref, node_types={"file"})
     handle_mock.assert_awaited_once()
     activation_event = handle_mock.await_args.args[0]
     assert activation_event.event_type == "AgentNeededEvent"
@@ -85,8 +86,7 @@ async def test_run_forever_stops_when_stop_called(
     monkeypatch.setattr("remora.bootstrap.runner.CairnWorkspaceService", _FakeWorkspaceService)
     monkeypatch.setattr("remora.bootstrap.runner.seed_coordinator_node", AsyncMock())
     monkeypatch.setattr("remora.bootstrap.runner.seed_modules_if_empty", AsyncMock(return_value=0))
-    monkeypatch.setattr("remora.bootstrap.runner.find_unassigned_modules", AsyncMock(return_value=[]))
-    monkeypatch.setattr("remora.bootstrap.runner.emit_agent_needed_events", AsyncMock(return_value=0))
+    monkeypatch.setattr("remora.bootstrap.runner.find_unassigned_nodes", AsyncMock(return_value=[]))
     monkeypatch.setattr("remora.bootstrap.runner.handle_agent_needed", AsyncMock())
 
     runner = BootstrapRunner(config)
@@ -127,17 +127,17 @@ async def test_run_for_file_fans_out_unassigned_nodes(
         AgentNeededPlan(node_id="function:src/app.py:build_app", agent_id="agent-build-app"),
     ]
     find_nodes_mock = AsyncMock(return_value=plans)
-    emit_mock = AsyncMock(return_value=2)
+    emit_mock = AsyncMock()
     handle_mock = AsyncMock(return_value=SimpleNamespace())
 
     monkeypatch.setattr("remora.bootstrap.runner.find_unassigned_nodes", find_nodes_mock)
-    monkeypatch.setattr("remora.bootstrap.runner.emit_agent_needed_events_for_nodes", emit_mock)
     monkeypatch.setattr("remora.bootstrap.runner.handle_agent_needed", handle_mock)
 
     runner = BootstrapRunner(config, bootstrap_root=bootstrap_root)
     event_store_ref = None
     try:
         await runner.initialize()
+        monkeypatch.setattr(runner, "_emit_events_for_plans", emit_mock)
         event_store_ref = runner.event_store
         handled = await runner.run_for_file("src/app.py")
     finally:
@@ -145,13 +145,12 @@ async def test_run_for_file_fans_out_unassigned_nodes(
 
     assert handled == 2
     assert event_store_ref is not None
-    find_nodes_mock.assert_awaited_once_with(event_store_ref, file_path="src/app.py")
-    emit_mock.assert_awaited_once_with(
+    find_nodes_mock.assert_awaited_once_with(
         event_store_ref,
-        swarm_id="bootstrap-test",
-        coordinator_id="coordinator",
         file_path="src/app.py",
+        node_types={"file"},
     )
+    emit_mock.assert_awaited_once_with(plans)
     assert handle_mock.await_count == 2
 
     handled_node_ids = {
@@ -212,3 +211,25 @@ async def test_handle_human_input_response_appends_event_and_reactivates_agent(
     activation_event = handle_mock.await_args.args[0]
     assert isinstance(activation_event, BootstrapEvent)
     assert activation_event.event_type == "HumanInputResponseEvent"
+
+
+@pytest.mark.asyncio
+async def test_run_once_uses_configured_node_types(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _make_config(tmp_path)
+    monkeypatch.setattr("remora.bootstrap.runner.CairnWorkspaceService", _FakeWorkspaceService)
+    monkeypatch.setattr("remora.bootstrap.runner.seed_coordinator_node", AsyncMock())
+    monkeypatch.setattr("remora.bootstrap.runner.seed_modules_if_empty", AsyncMock(return_value=0))
+    find_nodes_mock = AsyncMock(return_value=[])
+    monkeypatch.setattr("remora.bootstrap.runner.find_unassigned_nodes", find_nodes_mock)
+
+    runner = BootstrapRunner(config, node_types={"function"})
+    try:
+        await runner.run_once()
+        event_store_ref = runner.event_store
+    finally:
+        await runner.close()
+
+    find_nodes_mock.assert_awaited_once_with(event_store_ref, node_types={"function"})

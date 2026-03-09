@@ -6,6 +6,7 @@ import pytest
 
 from remora.bootstrap.coordinator import (
     emit_agent_needed_events,
+    emit_agent_needed_events_for_nodes,
     find_unassigned_modules,
     find_unassigned_nodes,
 )
@@ -121,3 +122,41 @@ async def test_find_unassigned_nodes_filters_by_file_and_assigned_targets(store:
 
     plans_after = await find_unassigned_nodes(store, file_path="src/app.py")
     assert [plan.node_id for plan in plans_after] == ["module:src/app.py"]
+
+
+@pytest.mark.asyncio
+async def test_emit_agent_needed_events_for_nodes_filters_by_file(store: EventStore) -> None:
+    count = await emit_agent_needed_events_for_nodes(
+        store,
+        swarm_id="swarm",
+        coordinator_id="coordinator",
+        file_path="src/app.py",
+    )
+    assert count == 2
+
+    replayed = [event async for event in store.replay("swarm")]
+    needed = [event for event in replayed if event["event_type"] == "AgentNeededEvent"]
+    assert len(needed) == 2
+    assert {event["payload"]["node_id"] for event in needed} == {
+        "module:src/app.py",
+        "function:src/app.py:build_app",
+    }
+
+
+@pytest.mark.asyncio
+async def test_emit_agent_needed_events_for_nodes_filters_by_node_type(store: EventStore) -> None:
+    count = await emit_agent_needed_events_for_nodes(
+        store,
+        swarm_id="swarm",
+        coordinator_id="coordinator",
+        node_types={"function"},
+    )
+    assert count == 2
+
+    replayed = [event async for event in store.replay("swarm")]
+    needed = [event for event in replayed if event["event_type"] == "AgentNeededEvent"]
+    node_ids = {event["payload"]["node_id"] for event in needed}
+    assert node_ids == {
+        "function:src/app.py:build_app",
+        "function:src/other.py:other_fn",
+    }

@@ -9,25 +9,30 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from remora.core.agents.cairn_externals import CairnExternals
 
 
-@dataclass
-class BootstrapEvent:
-    """Event envelope used by bootstrap event writes."""
+class BootstrapEvent(BaseModel):
+    """Event envelope used by bootstrap event writes.
+
+    Uses the same frozen Pydantic model style as core event types.
+    """
+
+    model_config = ConfigDict(frozen=True)
 
     event_type: str
     node_id: str | None = None
-    payload: dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
     from_agent: str | None = None
     to_agent: str | None = None
     correlation_id: str | None = None
     tags: tuple[str, ...] = ()
-    timestamp: float = field(default_factory=time.time)
+    timestamp: float = Field(default_factory=time.time)
 
 
 def build_bedrock(
@@ -91,8 +96,12 @@ def build_bedrock(
     }
 
 
-async def _make_files_provider(cairn_externals: CairnExternals) -> Callable[[], Awaitable[dict[str, str | bytes]]]:
-    """Create a workspace files provider for Grail runtime usage."""
+async def make_files_provider(cairn_externals: CairnExternals) -> Callable[[], Awaitable[dict[str, str | bytes]]]:
+    """Create a workspace files provider for Grail runtime usage.
+
+    NOTE: This only lists immediate children under workspace root via
+    ``list_dir(".")``. It is not recursive, so nested files are invisible.
+    """
 
     async def files_provider() -> dict[str, str | bytes]:
         try:
@@ -112,7 +121,7 @@ async def _make_files_provider(cairn_externals: CairnExternals) -> Callable[[], 
     return files_provider
 
 
-async def _extract_workspace_tools(cairn_externals: CairnExternals, tmp_dir: Path) -> Path:
+async def extract_workspace_tools(cairn_externals: CairnExternals, tmp_dir: Path) -> Path:
     """Extract workspace tools from Cairn VFS into a real directory."""
     tools_dir = tmp_dir / "tools"
     tools_dir.mkdir(parents=True, exist_ok=True)
@@ -137,6 +146,6 @@ async def _extract_workspace_tools(cairn_externals: CairnExternals, tmp_dir: Pat
 __all__ = [
     "BootstrapEvent",
     "build_bedrock",
-    "_make_files_provider",
-    "_extract_workspace_tools",
+    "make_files_provider",
+    "extract_workspace_tools",
 ]

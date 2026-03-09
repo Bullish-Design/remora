@@ -17,7 +17,9 @@ from remora.core.store.event_store import EventStore
 
 logger = logging.getLogger(__name__)
 
-_SKIP_DIRS = {".venv", ".devenv", "__pycache__", "dist", "build", ".git"}
+# Default skip directories for Python project layouts. Pass skip_dirs= to
+# seed_module_nodes_from_filesystem() or seed_modules_if_empty() to override.
+_SKIP_DIRS = frozenset({".venv", ".devenv", "__pycache__", "dist", "build", ".git"})
 
 
 def _module_full_name(rel_path: str) -> str:
@@ -32,14 +34,20 @@ async def seed_module_nodes_from_filesystem(
     project_root: Path,
     *,
     swarm_id: str,
+    skip_dirs: frozenset[str] | None = None,
 ) -> int:
-    """Create file/module nodes in `nodes` via NodeDiscoveredEvent projection."""
+    """Create file/module nodes in `nodes` via NodeDiscoveredEvent projection.
+
+    Args:
+        skip_dirs: Optional override for directory names excluded from scan.
+    """
     root = project_root.resolve()
     created = 0
+    effective_skip = skip_dirs if skip_dirs is not None else _SKIP_DIRS
 
     for py_file in sorted(root.rglob("*.py")):
         rel_path_obj = py_file.relative_to(root)
-        if _SKIP_DIRS.intersection(rel_path_obj.parts):
+        if effective_skip.intersection(rel_path_obj.parts):
             continue
 
         rel_path = rel_path_obj.as_posix()
@@ -48,9 +56,10 @@ async def seed_module_nodes_from_filesystem(
             continue
 
         source = py_file.read_text(encoding="utf-8", errors="replace")
-        source_hash = hashlib.sha1(source.encode("utf-8")).hexdigest()
+        source_bytes = source.encode("utf-8")
+        source_hash = hashlib.sha1(source_bytes).hexdigest()
         line_count = source.count("\n") + 1
-        byte_count = len(source.encode("utf-8"))
+        byte_count = len(source_bytes)
 
         await event_store.append(
             swarm_id,
@@ -100,13 +109,19 @@ async def seed_modules_if_empty(
     project_root: Path,
     *,
     swarm_id: str,
+    skip_dirs: frozenset[str] | None = None,
 ) -> int:
     """Seed module nodes only when no module/file nodes currently exist."""
     existing = await event_store.nodes.read_graph({"match": {"kind": "module"}})
     if existing and existing != "[]":
         logger.info("Module nodes already exist; skipping filesystem seeding")
         return 0
-    return await seed_module_nodes_from_filesystem(event_store, project_root, swarm_id=swarm_id)
+    return await seed_module_nodes_from_filesystem(
+        event_store,
+        project_root,
+        swarm_id=swarm_id,
+        skip_dirs=skip_dirs,
+    )
 
 
 async def _main() -> None:

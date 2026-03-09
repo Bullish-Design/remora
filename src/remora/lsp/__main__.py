@@ -155,8 +155,6 @@ def _run_server(
                 config,
                 project_root=runtime_paths.project_root,
                 bootstrap_root=runtime_paths.bootstrap_root,
-                event_store_path=runtime_paths.event_store_path,
-                subscriptions_path=runtime_paths.subscriptions_path,
                 event_store=event_store,
                 subscriptions=subscriptions,
                 workspace_service=cairn_service,

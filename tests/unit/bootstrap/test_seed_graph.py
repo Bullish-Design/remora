@@ -14,6 +14,8 @@ from remora.core.code.projections import NodeProjection
 from remora.core.events.code_events import NodeDiscoveredEvent
 from remora.core.store.event_store import EventStore
 
+SKIP_DIRS = [".venv", ".devenv", "__pycache__", "dist", "build", ".git"]
+
 
 @pytest.fixture
 async def store(tmp_path: Path) -> EventStore:
@@ -75,3 +77,24 @@ async def test_seed_coordinator_node_creates_agent_graph_node(store: EventStore)
 
     assert node["kind"] == "agent"
     assert node["attrs"]["name"] == "coordinator"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("skip_dir", SKIP_DIRS)
+async def test_skip_dirs_are_excluded(tmp_path: Path, skip_dir: str) -> None:
+    skip_path = tmp_path / skip_dir
+    skip_path.mkdir()
+    (skip_path / "module_that_should_be_skipped.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "real_module.py").write_text("y = 2\n", encoding="utf-8")
+
+    event_store = EventStore(tmp_path / "events.db", projection=NodeProjection())
+    await event_store.initialize()
+    try:
+        count = await seed_module_nodes_from_filesystem(
+            event_store,
+            tmp_path,
+            swarm_id="swarm",
+        )
+        assert count == 1
+    finally:
+        await event_store.close()

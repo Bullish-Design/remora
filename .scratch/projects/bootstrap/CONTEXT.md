@@ -1,6 +1,6 @@
 # Bootstrap Implementation Project Context
 
-## Status: IN PROGRESS — M0..M8 committed+pushed; M9 runtime wiring complete (commit pending)
+## Status: IN PROGRESS — M0..M9 complete; review refactor guide implemented (commit pending)
 
 ## Output
 - `.scratch/projects/bootstrap/IMPLEMENTATION_GUIDE.md` — implementation spec
@@ -155,8 +155,38 @@
 - D27: companion workspace ownership resolves to assigned bootstrap agent when available
 - D28: LSP starts bootstrap runner loop on initialized when bootstrap is enabled
 
+## 2026-03-09 review refactor implementation pass
+- Implemented the full `.scratch/projects/bootstrap/REVIEW_REFACTORING_GUIDE.md` across bootstrap runtime, tests, docs, and structural cleanup.
+- Key code updates:
+  - renamed bedrock helpers to public `make_files_provider` / `extract_workspace_tools`
+  - converted `BootstrapEvent` from dataclass to frozen Pydantic model
+  - runner no longer double-reads unassigned plans; emits from a shared in-memory plan list
+  - added configurable runner `node_types` policy and configurable seeding `skip_dirs`
+  - consolidated response extraction via `extract_response_text` in `core/agents/kernel_factory.py` and reused in bootstrap + v1 execution
+  - consolidated schema default loading to prefer `bootstrap/agents/DEFAULT_SCHEMA.yaml`
+- Structural/documentation updates:
+  - phase-1 scaffolding notes added to runner/coordinator/coordinator schema
+  - bootstrap turn observer intent documented (`observer=None`)
+  - removed redundant path args from LSP bootstrap runner wiring
+  - removed dead `bootstrap/src/remora_bootstrap/` package
+  - replaced `bootstrap/README.md` with runtime-data oriented documentation
+- Test additions:
+  - coordinator emit filters (`emit_agent_needed_events_for_nodes`)
+  - runtime execution coverage for the remaining bootstrap `.pym` tools
+  - response extraction branch tests + user prompt tests
+  - `_SKIP_DIRS` exhaustiveness test
+  - runner node-type configurability test
+  - schema default file/constant parity test
+- Validation:
+  - `devenv shell -- uv sync --extra dev`
+  - `devenv shell -- pytest tests/unit/bootstrap/ -q`
+  - `devenv shell -- pytest tests/unit/test_execution.py tests/unit/test_kernel_factory.py tests/unit/test_lsp_startup_sequence.py -q`
+  - `devenv shell -- pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q`
+  - `devenv shell -- ruff check ...` on touched files
+  - `devenv shell -- tach check` (fails with pre-existing module-boundary violations unrelated to this pass)
+
 ## Next step
-- Commit/push M9 runtime wiring changes.
+- Commit/push M9 + review-refactor implementation changes.
 
 ## Post-plan verification pass (current coding pass)
 - Added new integration test:

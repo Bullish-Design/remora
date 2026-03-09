@@ -53,8 +53,8 @@ async def test_handle_agent_needed_bootstraps_agent(monkeypatch: pytest.MonkeyPa
         return tmp_dir
 
     monkeypatch.setattr("remora.bootstrap.activation.CairnExternals", FakeCairnExternals)
-    monkeypatch.setattr("remora.bootstrap.activation._make_files_provider", _fake_files_provider)
-    monkeypatch.setattr("remora.bootstrap.activation._extract_workspace_tools", _fake_extract)
+    monkeypatch.setattr("remora.bootstrap.activation.make_files_provider", _fake_files_provider)
+    monkeypatch.setattr("remora.bootstrap.activation.extract_workspace_tools", _fake_extract)
     monkeypatch.setattr("remora.bootstrap.activation.TurnExecutor", _FakeExecutor)
     monkeypatch.setattr("remora.bootstrap.activation.build_bedrock", lambda **_: {"graph_read": object()})
     monkeypatch.setattr("remora.bootstrap.activation.discover_grail_tools", lambda *_, **__: [])
@@ -164,8 +164,8 @@ async def test_handle_agent_needed_generates_agent_id_when_missing(monkeypatch: 
             self.kwargs = kwargs
 
     monkeypatch.setattr("remora.bootstrap.activation.CairnExternals", FakeCairnExternals)
-    monkeypatch.setattr("remora.bootstrap.activation._make_files_provider", AsyncMock(return_value=AsyncMock(return_value={})))
-    monkeypatch.setattr("remora.bootstrap.activation._extract_workspace_tools", AsyncMock(return_value=tmp_path))
+    monkeypatch.setattr("remora.bootstrap.activation.make_files_provider", AsyncMock(return_value=AsyncMock(return_value={})))
+    monkeypatch.setattr("remora.bootstrap.activation.extract_workspace_tools", AsyncMock(return_value=tmp_path))
     monkeypatch.setattr("remora.bootstrap.activation.TurnExecutor", _FakeExecutor)
     monkeypatch.setattr("remora.bootstrap.activation.build_bedrock", lambda **_: {"graph_read": object()})
     monkeypatch.setattr("remora.bootstrap.activation.discover_grail_tools", lambda *_, **__: [])
@@ -242,8 +242,8 @@ async def test_handle_agent_needed_emits_tool_synthesized_event(
             self.kwargs = kwargs
 
     monkeypatch.setattr("remora.bootstrap.activation.CairnExternals", FakeCairnExternals)
-    monkeypatch.setattr("remora.bootstrap.activation._make_files_provider", AsyncMock(return_value=AsyncMock(return_value={})))
-    monkeypatch.setattr("remora.bootstrap.activation._extract_workspace_tools", AsyncMock(return_value=tmp_path))
+    monkeypatch.setattr("remora.bootstrap.activation.make_files_provider", AsyncMock(return_value=AsyncMock(return_value={})))
+    monkeypatch.setattr("remora.bootstrap.activation.extract_workspace_tools", AsyncMock(return_value=tmp_path))
     monkeypatch.setattr("remora.bootstrap.activation.TurnExecutor", _FakeExecutor)
     monkeypatch.setattr("remora.bootstrap.activation.build_bedrock", lambda **_: {"graph_read": object()})
     monkeypatch.setattr("remora.bootstrap.activation.discover_grail_tools", lambda *_, **__: [])

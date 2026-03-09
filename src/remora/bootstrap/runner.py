@@ -1,4 +1,20 @@
-"""Bootstrap runtime loop for module-to-agent assignment."""
+"""Bootstrap runtime loop for node-to-agent assignment.
+
+PHASE-1 SCAFFOLDING
+-------------------
+The coordinator currently runs as Python code in this module so bootstrap can
+start itself before coordinator-agent infrastructure is fully online.
+
+Current responsibilities:
+1. Seed coordinator/module nodes.
+2. Find unassigned nodes.
+3. Emit AgentNeededEvent for each plan.
+4. Activate each target agent directly.
+
+Target phase:
+- Replace this loop with an event-driven LLM coordinator
+  (see ``bootstrap/agents/coordinator.yaml``).
+"""
 
 from __future__ import annotations
 
@@ -11,9 +27,6 @@ from remora.bootstrap.activation import handle_agent_needed
 from remora.bootstrap.bedrock import BootstrapEvent
 from remora.bootstrap.coordinator import (
     AgentNeededPlan,
-    emit_agent_needed_events,
-    emit_agent_needed_events_for_nodes,
-    find_unassigned_modules,
     find_unassigned_nodes,
 )
 from remora.bootstrap.seed_graph import seed_coordinator_node, seed_modules_if_empty
@@ -39,6 +52,7 @@ class BootstrapRunner:
         event_store_path: Path | None = None,
         subscriptions_path: Path | None = None,
         coordinator_id: str = "coordinator",
+        node_types: set[str] | None = None,
         event_store: EventStore | None = None,
         subscriptions: SubscriptionRegistry | None = None,
         workspace_service: CairnWorkspaceService | None = None,
@@ -53,6 +67,7 @@ class BootstrapRunner:
         self.bootstrap_root = self.paths.bootstrap_root
         self.coordinator_id = coordinator_id
         self.swarm_id = config.swarm_id
+        self.node_types: set[str] = set(node_types) if node_types is not None else {"file"}
 
         self.event_store_path = event_store_path or self.paths.event_store_path
         self.subscriptions_path = subscriptions_path or self.paths.subscriptions_path
@@ -127,35 +142,46 @@ class BootstrapRunner:
             tags=("bootstrap", "agent-needed"),
         )
 
+    async def _emit_events_for_plans(self, plans: list[AgentNeededPlan]) -> None:
+        """Emit AgentNeededEvent for each already-resolved activation plan."""
+        for plan in plans:
+            await self.event_store.append(
+                self.swarm_id,
+                self._build_agent_needed_event(node_id=plan.node_id, agent_id=plan.agent_id),
+            )
+
     async def run_once(self) -> int:
-        """Run one coordinator pass and activate newly needed agents."""
+        """Run one coordinator pass and activate newly needed agents.
+
+        Phase-1 note: coordinator logic is Python-driven here. The coordinator
+        schema in ``bootstrap/agents/coordinator.yaml`` is aspirational and is
+        not activated by this loop yet.
+        """
         await self.initialize()
         async with self._activation_lock:
-            plans = await find_unassigned_modules(self.event_store)
+            plans = await find_unassigned_nodes(
+                self.event_store,
+                node_types=self.node_types,
+            )
             if not plans:
                 return 0
 
-            await emit_agent_needed_events(
-                self.event_store,
-                swarm_id=self.swarm_id,
-                coordinator_id=self.coordinator_id,
-            )
+            await self._emit_events_for_plans(plans)
             return await self._activate_plans(plans, parallel=False)
 
     async def run_for_file(self, file_path: str) -> int:
         """Activate bootstrap agents for all unassigned nodes in a file."""
         await self.initialize()
         async with self._activation_lock:
-            plans = await find_unassigned_nodes(self.event_store, file_path=file_path)
+            plans = await find_unassigned_nodes(
+                self.event_store,
+                file_path=file_path,
+                node_types=self.node_types,
+            )
             if not plans:
                 return 0
 
-            await emit_agent_needed_events_for_nodes(
-                self.event_store,
-                swarm_id=self.swarm_id,
-                coordinator_id=self.coordinator_id,
-                file_path=file_path,
-            )
+            await self._emit_events_for_plans(plans)
             return await self._activate_plans(plans, parallel=True)
 
     async def handle_human_input_response(
@@ -271,7 +297,7 @@ class BootstrapRunner:
         return handled
 
     async def run_forever(self, *, poll_interval_s: float = 0.5) -> None:
-        """Continuously assign and activate agents for unassigned modules."""
+        """Continuously assign and activate agents for unassigned nodes."""
         await self.initialize()
         self._running = True
         try:

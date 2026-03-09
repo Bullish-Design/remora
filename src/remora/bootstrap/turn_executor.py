@@ -15,7 +15,7 @@ from structured_agents import Message, build_client
 
 from remora.bootstrap.schema_loader import TurnSchema, load_schema, resolve_context_vars
 from remora.core.agents.cairn_externals import CairnExternals
-from remora.core.agents.kernel_factory import create_kernel
+from remora.core.agents.kernel_factory import create_kernel, extract_response_text
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,8 @@ class TurnExecutor:
             api_key=self._config.model_api_key or "EMPTY",
             timeout=self._config.timeout_s,
             tools=active_tools,
+            # Bootstrap turns are intentionally unobserved. We only persist the
+            # surrounding bootstrap events, not per-tool/model trace events.
             observer=None,
             client=self._client,
         )
@@ -94,7 +96,7 @@ class TurnExecutor:
             await kernel.close()
 
         return TurnResult(
-            response_text=self._extract_response(result),
+            response_text=extract_response_text(result),
             context_values=context_values,
         )
 
@@ -143,19 +145,5 @@ class TurnExecutor:
         if node_id:
             parts.append(f"Node: {node_id}")
         return "\n".join(parts)
-
-    @staticmethod
-    def _extract_response(result: Any) -> str:
-        if hasattr(result, "final_message") and result.final_message:
-            message = result.final_message
-            if hasattr(message, "content") and message.content:
-                return message.content
-            return str(result)
-
-        if hasattr(result, "content") and result.content:
-            return result.content
-
-        return str(result)
-
 
 __all__ = ["TurnExecutor", "TurnResult"]

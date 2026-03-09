@@ -1,4 +1,9 @@
-"""Coordinator helpers for bootstrap self-assignment flow."""
+"""Coordinator helpers for bootstrap self-assignment flow.
+
+PHASE-1 NOTE: this is the Python coordinator implementation. A future phase
+will shift orchestration to the LLM coordinator schema in
+``bootstrap/agents/coordinator.yaml`` while keeping these helpers as utilities.
+"""
 
 from __future__ import annotations
 
@@ -22,13 +27,14 @@ async def _read_assigned_node_ids(event_store: EventStore) -> set[str]:
     if not isinstance(agent_rows, list):
         return set()
 
-    return {
-        str(attrs.get("assigned_node_id"))
-        for row in agent_rows
-        if isinstance(row, dict)
-        for attrs in [row.get("attrs")]
-        if isinstance(attrs, dict) and attrs.get("assigned_node_id")
-    }
+    assigned: set[str] = set()
+    for row in agent_rows:
+        if not isinstance(row, dict):
+            continue
+        attrs = row.get("attrs")
+        if isinstance(attrs, dict) and attrs.get("assigned_node_id"):
+            assigned.add(str(attrs["assigned_node_id"]))
+    return assigned
 
 
 async def find_unassigned_nodes(
@@ -64,7 +70,10 @@ async def find_unassigned_nodes(
 
 
 async def find_unassigned_modules(event_store: EventStore) -> list[AgentNeededPlan]:
-    """Find module nodes that do not yet have an assigned agent."""
+    """Find file/module nodes that do not yet have an assigned agent.
+
+    Convenience wrapper around ``find_unassigned_nodes(..., node_types={"file"})``.
+    """
     return await find_unassigned_nodes(event_store, node_types={"file"})
 
 

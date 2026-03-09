@@ -1,3 +1,10 @@
+# PHASE STATUS: ASPIRATIONAL - NOT YET ACTIVE
+#
+# This schema documents the target LLM-driven coordinator. In phase 1 the
+# active coordinator logic is Python code in src/remora/bootstrap/runner.py
+# and src/remora/bootstrap/coordinator.py. The coordinator node is seeded in
+# the graph, but it is not activated through handle_agent_needed(), so these
+# subscriptions are not currently registered.
 version: "1"
 name: coordinator
 

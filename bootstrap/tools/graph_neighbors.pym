@@ -9,7 +9,10 @@ async def graph_neighbors() -> str:
     direction: 'in' | 'out' | 'both'
     For code nodes, neighbors are callers/callees from the code topology.
     For generic nodes, neighbors are connected via graph_edges.
-    Returns JSON array of {id, kind, attrs, edge_kind} objects."""
+    Returns JSON array of {id, kind, attrs, edge_kind} objects.
+
+    NOTE: For direction='both', duplicate neighbor IDs can appear when
+    multiple edges connect the same nodes with different edge kinds."""
     return await graph_read({"neighbors": node_id, "dir": direction})
 
 
