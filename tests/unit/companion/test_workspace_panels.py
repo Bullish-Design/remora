@@ -32,6 +32,7 @@ async def test_build_workspace_panels_reads_files_and_limits_log() -> None:
             "role.md": "Role content",
             "schema.yaml": "name: test",
             "notes.md": "Bootstrap notes",
+            "summary.md": "## What I do\nDetailed behavior",
             "todo.md": "- [ ] next",
             "log.jsonl": log_lines,
         },
@@ -41,9 +42,10 @@ async def test_build_workspace_panels_reads_files_and_limits_log() -> None:
     panels = await build_workspace_panels(workspace)
     by_key = {panel.key: panel for panel in panels}
 
-    assert set(by_key) == {"role", "schema", "notes", "todo", "log", "tools"}
+    assert set(by_key) == {"role", "schema", "notes", "summary", "todo", "log", "tools"}
     assert by_key["role"].content == "Role content"
     assert by_key["schema"].content == "name: test"
+    assert by_key["summary"].content == "## What I do\nDetailed behavior"
     assert by_key["tools"].content == "- `a_tool.pym`\n- `z_tool.pym`"
     assert by_key["log"].content.count("\n") == 19
     assert '{"i": 10}' in by_key["log"].content
@@ -55,7 +57,7 @@ async def test_build_workspace_panels_handles_missing_files() -> None:
     workspace = _FakeWorkspace(files={}, dirs={})
     panels = await build_workspace_panels(workspace)
 
-    assert len(panels) == 6
+    assert len(panels) == 7
     assert all(panel.is_empty for panel in panels)
 
 
@@ -71,7 +73,10 @@ async def test_compose_sidebar_includes_workspace_section() -> None:
         caller_ids=[],
     )
     workspace = _FakeWorkspace(
-        files={"role.md": "I own this module."},
+        files={
+            "role.md": "I own this module.",
+            "summary.md": "## What I am\nA module entrypoint.",
+        },
         dirs={"tools": []},
     )
 
@@ -79,3 +84,5 @@ async def test_compose_sidebar_includes_workspace_section() -> None:
     assert "## Workspace" in markdown
     assert "### Role" in markdown
     assert "I own this module." in markdown
+    assert "### Summary" in markdown
+    assert "A module entrypoint." in markdown

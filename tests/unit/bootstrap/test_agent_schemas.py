@@ -14,6 +14,7 @@ def test_bootstrap_agent_schema_files_exist() -> None:
         "DEFAULT_SCHEMA.yaml",
         "base_code_agent.yaml",
         "coordinator.yaml",
+        "subject_matter_expert.yaml",
     }
     files = {path.name for path in AGENTS_DIR.glob("*.yaml")}
     assert files >= expected
@@ -34,3 +35,19 @@ def test_coordinator_schema_subscribes_to_bootstrap_events() -> None:
     event_types = {spec.event_type for spec in schema.subscriptions}
     assert "AgentNeededEvent" in event_types
     assert "ToolSynthesizedEvent" in event_types
+
+
+def test_subject_matter_expert_contract_for_node_guides() -> None:
+    data = yaml.safe_load((AGENTS_DIR / "subject_matter_expert.yaml").read_text(encoding="utf-8"))
+    schema = TurnSchema.model_validate(data)
+
+    assert data.get("extends") == "base_code_agent"
+    assert schema.name == "subject_matter_expert"
+    assert "user_question" in schema.tools
+
+    event_types = {spec.event_type for spec in schema.subscriptions}
+    assert "HumanInputResponseEvent" in event_types
+
+    assert "What I am" in schema.system
+    assert "What I do" in schema.system
+    assert "How I do it" in schema.system

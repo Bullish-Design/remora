@@ -706,6 +706,15 @@ function M.setup(opts)
         if panel_open and panel._agent
             and requested_agent_id and requested_agent_id == panel._agent.id then
             log.info("HANDLER $/remora/requestInput: panel is open for this agent, focusing input")
+            if result.request_id then
+                panel.set_pending_request({
+                    request_id = result.request_id,
+                    prompt = result.prompt,
+                    agent_id = result.agent_id,
+                    node_id = result.node_id,
+                    question = result.question,
+                })
+            end
             if input_win_valid then
                 vim.api.nvim_set_current_win(panel._input_win)
                 vim.cmd("startinsert")
@@ -719,6 +728,15 @@ function M.setup(opts)
             -- displayed rather than silently dropped, then focus the input window.
             log.info("HANDLER $/remora/requestInput: panel agent mismatch; switching panel to agent=%s", requested_agent_id)
             panel.switch_agent(requested_agent_id)
+            if result.request_id then
+                panel.set_pending_request({
+                    request_id = result.request_id,
+                    prompt = result.prompt,
+                    agent_id = result.agent_id,
+                    node_id = result.node_id,
+                    question = result.question,
+                })
+            end
             if input_win_valid then
                 vim.api.nvim_set_current_win(panel._input_win)
                 vim.cmd("startinsert")
@@ -741,6 +759,15 @@ function M.setup(opts)
                 end
                 if result.proposal_id then
                     params.proposal_id = result.proposal_id
+                end
+                if result.request_id then
+                    params.request_id = result.request_id
+                end
+                if result.node_id then
+                    params.node_id = result.node_id
+                end
+                if result.question then
+                    params.question = result.question
                 end
                 log.info("HANDLER $/remora/requestInput: sending $/remora/submitInput params=%s", vim.inspect(params))
                 local client = get_client({ silent = true })

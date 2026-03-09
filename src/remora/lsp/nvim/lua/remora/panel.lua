@@ -17,6 +17,7 @@ M._input_buf = nil   -- buffer id for the input line
 M._agent = nil       -- current agent dict {id, name, node_type, status, ...}
 M._tools = {}        -- list of {name, description}
 M._events = {}       -- list of event dicts (chronological)
+M._pending_request = nil -- pending human input request metadata
 M._show_tools = false -- tools section collapsed by default
 M._ns = vim.api.nvim_create_namespace("remora_panel")
 M._augroup = nil     -- autocmd group id
@@ -64,6 +65,8 @@ local event_icons = {
     RewriteAppliedEvent = " ",
     RewriteRejectedEvent = " ",
     HumanChatEvent = " ",
+    HumanInputRequestEvent = " ",
+    HumanInputResponseEvent = " ",
     AgentMessageEvent = " ",
     ToolResultEvent = " ",
 }
@@ -77,6 +80,8 @@ local event_hls = {
     RewriteAppliedEvent = "DiagnosticOk",
     RewriteRejectedEvent = "DiagnosticError",
     HumanChatEvent = "RemoraUser",
+    HumanInputRequestEvent = "DiagnosticWarn",
+    HumanInputResponseEvent = "RemoraUser",
     AgentMessageEvent = "Comment",
     ToolResultEvent = "RemoraToolCall",
 }
@@ -119,6 +124,38 @@ local function clear_request_timeout_timer()
         M._request_timeout_timer:stop()
         M._request_timeout_timer:close()
         M._request_timeout_timer = nil
+    end
+end
+
+local function refresh_pending_request()
+    local responded = {}
+    for _, ev in ipairs(M._events) do
+        if ev.event_type == "HumanInputResponseEvent" then
+            local payload = ev.payload or {}
+            local request_id = payload.request_id or ev.request_id
+            if request_id and request_id ~= "" then
+                responded[request_id] = true
+            end
+        end
+    end
+
+    M._pending_request = nil
+    for idx = #M._events, 1, -1 do
+        local ev = M._events[idx]
+        if ev.event_type == "HumanInputRequestEvent" then
+            local payload = ev.payload or {}
+            local request_id = payload.request_id or ev.request_id
+            if request_id and request_id ~= "" and not responded[request_id] then
+                M._pending_request = {
+                    request_id = request_id,
+                    prompt = payload.question or ev.summary or "Input:",
+                    agent_id = ev.from_agent or payload.agent_id or (M._agent and M._agent.id),
+                    node_id = payload.node_id,
+                    question = payload.question,
+                }
+                break
+            end
+        end
     end
 end
 
@@ -235,6 +272,43 @@ local function build_lines()
                     local ml = Line()
                     ml:append("  " .. text_line, "RemoraUserText")
                     table.insert(lines, ml)
+                end
+                table.insert(lines, Line())
+
+            elseif etype == "HumanInputRequestEvent" then
+                local header = Line()
+                header:append(icon, hl)
+                header:append("Question", "DiagnosticWarn")
+                local ts = format_time(ev.timestamp)
+                if ts ~= "" then
+                    header:append("  " .. ts, "Comment")
+                end
+                table.insert(lines, header)
+
+                local prompt = (ev.payload and ev.payload.question) or ev.summary or ""
+                for _, text_line in ipairs(vim.split(prompt, "\n")) do
+                    local ql = Line()
+                    ql:append("  " .. text_line, "DiagnosticWarn")
+                    table.insert(lines, ql)
+                end
+                table.insert(lines, Line())
+
+            elseif etype == "HumanInputResponseEvent" then
+                local header = Line()
+                header:append(icon, hl)
+                header:append("You (response)", "RemoraUser")
+                local ts = format_time(ev.timestamp)
+                if ts ~= "" then
+                    header:append("  " .. ts, "Comment")
+                end
+                table.insert(lines, header)
+
+                local msg = (ev.payload and ev.payload.response)
+                    or ev.summary or ""
+                for _, text_line in ipairs(vim.split(msg, "\n")) do
+                    local rl = Line()
+                    rl:append("  " .. text_line, "RemoraUserText")
+                    table.insert(lines, rl)
                 end
                 table.insert(lines, Line())
 
@@ -363,7 +437,11 @@ local function build_lines()
     -- ── Help line ───────────────────────────────────────────────
     table.insert(lines, Line())
     local help = Line()
-    help:append("[q] close  [t] tools  [<CR>] send message", "Comment")
+    if M._pending_request then
+        help:append("[q] close  [t] tools  [<CR>] submit response", "Comment")
+    else
+        help:append("[q] close  [t] tools  [<CR>] send message", "Comment")
+    end
     table.insert(lines, help)
 
     return lines
@@ -396,6 +474,14 @@ local function render()
     if win_valid(M._chat_win) then
         local count = vim.api.nvim_buf_line_count(M._chat_buf)
         pcall(vim.api.nvim_win_set_cursor, M._chat_win, { count, 0 })
+    end
+
+    if win_valid(M._input_win) then
+        local label = " Message agent..."
+        if M._pending_request then
+            label = " Answer question..."
+        end
+        pcall(vim.api.nvim_set_option_value, "winbar", label, { win = M._input_win })
     end
 end
 
@@ -467,6 +553,7 @@ local function do_fetch_agent_data(client)
                 local changed = M._agent ~= nil
                 M._agent = nil
                 M._tools = {}
+                M._pending_request = nil
                 M._last_fetch_error = nil
                 if changed then
                     M._events = {}
@@ -486,6 +573,7 @@ local function do_fetch_agent_data(client)
                 M._agent = new_agent
                 M._tools = result.tools or {}
                 M._events = result.events or {}
+                refresh_pending_request()
                 M._last_fetch_error = nil
                 log.info("panel.do_fetch_agent_data: agent changed to %s (%s), %d tools, %d events",
                     tostring(new_id), tostring(new_agent and new_agent.name),
@@ -511,6 +599,7 @@ local function do_fetch_agent_data(client)
                     end
                 end
                 M._events = new_events
+                refresh_pending_request()
                 log.debug("panel.do_fetch_agent_data: same agent %s, merged to %d events",
                     tostring(new_id), #M._events)
             end
@@ -559,7 +648,7 @@ end
 
 local function send_message()
     if not buf_valid(M._input_buf) then return end
-    if not M._agent then
+    if not M._agent and not M._pending_request then
         log.warn("panel.send_message: no agent selected")
         if M._request_inflight then
             vim.notify("[Remora] Panel is still resolving agent data; please retry in a moment.", vim.log.levels.WARN)
@@ -574,16 +663,49 @@ local function send_message()
     text = vim.trim(text)
     if text == "" then return end
 
-    log.info("panel.send_message: sending to agent %s: %s", M._agent.id, text:sub(1, 100))
+    local target_agent = (M._pending_request and M._pending_request.agent_id)
+        or (M._agent and M._agent.id)
+        or "unknown"
+    log.info("panel.send_message: sending to agent %s: %s", target_agent, text:sub(1, 100))
 
-    -- Immediately append to local events for instant feedback
-    table.insert(M._events, {
-        event_type = "HumanChatEvent",
-        agent_id = M._agent.id,
-        timestamp = os.time(),
-        summary = text:sub(1, 200),
-        payload = { message = text, to_agent = M._agent.id },
-    })
+    local params = nil
+    if M._pending_request then
+        local pending = M._pending_request
+        table.insert(M._events, {
+            event_type = "HumanInputResponseEvent",
+            agent_id = pending.agent_id or (M._agent and M._agent.id),
+            timestamp = os.time(),
+            summary = text:sub(1, 200),
+            payload = {
+                request_id = pending.request_id,
+                response = text,
+                node_id = pending.node_id,
+                question = pending.question,
+            },
+        })
+        params = {
+            request_id = pending.request_id,
+            input = text,
+            agent_id = pending.agent_id,
+            node_id = pending.node_id,
+            question = pending.question,
+        }
+        M._pending_request = nil
+    else
+        -- Immediately append to local events for instant feedback
+        table.insert(M._events, {
+            event_type = "HumanChatEvent",
+            agent_id = M._agent.id,
+            timestamp = os.time(),
+            summary = text:sub(1, 200),
+            payload = { message = text, to_agent = M._agent.id },
+        })
+        params = {
+            agent_id = M._agent.id,
+            input = text,
+        }
+    end
+    refresh_pending_request()
     render()
 
     -- Clear input
@@ -592,10 +714,7 @@ local function send_message()
     -- Send to server
     local client = M._get_client and M._get_client()
     if client then
-        client.notify("$/remora/submitInput", {
-            agent_id = M._agent.id,
-            input = text,
-        })
+        client.notify("$/remora/submitInput", params)
     end
 end
 
@@ -797,10 +916,12 @@ function M.on_event(event)
         return
     end
     local agent_id = M._agent.id
-    local to_agent = event.payload and event.payload.to_agent
-    if event.agent_id ~= agent_id and to_agent ~= agent_id then
-        log.debug("panel.on_event: ignoring (agent mismatch: event.agent_id=%s to_agent=%s current=%s)",
-            tostring(event.agent_id), tostring(to_agent), agent_id)
+    local payload = event.payload or {}
+    local to_agent = event.to_agent or payload.to_agent
+    local from_agent = event.from_agent or payload.from_agent
+    if event.agent_id ~= agent_id and to_agent ~= agent_id and from_agent ~= agent_id then
+        log.debug("panel.on_event: ignoring (agent mismatch: event.agent_id=%s from_agent=%s to_agent=%s current=%s)",
+            tostring(event.agent_id), tostring(from_agent), tostring(to_agent), agent_id)
         return
     end
 
@@ -811,6 +932,7 @@ function M.on_event(event)
     end
 
     table.insert(M._events, event)
+    refresh_pending_request()
     render()
 end
 
@@ -836,9 +958,24 @@ function M.switch_agent(agent_id, agent_name)
     }
     M._events = {}
     M._tools = {}
+    M._pending_request = nil
     M._last_fetch_error = nil
     render()
     log.info("panel.switch_agent: panel now tracking agent_id=%s", agent_id)
+end
+
+function M.set_pending_request(request)
+    if not request or not request.request_id then
+        return
+    end
+    M._pending_request = {
+        request_id = request.request_id,
+        prompt = request.prompt or "Input:",
+        agent_id = request.agent_id or (M._agent and M._agent.id),
+        node_id = request.node_id,
+        question = request.question,
+    }
+    render()
 end
 
 --- Configure callbacks. Called once from init.lua setup.

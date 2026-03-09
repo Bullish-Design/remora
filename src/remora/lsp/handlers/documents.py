@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -9,8 +10,8 @@ from pygls.uris import to_fs_path
 from remora.core.code.discovery import CSTNode, node_to_event, parse_content
 from remora.core.events.code_events import NodeRemovedEvent
 from remora.core.events.interaction_events import ContentChangedEvent, FileSavedEvent
-from remora.runner.models import RewriteProposal
 from remora.lsp.protocols import LspServer
+from remora.runner.models import RewriteProposal
 
 logger = logging.getLogger("remora.lsp")
 
@@ -52,6 +53,16 @@ async def did_open(ls: LspServer, params: lsp.DidOpenTextDocumentParams) -> None
             )
 
         await _emit_node_events(ls, uri, new_nodes)
+
+        bootstrap_runner = getattr(ls, "bootstrap_runner", None)
+        if bootstrap_runner is not None:
+            async def _activate_bootstrap_for_file() -> None:
+                try:
+                    await bootstrap_runner.run_for_file(uri)
+                except Exception:
+                    logger.exception("did_open: bootstrap file activation failed for %s", uri)
+
+            asyncio.create_task(_activate_bootstrap_for_file())
 
         # Update edges in RemoraDB (edges stay in RemoraDB for now)
         await ls.db.update_edges(new_nodes)

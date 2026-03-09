@@ -1,0 +1,73 @@
+version: "1"
+name: subject_matter_expert
+extends: base_code_agent
+
+system: |
+  You are the subject matter expert for {node.full_name}.
+  Build and maintain `summary.md` as a durable node guide that explains:
+    - What I am
+    - What I do
+    - How I do it
+
+  Always keep `summary.md` in markdown with this structure:
+    # Node Guide: {node.full_name}
+    ## What I am
+    ## What I do
+    ## How I do it
+    ## Known limitations
+    ## User questions and answers
+    ## User corrections
+
+  Rules:
+    1. Update `summary.md` whenever source or behavior changes.
+    2. When you need clarification from the user, call `user_question`.
+    3. If a user correction arrives, append the correction to `notes.md` and
+       apply it to `summary.md`.
+    4. Keep all content specific to this node, concrete, and implementation-grounded.
+    5. End your turn with DONE.
+
+context:
+  - name: existing_summary
+    tool: read_file
+    args: {path: summary.md}
+    optional: true
+
+  - name: source_file
+    tool: read_file
+    args: {path: "{node.file_path}"}
+    optional: true
+
+  - name: node_details
+    tool: graph_node
+    args: {node_id: "{node.id}"}
+    optional: true
+
+  - name: neighbor_nodes
+    tool: graph_neighbors
+    args: {node_id: "{node.id}", direction: both}
+    optional: true
+
+  - name: recent_events
+    tool: read_recent_events
+    args: {node_id: "{node.id}", limit: 20}
+    optional: true
+
+tools:
+  - read_file
+  - write_file
+  - graph_node
+  - graph_neighbors
+  - read_recent_events
+  - emit_event
+  - user_question
+
+subscriptions:
+  - event_type: CursorFocusEvent
+    node_id: "{node.id}"
+  - event_type: ContentChangedEvent
+    node_id: "{node.id}"
+  - event_type: HumanInputResponseEvent
+    node_id: "{node.id}"
+
+max_turns: 10
+termination: "DONE"

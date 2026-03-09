@@ -6,7 +6,7 @@ import time
 
 from lsprotocol import types as lsp
 
-from remora.core.events.agent_events import HumanChatEvent, RewriteRejectedEvent
+from remora.core.events.agent_events import HumanChatEvent, HumanInputResponseEvent, RewriteRejectedEvent
 from remora.lsp.protocols import LspServer
 
 logger = logging.getLogger("remora.lsp")
@@ -51,11 +51,53 @@ async def on_input_submitted(ls: LspServer, params: dict) -> None:
                 "agent_id": getattr(params, "agent_id", None),
                 "input": getattr(params, "input", None),
                 "proposal_id": getattr(params, "proposal_id", None),
+                "request_id": getattr(params, "request_id", None),
+                "node_id": getattr(params, "node_id", None),
+                "question": getattr(params, "question", None),
             }
             # Drop None entries so "key in params" behaves correctly
             params = {k: v for k, v in params.items() if v is not None}
             logger.debug("on_input_submitted: coerced to dict keys=%s", list(params.keys()))
-        if "agent_id" in params:
+        if "request_id" in params:
+            request_id = str(params["request_id"]).strip()
+            response = str(params.get("input", "")).strip()
+            agent_id = str(params.get("agent_id", "")).strip()
+            node_id = str(params.get("node_id", "")).strip()
+            question = str(params.get("question", "")).strip()
+
+            if not request_id or not response:
+                logger.warning(
+                    "on_input_submitted: request response missing required fields request_id=%r response_len=%d",
+                    request_id,
+                    len(response),
+                )
+                return
+
+            bootstrap_runner = getattr(ls, "bootstrap_runner", None)
+            if bootstrap_runner and agent_id and node_id:
+                handled = await bootstrap_runner.handle_human_input_response(
+                    agent_id=agent_id,
+                    node_id=node_id,
+                    request_id=request_id,
+                    response=response,
+                    question=question or None,
+                )
+                if not handled:
+                    logger.warning(
+                        "on_input_submitted: bootstrap human response failed agent=%s node=%s request_id=%s",
+                        agent_id,
+                        node_id,
+                        request_id,
+                    )
+                return
+
+            logger.info(
+                "on_input_submitted: fallback HumanInputResponseEvent request_id=%s (no bootstrap routing)",
+                request_id,
+            )
+            await ls.emit_event(HumanInputResponseEvent(request_id=request_id, response=response))
+
+        elif "agent_id" in params:
             agent_id = params["agent_id"]
             message = params["input"]
             logger.info("on_input_submitted: chat message to agent=%s message=%r", agent_id, message[:100])

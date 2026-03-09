@@ -37,6 +37,9 @@ async def build_workspace_panels(workspace: AgentWorkspace) -> list[WorkspacePan
     notes, notes_empty = await _read_panel_text(workspace, "notes.md")
     panels.append(WorkspacePanel(key="notes", title="Notes", content=notes, is_empty=notes_empty))
 
+    summary, summary_empty = await _read_panel_text(workspace, "summary.md")
+    panels.append(WorkspacePanel(key="summary", title="Summary", content=summary, is_empty=summary_empty))
+
     todo, todo_empty = await _read_panel_text(workspace, "todo.md")
     panels.append(WorkspacePanel(key="todo", title="Todo", content=todo, is_empty=todo_empty))
 

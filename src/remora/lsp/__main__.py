@@ -219,6 +219,41 @@ def _run_server(
                     )
             event_bus_local = getattr(ls, "_companion_event_bus", None)
             cairn_svc = getattr(ls, "_companion_cairn_service", None)
+            if event_bus_local and not getattr(ls, "_remora_user_question_bridge_registered", False):
+                try:
+                    from remora.bootstrap.bedrock import BootstrapEvent
+
+                    async def _forward_user_question(event: BootstrapEvent) -> None:
+                        if getattr(event, "event_type", "") != "HumanInputRequestEvent":
+                            return
+                        payload = getattr(event, "payload", {}) or {}
+                        if not isinstance(payload, dict):
+                            return
+                        if payload.get("kind") != "user_question":
+                            return
+
+                        prompt = str(payload.get("question") or "Input:")
+                        agent_id = str(getattr(event, "from_agent", "") or payload.get("agent_id", "")).strip()
+                        if not agent_id:
+                            return
+
+                        ls.protocol.notify(
+                            "$/remora/requestInput",
+                            {
+                                "agent_id": agent_id,
+                                "prompt": prompt,
+                                "request_id": payload.get("request_id"),
+                                "node_id": payload.get("node_id"),
+                                "question": payload.get("question"),
+                            },
+                        )
+
+                    event_bus_local.subscribe(BootstrapEvent, _forward_user_question)
+                    ls._remora_user_question_bridge_registered = True
+                    startup_log.info("Bootstrap user-question bridge registered")
+                except Exception:
+                    startup_log.exception("Failed to register bootstrap user-question bridge")
+
             cairn_ready = False
             if cairn_svc is not None:
                 try:

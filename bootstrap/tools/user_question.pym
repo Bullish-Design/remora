@@ -1,0 +1,23 @@
+@external
+async def event_write(event_type: str, payload: dict) -> str: ...
+
+question: str = Input("question")
+request_id: str = Input("request_id")
+node_id: str = Input("node_id")
+
+async def user_question() -> str:
+    """Request a human answer from the editor/UI input flow.
+    Emits a HumanInputRequestEvent payload for the focused node and
+    returns the event_write result JSON."""
+    return await event_write(
+        "HumanInputRequestEvent",
+        {
+            "question": question,
+            "request_id": request_id,
+            "node_id": node_id,
+            "kind": "user_question",
+        },
+    )
+
+
+await user_question()

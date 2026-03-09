@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from remora.bootstrap.activation import default_agent_id, handle_agent_needed
+from remora.bootstrap.activation import (
+    _append_correction_notes,
+    _ensure_subject_matter_expert_workspace,
+    _extract_human_response_fields,
+    default_agent_id,
+    handle_agent_needed,
+)
 from remora.bootstrap.bedrock import BootstrapEvent
 from remora.bootstrap.schema_loader import SubscriptionSpec, TurnSchema
 from remora.bootstrap.turn_executor import TurnResult
@@ -294,3 +300,94 @@ async def test_handle_agent_needed_emits_tool_synthesized_event(
     assert isinstance(emitted, BootstrapEvent)
     assert emitted.event_type == "ToolSynthesizedEvent"
     assert emitted.payload["tool_name"] == "node_context"
+
+
+@pytest.mark.asyncio
+async def test_ensure_subject_matter_expert_workspace_seeds_schema_and_summary() -> None:
+    class _FakeCairnExternals:
+        def __init__(self) -> None:
+            self.files: dict[str, str] = {}
+
+        async def read_file(self, path: str) -> str:
+            return self.files.get(path, "")
+
+        async def write_file(self, path: str, content: str) -> None:
+            self.files[path] = content
+
+    cairn = _FakeCairnExternals()
+    await _ensure_subject_matter_expert_workspace(
+        cairn,
+        agent_id="agent-app",
+        node_attrs={"id": "module:src/app.py", "full_name": "src.app"},
+    )
+
+    assert "extends: subject_matter_expert" in cairn.files["schema.yaml"]
+    assert "# Node Guide: src.app" in cairn.files["summary.md"]
+
+
+@pytest.mark.asyncio
+async def test_ensure_subject_matter_expert_workspace_preserves_existing_files() -> None:
+    class _FakeCairnExternals:
+        def __init__(self) -> None:
+            self.files: dict[str, str] = {
+                "schema.yaml": "version: \"1\"\nname: custom\n",
+                "summary.md": "# custom summary\n",
+            }
+
+        async def read_file(self, path: str) -> str:
+            return self.files.get(path, "")
+
+        async def write_file(self, path: str, content: str) -> None:
+            self.files[path] = content
+
+    cairn = _FakeCairnExternals()
+    await _ensure_subject_matter_expert_workspace(
+        cairn,
+        agent_id="agent-app",
+        node_attrs={"id": "module:src/app.py", "full_name": "src.app"},
+    )
+
+    assert cairn.files["schema.yaml"] == "version: \"1\"\nname: custom\n"
+    assert cairn.files["summary.md"] == "# custom summary\n"
+
+
+@pytest.mark.asyncio
+async def test_append_correction_notes_writes_notes_and_summary() -> None:
+    class _FakeCairnExternals:
+        def __init__(self) -> None:
+            self.files: dict[str, str] = {
+                "notes.md": "existing note\n",
+                "summary.md": "# Node Guide: src.app\n\n## User corrections\n",
+            }
+
+        async def read_file(self, path: str) -> str:
+            return self.files.get(path, "")
+
+        async def write_file(self, path: str, content: str) -> None:
+            self.files[path] = content
+
+    cairn = _FakeCairnExternals()
+    await _append_correction_notes(
+        cairn,
+        request_id="req-2",
+        question="What should this return?",
+        response="Return a cached value.",
+    )
+
+    assert "Correction `req-2`: Return a cached value." in cairn.files["notes.md"]
+    assert "`req-2`: Return a cached value." in cairn.files["summary.md"]
+
+
+def test_extract_human_response_fields_from_activation_event() -> None:
+    event = SimpleNamespace(
+        event_type="HumanInputResponseEvent",
+        payload={
+            "request_id": "req-3",
+            "question": "Clarify behavior",
+            "response": "Use deterministic ordering.",
+        },
+    )
+    request_id, question, response = _extract_human_response_fields(event)
+    assert request_id == "req-3"
+    assert question == "Clarify behavior"
+    assert response == "Use deterministic ordering."

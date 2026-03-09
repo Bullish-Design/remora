@@ -17,6 +17,7 @@ EXPECTED_FILES = {
     "graph_add_edge.pym",
     "read_recent_events.pym",
     "emit_event.pym",
+    "user_question.pym",
 }
 
 
@@ -81,3 +82,32 @@ async def test_graph_find_nodes_routes_to_graph_read(tmp_path: Path) -> None:
     assert captured["selector"] == {"match": {"kind": "function"}}
     payload = json.loads(result)
     assert payload[0]["kind"] == "function"
+
+
+@pytest.mark.asyncio
+async def test_user_question_emits_human_input_request_event(tmp_path: Path) -> None:
+    script = _load_tool(TOOLS_DIR / "user_question.pym", tmp_path / ".grail")
+    captured: dict[str, object] = {}
+
+    async def _event_write(event_type: str, payload: dict) -> str:
+        captured["event_type"] = event_type
+        captured["payload"] = payload
+        return json.dumps({"event_id": 99})
+
+    result = await script.run(
+        inputs={
+            "question": "What should this function return?",
+            "request_id": "req-123",
+            "node_id": "function:src/app.py:42",
+        },
+        externals={"event_write": _event_write},
+    )
+
+    assert json.loads(result)["event_id"] == 99
+    assert captured["event_type"] == "HumanInputRequestEvent"
+    assert captured["payload"] == {
+        "question": "What should this function return?",
+        "request_id": "req-123",
+        "node_id": "function:src/app.py:42",
+        "kind": "user_question",
+    }

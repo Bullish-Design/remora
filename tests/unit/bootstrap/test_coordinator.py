@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from remora.bootstrap.coordinator import emit_agent_needed_events, find_unassigned_modules
+from remora.bootstrap.coordinator import (
+    emit_agent_needed_events,
+    find_unassigned_modules,
+    find_unassigned_nodes,
+)
 from remora.core.code.projections import NodeProjection
 from remora.core.events.code_events import NodeDiscoveredEvent
 from remora.core.store.event_store import EventStore
@@ -27,6 +31,34 @@ async def store(tmp_path: Path) -> EventStore:
             end_line=20,
             source_code="print('x')\n",
             source_hash="hash",
+        ),
+    )
+    await event_store.append(
+        "swarm",
+        NodeDiscoveredEvent(
+            node_id="function:src/app.py:build_app",
+            node_type="function",
+            name="build_app",
+            full_name="function:build_app",
+            file_path="src/app.py",
+            start_line=3,
+            end_line=10,
+            source_code="def build_app():\n    return {}\n",
+            source_hash="hash2",
+        ),
+    )
+    await event_store.append(
+        "swarm",
+        NodeDiscoveredEvent(
+            node_id="function:src/other.py:other_fn",
+            node_type="function",
+            name="other_fn",
+            full_name="function:other_fn",
+            file_path="src/other.py",
+            start_line=1,
+            end_line=2,
+            source_code="def other_fn():\n    return 1\n",
+            source_hash="hash3",
         ),
     )
 
@@ -66,3 +98,26 @@ async def test_emit_agent_needed_events_appends_bootstrap_events(store: EventSto
     payload = needed[0]["payload"]
     assert payload["node_id"] == "module:src/app.py"
     assert payload["agent_id"].startswith("agent-")
+
+
+@pytest.mark.asyncio
+async def test_find_unassigned_nodes_filters_by_file_and_assigned_targets(store: EventStore) -> None:
+    plans = await find_unassigned_nodes(store, file_path="src/app.py")
+    assert [plan.node_id for plan in plans] == [
+        "module:src/app.py",
+        "function:src/app.py:build_app",
+    ]
+
+    await store.nodes.write_graph(
+        "add_node",
+        {
+            "id": "agent-build-app",
+            "kind": "agent",
+            "attrs": {
+                "assigned_node_id": "function:src/app.py:build_app",
+            },
+        },
+    )
+
+    plans_after = await find_unassigned_nodes(store, file_path="src/app.py")
+    assert [plan.node_id for plan in plans_after] == ["module:src/app.py"]

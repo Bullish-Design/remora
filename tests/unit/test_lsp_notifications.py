@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from tests.unit.conftest import make_node as _make_node
@@ -15,6 +15,7 @@ def mock_server():
     srv.event_store = AsyncMock()
     srv.db = AsyncMock()
     srv.emit_event = AsyncMock()
+    srv.bootstrap_runner = None
     return srv
 
 
@@ -110,3 +111,49 @@ async def test_input_submitted_emit_timeout_skips_runner(
     await notifications.on_input_submitted(mock_server, {"agent_id": "rm_agent", "input": "hello"})
 
     mock_server.runner.trigger.assert_not_awaited()
+
+
+@pytest.mark.asyncio()
+async def test_input_submitted_request_id_routes_to_bootstrap_runner(mock_server):
+    mock_server.bootstrap_runner = AsyncMock()
+    mock_server.bootstrap_runner.handle_human_input_response = AsyncMock(return_value=True)
+
+    from remora.lsp import notifications
+
+    await notifications.on_input_submitted(
+        mock_server,
+        {
+            "request_id": "req-1",
+            "agent_id": "agent-app",
+            "node_id": "module:src/app.py",
+            "input": "Use caching.",
+            "question": "How should this work?",
+        },
+    )
+
+    mock_server.bootstrap_runner.handle_human_input_response.assert_awaited_once_with(
+        agent_id="agent-app",
+        node_id="module:src/app.py",
+        request_id="req-1",
+        response="Use caching.",
+        question="How should this work?",
+    )
+    mock_server.emit_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio()
+async def test_input_submitted_request_id_falls_back_to_human_input_event(mock_server):
+    from remora.lsp import notifications
+
+    await notifications.on_input_submitted(
+        mock_server,
+        {
+            "request_id": "req-2",
+            "input": "Return cached data.",
+        },
+    )
+
+    mock_server.emit_event.assert_awaited_once()
+    event = mock_server.emit_event.await_args.args[0]
+    assert event.request_id == "req-2"
+    assert event.response == "Return cached data."

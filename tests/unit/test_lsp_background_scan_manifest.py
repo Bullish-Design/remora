@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from lsprotocol import types as lsp
@@ -311,4 +313,72 @@ async def test_background_scan_uses_aggressive_preemption_settings(
 
     for task in scheduled_tasks:
         if task is not scan_task and not task.done():
+            task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_initialized_registers_bootstrap_user_question_bridge(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_server = _FakeServer(str(tmp_path), _SimpleDB())
+    fake_server.protocol = SimpleNamespace(notify=MagicMock())
+    event_bus = _FakeEventBus()
+
+    import remora.lsp.__main__ as lsp_main_mod
+    import remora.runner.agent_runner as runner_mod
+    from remora.bootstrap.bedrock import BootstrapEvent
+
+    monkeypatch.setattr(lsp_main_mod, "_setup_logging", lambda: logging.getLogger("test"))
+    monkeypatch.setattr(lsp_main_mod, "_get_server", lambda: fake_server)
+    monkeypatch.setattr(runner_mod, "AgentRunner", _FakeRunner)
+    monkeypatch.setattr("remora.core.config.load_config", lambda path=None: Config())
+
+    with pytest.raises(_StopSentinel):
+        lsp_main_mod._run_server(event_bus=event_bus)
+
+    scheduled_tasks: list[asyncio.Task] = []
+
+    def _capture_ensure_future(coro):
+        task = asyncio.create_task(coro)
+        scheduled_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(asyncio, "ensure_future", _capture_ensure_future)
+    initialized_handler = fake_server._features[lsp.INITIALIZED]
+    await initialized_handler(lsp.InitializedParams())
+
+    bridge_handler = None
+    for event_type, handler in event_bus.subscriptions:
+        if event_type is BootstrapEvent:
+            bridge_handler = handler
+            break
+    assert bridge_handler is not None
+
+    await bridge_handler(
+        BootstrapEvent(
+            event_type="HumanInputRequestEvent",
+            node_id="function:app.py:foo",
+            from_agent="agent-foo",
+            payload={
+                "kind": "user_question",
+                "request_id": "req-99",
+                "question": "What should this function return?",
+                "node_id": "function:app.py:foo",
+            },
+        )
+    )
+
+    fake_server.protocol.notify.assert_called_once_with(
+        "$/remora/requestInput",
+        {
+            "agent_id": "agent-foo",
+            "prompt": "What should this function return?",
+            "request_id": "req-99",
+            "node_id": "function:app.py:foo",
+            "question": "What should this function return?",
+        },
+    )
+
+    for task in scheduled_tasks:
+        if not task.done():
             task.cancel()

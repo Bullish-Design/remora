@@ -62,6 +62,138 @@ async def _read_node_attrs(event_store: EventStore, node_id: str) -> dict[str, A
     return attrs
 
 
+def _as_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _build_subject_matter_expert_schema(*, agent_id: str) -> str:
+    return (
+        'version: "1"\n'
+        f'name: "{agent_id}_sme"\n'
+        "extends: subject_matter_expert\n"
+        'termination: "DONE"\n'
+    )
+
+
+def _build_summary_template(node_attrs: dict[str, Any]) -> str:
+    node_name = str(
+        node_attrs.get("full_name")
+        or node_attrs.get("name")
+        or node_attrs.get("id")
+        or node_attrs.get("node_id")
+        or "unknown-node"
+    )
+    return (
+        f"# Node Guide: {node_name}\n\n"
+        "## What I am\n"
+        "_pending_\n\n"
+        "## What I do\n"
+        "_pending_\n\n"
+        "## How I do it\n"
+        "_pending_\n\n"
+        "## Known limitations\n"
+        "_pending_\n\n"
+        "## User questions and answers\n"
+        "_none yet_\n\n"
+        "## User corrections\n"
+        "_none yet_\n"
+    )
+
+
+async def _ensure_subject_matter_expert_workspace(
+    cairn_externals: CairnExternals,
+    *,
+    agent_id: str,
+    node_attrs: dict[str, Any],
+) -> None:
+    read_file = getattr(cairn_externals, "read_file", None)
+    write_file = getattr(cairn_externals, "write_file", None)
+    if not callable(read_file) or not callable(write_file):
+        return
+
+    try:
+        schema_text = _as_text(await read_file("schema.yaml"))
+    except Exception:
+        schema_text = ""
+    if not schema_text.strip():
+        await write_file("schema.yaml", _build_subject_matter_expert_schema(agent_id=agent_id))
+
+    try:
+        summary_text = _as_text(await read_file("summary.md"))
+    except Exception:
+        summary_text = ""
+    if not summary_text.strip():
+        await write_file("summary.md", _build_summary_template(node_attrs))
+
+
+def _extract_human_response_fields(activation_event: Any) -> tuple[str, str, str]:
+    event_type = getattr(activation_event, "event_type", "")
+    payload = getattr(activation_event, "payload", {}) if activation_event is not None else {}
+    if not isinstance(payload, dict):
+        payload = {}
+    if event_type != "HumanInputResponseEvent":
+        return "", "", ""
+
+    request_id = str(payload.get("request_id", "")).strip()
+    response = str(payload.get("response", "")).strip()
+    question = str(payload.get("question", "")).strip()
+    return request_id, question, response
+
+
+async def _append_correction_notes(
+    cairn_externals: CairnExternals,
+    *,
+    request_id: str,
+    question: str,
+    response: str,
+) -> None:
+    if not response:
+        return
+
+    marker_id = request_id or "no-request-id"
+    notes_entry = (
+        f"- Correction `{marker_id}`: {response}"
+        + (f" (question: {question})" if question else "")
+        + "\n"
+    )
+    summary_entry = (
+        f"- `{marker_id}`: {response}"
+        + (f" (question: {question})" if question else "")
+        + "\n"
+    )
+
+    try:
+        notes_text = _as_text(await cairn_externals.read_file("notes.md"))
+    except Exception:
+        notes_text = ""
+    if notes_entry not in notes_text:
+        if notes_text and not notes_text.endswith("\n"):
+            notes_text += "\n"
+        notes_text += notes_entry
+        await cairn_externals.write_file("notes.md", notes_text)
+
+    try:
+        summary_text = _as_text(await cairn_externals.read_file("summary.md"))
+    except Exception:
+        summary_text = ""
+    if summary_entry in summary_text:
+        return
+
+    section = "## User corrections"
+    if section not in summary_text:
+        if summary_text and not summary_text.endswith("\n"):
+            summary_text += "\n"
+        summary_text += f"\n{section}\n"
+    if not summary_text.endswith("\n"):
+        summary_text += "\n"
+    summary_text += summary_entry
+    await cairn_externals.write_file("summary.md", summary_text)
+
+
 async def _list_workspace_tool_files(cairn_externals: CairnExternals) -> set[str]:
     try:
         files = await cairn_externals.list_dir("tools")
@@ -210,6 +342,18 @@ async def handle_agent_needed(
     files_provider = await _make_files_provider(cairn_externals)
 
     node_attrs = await _read_node_attrs(event_store, node_id)
+    await _ensure_subject_matter_expert_workspace(
+        cairn_externals,
+        agent_id=agent_id,
+        node_attrs=node_attrs,
+    )
+    request_id, question, response = _extract_human_response_fields(event)
+    await _append_correction_notes(
+        cairn_externals,
+        request_id=request_id,
+        question=question,
+        response=response,
+    )
     tool_files_before = await _list_workspace_tool_files(cairn_externals)
 
     with tempfile.TemporaryDirectory(prefix="remora-bootstrap-") as tmp_dir:
