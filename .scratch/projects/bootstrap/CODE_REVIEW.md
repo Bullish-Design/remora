@@ -68,7 +68,7 @@ paths = await cairn_externals.list_dir(".")
 
 `list_dir` returns immediate children only. Workspace files in subdirectories (other than `tools/`, which is handled separately by `_extract_workspace_tools`) are invisible to Grail's files provider. For the current bootstrap use case this is fine — agents only write to the root. But if a future agent writes structured files (e.g., `memory/index.md`), Grail won't see them via this provider.
 
-**Recommendation:** Document this limitation in a comment, or if needed in future, implement a recursive listing.
+**Recommendation:** Document this limitation in a comment, and implement a recursive listing via a flag for future experimentation.
 
 ---
 
@@ -209,7 +209,7 @@ Honest, correct.
 
 **`_ensure_direct_subscription` + `_register_schema_subscriptions` both call `get_subscriptions(agent_id)`** — two separate reads from the subscriptions DB for the same agent. Minor efficiency concern; could be merged if performance becomes an issue.
 
-**No idempotency guard on `_emit_tool_synthesized_events`.** On a crash-and-restart scenario where the agent was activated but the graph node write failed, `handle_agent_needed` would be called again. The tool file diff would be `before=set()` (workspace now has tools) → `after=set(with tools)` → duplicate `ToolSynthesizedEvent` would be emitted. The graph writes also use `INSERT OR REPLACE` (idempotent), but the event emission is not. Low risk for the current use case but worth noting.
+**No idempotency guard on `_emit_tool_synthesized_events`.** On a crash-and-restart scenario where the agent was activated but the graph node write failed, `handle_agent_needed` would be called again. The tool file diff would be `before=set()` (workspace now has tools) → `after=set(with tools)` → duplicate `ToolSynthesizedEvent` would be emitted. The graph writes also use `INSERT OR REPLACE` (idempotent), but the event emission is not. Low risk for the current use case but worth adding notes to the docstrings where this will impact.
 
 ### Elegance
 
@@ -736,7 +736,7 @@ This is fine as a design artifact, but it creates confusion: a developer reading
 
 A separate package exists at `bootstrap/src/remora_bootstrap/` with `primitives.py`, `runtime.py`, `bootstrap.py`, `contracts.py`, `registry.py`, and subpackages. This appears to be an earlier implementation attempt. Nothing in the current codebase imports from it. It is **dead code** and adds cognitive overhead — a developer exploring the codebase would encounter it and wonder about its relationship to `src/remora/bootstrap/`.
 
-**Recommendation:** Remove it, or add an explicit `README` or top-level comment explaining it is an archived exploration.
+**Recommendation:** Remove it, given that it is an archived exploration.
 
 ### Developer mental model assessment
 
