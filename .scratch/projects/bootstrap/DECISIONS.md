@@ -204,3 +204,12 @@ when at least one workspace panel (`role`, `schema`, `notes`, `todo`, `log`,
 
 **Rationale**: Keeps non-bootstrap node sidebars uncluttered while still
 surfacing bootstrap identity artifacts immediately once present.
+
+## D24: ToolSynthesizedEvent is emitted by activation diff, not write tool
+**Decision**: New workspace tools are detected in `handle_agent_needed()` via
+before/after snapshots of `tools/*.pym`. For each newly seen file, activation
+emits `ToolSynthesizedEvent` directly to EventStore.
+
+**Rationale**: This avoids coupling event emission to one specific write tool
+implementation and guarantees event generation even if tools are created by
+different means during a turn.

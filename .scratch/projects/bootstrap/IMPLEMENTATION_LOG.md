@@ -247,3 +247,29 @@
 ### validation commands run
 - `devenv shell -- ruff check src/remora/companion/sidebar/composer.py src/remora/companion/sidebar/workspace.py tests/unit/companion/test_workspace_panels.py`
 - `devenv shell -- pytest tests/unit/companion/test_workspace_panels.py tests/unit/companion/test_node_agent.py tests/unit/companion/test_node_workspace.py tests/unit/companion/test_registry.py tests/unit/companion/test_router.py tests/unit/companion/test_startup.py tests/unit/companion/test_swarms.py -q`
+
+## 2026-03-08 — M6 implementation (completed, pending commit)
+
+### bootstrap files changed
+- `src/remora/bootstrap/activation.py`
+  - Added workspace tool snapshot helper (`_list_workspace_tool_files`)
+  - Added synthesized-tool event helper (`_emit_tool_synthesized_events`)
+  - `handle_agent_needed()` now:
+    - snapshots workspace `tools/*.pym` before turn
+    - snapshots again after turn
+    - emits `ToolSynthesizedEvent` for each new tool file
+
+### tests changed
+- `tests/unit/bootstrap/test_activation.py`
+  - Added `test_handle_agent_needed_emits_tool_synthesized_event`
+    - verifies new tool diff results in `BootstrapEvent(event_type="ToolSynthesizedEvent")`
+
+### notable implementation notes
+- Tool synthesis events are produced by activation-level diffing, not by adding
+  side effects to `write_file.pym`. This keeps behavior independent of how a
+  tool file was created during the turn.
+
+### validation commands run
+- `devenv shell -- ruff check src/remora/bootstrap/activation.py tests/unit/bootstrap/test_activation.py`
+- `devenv shell -- pytest tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/test_grail_discovery.py -q`
+- `devenv shell -- pytest tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_seed_graph.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_grail_discovery.py tests/unit/companion/test_workspace_panels.py -q`

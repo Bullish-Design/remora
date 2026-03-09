@@ -1,6 +1,6 @@
 # Bootstrap Implementation Project Context
 
-## Status: IN PROGRESS — M3/M4 committed+pushed; M5 implemented locally and validated
+## Status: IN PROGRESS — M3/M4/M5 committed+pushed; M6 implemented locally and validated
 
 ## Output
 - `.scratch/projects/bootstrap/IMPLEMENTATION_GUIDE.md` — implementation spec
@@ -13,7 +13,17 @@
   - commit `7953623`
 - M4 graph seeding support was committed and pushed:
   - commit `20f01a9`
-- Implemented M5 companion workspace visibility:
+- M5 companion workspace visibility was committed and pushed:
+  - commit `2af3e50`
+- Implemented M6 tool synthesis hardening:
+  - updated `src/remora/bootstrap/activation.py`
+    - tracks workspace tool file set before/after each activation turn
+    - emits `ToolSynthesizedEvent` for newly created `tools/*.pym` files
+      (payload includes `node_id`, `agent_id`, `tool_name`, `file_path`)
+  - updated `tests/unit/bootstrap/test_activation.py`
+    - added coverage for synthesized-tool event emission path
+
+- Previously implemented M5 artifacts:
   - added `src/remora/companion/sidebar/workspace.py`
     - `WorkspacePanel` dataclass
     - `build_workspace_panels(workspace)` for `role.md`, `schema.yaml`,
@@ -66,6 +76,9 @@
 - `devenv shell -- pytest tests/unit/bootstrap/test_seed_graph.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_grail_discovery.py tests/unit/bootstrap/test_system_tools.py tests/unit/bootstrap/test_bedrock.py tests/unit/test_event_store_schema.py tests/unit/test_node_store_graph.py tests/unit/test_subscriptions.py -q`
 - `devenv shell -- ruff check src/remora/companion/sidebar/composer.py src/remora/companion/sidebar/workspace.py tests/unit/companion/test_workspace_panels.py`
 - `devenv shell -- pytest tests/unit/companion/test_workspace_panels.py tests/unit/companion/test_node_agent.py tests/unit/companion/test_node_workspace.py tests/unit/companion/test_registry.py tests/unit/companion/test_router.py tests/unit/companion/test_startup.py tests/unit/companion/test_swarms.py -q`
+- `devenv shell -- ruff check src/remora/bootstrap/activation.py tests/unit/bootstrap/test_activation.py`
+- `devenv shell -- pytest tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/test_grail_discovery.py -q`
+- `devenv shell -- pytest tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_seed_graph.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_grail_discovery.py tests/unit/companion/test_workspace_panels.py -q`
 - All passing.
 
 ## Key decisions captured (see DECISIONS.md)
@@ -74,10 +87,11 @@
 - D21: default agent IDs are deterministic and node-derived (`default_agent_id`)
 - D22: filesystem fallback seeds modules through `NodeDiscoveredEvent` + `NodeProjection`, not `graph_nodes` writes
 - D23: workspace sidebar section renders only when at least one bootstrap panel has content
+- D24: tool-synthesis events are emitted by activation-time before/after workspace tool diff
 
 ## Next step
-- Commit/push current M5 changes.
-- Start M6 tool synthesis flow hardening.
+- Commit/push current M6 changes.
+- Run an optional full test sweep / integration bootstrap loop tests when desired.
 
 ## 2026-03-08 decision lock (implementation kickoff)
 The following decisions were reconfirmed with the user before coding:

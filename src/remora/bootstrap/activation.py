@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from remora.bootstrap.bedrock import _extract_workspace_tools, _make_files_provider, build_bedrock
+from remora.bootstrap.bedrock import BootstrapEvent, _extract_workspace_tools, _make_files_provider, build_bedrock
 from remora.bootstrap.schema_loader import TurnSchema, load_schema
 from remora.bootstrap.turn_executor import TurnExecutor, TurnResult
 from remora.core.agents.cairn_bridge import CairnWorkspaceService, SyncMode
@@ -60,6 +60,42 @@ async def _read_node_attrs(event_store: EventStore, node_id: str) -> dict[str, A
     attrs.setdefault("id", node_id)
     attrs.setdefault("node_id", node_id)
     return attrs
+
+
+async def _list_workspace_tool_files(cairn_externals: CairnExternals) -> set[str]:
+    try:
+        files = await cairn_externals.list_dir("tools")
+    except Exception:
+        return set()
+    return {name for name in (files or []) if name.endswith(".pym")}
+
+
+async def _emit_tool_synthesized_events(
+    event_store: EventStore,
+    *,
+    swarm_id: str,
+    agent_id: str,
+    node_id: str,
+    before: set[str],
+    after: set[str],
+) -> int:
+    emitted = 0
+    for file_name in sorted(after - before):
+        event = BootstrapEvent(
+            event_type="ToolSynthesizedEvent",
+            node_id=node_id,
+            payload={
+                "node_id": node_id,
+                "agent_id": agent_id,
+                "tool_name": Path(file_name).stem,
+                "file_path": f"tools/{file_name}",
+            },
+            from_agent=agent_id,
+            tags=("bootstrap", "tool-synthesized"),
+        )
+        await event_store.append(swarm_id, event)
+        emitted += 1
+    return emitted
 
 
 def _pattern_key(pattern: SubscriptionPattern) -> tuple[Any, ...]:
@@ -174,6 +210,7 @@ async def handle_agent_needed(
     files_provider = await _make_files_provider(cairn_externals)
 
     node_attrs = await _read_node_attrs(event_store, node_id)
+    tool_files_before = await _list_workspace_tool_files(cairn_externals)
 
     with tempfile.TemporaryDirectory(prefix="remora-bootstrap-") as tmp_dir:
         extracted_tools_dir = await _extract_workspace_tools(cairn_externals, Path(tmp_dir))
@@ -194,6 +231,16 @@ async def handle_agent_needed(
             system_agents_dir=agents_dir,
         )
         turn = await executor.run(event)
+
+    tool_files_after = await _list_workspace_tool_files(cairn_externals)
+    await _emit_tool_synthesized_events(
+        event_store,
+        swarm_id=swarm_id,
+        agent_id=agent_id,
+        node_id=node_id,
+        before=tool_files_before,
+        after=tool_files_after,
+    )
 
     schema = await load_schema(cairn_externals, system_agents_dir=agents_dir)
     await _register_schema_subscriptions(

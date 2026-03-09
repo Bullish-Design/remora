@@ -1,6 +1,6 @@
 # Bootstrap Implementation Progress
 
-## Status: M5 COMPLETE; M6 NEXT
+## Status: M6 COMPLETE (implementation guide milestones complete)
 
 ## Tasks
 
@@ -52,4 +52,6 @@
 | M5.2 | Integrate workspace panels into sidebar composer output | done |
 | M5.3 | Add companion tests for workspace panel rendering | done |
 | M5.4 | Run targeted companion tests + lint | done |
-| M6 | Tool synthesis flow hardening | pending |
+| M6.1 | Emit `ToolSynthesizedEvent` when new workspace `.pym` tools appear after activation | done |
+| M6.2 | Add M6 activation test coverage for synthesized-tool event emission | done |
+| M6.3 | Run targeted bootstrap + companion regression checks | done |

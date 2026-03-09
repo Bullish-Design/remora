@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from remora.bootstrap.activation import default_agent_id, handle_agent_needed
+from remora.bootstrap.bedrock import BootstrapEvent
 from remora.bootstrap.schema_loader import SubscriptionSpec, TurnSchema
 from remora.bootstrap.turn_executor import TurnResult
 from remora.core.events.subscriptions import SubscriptionPattern
@@ -219,3 +220,77 @@ def test_default_agent_id_is_stable_and_safe() -> None:
     assert first.startswith("agent-")
     assert "/" not in first
     assert ":" not in first
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_needed_emits_tool_synthesized_event(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    bootstrap_root = tmp_path / "bootstrap"
+    (bootstrap_root / "tools").mkdir(parents=True)
+    (bootstrap_root / "agents").mkdir(parents=True)
+
+    class FakeCairnExternals:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    monkeypatch.setattr("remora.bootstrap.activation.CairnExternals", FakeCairnExternals)
+    monkeypatch.setattr("remora.bootstrap.activation._make_files_provider", AsyncMock(return_value=AsyncMock(return_value={})))
+    monkeypatch.setattr("remora.bootstrap.activation._extract_workspace_tools", AsyncMock(return_value=tmp_path))
+    monkeypatch.setattr("remora.bootstrap.activation.TurnExecutor", _FakeExecutor)
+    monkeypatch.setattr("remora.bootstrap.activation.build_bedrock", lambda **_: {"graph_read": object()})
+    monkeypatch.setattr("remora.bootstrap.activation.discover_grail_tools", lambda *_, **__: [])
+    monkeypatch.setattr(
+        "remora.bootstrap.activation._list_workspace_tool_files",
+        AsyncMock(side_effect=[set(), {"node_context.pym"}]),
+    )
+    monkeypatch.setattr("remora.bootstrap.activation.load_schema", AsyncMock(return_value=TurnSchema()))
+
+    workspace = SimpleNamespace(cairn=object())
+    workspace_service = SimpleNamespace(
+        _stable_workspace=object(),
+        resolver=object(),
+        initialize=AsyncMock(),
+        get_agent_workspace=AsyncMock(return_value=workspace),
+    )
+    subscriptions = SimpleNamespace(
+        get_subscriptions=AsyncMock(return_value=[]),
+        register=AsyncMock(),
+    )
+    event_store = SimpleNamespace(
+        nodes=SimpleNamespace(
+            read_graph=AsyncMock(return_value=json.dumps({"id": "module:src/app.py", "attrs": {}})),
+            write_graph=AsyncMock(return_value="{}"),
+        ),
+        append=AsyncMock(return_value=11),
+    )
+    event = SimpleNamespace(
+        event_type="AgentNeededEvent",
+        node_id="module:src/app.py",
+        payload={"node_id": "module:src/app.py", "agent_id": "agent-app"},
+    )
+    config = SimpleNamespace(
+        model_base_url="http://localhost:8000/v1",
+        model_api_key="",
+        model_default="Qwen/Qwen3-4B",
+        timeout_s=30.0,
+    )
+
+    await handle_agent_needed(
+        event,
+        workspace_service=workspace_service,
+        subscriptions=subscriptions,
+        event_store=event_store,
+        config=config,
+        swarm_id="swarm",
+        bootstrap_root=bootstrap_root,
+    )
+
+    event_store.append.assert_awaited_once()
+    append_args = event_store.append.await_args.args
+    assert append_args[0] == "swarm"
+    emitted = append_args[1]
+    assert isinstance(emitted, BootstrapEvent)
+    assert emitted.event_type == "ToolSynthesizedEvent"
+    assert emitted.payload["tool_name"] == "node_context"
