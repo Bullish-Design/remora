@@ -1,6 +1,6 @@
 # Bootstrap Implementation Progress
 
-## Status: M6 COMPLETE (implementation guide milestones complete)
+## Status: M7 COMPLETE + full-suite verification COMPLETE
 
 ## Tasks
 
@@ -55,3 +55,5 @@
 | M6.1 | Emit `ToolSynthesizedEvent` when new workspace `.pym` tools appear after activation | done |
 | M6.2 | Add M6 activation test coverage for synthesized-tool event emission | done |
 | M6.3 | Run targeted bootstrap + companion regression checks | done |
+| M7.1 | Add end-to-end bootstrap loop integration test | done |
+| M7.2 | Run full-suite verification (`tests/` with documented excludes) | done |

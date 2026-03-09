@@ -1,6 +1,6 @@
 # Bootstrap Implementation Project Context
 
-## Status: IN PROGRESS — M0..M6 committed+pushed; implementation guide milestones complete
+## Status: IN PROGRESS — M0..M6 committed+pushed; M7 implemented + verified; commit pending
 
 ## Output
 - `.scratch/projects/bootstrap/IMPLEMENTATION_GUIDE.md` — implementation spec
@@ -23,6 +23,12 @@
       (payload includes `node_id`, `agent_id`, `tool_name`, `file_path`)
   - updated `tests/unit/bootstrap/test_activation.py`
     - added coverage for synthesized-tool event emission path
+- M7 bootstrap loop integration verification is complete (pending commit):
+  - added `tests/integration/test_bootstrap_loop.py`
+    - validates coordinator `AgentNeededEvent` emission
+    - validates activation handling + assignment persistence
+    - validates direct + schema subscription registration
+    - validates `ToolSynthesizedEvent` emission when a workspace tool appears
 
 - Previously implemented M5 artifacts:
   - added `src/remora/companion/sidebar/workspace.py`
@@ -91,7 +97,19 @@
 - D24: tool-synthesis events are emitted by activation-time before/after workspace tool diff
 
 ## Next step
-- Optional: run full suite and/or add integration bootstrap-loop tests to validate end-to-end runtime wiring.
+- Commit/push post-plan verification changes (integration test + approved `.grail` artifact churn).
+
+## Post-plan verification pass (current coding pass)
+- Added new integration test:
+  - `tests/integration/test_bootstrap_loop.py`
+  - validates coordinator emission + activation handling + subscription registration
+    + synthesized tool event emission in one end-to-end flow
+- Ran full test suite with documented excludes:
+  - `devenv shell -- pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q`
+  - passing in current branch state
+- Additional modified artifact observed during test execution:
+  - `.grail/add_tool/check.json` (path metadata churn)
+  - user explicitly approved committing this file as-is.
 
 ## 2026-03-08 decision lock (implementation kickoff)
 The following decisions were reconfirmed with the user before coding:

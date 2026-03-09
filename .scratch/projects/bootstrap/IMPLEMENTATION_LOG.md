@@ -273,3 +273,28 @@
 - `devenv shell -- ruff check src/remora/bootstrap/activation.py tests/unit/bootstrap/test_activation.py`
 - `devenv shell -- pytest tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/test_grail_discovery.py -q`
 - `devenv shell -- pytest tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_seed_graph.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_grail_discovery.py tests/unit/companion/test_workspace_panels.py -q`
+
+## 2026-03-08 — M7 implementation (completed)
+
+### tests added
+- `tests/integration/test_bootstrap_loop.py`
+  - Added `test_bootstrap_loop_emits_and_handles_agent_needed`
+    - seeds module discovery through `NodeDiscoveredEvent`
+    - verifies coordinator emits one `AgentNeededEvent`
+    - verifies activation persists agent assignment to graph
+    - verifies direct + `ContentChangedEvent` subscriptions are registered
+    - verifies activation emits one `ToolSynthesizedEvent` for new workspace tool
+
+### non-runtime metadata updates
+- `.grail/add_tool/check.json`
+  - Updated by local Grail metadata churn during test execution.
+  - User explicitly approved including this change in commit.
+
+### notable implementation notes
+- Integration test uses `await agentfs_available()` (async-safe) instead of
+  sync helper to avoid nested event-loop runtime errors.
+
+### validation commands run
+- `devenv shell -- ruff check tests/integration/test_bootstrap_loop.py`
+- `devenv shell -- pytest tests/integration/test_bootstrap_loop.py -q`
+- `devenv shell -- pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q`
