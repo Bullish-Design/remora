@@ -141,7 +141,7 @@
 - `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/schema_loader.py src/remora/bootstrap/turn_executor.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py`
 - `devenv shell -- pytest tests/unit/test_grail_discovery.py tests/unit/bootstrap/test_system_tools.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_execution.py tests/unit/test_event_store_schema.py tests/unit/test_node_store_graph.py tests/unit/bootstrap/test_bedrock.py tests/unit/test_subscriptions.py -q`
 
-## 2026-03-08 — M3 implementation (completed, pending commit)
+## 2026-03-08 — M3 implementation (completed)
 
 ### bootstrap files added
 - `src/remora/bootstrap/activation.py`
@@ -187,7 +187,7 @@
 - `devenv shell -- pytest tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py -q`
 - `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/activation.py src/remora/bootstrap/coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py`
 
-## 2026-03-08 — M4 implementation (completed, pending commit)
+## 2026-03-08 — M4 implementation (completed)
 
 ### bootstrap files added
 - `src/remora/bootstrap/seed_graph.py`
@@ -221,7 +221,7 @@
 - `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/seed_graph.py tests/unit/bootstrap/test_seed_graph.py`
 - `devenv shell -- pytest tests/unit/bootstrap/test_seed_graph.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_grail_discovery.py tests/unit/bootstrap/test_system_tools.py tests/unit/bootstrap/test_bedrock.py tests/unit/test_event_store_schema.py tests/unit/test_node_store_graph.py tests/unit/test_subscriptions.py -q`
 
-## 2026-03-08 — M5 implementation (completed, pending commit)
+## 2026-03-08 — M5 implementation (completed)
 
 ### companion files added
 - `src/remora/companion/sidebar/workspace.py`
@@ -248,7 +248,7 @@
 - `devenv shell -- ruff check src/remora/companion/sidebar/composer.py src/remora/companion/sidebar/workspace.py tests/unit/companion/test_workspace_panels.py`
 - `devenv shell -- pytest tests/unit/companion/test_workspace_panels.py tests/unit/companion/test_node_agent.py tests/unit/companion/test_node_workspace.py tests/unit/companion/test_registry.py tests/unit/companion/test_router.py tests/unit/companion/test_startup.py tests/unit/companion/test_swarms.py -q`
 
-## 2026-03-08 — M6 implementation (completed, pending commit)
+## 2026-03-08 — M6 implementation (completed)
 
 ### bootstrap files changed
 - `src/remora/bootstrap/activation.py`

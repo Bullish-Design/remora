@@ -1,6 +1,6 @@
 # Bootstrap Implementation Project Context
 
-## Status: IN PROGRESS — M3/M4/M5 committed+pushed; M6 implemented locally and validated
+## Status: IN PROGRESS — M0..M6 committed+pushed; implementation guide milestones complete
 
 ## Output
 - `.scratch/projects/bootstrap/IMPLEMENTATION_GUIDE.md` — implementation spec
@@ -15,7 +15,8 @@
   - commit `20f01a9`
 - M5 companion workspace visibility was committed and pushed:
   - commit `2af3e50`
-- Implemented M6 tool synthesis hardening:
+- M6 tool synthesis hardening was committed and pushed:
+  - commit `e17d490`
   - updated `src/remora/bootstrap/activation.py`
     - tracks workspace tool file set before/after each activation turn
     - emits `ToolSynthesizedEvent` for newly created `tools/*.pym` files
@@ -90,8 +91,7 @@
 - D24: tool-synthesis events are emitted by activation-time before/after workspace tool diff
 
 ## Next step
-- Commit/push current M6 changes.
-- Run an optional full test sweep / integration bootstrap loop tests when desired.
+- Optional: run full suite and/or add integration bootstrap-loop tests to validate end-to-end runtime wiring.
 
 ## 2026-03-08 decision lock (implementation kickoff)
 The following decisions were reconfirmed with the user before coding:
