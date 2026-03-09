@@ -298,3 +298,42 @@
 - `devenv shell -- ruff check tests/integration/test_bootstrap_loop.py`
 - `devenv shell -- pytest tests/integration/test_bootstrap_loop.py -q`
 - `devenv shell -- pytest tests/ --ignore=tests/benchmarks --ignore=tests/integration/cairn -q`
+
+## 2026-03-08 — M8 implementation (completed; commit pending)
+
+### bootstrap files added
+- `src/remora/bootstrap/runner.py`
+  - Added `BootstrapRunner` lifecycle:
+    - path setup for existing EventStore layout (`.remora/events/events.db`)
+    - resource initialization (`SubscriptionRegistry`, `EventStore`, `CairnWorkspaceService`)
+    - coordinator/module fallback seeding
+    - one-pass orchestration (`run_once`) for:
+      `find_unassigned_modules` -> `emit_agent_needed_events` -> `handle_agent_needed`
+    - long-running polling loop (`run_forever`) plus `stop()` and `close()`
+  - Added `run_bootstrap(config, ...)` convenience entrypoint.
+
+### bootstrap files changed
+- `src/remora/bootstrap/__init__.py`
+  - Exported `BootstrapRunner` and `run_bootstrap`.
+
+### tests added
+- `tests/unit/bootstrap/test_runner.py`
+  - verifies default DB path layout
+  - verifies run-once orchestration emits + handles unassigned modules
+  - verifies run-forever exits when stopped
+
+### notable implementation notes
+- Runner reuses existing DB path conventions from prior decisions:
+  - event store: `.remora/events/events.db`
+  - subscription store: `.remora/events/subscriptions.db`
+- Activation is executed from deterministic plans found before emission to keep
+  one-pass behavior stable in v1 bootstrap runtime.
+
+### validation commands run
+- `devenv shell -- uv sync --extra dev`
+- `devenv shell -- pytest tests/unit/bootstrap/test_runner.py -q` (fail first, then pass after implementation)
+- `devenv shell -- ruff check src/remora/bootstrap/__init__.py --fix`
+- `devenv shell -- ruff check src/remora/bootstrap/runner.py src/remora/bootstrap/__init__.py tests/unit/bootstrap/test_runner.py`
+- `devenv shell -- pytest tests/unit/bootstrap/test_runner.py tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_coordinator.py -q`
+- `devenv shell -- pytest tests/unit/bootstrap/ -q`
+- `devenv shell -- pytest tests/integration/test_bootstrap_loop.py -q`

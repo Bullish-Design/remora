@@ -213,3 +213,16 @@ emits `ToolSynthesizedEvent` directly to EventStore.
 **Rationale**: This avoids coupling event emission to one specific write tool
 implementation and guarantees event generation even if tools are created by
 different means during a turn.
+
+## D25: Bootstrap runner uses coordinator pass + direct activation in v1
+**Decision**: `BootstrapRunner.run_once()` executes:
+1) `find_unassigned_modules()`
+2) `emit_agent_needed_events()`
+3) direct `handle_agent_needed(...)` calls for each planned assignment.
+
+It does not rely on `EventStore.get_triggers()` for initial `AgentNeededEvent`
+dispatch in v1.
+
+**Rationale**: This keeps bootstrap progress deterministic with current v1
+subscription semantics while still appending canonical `AgentNeededEvent`
+records to EventStore for observability and replay.

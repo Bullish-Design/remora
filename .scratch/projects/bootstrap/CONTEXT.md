@@ -1,6 +1,6 @@
 # Bootstrap Implementation Project Context
 
-## Status: IN PROGRESS — M0..M7 committed+pushed; awaiting next milestone
+## Status: IN PROGRESS — M0..M7 committed+pushed; M8 runner wiring complete (commit pending)
 
 ## Output
 - `.scratch/projects/bootstrap/IMPLEMENTATION_GUIDE.md` — implementation spec
@@ -23,7 +23,7 @@
       (payload includes `node_id`, `agent_id`, `tool_name`, `file_path`)
   - updated `tests/unit/bootstrap/test_activation.py`
     - added coverage for synthesized-tool event emission path
-- M7 bootstrap loop integration verification is complete (pending commit):
+- M7 bootstrap loop integration verification is complete:
   - added `tests/integration/test_bootstrap_loop.py`
     - validates coordinator `AgentNeededEvent` emission
     - validates activation handling + assignment persistence
@@ -32,6 +32,22 @@
 - M7 verification artifacts were committed and pushed:
   - commit `ec5912b`
   - includes `.grail/add_tool/check.json` metadata churn (user-approved)
+- M8 bootstrap runtime wiring was implemented (pending commit):
+  - added `src/remora/bootstrap/runner.py`
+    - `BootstrapRunner` with init paths for existing DB layout
+      (`.remora/events/events.db`, `.remora/events/subscriptions.db`)
+    - `initialize()` creates EventStore + SubscriptionRegistry + workspace service,
+      seeds coordinator node, and filesystem module fallback
+    - `run_once()` performs one coordinator pass:
+      `find_unassigned_modules` -> `emit_agent_needed_events` -> `handle_agent_needed`
+    - `run_forever()` polling loop with `stop()` and `close()` lifecycle controls
+    - convenience `run_bootstrap(config, ...)`
+  - updated `src/remora/bootstrap/__init__.py`
+    - exports `BootstrapRunner` and `run_bootstrap`
+  - added `tests/unit/bootstrap/test_runner.py`
+    - default path layout test
+    - run-once orchestration test (emit + handle)
+    - run-forever stop behavior test
 
 - Previously implemented M5 artifacts:
   - added `src/remora/companion/sidebar/workspace.py`
@@ -90,6 +106,13 @@
 - `devenv shell -- pytest tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/test_grail_discovery.py -q`
 - `devenv shell -- pytest tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_seed_graph.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_grail_discovery.py tests/unit/companion/test_workspace_panels.py -q`
 - All passing.
+- `devenv shell -- uv sync --extra dev`
+- `devenv shell -- pytest tests/unit/bootstrap/test_runner.py -q` (fail first: missing module, then pass)
+- `devenv shell -- ruff check src/remora/bootstrap/__init__.py --fix`
+- `devenv shell -- ruff check src/remora/bootstrap/runner.py src/remora/bootstrap/__init__.py tests/unit/bootstrap/test_runner.py`
+- `devenv shell -- pytest tests/unit/bootstrap/test_runner.py tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_coordinator.py -q`
+- `devenv shell -- pytest tests/unit/bootstrap/ -q`
+- `devenv shell -- pytest tests/integration/test_bootstrap_loop.py -q`
 
 ## Key decisions captured (see DECISIONS.md)
 - D19: coordinator assignment source is `agent.attrs.assigned_node_id`
@@ -98,9 +121,10 @@
 - D22: filesystem fallback seeds modules through `NodeDiscoveredEvent` + `NodeProjection`, not `graph_nodes` writes
 - D23: workspace sidebar section renders only when at least one bootstrap panel has content
 - D24: tool-synthesis events are emitted by activation-time before/after workspace tool diff
+- D25: bootstrap runner run-once flow is coordinator pass + direct activation (no trigger-queue dependency for initial AgentNeeded dispatch)
 
 ## Next step
-- Start the next implementation milestone after M7 verification.
+- Commit/push M8 runner implementation.
 
 ## Post-plan verification pass (current coding pass)
 - Added new integration test:

@@ -8,6 +8,7 @@ from remora.bootstrap.bedrock import (
     build_bedrock,
 )
 from remora.bootstrap.coordinator import AgentNeededPlan, emit_agent_needed_events, find_unassigned_modules
+from remora.bootstrap.runner import BootstrapRunner, run_bootstrap
 from remora.bootstrap.schema_loader import (
     ContextStep,
     SubscriptionSpec,
@@ -34,6 +35,8 @@ __all__ = [
     "TurnSchema",
     "load_schema",
     "resolve_context_vars",
+    "BootstrapRunner",
+    "run_bootstrap",
     "seed_module_nodes_from_filesystem",
     "seed_coordinator_node",
     "seed_modules_if_empty",

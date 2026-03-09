@@ -1,6 +1,6 @@
 # Bootstrap Implementation Progress
 
-## Status: M7 COMPLETE + committed/pushed
+## Status: M8 implementation complete (commit pending)
 
 ## Tasks
 
@@ -58,3 +58,8 @@
 | M7.1 | Add end-to-end bootstrap loop integration test | done |
 | M7.2 | Run full-suite verification (`tests/` with documented excludes) | done |
 | M7.3 | Commit/push verification pass artifacts | done |
+| M8.1 | Add bootstrap runner outline + scope notes | done |
+| M8.2 | Add failing tests for bootstrap runner lifecycle + trigger loop | done |
+| M8.3 | Implement `src/remora/bootstrap/runner.py` + package exports | done |
+| M8.4 | Run targeted lint/tests and adjust notes | done |
+| M8.5 | Commit/push M8 implementation | pending |
