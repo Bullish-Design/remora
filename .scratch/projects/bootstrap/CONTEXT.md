@@ -10,21 +10,21 @@ Studied the v1 remora implementation and wrote a full actionable implementation
 spec mapping every V6 bootstrap concept to v1 components.
 
 ## Key decisions captured (see DECISIONS.md)
-- Bootstrap graph = new tables (bootstrap_nodes, bootstrap_edges) in the existing
-  event_store.db, exposed via BootstrapGraphStore (sibling to NodeStore)
-- Bedrock = async closures built per activation by build_bedrock() factory
+- NodeStore is the unified graph API — extended with read_graph() + write_graph()
+- New tables graph_nodes + graph_edges in event_store.db (not a separate file)
+- Code topology (functions/classes/modules) is LIVE in nodes table — no seeding needed
+- Bedrock _graph_read/_graph_write call event_store.nodes directly
 - TurnExecutor runs parallel to v1's execute_agent_turn() — no replacement
 - discover_grail_tools() extended with workspace_tools_dir + direct externals param
 
-## V1 files modified (minimal)
-- core/store/event_store_schema.py — add create_bootstrap_tables()
-- core/store/event_store.py — expose .bootstrap_graph property
-- core/tools/grail.py — add workspace_tools_dir + externals params to discover_grail_tools
+## V1 files modified (three only)
+- core/store/event_store_schema.py — add create_graph_tables()
+- core/store/node_store.py — add read_graph(), write_graph(), routing helpers
+- core/tools/grail.py — add workspace_tools_dir + externals params
 
 ## New files
 - src/remora/bootstrap/__init__.py
-- src/remora/bootstrap/bedrock.py
-- src/remora/bootstrap/graph_store.py
+- src/remora/bootstrap/bedrock.py          (NO graph_store.py — it's in NodeStore now)
 - src/remora/bootstrap/schema_loader.py
 - src/remora/bootstrap/turn_executor.py
 - src/remora/bootstrap/seed_graph.py

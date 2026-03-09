@@ -1,16 +1,29 @@
 # Bootstrap Implementation Decisions
 
-## D1: Bootstrap graph in EventStore DB (not a separate file)
-**Decision**: Add `bootstrap_nodes` + `bootstrap_edges` tables to the existing
-event_store.db via `event_store_schema.py`. BootstrapGraphStore wraps the same
-SQLite connection (write_conn / read_conn pair) from EventStore.
+## D1: Extend NodeStore — unified graph API, two tables
+**Decision**: Extend the existing `NodeStore` class with `read_graph()` and
+`write_graph()` methods. Add `graph_nodes` + `graph_edges` tables to event_store.db.
+`NodeStore` routes queries to the appropriate table based on node kind:
+- `kind in CODE_NODE_KINDS` → query v1 `nodes` table (live, from LSP scanner)
+- everything else → query new `graph_nodes` table
 
-**Rationale**: EventStore already manages WAL mode, read/write lock separation,
-and retry logic. Adding tables to the same DB avoids a third SQLite file and
-lets the graph store benefit from the same connection-management infrastructure.
+No separate `BootstrapGraphStore` class. No parallel graph concept.
 
-**Tradeoff**: Couples bootstrap graph schema to EventStore's schema module.
-Accepted — the bootstrap is explicitly built on top of v1 infrastructure.
+**Rationale**: Makes `event_store.nodes` the single, unified graph API. Bootstrap
+agents can query live code topology (from `nodes` table via `caller_ids`/`callee_ids`)
+and coordination topology (from `graph_nodes`/`graph_edges`) through the same tool
+calls. No seeding needed for code topology — it's live.
+
+**Key routing rule**:
+```python
+CODE_NODE_KINDS = frozenset({"function", "class", "method", "module", "file", "section"})
+# reads: route to nodes table if kind in CODE_NODE_KINDS, else graph_nodes
+# writes: always target graph_nodes (agents don't write code nodes directly)
+```
+
+**Tradeoff**: NodeStore grows slightly in scope. Mitigated by keeping existing
+methods (`get_node`, `list_nodes`, etc.) completely unchanged — new methods are
+additive only.
 
 ## D2: Bedrock functions are async closures, not module-level
 **Decision**: Bedrock functions are built at runtime via a factory:

@@ -20,9 +20,8 @@
 
 3. [M0: The Bedrock Layer](#3-m0-the-bedrock-layer)
    `src/remora/bootstrap/bedrock.py`. The six async functions.
-   `BootstrapGraphStore` in `src/remora/bootstrap/graph_store.py`.
-   Schema additions to `event_store_schema.py`.
-   `build_bedrock()` factory and per-agent closure construction.
+   `NodeStore` extended with generic graph methods and `graph_nodes` + `graph_edges` tables.
+   Schema additions to `event_store_schema.py`. `build_bedrock()` factory.
 
 4. [M1: System Tools (.pym)](#4-m1-system-tools-pym)
    All nine `bootstrap/tools/*.pym` files with exact content.
@@ -41,9 +40,9 @@
    Bootstrap coordinator: scan graph → emit AgentNeededEvent → spawn agents.
 
 7. [M4: Graph Seeding](#7-m4-graph-seeding)
-   `src/remora/bootstrap/seed_graph.py`.
-   Walking the Remora source tree. Writing bootstrap_nodes + bootstrap_edges.
-   Node kinds and edge kinds for the initial code topology.
+   Why code topology requires no seeding — it's live in `NodeStore`.
+   `src/remora/bootstrap/seed_graph.py` for non-code bootstrap nodes only.
+   Node kinds and edge kinds reference.
 
 8. [M5: Companion Visibility](#8-m5-companion-visibility)
    Extending the companion sidebar to display workspace files.
@@ -70,12 +69,13 @@
 |---|---|---|
 | `_cairn_read(path)` | `CairnExternals.read_file(path)` | wrap in bedrock closure |
 | `_cairn_write(path, content)` | `CairnExternals.write_file(path, content)` | wrap in bedrock closure |
-| `_graph_read(selector)` | `BootstrapGraphStore.read(selector)` | **new class** (extends NodeStore pattern) |
-| `_graph_write(op, data)` | `BootstrapGraphStore.write(op, data)` | **new class** |
+| `_graph_read(selector)` | `NodeStore.read_graph(selector)` | **extend** NodeStore |
+| `_graph_write(op, data)` | `NodeStore.write_graph(op, data)` | **extend** NodeStore |
 | `_event_read(selector)` | `EventStore.get_recent_events()` | wrap in bedrock closure |
 | `_event_write(event_type, payload)` | `EventStore.append(swarm_id, event)` | wrap in bedrock closure |
 | `workspace` store | `CairnWorkspaceService` per-agent DB | reuse as-is |
-| `graph` store | `BootstrapGraphStore` + EventStore DB | **new tables** in existing DB |
+| `graph` store — code nodes | `NodeStore` existing `nodes` table | **extend** with graph read methods |
+| `graph` store — generic nodes | new `graph_nodes` + `graph_edges` tables in event_store.db | **extend** NodeStore |
 | `events` store | `EventStore` (WAL SQLite) | reuse as-is |
 | `SubscriptionRegistry` | `SubscriptionRegistry` | reuse as-is |
 | `RemoraGrailTool` | `RemoraGrailTool` | reuse as-is |
@@ -85,40 +85,70 @@
 | `create_kernel()` | `create_kernel()` | reuse as-is |
 | Companion sidebar workspace view | — | **new** sidebar panels |
 
+### The unified graph: one NodeStore, two tables
+
+The graph is accessible through a single object: `event_store.nodes` (the
+existing `NodeStore`). It routes queries to the appropriate table:
+
+```
+NodeStore
+  ├─ nodes table          ← code nodes (functions, classes, modules)
+  │   Populated by v1 LSP scanner via NodeDiscoveredEvent projection.
+  │   Read with: get_node(), list_nodes(), get_node_at_position()  [existing]
+  │   Also readable via: read_graph({"match": {"kind": "function"}})  [new]
+  │
+  └─ graph_nodes table    ← generic nodes (agents, tasks, custom kinds)
+      Populated by bootstrap agents via graph_add_node tool.
+      Read with: read_graph({"node": id}), read_graph({"match": ...})  [new]
+
+graph_edges table         ← edges for generic nodes only
+  Code node topology uses caller_ids / callee_ids columns in the nodes table.
+  Bootstrap coordination edges (assigned_to, produced, etc.) go here.
+```
+
+**Key routing rule**: `kind in CODE_NODE_KINDS` → query `nodes` table.
+Everything else → query `graph_nodes` table.
+
+```python
+CODE_NODE_KINDS = frozenset({"function", "class", "method", "module", "file", "section"})
+```
+
 ### What is NOT changed in v1
 
-- `EventStore` — no schema changes except adding bootstrap tables
+- `EventStore` — no logic changes; only new tables added to schema
 - `CairnWorkspaceService` — unchanged
 - `CairnExternals` — unchanged; bedrock closures call its methods
 - `SubscriptionRegistry` / `SubscriptionPattern` — unchanged
 - `RemoraGrailTool` — unchanged
+- `AgentNode` — unchanged; still drives LSP features
 - `execute_agent_turn()` — unchanged; bootstrap TurnExecutor runs alongside it
-- `AgentNode` / `NodeStore` — unchanged; BootstrapGraphStore is a sibling class
+
+### What IS changed in v1
+
+| File | Change |
+|---|---|
+| `core/store/event_store_schema.py` | Add `graph_nodes` + `graph_edges` tables |
+| `core/store/node_store.py` | Add `read_graph()`, `write_graph()`, and private helpers |
+| `core/tools/grail.py` | Add `workspace_tools_dir` + `externals` params to `discover_grail_tools()` |
 
 ### The bootstrap externals dict
 
-The bootstrap bedrock constructs one externals dict per agent activation.
-This dict is injected into Grail tool execution in place of the v1
-`AgentContext.as_externals()`:
+Built once per agent activation by `build_bedrock()`. Injected as the Grail
+externals dict instead of the v1 `AgentContext.as_externals()`:
 
 ```python
 {
-    # Workspace channel
     "_cairn_read":  async (path: str) -> str,
-    "_cairn_write": async (path: str, content: str) -> None,
-
-    # Graph channel
+    "_cairn_write": async (path: str, content: str) -> str,
     "_graph_read":  async (selector: dict) -> str,
     "_graph_write": async (op: str, data: dict) -> str,
-
-    # Event channel
     "_event_read":  async (selector: dict) -> str,
     "_event_write": async (event_type: str, payload: dict) -> str,
 }
 ```
 
-System tool `.pym` files declare `@external` on exactly the bedrock functions
-they need from this dict. No other keys are accessible to Grail scripts.
+System tool `.pym` files declare `@external` on exactly the bedrock names they
+need from this dict. No other keys are accessible to Grail scripts.
 
 ---
 
@@ -130,11 +160,12 @@ they need from this dict. No other keys are accessible to Grail scripts.
 src/remora/bootstrap/
   __init__.py
   bedrock.py          # build_bedrock() factory — the six async closures
-  graph_store.py      # BootstrapGraphStore — new tables on EventStore DB
   schema_loader.py    # TurnSchema, load_schema(), DEFAULT_SCHEMA constant
   turn_executor.py    # TurnExecutor class — context pipeline + LLM dispatch
-  seed_graph.py       # One-time seeding script for code topology
+  seed_graph.py       # One-time seeder for non-code bootstrap nodes
 ```
+
+Note: no `graph_store.py` — the graph lives in `core/store/node_store.py`.
 
 ### New directory: `bootstrap/tools/` (repo root, not in src/)
 
@@ -172,26 +203,23 @@ The bootstrap module imports from:
 - `remora.core.agents.cairn_bridge` — `CairnWorkspaceService`, `CairnExternals`
 - `remora.core.tools.grail` — `RemoraGrailTool`, `discover_grail_tools`
 - `remora.core.store.event_store` — `EventStore`
-- `remora.core.store.event_store_schema` — `create_tables` (to add bootstrap tables)
+- `remora.core.store.node_store` — `NodeStore` (for type hints only; accessed via `event_store.nodes`)
 - `remora.core.agents.kernel_factory` — `create_kernel`
 - `remora.core.events.subscriptions` — `SubscriptionRegistry`
 - `remora.utils` — `PathLike`, `normalize_path`
 
 The bootstrap module must NOT import from:
-- `remora.lsp` — LSP is an adapter layer, not a core dependency
+- `remora.lsp` — LSP is an adapter layer
 - `remora.runner` — runner is an adapter layer
-- `remora.service` — service is an adapter layer
-- `remora.companion` — companion reads bootstrap output; it does not feed it
+- `remora.service` / `remora.companion` — these consume bootstrap output
 
-### What v1 files are modified
+### V1 files modified (three only)
 
-| File | Change |
+| File | Change summary |
 |---|---|
-| `core/store/event_store_schema.py` | Add `create_bootstrap_tables()` called from `create_tables()` |
-| `core/store/event_store.py` | Expose `BootstrapGraphStore` via `event_store.bootstrap_graph` property (like `event_store.nodes`) |
-| `core/tools/grail.py` | Add optional `workspace_tools_dir` parameter to `discover_grail_tools()` |
-
-Everything else in v1 is unchanged.
+| `core/store/event_store_schema.py` | Add `create_graph_tables()` → called from `create_tables()` |
+| `core/store/node_store.py` | Add `read_graph()`, `write_graph()`, routing helpers, `CODE_NODE_KINDS` |
+| `core/tools/grail.py` | Add `workspace_tools_dir` + `externals` kwargs to `discover_grail_tools()` |
 
 ---
 
@@ -199,21 +227,21 @@ Everything else in v1 is unchanged.
 
 ### 3.1 Schema additions: `core/store/event_store_schema.py`
 
-Add a new function `create_bootstrap_tables()` and call it from `create_tables()`:
+Add `create_graph_tables()` and call it from the end of `create_tables()`:
 
 ```python
-def create_bootstrap_tables(conn: sqlite3.Connection) -> None:
-    """Create bootstrap-specific tables: generic graph nodes and edges."""
+def create_graph_tables(conn: sqlite3.Connection) -> None:
+    """Create generic property graph tables for bootstrap agents."""
     conn.executescript("""
-        CREATE TABLE IF NOT EXISTS bootstrap_nodes (
+        CREATE TABLE IF NOT EXISTS graph_nodes (
             id          TEXT PRIMARY KEY,
             kind        TEXT NOT NULL,
             attrs_json  TEXT NOT NULL DEFAULT '{}'
         );
 
-        CREATE INDEX IF NOT EXISTS idx_bnode_kind ON bootstrap_nodes(kind);
+        CREATE INDEX IF NOT EXISTS idx_gnode_kind ON graph_nodes(kind);
 
-        CREATE TABLE IF NOT EXISTS bootstrap_edges (
+        CREATE TABLE IF NOT EXISTS graph_edges (
             from_id     TEXT NOT NULL,
             to_id       TEXT NOT NULL,
             kind        TEXT NOT NULL,
@@ -221,251 +249,268 @@ def create_bootstrap_tables(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (from_id, to_id, kind)
         );
 
-        CREATE INDEX IF NOT EXISTS idx_bedge_from ON bootstrap_edges(from_id);
-        CREATE INDEX IF NOT EXISTS idx_bedge_to   ON bootstrap_edges(to_id);
+        CREATE INDEX IF NOT EXISTS idx_gedge_from ON graph_edges(from_id);
+        CREATE INDEX IF NOT EXISTS idx_gedge_to   ON graph_edges(to_id);
     """)
-```
 
-Call it at the end of `create_tables()`:
-```python
+
 def create_tables(conn: sqlite3.Connection) -> None:
-    # ... existing tables ...
-    create_bootstrap_tables(conn)
+    # ... existing events, nodes, subscriptions tables ...
+    create_graph_tables(conn)  # add at end
 ```
 
-Also add migration in `migrate()`:
+No migration needed — `IF NOT EXISTS` handles existing databases.
+
+### 3.2 NodeStore extension: `core/store/node_store.py`
+
+Add generic graph methods to the existing `NodeStore` class. The existing
+`get_node()`, `list_nodes()`, and `get_node_at_position()` are untouched.
+
+#### Constants and helpers
+
 ```python
-# bootstrap_nodes and bootstrap_edges are created fresh — no migration needed
-# (create_bootstrap_tables uses IF NOT EXISTS)
-```
-
-### 3.2 BootstrapGraphStore: `src/remora/bootstrap/graph_store.py`
-
-```python
-"""Bootstrap property graph store.
-
-Lives in the same SQLite DB as EventStore but in separate tables.
-Follows the same read_conn / write_conn pattern as NodeStore.
-"""
-from __future__ import annotations
-
-import asyncio
 import json
-import sqlite3
 import uuid
-from typing import Any
 
-from remora.utils import PathLike
+# Kinds that live in the v1 `nodes` table (populated by LSP scanner)
+CODE_NODE_KINDS: frozenset[str] = frozenset({
+    "function", "class", "method", "module", "file", "section", "table"
+})
 
 
-class BootstrapGraphStore:
-    """Shared property graph for bootstrap agents.
+def _agent_node_to_graph_dict(node: "AgentNode") -> dict:
+    """Project an AgentNode to the generic graph node shape."""
+    return {
+        "id":   node.node_id,
+        "kind": node.node_type,
+        "attrs": {
+            "name":       node.name,
+            "full_name":  node.full_name,
+            "file_path":  node.file_path,
+            "start_line": node.start_line,
+            "end_line":   node.end_line,
+            "status":     node.status,
+        },
+    }
+```
 
-    Tables: bootstrap_nodes(id, kind, attrs_json)
-            bootstrap_edges(from_id, to_id, kind, attrs_json)
+#### Public graph API (new methods on NodeStore)
 
-    read_conn is a dedicated read-only connection (WAL mode: no blocking).
-    write_conn is the main EventStore write connection, protected by write_lock.
-    Both are passed in by EventStore after initialize().
+```python
+async def read_graph(self, selector: dict) -> str:
+    """Unified graph read. Dispatches by selector shape.
+
+    {"node": node_id}                   → get one node (code or generic)
+    {"neighbors": node_id, "dir": str}  → get neighbors (in/out/both)
+    {"match": {"kind": str, ...}}        → find nodes by kind + attrs
     """
+    if "node" in selector:
+        return await self._graph_get_node(selector["node"])
+    if "neighbors" in selector:
+        return await self._graph_get_neighbors(
+            selector["neighbors"], selector.get("dir", "both")
+        )
+    if "match" in selector:
+        return await self._graph_find_nodes(selector["match"])
+    raise ValueError(f"Unknown graph read selector: {selector!r}")
 
-    def __init__(
-        self,
-        read_conn: sqlite3.Connection,
-        read_lock: asyncio.Lock,
-        write_conn: sqlite3.Connection,
-        write_lock: asyncio.Lock,
-    ) -> None:
-        self._read_conn = read_conn
-        self._read_lock = read_lock
-        self._write_conn = write_conn
-        self._write_lock = write_lock
 
-    # ── Reads ──────────────────────────────────────────────────────────────
+async def write_graph(self, op: str, data: dict) -> str:
+    """Unified graph write. Always targets generic graph_nodes/graph_edges.
 
-    async def read(self, selector: dict) -> str:
-        """Dispatch a read selector to the appropriate query.
+    "add_node"  data = {"kind": str, "attrs": dict, "id"?: str}
+    "add_edge"  data = {"from": str, "to": str, "kind": str, "attrs"?: dict}
+    """
+    if op == "add_node":
+        return await self._graph_add_node(data)
+    if op == "add_edge":
+        return await self._graph_add_edge(data)
+    raise ValueError(f"Unknown graph write op: {op!r}")
+```
 
-        Selector shapes:
-          {"node": node_id}                   → get one node
-          {"neighbors": node_id, "dir": str}  → get neighbors (in/out/both)
-          {"match": {"kind": str, ...}}        → find nodes by attrs
-        """
-        if "node" in selector:
-            return await self._get_node(selector["node"])
-        if "neighbors" in selector:
-            return await self._get_neighbors(selector["neighbors"], selector.get("dir", "both"))
-        if "match" in selector:
-            return await self._find_nodes(selector["match"])
-        raise ValueError(f"Unknown graph read selector: {selector!r}")
+#### Private read helpers
 
-    async def _get_node(self, node_id: str) -> str:
-        def _fetch(conn: sqlite3.Connection) -> dict | None:
+```python
+async def _graph_get_node(self, node_id: str) -> str:
+    """Get one node — checks code nodes first, then generic."""
+    # Try code nodes table
+    node = await self.get_node(node_id)
+    if node:
+        return json.dumps(_agent_node_to_graph_dict(node))
+
+    # Fall back to graph_nodes table
+    def _fetch(conn: sqlite3.Connection) -> dict | None:
+        with conn.execute(
+            "SELECT id, kind, attrs_json FROM graph_nodes WHERE id = ?",
+            (node_id,),
+        ) as cursor:
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return {"id": row[0], "kind": row[1], "attrs": json.loads(row[2])}
+
+    async with self._read_lock:
+        result = await asyncio.to_thread(_fetch, self._read_conn)
+    return json.dumps(result)
+
+
+async def _graph_find_nodes(self, match: dict) -> str:
+    """Find nodes by kind + optional attr filters. Routes by kind."""
+    kind = match.get("kind")
+    extra_filters = {k: v for k, v in match.items() if k != "kind"}
+
+    if kind in CODE_NODE_KINDS:
+        # Query v1 nodes table
+        nodes = await self.list_nodes(node_type=kind)
+        results = [_agent_node_to_graph_dict(n) for n in nodes]
+        if extra_filters:
+            results = [
+                r for r in results
+                if all(r["attrs"].get(k) == v for k, v in extra_filters.items())
+            ]
+        return json.dumps(results)
+
+    # Query graph_nodes table
+    def _fetch(conn: sqlite3.Connection) -> list[dict]:
+        if kind:
             with conn.execute(
-                "SELECT id, kind, attrs_json FROM bootstrap_nodes WHERE id = ?",
-                (node_id,),
+                "SELECT id, kind, attrs_json FROM graph_nodes WHERE kind = ?",
+                (kind,),
             ) as cursor:
-                row = cursor.fetchone()
-            if row is None:
-                return None
-            return {"id": row[0], "kind": row[1], "attrs": json.loads(row[2])}
-
-        async with self._read_lock:
-            result = await asyncio.to_thread(_fetch, self._read_conn)
-        return json.dumps(result)
-
-    async def _get_neighbors(self, node_id: str, direction: str) -> str:
-        def _fetch(conn: sqlite3.Connection) -> list[dict]:
-            if direction == "out":
-                query = """
-                    SELECT n.id, n.kind, n.attrs_json, e.kind as edge_kind
-                    FROM bootstrap_edges e
-                    JOIN bootstrap_nodes n ON e.to_id = n.id
-                    WHERE e.from_id = ?
-                """
-            elif direction == "in":
-                query = """
-                    SELECT n.id, n.kind, n.attrs_json, e.kind as edge_kind
-                    FROM bootstrap_edges e
-                    JOIN bootstrap_nodes n ON e.from_id = n.id
-                    WHERE e.to_id = ?
-                """
-            else:  # both
-                query = """
-                    SELECT n.id, n.kind, n.attrs_json, e.kind as edge_kind
-                    FROM bootstrap_edges e
-                    JOIN bootstrap_nodes n ON (e.to_id = n.id AND e.from_id = ?)
-                    UNION
-                    SELECT n.id, n.kind, n.attrs_json, e.kind as edge_kind
-                    FROM bootstrap_edges e
-                    JOIN bootstrap_nodes n ON (e.from_id = n.id AND e.to_id = ?)
-                """
-                with conn.execute(query, (node_id, node_id)) as cursor:
-                    rows = cursor.fetchall()
-                return [{"id": r[0], "kind": r[1], "attrs": json.loads(r[2]), "edge_kind": r[3]} for r in rows]
-
-            with conn.execute(query, (node_id,)) as cursor:
                 rows = cursor.fetchall()
-            return [{"id": r[0], "kind": r[1], "attrs": json.loads(r[2]), "edge_kind": r[3]} for r in rows]
+        else:
+            with conn.execute(
+                "SELECT id, kind, attrs_json FROM graph_nodes"
+            ) as cursor:
+                rows = cursor.fetchall()
 
-        async with self._read_lock:
-            result = await asyncio.to_thread(_fetch, self._read_conn)
-        return json.dumps(result)
+        results = []
+        for row in rows:
+            attrs = json.loads(row[2])
+            if all(attrs.get(k) == v for k, v in extra_filters.items()):
+                results.append({"id": row[0], "kind": row[1], "attrs": attrs})
+        return results
 
-    async def _find_nodes(self, match: dict) -> str:
-        kind = match.get("kind")
+    async with self._read_lock:
+        result = await asyncio.to_thread(_fetch, self._read_conn)
+    return json.dumps(result)
 
-        def _fetch(conn: sqlite3.Connection) -> list[dict]:
-            if kind:
-                with conn.execute(
-                    "SELECT id, kind, attrs_json FROM bootstrap_nodes WHERE kind = ?",
-                    (kind,),
-                ) as cursor:
-                    rows = cursor.fetchall()
-            else:
-                with conn.execute("SELECT id, kind, attrs_json FROM bootstrap_nodes") as cursor:
-                    rows = cursor.fetchall()
 
-            results = []
-            for row in rows:
-                attrs = json.loads(row[2])
-                # Filter by additional attrs (equality)
-                if all(attrs.get(k) == v for k, v in match.items() if k != "kind"):
-                    results.append({"id": row[0], "kind": row[1], "attrs": attrs})
-            return results
+async def _graph_get_neighbors(self, node_id: str, direction: str) -> str:
+    """Get neighbors of a node. Routing depends on whether it's a code node."""
+    # Check if it's a code node
+    node = await self.get_node(node_id)
+    if node:
+        # Code node: derive neighbors from caller_ids / callee_ids
+        if direction == "in":
+            neighbor_ids = node.caller_ids
+            edge_kind = "calls"
+        elif direction == "out":
+            neighbor_ids = node.callee_ids
+            edge_kind = "calls"
+        else:  # both
+            neighbor_ids = node.caller_ids + node.callee_ids
+            edge_kind = "calls"
 
-        async with self._read_lock:
-            result = await asyncio.to_thread(_fetch, self._read_conn)
-        return json.dumps(result)
+        neighbors = []
+        for nid in neighbor_ids:
+            raw = await self._graph_get_node(nid)
+            n = json.loads(raw)
+            if n:
+                n["edge_kind"] = edge_kind
+                neighbors.append(n)
+        return json.dumps(neighbors)
 
-    # ── Writes ─────────────────────────────────────────────────────────────
+    # Generic node: query graph_edges table
+    def _fetch(conn: sqlite3.Connection) -> list[dict]:
+        if direction == "out":
+            query = """
+                SELECT n.id, n.kind, n.attrs_json, e.kind as edge_kind
+                FROM graph_edges e
+                JOIN graph_nodes n ON e.to_id = n.id
+                WHERE e.from_id = ?
+            """
+        elif direction == "in":
+            query = """
+                SELECT n.id, n.kind, n.attrs_json, e.kind as edge_kind
+                FROM graph_edges e
+                JOIN graph_nodes n ON e.from_id = n.id
+                WHERE e.to_id = ?
+            """
+        else:  # both
+            with conn.execute("""
+                SELECT n.id, n.kind, n.attrs_json, e.kind as edge_kind
+                FROM graph_edges e
+                JOIN graph_nodes n ON (e.to_id = n.id AND e.from_id = ?)
+                UNION
+                SELECT n.id, n.kind, n.attrs_json, e.kind as edge_kind
+                FROM graph_edges e
+                JOIN graph_nodes n ON (e.from_id = n.id AND e.to_id = ?)
+            """, (node_id, node_id)) as cursor:
+                rows = cursor.fetchall()
+            return [
+                {"id": r[0], "kind": r[1], "attrs": json.loads(r[2]), "edge_kind": r[3]}
+                for r in rows
+            ]
 
-    async def write(self, op: str, data: dict) -> str:
-        """Dispatch a write operation.
+        with conn.execute(query, (node_id,)) as cursor:
+            rows = cursor.fetchall()
+        return [
+            {"id": r[0], "kind": r[1], "attrs": json.loads(r[2]), "edge_kind": r[3]}
+            for r in rows
+        ]
 
-        Op shapes:
-          "add_node"  data = {"kind": str, "attrs": dict, "id"?: str}
-          "add_edge"  data = {"from": str, "to": str, "kind": str, "attrs"?: dict}
-        """
-        if op == "add_node":
-            return await self._add_node(data)
-        if op == "add_edge":
-            return await self._add_edge(data)
-        raise ValueError(f"Unknown graph write op: {op!r}")
-
-    async def _add_node(self, data: dict) -> str:
-        node_id = data.get("id") or str(uuid.uuid4())
-        kind = data["kind"]
-        attrs = data.get("attrs", {})
-        attrs_json = json.dumps(attrs)
-
-        def _exec(conn: sqlite3.Connection) -> None:
-            conn.execute(
-                "INSERT OR REPLACE INTO bootstrap_nodes (id, kind, attrs_json) VALUES (?, ?, ?)",
-                (node_id, kind, attrs_json),
-            )
-
-        async with self._write_lock:
-            await asyncio.to_thread(_exec, self._write_conn)
-
-        return json.dumps({"id": node_id, "kind": kind})
-
-    async def _add_edge(self, data: dict) -> str:
-        from_id = data["from"]
-        to_id = data["to"]
-        kind = data["kind"]
-        attrs = data.get("attrs", {})
-        attrs_json = json.dumps(attrs)
-
-        def _exec(conn: sqlite3.Connection) -> None:
-            conn.execute(
-                "INSERT OR REPLACE INTO bootstrap_edges (from_id, to_id, kind, attrs_json) VALUES (?, ?, ?, ?)",
-                (from_id, to_id, kind, attrs_json),
-            )
-
-        async with self._write_lock:
-            await asyncio.to_thread(_exec, self._write_conn)
-
-        return json.dumps({"from": from_id, "to": to_id, "kind": kind})
+    async with self._read_lock:
+        result = await asyncio.to_thread(_fetch, self._read_conn)
+    return json.dumps(result)
 ```
 
-### 3.3 Expose BootstrapGraphStore on EventStore
-
-In `core/store/event_store.py`, after the `NodeStore` initialization block inside
-`initialize()`, add:
+#### Private write helpers
 
 ```python
-# After: self._node_store = NodeStore(...)
-from remora.bootstrap.graph_store import BootstrapGraphStore
-self._bootstrap_graph = BootstrapGraphStore(
-    read_conn=self._read_conn,
-    read_lock=self._read_lock,
-    write_conn=self._conn,
-    write_lock=self._lock,
-)
+async def _graph_add_node(self, data: dict) -> str:
+    node_id = data.get("id") or str(uuid.uuid4())
+    kind = data["kind"]
+    attrs_json = json.dumps(data.get("attrs", {}))
+
+    def _exec(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "INSERT OR REPLACE INTO graph_nodes (id, kind, attrs_json) VALUES (?, ?, ?)",
+            (node_id, kind, attrs_json),
+        )
+
+    async with self._write_lock:
+        await asyncio.to_thread(_exec, self._write_conn)
+    return json.dumps({"id": node_id, "kind": kind})
+
+
+async def _graph_add_edge(self, data: dict) -> str:
+    from_id   = data["from"]
+    to_id     = data["to"]
+    kind      = data["kind"]
+    attrs_json = json.dumps(data.get("attrs", {}))
+
+    def _exec(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "INSERT OR REPLACE INTO graph_edges (from_id, to_id, kind, attrs_json) VALUES (?, ?, ?, ?)",
+            (from_id, to_id, kind, attrs_json),
+        )
+
+    async with self._write_lock:
+        await asyncio.to_thread(_exec, self._write_conn)
+    return json.dumps({"from": from_id, "to": to_id, "kind": kind})
 ```
 
-Add a property (alongside the `nodes` property):
-```python
-@property
-def bootstrap_graph(self) -> "BootstrapGraphStore":
-    if self._bootstrap_graph is None:
-        raise RuntimeError("EventStore not initialized")
-    return self._bootstrap_graph
-```
+### 3.3 Build the bedrock: `src/remora/bootstrap/bedrock.py`
 
-Also add the type annotation in `__init__`: `self._bootstrap_graph: BootstrapGraphStore | None = None`
-
-And clear it in `close()`: `self._bootstrap_graph = None`
-
-### 3.4 Build the bedrock: `src/remora/bootstrap/bedrock.py`
+The bedrock closures now call `event_store.nodes.read_graph()` and
+`event_store.nodes.write_graph()` — the same `NodeStore` that drives LSP.
 
 ```python
 """Bootstrap bedrock: the six async functions.
 
 build_bedrock() is called once per agent activation.
-It returns a dict of six async callables that form the
-bedrock layer for that agent's Grail tool execution.
+Returns a dict of six async callables for that agent's Grail execution.
 """
 from __future__ import annotations
 
@@ -475,12 +520,17 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from remora.core.agents.cairn_externals import CairnExternals
-from remora.bootstrap.graph_store import BootstrapGraphStore
+from structured_agents.events import Event as StructuredEvent
 
 
 @dataclass
-class BootstrapEvent:
-    """Minimal event model for bootstrap-emitted events."""
+class BootstrapEvent(StructuredEvent):
+    """Minimal event model for bootstrap-emitted events.
+
+    Inherits from StructuredEvent so EventStore.append() type-checks cleanly.
+    All fields are read via getattr by EventStore, so the inheritance is
+    sufficient — no method overrides required.
+    """
     event_type: str
     node_id: str | None = None
     payload: dict = field(default_factory=dict)
@@ -492,22 +542,20 @@ def build_bedrock(
     *,
     agent_id: str,
     cairn_externals: CairnExternals,
-    graph_store: BootstrapGraphStore,
     event_store: Any,   # EventStore — Any to avoid circular import
     swarm_id: str,
 ) -> dict[str, Any]:
     """Build the six bedrock functions for one agent activation.
 
-    Returns a dict suitable for injection as the Grail externals dict.
-    Bootstrap .pym tools declare @external on these names.
+    _graph_read / _graph_write delegate to event_store.nodes (NodeStore),
+    which routes to the nodes table (code) or graph_nodes table (generic).
     """
+    node_store = event_store.nodes  # NodeStore — unified graph access
 
     # ── Workspace channel ──────────────────────────────────────────────────
 
     async def _cairn_read(path: str) -> str:
-        result = await cairn_externals.read_file(path)
-        # CairnExternals.read_file returns str; empty string if not found
-        return result or ""
+        return await cairn_externals.read_file(path) or ""
 
     async def _cairn_write(path: str, content: str) -> str:
         await cairn_externals.write_file(path, content)
@@ -516,10 +564,10 @@ def build_bedrock(
     # ── Graph channel ──────────────────────────────────────────────────────
 
     async def _graph_read(selector: dict) -> str:
-        return await graph_store.read(selector)
+        return await node_store.read_graph(selector)
 
     async def _graph_write(op: str, data: dict) -> str:
-        return await graph_store.write(op, data)
+        return await node_store.write_graph(op, data)
 
     # ── Event channel ──────────────────────────────────────────────────────
 
@@ -555,8 +603,8 @@ def build_bedrock(
 
 ### 4.1 How discover_grail_tools() is extended
 
-In `core/tools/grail.py`, extend `discover_grail_tools()` to accept an optional
-second directory:
+Replace `discover_grail_tools()` in `core/tools/grail.py` in full. Also add the
+`_make_tool_callable` helper (used for synthesized tool loading in §9.3):
 
 ```python
 def discover_grail_tools(
@@ -565,15 +613,79 @@ def discover_grail_tools(
     context: AgentContext | None = None,      # None when using bootstrap bedrock
     externals: dict[str, Any] | None = None,  # NEW: bootstrap externals dict
     files_provider: FilesProvider,
-    workspace_tools_dir: Path | None = None,  # NEW: agent's workspace/tools/
+    workspace_tools_dir: Path | None = None,  # NEW: real filesystem dir of .pym files
     limits: grail.Limits | None = None,
     grail_dir: str | Path | None = None,
 ) -> list[RemoraGrailTool | SwarmTool]:
-```
+    """Discover and load .pym tools from a directory.
 
-When `externals` is provided directly (bootstrap mode), skip the
-`context.as_externals()` call. When `workspace_tools_dir` is provided,
-scan it after `agents_dir` (workspace tools may shadow system tools by name).
+    Bootstrap mode: pass externals=bedrock_dict, context=None.
+    V1 mode: pass context=AgentContext, externals=None.
+    workspace_tools_dir must be a real filesystem directory (see §9.3 for
+    how to extract synthesized tools from Cairn to a temp dir).
+    """
+    if externals is not None:
+        externals_dict = externals
+    elif context is not None:
+        externals_dict = context.as_externals()
+    else:
+        raise ValueError("Either context or externals must be provided")
+
+    tools: list[RemoraGrailTool | SwarmTool] = []
+    if not agents_dir.exists():
+        logger.warning("Agents directory does not exist: %s", agents_dir)
+        return tools
+
+    for pym_file in sorted(agents_dir.glob("*.pym")):
+        try:
+            tools.append(
+                RemoraGrailTool(
+                    pym_file,
+                    externals=externals_dict,
+                    files_provider=files_provider,
+                    limits=limits,
+                    grail_dir=grail_dir,
+                )
+            )
+            logger.debug("Loaded tool: %s", pym_file.name)
+        except Exception as exc:
+            logger.warning("Failed to load %s: %s", pym_file, exc)
+
+    # Workspace tools — must be a real filesystem directory, not a Cairn path
+    if workspace_tools_dir and workspace_tools_dir.exists():
+        system_externals = {
+            tool.schema.name: _make_tool_callable(tool)
+            for tool in tools
+            if isinstance(tool, RemoraGrailTool)
+        }
+        for pym_file in sorted(workspace_tools_dir.glob("*.pym")):
+            try:
+                tools.append(
+                    RemoraGrailTool(
+                        pym_file,
+                        externals=system_externals,
+                        files_provider=files_provider,
+                        limits=limits,
+                        grail_dir=grail_dir,
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Failed to load workspace tool %s: %s", pym_file, exc)
+
+    # Swarm tools only available in v1 mode (require AgentContext)
+    if context is not None:
+        tools.extend(build_swarm_tools(context))
+
+    return tools
+
+
+def _make_tool_callable(tool: RemoraGrailTool):
+    """Wrap a RemoraGrailTool as a plain async callable for use as @external."""
+    async def _call(**kwargs) -> str:
+        result = await tool.execute(kwargs, context=None)
+        return result.output
+    return _call
+```
 
 Bootstrap callers pass:
 ```python
@@ -581,7 +693,7 @@ tools = discover_grail_tools(
     bootstrap_tools_dir,
     externals=bedrock_dict,
     files_provider=files_provider,
-    workspace_tools_dir=agent_workspace_path / "tools",
+    workspace_tools_dir=extracted_tools_dir,  # real fs dir, see §9.3
 )
 ```
 
@@ -619,10 +731,10 @@ async def write_file(path: str, content: str) -> str:
 @external
 async def _graph_read(selector: dict) -> str: ...
 
-import json
-
 async def graph_node(node_id: str) -> str:
     """Get a single node from the shared graph by ID.
+    Works for both code nodes (functions, classes, modules) and
+    generic nodes (agents, tasks, etc.).
     Returns JSON: {"id": str, "kind": str, "attrs": dict} or null if not found."""
     return await _graph_read({"node": node_id})
 ```
@@ -635,6 +747,8 @@ async def _graph_read(selector: dict) -> str: ...
 async def graph_neighbors(node_id: str, direction: str) -> str:
     """Get the neighbors of a node.
     direction: 'in' | 'out' | 'both'
+    For code nodes, neighbors are callers/callees from the code topology.
+    For generic nodes, neighbors are connected via graph_edges.
     Returns JSON array of {id, kind, attrs, edge_kind} objects."""
     return await _graph_read({"neighbors": node_id, "dir": direction})
 ```
@@ -646,6 +760,8 @@ async def _graph_read(selector: dict) -> str: ...
 
 async def graph_find_nodes(kind: str) -> str:
     """Find all nodes in the graph with the given kind.
+    Works for both code kinds (function, class, module, method, file)
+    and custom kinds (agent, task, etc.).
     Returns JSON array of {id, kind, attrs} objects."""
     return await _graph_read({"match": {"kind": kind}})
 ```
@@ -657,7 +773,7 @@ async def _graph_write(op: str, data: dict) -> str: ...
 
 async def graph_add_node(kind: str, attrs: dict) -> str:
     """Add a node to the shared graph.
-    kind: the node type (e.g. 'module', 'agent', 'task')
+    kind: the node type (e.g. 'agent', 'task') — not a code node kind
     attrs: arbitrary JSON attributes
     Returns JSON: {"id": str, "kind": str} with the generated ID."""
     return await _graph_write("add_node", {"kind": kind, "attrs": attrs})
@@ -670,8 +786,8 @@ async def _graph_write(op: str, data: dict) -> str: ...
 
 async def graph_add_edge(from_id: str, to_id: str, kind: str) -> str:
     """Add a directed edge to the shared graph.
-    from_id, to_id: node IDs (must already exist)
-    kind: edge type (e.g. 'calls', 'imports', 'assigned_to')
+    from_id, to_id: node IDs (at least one must exist)
+    kind: edge type (e.g. 'assigned_to', 'produced', 'depends_on')
     Returns JSON: {"from": str, "to": str, "kind": str}."""
     return await _graph_write("add_edge", {"from": from_id, "to": to_id, "kind": kind})
 ```
@@ -701,20 +817,13 @@ async def emit_event(event_type: str, payload: dict) -> str:
 
 ### 4.3 Files provider for bootstrap tools
 
-Bootstrap tools do not need the Cairn virtual filesystem for their own
-execution (they use bedrock externals). The `files_provider` passed to
-`RemoraGrailTool` should return the agent's workspace files for any tool
-that might read from the Grail virtual FS:
-
 ```python
 async def _make_files_provider(cairn_externals: CairnExternals):
     async def files_provider() -> dict[str, str | bytes]:
-        # List all files in the agent workspace and return them
-        # For bootstrap tools this is rarely used but required by RemoraGrailTool
         try:
             paths = await cairn_externals.list_dir(".")
             files = {}
-            for path in paths:
+            for path in paths or []:
                 try:
                     content = await cairn_externals.read_file(path)
                     files[path] = content
@@ -733,11 +842,7 @@ async def _make_files_provider(cairn_externals: CairnExternals):
 ### 5.1 TurnSchema and schema_loader: `src/remora/bootstrap/schema_loader.py`
 
 ```python
-"""Bootstrap schema.yaml loader.
-
-TurnSchema is the Pydantic model for a schema.yaml file.
-load_schema() reads workspace/schema.yaml, resolves extends:, falls back to DEFAULT_SCHEMA.
-"""
+"""Bootstrap schema.yaml loader."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -745,9 +850,6 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
-
-# ── DEFAULT_SCHEMA ─────────────────────────────────────────────────────────
-# Embedded — never relies on an external file being present.
 
 DEFAULT_SCHEMA_YAML = """
 version: "1"
@@ -775,11 +877,7 @@ termination: "DONE"
 """.strip()
 
 
-# ── Pydantic models ────────────────────────────────────────────────────────
-
-
 class ContextStep(BaseModel):
-    """One step in the context pipeline."""
     name: str
     tool: str
     args: dict[str, Any] = Field(default_factory=dict)
@@ -787,13 +885,11 @@ class ContextStep(BaseModel):
 
 
 class SubscriptionSpec(BaseModel):
-    """One event subscription declared in schema.yaml."""
     event_type: str
     node_id: str | None = None
 
 
 class TurnSchema(BaseModel):
-    """Parsed and validated schema.yaml."""
     version: str = "1"
     name: str = "unnamed"
     system: str = ""
@@ -805,49 +901,44 @@ class TurnSchema(BaseModel):
     extends: str | None = None
 
 
-# ── Loader ─────────────────────────────────────────────────────────────────
-
-
 def _load_yaml(text: str) -> dict:
     data = yaml.safe_load(text)
     return data if isinstance(data, dict) else {}
 
 
 def _merge_schemas(base: dict, child: dict) -> dict:
-    """Shallow merge: child overrides base. context/tools lists are appended."""
+    """Shallow merge: child overrides base. Lists are appended."""
     merged = dict(base)
     for key, value in child.items():
         if key == "extends":
             continue
         if key in ("context", "tools", "subscriptions") and key in merged:
-            base_list = merged[key] if isinstance(merged[key], list) else []
-            child_list = value if isinstance(value, list) else []
-            merged[key] = base_list + child_list
+            merged[key] = (merged[key] or []) + (value or [])
         else:
             merged[key] = value
     return merged
 
 
-def load_schema(
-    workspace_root: Path,
+async def load_schema(
+    cairn_externals: "CairnExternals",
     *,
     system_agents_dir: Path | None = None,
 ) -> TurnSchema:
-    """Load schema.yaml from the agent workspace.
+    """Load schema.yaml from the agent's Cairn workspace.
 
-    Resolution order:
-    1. workspace_root / schema.yaml  (agent-written)
-    2. Resolve extends: one level from system_agents_dir
-    3. DEFAULT_SCHEMA if no schema.yaml present
+    Falls back to DEFAULT_SCHEMA if schema.yaml is absent.
+    Resolves extends: one level from system_agents_dir (real filesystem).
 
-    Returns a validated TurnSchema.
+    NOTE: Takes CairnExternals, not a Path — agent workspaces are Cairn
+    virtual filesystems (SQLite-backed), not real directories. schema.yaml
+    written by an agent via write_file() lives in Cairn, not on disk.
     """
-    schema_path = workspace_root / "schema.yaml"
+    content = await cairn_externals.read_file("schema.yaml")
 
-    if not schema_path.exists():
+    if not content:
         return TurnSchema.model_validate(_load_yaml(DEFAULT_SCHEMA_YAML))
 
-    child_data = _load_yaml(schema_path.read_text(encoding="utf-8"))
+    child_data = _load_yaml(content)
 
     extends = child_data.get("extends")
     if extends and system_agents_dir:
@@ -861,27 +952,23 @@ def load_schema(
 
 ### 5.2 Template variable resolution
 
-Template variables are resolved in two passes:
+Two passes, applied in order:
 
-**Pass 1 — `{node.*}` variables** (resolved before context pipeline runs):
+**Pass 1 — `{node.*}` before context pipeline**:
 ```python
+import re
+
 def _resolve_node_vars(text: str, node_attrs: dict[str, Any]) -> str:
-    """Replace {node.field} with values from the graph node's attrs dict."""
-    import re
     def replacer(m: re.Match) -> str:
-        field = m.group(1)
-        return str(node_attrs.get(field, m.group(0)))
+        return str(node_attrs.get(m.group(1), m.group(0)))
     return re.sub(r'\{node\.([^}]+)\}', replacer, text)
 ```
 
-**Pass 2 — `{{name}}` variables** (resolved after context pipeline):
+**Pass 2 — `{{name}}` after context pipeline**:
 ```python
-def _resolve_context_vars(text: str, context_values: dict[str, str]) -> str:
-    """Replace {{name}} with values from the assembled context pipeline."""
-    import re
+def resolve_context_vars(text: str, context_values: dict[str, str]) -> str:
     def replacer(m: re.Match) -> str:
-        key = m.group(1)
-        return context_values.get(key, "")
+        return context_values.get(m.group(1), "")
     return re.sub(r'\{\{([^}]+)\}\}', replacer, text)
 ```
 
@@ -890,9 +977,7 @@ def _resolve_context_vars(text: str, context_values: dict[str, str]) -> str:
 ```python
 """Bootstrap turn executor.
 
-Loads schema.yaml, runs context pipeline, dispatches to LLM kernel,
-handles tool calls using the bootstrap bedrock externals.
-Runs in parallel to v1's execute_agent_turn() — not a replacement.
+Parallel to v1's execute_agent_turn(). Uses schema.yaml instead of manifest.yaml.
 """
 from __future__ import annotations
 
@@ -904,8 +989,9 @@ from typing import Any
 
 from structured_agents import Message, build_client
 
+from remora.core.agents.cairn_externals import CairnExternals
 from remora.core.agents.kernel_factory import create_kernel
-from remora.bootstrap.schema_loader import TurnSchema, load_schema
+from remora.bootstrap.schema_loader import TurnSchema, load_schema, resolve_context_vars
 
 logger = logging.getLogger(__name__)
 
@@ -914,58 +1000,43 @@ logger = logging.getLogger(__name__)
 class TurnResult:
     response_text: str
     context_values: dict[str, str] = field(default_factory=dict)
-    events_emitted: int = 0
 
 
 class TurnExecutor:
-    """Run one agent activation using schema.yaml + bootstrap bedrock.
-
-    Usage:
-        executor = TurnExecutor(
-            agent_id="my-module-agent",
-            workspace_root=Path("/path/to/workspace"),
-            tools=tools,          # list[RemoraGrailTool] from discover_grail_tools
-            bedrock=bedrock_dict, # from build_bedrock()
-            node_attrs={...},     # from graph_node query (or activation event)
-            config=config,
-        )
-        result = await executor.run(activation_event)
-    """
-
     def __init__(
         self,
         *,
         agent_id: str,
-        workspace_root: Path,
+        cairn_externals: CairnExternals,  # replaces workspace_root: Path
         tools: list[Any],
-        bedrock: dict[str, Any],
         node_attrs: dict[str, Any],
-        config: Any,               # remora.core.config.Config
+        config: Any,
         system_agents_dir: Path | None = None,
         client: Any | None = None,
     ) -> None:
         self._agent_id = agent_id
-        self._workspace_root = workspace_root
+        self._cairn_externals = cairn_externals  # used by load_schema (Cairn VFS)
         self._tools = tools
-        self._bedrock = bedrock
         self._node_attrs = node_attrs
         self._config = config
         self._system_agents_dir = system_agents_dir
         self._client = client
 
     async def run(self, activation_event: Any = None) -> TurnResult:
-        """Execute one agent turn."""
-        schema = load_schema(
-            self._workspace_root,
+        schema = await load_schema(
+            self._cairn_externals,
             system_agents_dir=self._system_agents_dir,
         )
 
         context_values = await self._run_context_pipeline(schema)
-        system_prompt = self._build_system_prompt(schema, context_values)
+        system_prompt = resolve_context_vars(
+            self.resolve_node_vars(schema.system), context_values
+        )
         user_prompt = self._build_user_prompt(activation_event)
 
-        tool_schemas = [t.schema for t in self._tools
-                        if t.schema.name in schema.tools]
+        tool_map = {t.schema.name: t for t in self._tools}
+        active_tools = [tool_map[name] for name in schema.tools if name in tool_map]
+        tool_schemas = [t.schema for t in active_tools]
 
         messages = [
             Message(role="system", content=system_prompt),
@@ -985,8 +1056,9 @@ class TurnExecutor:
             base_url=self._config.model_base_url,
             api_key=self._config.model_api_key or "EMPTY",
             timeout=self._config.timeout_s,
-            tools=self._tools,
+            tools=active_tools,
             observer=None,
+            client=self._client,  # reuse the built client
         )
 
         try:
@@ -994,14 +1066,12 @@ class TurnExecutor:
         finally:
             await kernel.close()
 
-        response_text = self._extract_response(result)
         return TurnResult(
-            response_text=response_text,
+            response_text=self._extract_response(result),
             context_values=context_values,
         )
 
     async def _run_context_pipeline(self, schema: TurnSchema) -> dict[str, str]:
-        """Execute context pipeline steps, collecting named values."""
         values: dict[str, str] = {}
         tool_map = {t.schema.name: t for t in self._tools}
 
@@ -1009,30 +1079,28 @@ class TurnExecutor:
             tool = tool_map.get(step.tool)
             if tool is None:
                 if not step.optional:
-                    logger.warning("Context pipeline: tool %r not found", step.tool)
+                    logger.warning("Context step %r: tool %r not found", step.name, step.tool)
                 values[step.name] = ""
                 continue
 
-            # Resolve {node.*} in args
             resolved_args = {
-                k: self._resolve_node_vars(str(v)) if isinstance(v, str) else v
+                k: self.resolve_node_vars(str(v)) if isinstance(v, str) else v
                 for k, v in step.args.items()
             }
-
             try:
                 result = await tool.execute(resolved_args, context=None)
                 values[step.name] = result.output if not result.is_error else ""
             except Exception:
                 if not step.optional:
-                    logger.warning("Context pipeline step %r failed", step.name, exc_info=True)
+                    logger.warning("Context step %r failed", step.name, exc_info=True)
                 values[step.name] = ""
 
         return values
 
-    def _build_system_prompt(self, schema: TurnSchema, context_values: dict[str, str]) -> str:
-        text = self._resolve_node_vars(schema.system)
-        text = _resolve_context_vars(text, context_values)
-        return text
+    def resolve_node_vars(self, text: str) -> str:
+        def replacer(m: re.Match) -> str:
+            return str(self._node_attrs.get(m.group(1), m.group(0)))
+        return re.sub(r'\{node\.([^}]+)\}', replacer, text)
 
     def _build_user_prompt(self, activation_event: Any) -> str:
         if activation_event is None:
@@ -1044,27 +1112,12 @@ class TurnExecutor:
             parts.append(f"Node: {node_id}")
         return "\n".join(parts)
 
-    def _resolve_node_vars(self, text: str) -> str:
-        def replacer(m: re.Match) -> str:
-            field = m.group(1)
-            return str(self._node_attrs.get(field, m.group(0)))
-        return re.sub(r'\{node\.([^}]+)\}', replacer, text)
-
     @staticmethod
     def _extract_response(result: Any) -> str:
         if hasattr(result, "final_message") and result.final_message:
             msg = result.final_message
             return msg.content if hasattr(msg, "content") and msg.content else str(result)
-        if hasattr(result, "content") and result.content:
-            return result.content
-        return str(result)
-
-
-def _resolve_context_vars(text: str, context_values: dict[str, str]) -> str:
-    def replacer(m: re.Match) -> str:
-        key = m.group(1)
-        return context_values.get(key, "")
-    return re.sub(r'\{\{([^}]+)\}\}', replacer, text)
+        return getattr(result, "content", None) or str(result)
 ```
 
 ---
@@ -1073,7 +1126,7 @@ def _resolve_context_vars(text: str, context_values: dict[str, str]) -> str:
 
 ### 6.1 Base YAML schemas
 
-**`bootstrap/agents/DEFAULT_SCHEMA.yaml`** (mirrors the embedded DEFAULT_SCHEMA constant):
+**`bootstrap/agents/DEFAULT_SCHEMA.yaml`**:
 ```yaml
 version: "1"
 name: bootstrap_default
@@ -1090,11 +1143,9 @@ system: |
   When you have completed these three writes, output: DONE
 
 context: []
-
 tools:
   - read_file
   - write_file
-
 max_turns: 5
 termination: "DONE"
 ```
@@ -1112,20 +1163,17 @@ system: |
 context:
   - name: role
     tool: read_file
-    args:
-      path: role.md
+    args: {path: role.md}
     optional: true
 
   - name: notes
     tool: read_file
-    args:
-      path: notes.md
+    args: {path: notes.md}
     optional: true
 
   - name: source
     tool: read_file
-    args:
-      path: "{node.file_path}"
+    args: {path: "{node.file_path}"}
     optional: true
 
 tools:
@@ -1143,65 +1191,72 @@ max_turns: 8
 termination: "DONE"
 ```
 
-### 6.2 Bootstrap loop: activation flow
+### 6.2 Activation flow
 
-The self-bootstrapping loop is driven by the existing `SubscriptionRegistry` +
-`EventStore` trigger queue (already in v1). The bootstrap adds two pieces:
-
-**Step A — New agent workspace creation**
-
-When the bootstrap runtime processes an `AgentNeededEvent`, it:
-1. Creates an agent workspace via `CairnWorkspaceService.get_agent_workspace(agent_id)`
-2. Registers default subscriptions via `SubscriptionRegistry.register_defaults(agent_id, node_id)`
-3. Activates the agent with DEFAULT_SCHEMA (because workspace is empty)
+**Step A — New agent workspace creation** (runtime, not yet built — placeholder):
 
 ```python
-# In bootstrap runtime (not yet built — placeholder for M3)
-async def handle_agent_needed(event: Any, workspace_service, subscriptions, ...) -> None:
+import json
+import tempfile
+
+async def handle_agent_needed(event, workspace_service, subscriptions, event_store,
+                               config, swarm_id, bootstrap_tools_dir) -> None:
     agent_id = event.payload["agent_id"]
     node_id  = event.payload["node_id"]
 
     workspace = await workspace_service.get_agent_workspace(agent_id)
-    await subscriptions.register(agent_id, SubscriptionPattern(
-        event_types=["ContentChangedEvent"],
-        # node_id matching via tags or a custom field — see §6.3
-    ))
+    await subscriptions.register(agent_id, SubscriptionPattern(to_agent=agent_id))
 
-    # Activate with TurnExecutor — workspace is empty so DEFAULT_SCHEMA kicks in
+    # Build CairnExternals directly — workspace_service.get_externals() returns
+    # the Grail externals dict, not the CairnExternals object itself.
+    cairn_ext = CairnExternals(
+        agent_id=agent_id,
+        agent_fs=workspace.cairn,
+        stable_fs=workspace_service._stable_workspace,
+        resolver=workspace_service.resolver,
+    )
+
     bedrock = build_bedrock(
         agent_id=agent_id,
-        cairn_externals=workspace_service.get_externals(agent_id, workspace),
-        graph_store=event_store.bootstrap_graph,
+        cairn_externals=cairn_ext,
         event_store=event_store,
         swarm_id=swarm_id,
     )
-    tools = discover_grail_tools(
-        bootstrap_tools_dir,
-        externals=bedrock,
-        files_provider=_make_files_provider(workspace_service.get_externals(agent_id, workspace)),
-        workspace_tools_dir=workspace.path / "tools",
-    )
-    executor = TurnExecutor(
-        agent_id=agent_id,
-        workspace_root=workspace.path,
-        tools=tools,
-        bedrock=bedrock,
-        node_attrs={"id": node_id, ...},
-        config=config,
-    )
-    await executor.run(event)
+    files_provider = await _make_files_provider(cairn_ext)
+
+    # Synthesized tools live in Cairn's virtual FS (a SQLite DB), not on disk.
+    # Extract .pym files to a temp directory so discover_grail_tools() can find them.
+    with tempfile.TemporaryDirectory() as tmp:
+        extracted_tools_dir = await _extract_workspace_tools(cairn_ext, Path(tmp))
+        tools = discover_grail_tools(
+            bootstrap_tools_dir,
+            externals=bedrock,
+            files_provider=files_provider,
+            workspace_tools_dir=extracted_tools_dir,
+        )
+
+        # Fetch node attrs from the unified graph
+        node_raw = await event_store.nodes.read_graph({"node": node_id})
+        node_attrs = (json.loads(node_raw) or {}).get("attrs", {})
+        node_attrs["id"] = node_id
+
+        executor = TurnExecutor(
+            agent_id=agent_id,
+            cairn_externals=cairn_ext,
+            tools=tools,
+            node_attrs=node_attrs,
+            config=config,
+            system_agents_dir=bootstrap_tools_dir.parent / "agents",
+        )
+        await executor.run(event)
+    # temp dir cleaned up on exit
 ```
 
-**Step B — Subsequent activations**
+**Step B — Subsequent activations**: same flow. `load_schema()` finds
+`schema.yaml` written by the agent in activation 1 — DEFAULT_SCHEMA is
+no longer used.
 
-On subsequent activations the same flow runs, but `load_schema()` now finds
-`schema.yaml` in the workspace (written by the agent in its first activation)
-and loads it instead of DEFAULT_SCHEMA. The agent runs as it defined itself.
-
-### 6.3 Coordinator agent: schema.yaml
-
-The coordinator is seeded with this schema.yaml (written to its workspace
-after graph seeding completes):
+### 6.3 Coordinator schema.yaml
 
 ```yaml
 version: "1"
@@ -1209,20 +1264,18 @@ name: coordinator
 
 system: |
   You are the Remora bootstrap coordinator.
-  You survey the code graph and ensure every module node has an assigned agent.
+  Survey the code graph and ensure every module node has an assigned agent.
   {{notes}}
 
 context:
   - name: notes
     tool: read_file
-    args:
-      path: notes.md
+    args: {path: notes.md}
     optional: true
 
-  - name: unassigned
+  - name: modules
     tool: graph_find_nodes
-    args:
-      kind: module
+    args: {kind: module}
 
 tools:
   - read_file
@@ -1240,24 +1293,45 @@ max_turns: 10
 termination: "DONE"
 ```
 
-The coordinator inspects `{{unassigned}}` (JSON list of module nodes), checks
-which ones lack an `assigned_agent` attr, and emits `AgentNeededEvent` for each.
+The coordinator reads `{{modules}}` (JSON list), checks which lack an
+`assigned_agent` attr, and emits `AgentNeededEvent` for each unassigned module.
 
 ---
 
 ## 7. M4: Graph Seeding
 
-### 7.1 `src/remora/bootstrap/seed_graph.py`
+### 7.1 Why code topology requires no seeding
 
-A one-time script that populates `bootstrap_nodes` and `bootstrap_edges` from
-the Remora source tree. It calls `BootstrapGraphStore.write()` directly — this
-is the one place where bedrock is called outside of a Grail tool.
+The v1 LSP scanner (background scanner + `NodeDiscoveredEvent` projection)
+already populates the `nodes` table in `event_store.db` with code nodes for
+every function, class, module, and file in the project. `caller_ids` and
+`callee_ids` are maintained by the same projection as the scanner discovers
+call relationships.
+
+Because `NodeStore.read_graph()` routes `kind in CODE_NODE_KINDS` to the
+`nodes` table, bootstrap agents can query live code topology immediately —
+no seeding required:
 
 ```python
-"""Bootstrap graph seeding.
+# Agent calls graph_find_nodes(kind="module") →
+# NodeStore._graph_find_nodes({"kind": "module"}) →
+# NodeStore.list_nodes(node_type="module") →
+# reads from nodes table populated by LSP scanner
+```
 
-Walks the remora source tree and populates bootstrap_nodes + bootstrap_edges.
-Run once before starting the bootstrap swarm.
+**M4 is only needed for two cases:**
+1. Non-code bootstrap nodes that have no v1 equivalent (e.g. `agent` nodes
+   representing bootstrap agents themselves, or `task` nodes)
+2. A fresh install before the LSP scanner has run — a lightweight filesystem
+   seeder creates module-level nodes so the coordinator can start immediately
+
+### 7.2 `src/remora/bootstrap/seed_graph.py`
+
+```python
+"""Bootstrap graph seeder.
+
+Seeds non-code bootstrap nodes. Code nodes are live in NodeStore
+via the v1 LSP scanner — no mirroring needed.
 
 Usage:
     devenv shell -- python -m remora.bootstrap.seed_graph
@@ -1268,88 +1342,45 @@ import asyncio
 import logging
 from pathlib import Path
 
-from remora.bootstrap.graph_store import BootstrapGraphStore
 from remora.core.store.event_store import EventStore
 
 logger = logging.getLogger(__name__)
 
 
-async def seed_from_node_store(
-    event_store: EventStore,
-    *,
-    swarm_id: str,
-) -> int:
-    """Seed bootstrap_nodes + bootstrap_edges from the v1 NodeStore.
-
-    Reads existing AgentNode entries from the nodes table and mirrors
-    them into bootstrap_nodes with kind=node_type. Also mirrors caller/callee
-    relationships as bootstrap_edges with kind='calls'.
-
-    Returns the number of nodes seeded.
-    """
-    graph = event_store.bootstrap_graph
-    node_store = event_store.nodes
-
-    nodes = await node_store.list_nodes()
-    count = 0
-
-    for node in nodes:
-        await graph.write("add_node", {
-            "id": node.node_id,
-            "kind": node.node_type,
-            "attrs": {
-                "name":      node.name,
-                "full_name": node.full_name,
-                "file_path": node.file_path,
-                "start_line": node.start_line,
-                "end_line":   node.end_line,
-            },
-        })
-        count += 1
-
-    # Mirror call edges
-    for node in nodes:
-        for callee_id in node.callee_ids:
-            try:
-                await graph.write("add_edge", {
-                    "from": node.node_id,
-                    "to":   callee_id,
-                    "kind": "calls",
-                })
-            except Exception:
-                logger.debug("Edge add failed %s -> %s", node.node_id, callee_id)
-
-    logger.info("Seeded %d bootstrap nodes from NodeStore", count)
-    return count
-
-
-async def seed_from_filesystem(
+async def seed_module_nodes_from_filesystem(
     event_store: EventStore,
     project_root: Path,
     *,
     swarm_id: str,
 ) -> int:
-    """Fallback seeder: walk the filesystem and create module-level nodes.
+    """Lightweight fallback: create module nodes in graph_nodes from filesystem.
 
-    Used when the v1 NodeStore has not yet been populated (fresh install).
-    Creates one 'module' node per Python file.
+    Only needed when the v1 LSP scanner has not yet run. Creates one
+    'module' node per Python file in the graph_nodes table. These will be
+    superseded/complemented by the NodeStore's live nodes table once scanning
+    completes, but they allow the coordinator to start immediately.
     """
-    graph = event_store.bootstrap_graph
+    node_store = event_store.nodes
     count = 0
+    skip_dirs = {".venv", ".devenv", "__pycache__", "dist", "build", ".git"}
 
     for py_file in sorted(project_root.rglob("*.py")):
-        # Skip virtual environments and build artifacts
-        parts = py_file.relative_to(project_root).parts
-        if any(p in (".venv", ".devenv", "__pycache__", "dist", "build") for p in parts):
+        parts = set(py_file.relative_to(project_root).parts)
+        if parts & skip_dirs:
             continue
 
         rel_path = py_file.relative_to(project_root).as_posix()
-        # Derive module full_name from file path
-        module_path = rel_path.replace("/", ".").removesuffix(".py").removeprefix("src.")
-        node_id = rel_path.replace("/", "_").replace(".", "_")
+        # e.g. src/remora/core/events/events.py → remora.core.events.events
+        module_path = (
+            rel_path
+            .removeprefix("src/")
+            .replace("/", ".")
+            .removesuffix(".py")
+        )
+        node_id = f"module:{rel_path}"
 
-        await graph.write("add_node", {
-            "id": node_id,
+        await node_store.write_graph("add_node", {
+            "id":   node_id,
             "kind": "module",
             "attrs": {
                 "name":      py_file.stem,
@@ -1359,50 +1390,70 @@ async def seed_from_filesystem(
         })
         count += 1
 
-    logger.info("Seeded %d module nodes from filesystem", count)
+    logger.info("Seeded %d module nodes from filesystem (fallback)", count)
     return count
 
 
-if __name__ == "__main__":
-    import sys
-    from remora.core.config import Config
-    from remora.core.store.event_store import EventStore
+async def seed_coordinator_node(
+    event_store: EventStore,
+    *,
+    coordinator_id: str = "coordinator",
+) -> None:
+    """Create the coordinator agent node in the graph."""
+    await event_store.nodes.write_graph("add_node", {
+        "id":   coordinator_id,
+        "kind": "agent",
+        "attrs": {
+            "name":    "coordinator",
+            "role":    "Surveys the graph and assigns agents to modules",
+            "status":  "pending",
+        },
+    })
+    logger.info("Seeded coordinator node: %s", coordinator_id)
 
+
+if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    project_root = Path.cwd()
-    db_path = project_root / ".remora" / "event_store.db"
+    db_path = Path.cwd() / ".remora" / "event_store.db"
 
     async def main() -> None:
         event_store = EventStore(db_path)
         await event_store.initialize()
         try:
-            n = await seed_from_node_store(event_store, swarm_id="bootstrap")
-            if n == 0:
-                n = await seed_from_filesystem(event_store, project_root, swarm_id="bootstrap")
-            print(f"Seeded {n} nodes.")
+            await seed_coordinator_node(event_store)
+
+            # Only seed module nodes if LSP scanner hasn't run yet
+            node_count = len(await event_store.nodes.list_nodes(node_type="module"))
+            if node_count == 0:
+                logger.info("LSP scanner nodes not found — seeding from filesystem")
+                await seed_module_nodes_from_filesystem(
+                    event_store, Path.cwd(), swarm_id="bootstrap"
+                )
+            else:
+                logger.info("LSP scanner has %d module nodes — skipping filesystem seed", node_count)
         finally:
             await event_store.close()
 
     asyncio.run(main())
 ```
 
-### 7.2 Node kinds and edge kinds for code topology
+### 7.3 Node and edge kind reference
 
-| Kind | Used for | Key attrs |
-|------|----------|-----------|
-| `module` | Python file | `name`, `full_name`, `file_path` |
-| `class` | Python class | `name`, `full_name`, `file_path`, `start_line`, `end_line` |
-| `function` | Python function/method | `name`, `full_name`, `file_path`, `start_line`, `end_line` |
-| `agent` | Bootstrap agent | `agent_id`, `role`, `node_id` (assigned module) |
-| `task` | Work item | `title`, `status`, `assigned_to` |
+| Kind | Table | Used for | Key attrs |
+|------|-------|----------|-----------|
+| `module` | `nodes` (live) or `graph_nodes` (fallback) | Python file | `name`, `full_name`, `file_path` |
+| `function` | `nodes` (live) | Python function | `name`, `full_name`, `file_path`, `start_line`, `end_line` |
+| `class` | `nodes` (live) | Python class | same as function |
+| `method` | `nodes` (live) | Python method | same as function |
+| `agent` | `graph_nodes` | Bootstrap agent | `name`, `role`, `status`, `assigned_node_id` |
+| `task` | `graph_nodes` | Work item | `title`, `status`, `assigned_to` |
 
-| Edge kind | Meaning |
-|-----------|---------|
-| `calls` | function A calls function B |
-| `imports` | module A imports module B |
-| `parent_of` | class/module A contains function B |
-| `assigned_to` | agent A is assigned to node B |
-| `produced` | agent A produced task B |
+| Edge kind | Table | Meaning |
+|-----------|-------|---------|
+| `calls` | derived from `caller_ids`/`callee_ids` | function A calls function B |
+| `assigned_to` | `graph_edges` | agent A is responsible for node B |
+| `produced` | `graph_edges` | agent A created task B |
+| `depends_on` | `graph_edges` | task A depends on task B |
 
 ---
 
@@ -1423,20 +1474,10 @@ on the agent's cairn workspace.
 Add to `companion/sidebar/composer.py` (or create `companion/sidebar/workspace.py`):
 
 ```python
-"""Bootstrap workspace panels for the companion sidebar.
-
-Five panels reading from the agent's cairn workspace:
-  ROLE    — role.md (plain text)
-  SCHEMA  — schema.yaml (parsed, key sections highlighted)
-  NOTES   — notes.md (plain text, scrollable)
-  TODO    — todo.md (markdown checklist)
-  LOG     — log.jsonl (last N entries, newest first)
-  TOOLS   — workspace/tools/*.pym (list + content on expand)
-"""
+"""Bootstrap workspace panels for the companion sidebar."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 
@@ -1444,12 +1485,12 @@ from typing import Any
 class WorkspacePanel:
     key: str          # "role" | "schema" | "notes" | "todo" | "log" | "tools"
     title: str
-    content: str      # Rendered markdown or plain text for display
-    is_empty: bool    # True when backing file is absent
+    content: str
+    is_empty: bool
 
 
 async def build_workspace_panels(
-    cairn_externals: Any,   # CairnExternals for the agent
+    cairn_externals: Any,  # CairnExternals for the agent
 ) -> list[WorkspacePanel]:
     """Build all workspace panels for one agent."""
     panels = []
@@ -1461,37 +1502,28 @@ async def build_workspace_panels(
         except Exception:
             return "", True
 
-    # ROLE
     content, empty = await _read("role.md")
     panels.append(WorkspacePanel("role", "Role", content, empty))
 
-    # SCHEMA
     content, empty = await _read("schema.yaml")
     panels.append(WorkspacePanel("schema", "Schema", content, empty))
 
-    # NOTES
     content, empty = await _read("notes.md")
     panels.append(WorkspacePanel("notes", "Notes", content, empty))
 
-    # TODO
     content, empty = await _read("todo.md")
     panels.append(WorkspacePanel("todo", "Todo", content, empty))
 
-    # LOG — last 20 lines of log.jsonl
     content, empty = await _read("log.jsonl")
     if not empty:
         lines = [l for l in content.splitlines() if l.strip()]
         content = "\n".join(lines[-20:])
     panels.append(WorkspacePanel("log", "Log", content, empty))
 
-    # TOOLS — list workspace/tools/*.pym names
     try:
         tool_files = await cairn_externals.list_dir("tools")
         pym_files = [f for f in (tool_files or []) if f.endswith(".pym")]
-        if pym_files:
-            tool_content = "\n".join(f"- `{f}`" for f in sorted(pym_files))
-        else:
-            tool_content = ""
+        tool_content = "\n".join(f"- `{f}`" for f in sorted(pym_files)) if pym_files else ""
         panels.append(WorkspacePanel("tools", "Tools", tool_content, not bool(pym_files)))
     except Exception:
         panels.append(WorkspacePanel("tools", "Tools", "", True))
@@ -1501,13 +1533,9 @@ async def build_workspace_panels(
 
 ### 8.3 Sidebar refresh
 
-Workspace panels refresh when:
-- An agent turn completes (activation end event)
-- The developer explicitly selects a different agent
-
-The existing event bus (`EventBus`) already notifies the companion on relevant
-events. Add a handler for `AgentActivationEndEvent` (or the equivalent v1
-event) to trigger a sidebar refresh.
+Workspace panels refresh on activation end (existing event bus notifications).
+No polling needed — the companion is already notified by the `EventBus` when
+agent turns complete.
 
 ### 8.4 ASCII mockup
 
@@ -1551,9 +1579,7 @@ event) to trigger a sidebar refresh.
 ### 9.1 Writing a synthesized tool from within a turn
 
 An agent writes a `.pym` file to `tools/<name>.pym` in its workspace using
-the `write_file` tool. The Grail syntax and `@external` constraints are the
-same as system tools, except the declarations reference system tool function
-names (not bedrock names):
+the `write_file` tool. `@external` declarations reference system tool names:
 
 ```python
 # Agent writes this to workspace/tools/node_context.pym
@@ -1570,7 +1596,7 @@ async def graph_neighbors(node_id: str, direction: str) -> str: ...
 import json
 
 async def node_context(node_id: str) -> str:
-    """Return full context for a node: source code, graph metadata, callers, callees.
+    """Return full context for a node: source, graph metadata, callers, callees.
     Returns JSON with keys: source, node, callers, callees."""
     node    = json.loads(await graph_node(node_id))
     source  = await read_file(node["attrs"]["file_path"])
@@ -1584,90 +1610,60 @@ async def node_context(node_id: str) -> str:
     })
 ```
 
-On the NEXT activation, `discover_grail_tools()` scans `workspace/tools/` and
-compiles `node_context.pym`. The externals dict passed at that time will contain
-the resolved `read_file`, `graph_node`, and `graph_neighbors` functions (compiled
-system tools). `node_context` becomes available as a callable tool.
+On the next activation, `discover_grail_tools()` compiles `node_context.pym`
+with system tool callables injected as externals. `node_context` becomes
+available as a single tool call.
 
 ### 9.2 The @external boundary for synthesized tools
 
-Synthesized tools live at the **system tool layer**, not the bedrock layer.
-They must declare `@external` on system tool names, not on `_cairn_read`,
-`_graph_write`, etc.
+Synthesized tools declare `@external` on **system tool names**, not bedrock names.
 
 The Grail externals dict passed to synthesized tools contains ONLY the system
-tool callables (the compiled `RemoraGrailTool.execute` functions, wrapped as
-plain async callables). The bedrock names are NOT present in this dict.
+tool callables (wrapped `RemoraGrailTool.execute` functions). The `_cairn_read`,
+`_graph_write`, etc. names are NOT present. A synthesized tool attempting to
+call `_cairn_read` directly will fail at runtime (key not in externals dict).
 
-This means the compiler enforces the boundary: a synthesized tool that tries
-to declare `@external` on `_cairn_read` will compile but fail at runtime
-(key not in externals). The convention is documented in `schema.yaml` comments
-and in the DEFAULT_SCHEMA system prompt.
+### 9.3 Extracting synthesized tools from Cairn
 
-### 9.3 Extending discover_grail_tools()
+Agent workspaces are Cairn virtual filesystems (SQLite-backed). When an agent
+writes `tools/node_context.pym` via `write_file()`, the content lives in Cairn —
+not on the real filesystem. `discover_grail_tools()` uses `Path.glob()`, which
+only works on real paths.
 
-The extended signature (described in §4.1):
-
-```python
-def discover_grail_tools(
-    agents_dir: Path,
-    *,
-    context: AgentContext | None = None,
-    externals: dict[str, Any] | None = None,
-    files_provider: FilesProvider,
-    workspace_tools_dir: Path | None = None,
-    limits: grail.Limits | None = None,
-    grail_dir: str | Path | None = None,
-) -> list[RemoraGrailTool | SwarmTool]:
-```
-
-Implementation changes:
-1. If `externals` is provided, use it directly; else use `context.as_externals()`
-2. After scanning `agents_dir`, if `workspace_tools_dir` exists:
-   - Build a second externals dict containing only the system tools (not bedrock)
-   - Scan `workspace_tools_dir/*.pym` and compile each with this second dict
-   - Append to tools list; workspace tools shadow system tools by name if same name
+Add `_extract_workspace_tools()` to `src/remora/bootstrap/bedrock.py`. This is
+called in `handle_agent_needed()` (§6.2) before tool discovery:
 
 ```python
-# After loading system tools:
-if workspace_tools_dir and workspace_tools_dir.exists():
-    # Build system-tool externals: name -> async callable wrapper
-    system_externals = {
-        tool.schema.name: _make_tool_callable(tool)
-        for tool in tools
-        if isinstance(tool, RemoraGrailTool)
-    }
-    for pym_file in sorted(workspace_tools_dir.glob("*.pym")):
-        try:
-            tools.append(RemoraGrailTool(
-                pym_file,
-                externals=system_externals,
-                files_provider=files_provider,
-                limits=limits,
-                grail_dir=grail_dir,
-            ))
-        except Exception as exc:
-            logger.warning("Failed to load workspace tool %s: %s", pym_file, exc)
+async def _extract_workspace_tools(cairn_externals: CairnExternals, tmp_dir: Path) -> Path:
+    """Extract .pym files from Cairn virtual FS to a real temp directory.
+
+    Returns the tools subdirectory path (may be empty if no tools yet).
+    Called once per activation; the caller's tempfile.TemporaryDirectory()
+    context manager handles cleanup.
+    """
+    tools_dir = tmp_dir / "tools"
+    tools_dir.mkdir()
+    try:
+        files = await cairn_externals.list_dir("tools")
+        for fname in (files or []):
+            if fname.endswith(".pym"):
+                content = await cairn_externals.read_file(f"tools/{fname}")
+                if content:
+                    (tools_dir / fname).write_text(content, encoding="utf-8")
+    except Exception:
+        pass  # no workspace/tools dir yet — tools_dir stays empty
+    return tools_dir
 ```
 
-Where `_make_tool_callable(tool)` wraps `tool.execute()` as a plain async function
-that takes positional args matching the tool's schema:
-
-```python
-def _make_tool_callable(tool: RemoraGrailTool):
-    async def _call(**kwargs) -> str:
-        result = await tool.execute(kwargs, context=None)
-        return result.output
-    return _call
-```
+The workspace tools scan in `discover_grail_tools()` (§4.1) is already correct
+— it receives this real filesystem path. `_make_tool_callable` is defined in
+`grail.py` alongside `discover_grail_tools` (see §4.1).
 
 ### 9.4 ToolSynthesizedEvent
 
-When an agent writes a new `.pym` tool, it should emit a `ToolSynthesizedEvent`
-so the coordinator can log it and potentially promote it to a system tool:
+When an agent writes a new `.pym` tool:
 
 ```python
-# Agent calls:
 await emit_event("ToolSynthesizedEvent", {
     "node_id":   "{node.id}",
     "tool_name": "node_context",
@@ -1675,10 +1671,9 @@ await emit_event("ToolSynthesizedEvent", {
 })
 ```
 
-The coordinator's schema.yaml subscribes to `ToolSynthesizedEvent`.
-Promotion to a system tool = the coordinator copies the `.pym` content
-(via `read_file`) and records it in a graph node for future reference.
-Actual file promotion to `bootstrap/tools/` requires a human decision.
+The coordinator subscribes to `ToolSynthesizedEvent`. Promotion to a system
+tool requires a human decision — the coordinator can record the tool in the
+graph but not auto-copy to `bootstrap/tools/`.
 
 ---
 
@@ -1692,101 +1687,111 @@ devenv shell -- python -m pytest tests/ --ignore=tests/benchmarks --ignore=tests
 ### M0 tests: `tests/unit/bootstrap/test_bedrock.py`
 
 ```python
-# Key invariants to test:
-
-# 1. _cairn_read round-trip via CairnExternals mock
-async def test_cairn_read_delegates_to_externals():
+# 1. _cairn_read delegates to CairnExternals.read_file
+async def test_cairn_read_delegates():
     ...
 
-# 2. _cairn_write round-trip
-async def test_cairn_write_delegates_to_externals():
+# 2. _cairn_write delegates to CairnExternals.write_file
+async def test_cairn_write_delegates():
     ...
 
-# 3. _graph_read dispatches by selector shape
-async def test_graph_read_get_node():
-async def test_graph_read_get_neighbors_in():
-async def test_graph_read_get_neighbors_out():
-async def test_graph_read_find_nodes():
+# 3. _graph_read delegates to event_store.nodes.read_graph
+async def test_graph_read_delegates_to_node_store():
+    ...
 
-# 4. _graph_write dispatches by op
-async def test_graph_write_add_node_generates_id():
-async def test_graph_write_add_edge():
+# 4. _graph_write delegates to event_store.nodes.write_graph
+async def test_graph_write_delegates_to_node_store():
+    ...
 
-# 5. _event_read calls event_store.get_recent_events
+# 5. _event_read calls get_recent_events
 async def test_event_read_calls_get_recent_events():
+    ...
 
-# 6. _event_write appends event and returns event_id
-async def test_event_write_appends_and_returns_id():
+# 6. _event_write appends BootstrapEvent and returns event_id
+async def test_event_write_returns_event_id():
+    ...
 ```
 
-### M0 tests: `tests/unit/bootstrap/test_graph_store.py`
+### M0 tests: `tests/unit/test_node_store.py` (extend existing test file)
 
 ```python
-# Test BootstrapGraphStore against a live SQLite connection
+# New graph methods — all against live SQLite (same pattern as existing tests)
 
-async def test_add_node_and_get_node():
-    # add_node returns {"id": ..., "kind": ...}
-    # get_node returns the node with attrs
+async def test_read_graph_get_code_node(node_store_with_data):
+    # graph_find_nodes(kind="function") returns AgentNode projected to dict
+    result = json.loads(await node_store.read_graph({"match": {"kind": "function"}}))
+    assert all(r["kind"] == "function" for r in result)
+
+async def test_read_graph_get_generic_node(node_store):
+    await node_store.write_graph("add_node", {"kind": "agent", "attrs": {"name": "test"}})
+    result = json.loads(await node_store.read_graph({"match": {"kind": "agent"}}))
+    assert len(result) == 1 and result[0]["attrs"]["name"] == "test"
+
+async def test_write_graph_add_node_generates_id(node_store):
+    result = json.loads(await node_store.write_graph("add_node", {"kind": "task", "attrs": {}}))
+    assert "id" in result and result["kind"] == "task"
+
+async def test_write_graph_add_node_preserves_provided_id(node_store):
+    result = json.loads(await node_store.write_graph("add_node",
+        {"id": "my-id", "kind": "agent", "attrs": {}}))
+    assert result["id"] == "my-id"
+
+async def test_read_graph_code_node_neighbors_from_caller_ids(node_store_with_data):
+    # neighbor query on a function node returns callers from caller_ids column
     ...
 
-async def test_add_node_id_generated_if_absent():
+async def test_read_graph_generic_node_neighbors_from_graph_edges(node_store):
+    # neighbor query on an agent node returns entries from graph_edges table
     ...
 
-async def test_add_node_id_preserved_if_provided():
+async def test_code_node_kinds_not_written_to_graph_nodes(node_store):
+    # write_graph("add_node", {"kind": "function", ...}) should raise or be rejected
+    # code nodes are read-only from the bootstrap perspective
     ...
+```
 
-async def test_get_neighbors_in():
-    ...
+### M0 tests: `tests/unit/test_event_store_schema.py`
 
-async def test_get_neighbors_out():
-    ...
-
-async def test_get_neighbors_both():
-    ...
-
-async def test_find_nodes_by_kind():
-    ...
-
-async def test_find_nodes_by_attrs():
-    ...
+```python
+def test_create_tables_creates_graph_tables(tmp_path):
+    import sqlite3
+    conn = sqlite3.connect(str(tmp_path / "test.db"))
+    create_tables(conn)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "graph_nodes" in tables
+    assert "graph_edges" in tables
 ```
 
 ### M1 tests: `tests/unit/bootstrap/test_system_tools.py`
 
 ```python
-# Each .pym file compiles successfully
 def test_all_pym_files_compile():
     for pym_file in Path("bootstrap/tools").glob("*.pym"):
         script = grail.load(str(pym_file))
         assert script is not None
 
-# Each tool declares @external on only bedrock names
 def test_pym_externals_are_bedrock_names():
     bedrock_names = {"_cairn_read", "_cairn_write", "_graph_read",
                      "_graph_write", "_event_read", "_event_write"}
     for pym_file in Path("bootstrap/tools").glob("*.pym"):
         script = grail.load(str(pym_file))
-        assert set(script.externals).issubset(bedrock_names), \
-            f"{pym_file.name} declares non-bedrock external: {script.externals}"
+        assert set(script.externals).issubset(bedrock_names)
 
-# Full round-trip: tool callable with mocked bedrock
 async def test_read_file_tool_calls_cairn_read():
     ...
 
-async def test_emit_event_tool_calls_event_write():
+async def test_graph_find_nodes_routes_to_graph_read():
     ...
 ```
 
 ### M2 tests: `tests/unit/bootstrap/test_schema_loader.py`
 
 ```python
-# DEFAULT_SCHEMA parses without error
 def test_default_schema_parses():
     schema = load_schema(Path("/nonexistent"))
     assert schema.termination == "DONE"
     assert "read_file" in schema.tools
 
-# Agent-written schema.yaml is loaded
 def test_agent_schema_loaded_when_present(tmp_path):
     (tmp_path / "schema.yaml").write_text("""
 version: "1"
@@ -1800,7 +1805,6 @@ termination: "DONE"
     assert schema.name == "test_agent"
     assert schema.max_turns == 3
 
-# extends: merges base correctly
 def test_extends_merges_base(tmp_path, bootstrap_agents_dir):
     (tmp_path / "schema.yaml").write_text("""
 extends: base_code_agent
@@ -1809,49 +1813,8 @@ tools:
 termination: "DONE"
 """)
     schema = load_schema(tmp_path, system_agents_dir=bootstrap_agents_dir)
-    # base_code_agent tools + graph_add_edge
     assert "read_file" in schema.tools
     assert "graph_add_edge" in schema.tools
-
-# Malformed YAML returns validation error
-def test_invalid_schema_raises(tmp_path):
-    (tmp_path / "schema.yaml").write_text("not: yaml: valid: ??? [")
-    with pytest.raises(Exception):
-        load_schema(tmp_path)
-```
-
-### M2 tests: `tests/integration/bootstrap/test_turn_executor.py`
-
-```python
-# Full turn with mocked LLM: context assembled, tools called, turn ends
-async def test_turn_executor_full_turn_mocked_llm(tmp_path, mock_client):
-    # Write a simple schema.yaml
-    # Run TurnExecutor
-    # Assert context pipeline executed
-    # Assert termination detected
-    ...
-
-# DEFAULT_SCHEMA used when workspace has no schema.yaml
-async def test_turn_executor_uses_default_schema_for_empty_workspace(tmp_path, mock_client):
-    # tmp_path has no schema.yaml
-    # Run executor
-    # Assert system prompt contains bootstrap default text
-    ...
-
-# Context pipeline skips optional missing steps
-async def test_context_pipeline_optional_step_missing(tmp_path, mock_client):
-    ...
-```
-
-### M3 tests: `tests/integration/bootstrap/test_bootstrap_loop.py`
-
-```python
-# Empty workspace → DEFAULT_SCHEMA → agent writes schema.yaml → next activation uses it
-async def test_self_bootstrapping_loop(event_store, workspace_service, config):
-    agent_id = "test-module-agent"
-    # Activation 1: DEFAULT_SCHEMA, agent writes schema.yaml
-    # Activation 2: load_schema() finds schema.yaml — not DEFAULT_SCHEMA
-    ...
 ```
 
 ### M4 tests: `tests/unit/bootstrap/test_seed_graph.py`
@@ -1860,10 +1823,14 @@ async def test_self_bootstrapping_loop(event_store, workspace_service, config):
 async def test_seed_from_filesystem_creates_module_nodes(tmp_path, event_store):
     (tmp_path / "foo.py").write_text("x = 1")
     (tmp_path / "bar.py").write_text("y = 2")
-    n = await seed_from_filesystem(event_store, tmp_path, swarm_id="test")
+    n = await seed_module_nodes_from_filesystem(event_store, tmp_path, swarm_id="test")
     assert n == 2
-    result = json.loads(await event_store.bootstrap_graph.read({"match": {"kind": "module"}}))
+    result = json.loads(await event_store.nodes.read_graph({"match": {"kind": "module"}}))
     assert len(result) == 2
+
+async def test_seed_skips_when_live_nodes_exist(event_store_with_nodes):
+    # seed_graph main() should skip filesystem seed if nodes table has entries
+    ...
 ```
 
 ### Summary: test file locations
@@ -1871,9 +1838,10 @@ async def test_seed_from_filesystem_creates_module_nodes(tmp_path, event_store):
 ```
 tests/
   unit/
+    test_node_store.py          # extend existing — add graph method tests
+    test_event_store_schema.py  # extend existing — add graph table assertions
     bootstrap/
       test_bedrock.py
-      test_graph_store.py
       test_system_tools.py
       test_schema_loader.py
       test_seed_graph.py

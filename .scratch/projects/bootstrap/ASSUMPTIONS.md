@@ -19,10 +19,16 @@ remora v1 codebase.
 - The TurnExecutor runs in parallel to v1's execute_agent_turn — no replacement
 
 ## Graph Store Decision
-User chose "extend NodeStore" — implemented as:
-- New tables `bootstrap_nodes` + `bootstrap_edges` in the existing event_store.db
-- New class `BootstrapGraphStore` (similar to NodeStore) that shares the EventStore DB connection
-- Added to event_store_schema.py's create_tables() and EventStore.initialize()
+NodeStore is the unified graph API. Extended with two new methods:
+- `read_graph(selector)` — routes to `nodes` table (code nodes) or `graph_nodes` (generic)
+- `write_graph(op, data)` — always targets `graph_nodes` + `graph_edges`
+
+New tables in event_store.db: `graph_nodes(id, kind, attrs_json)` + `graph_edges(from_id, to_id, kind, attrs_json)`
+
+Code topology (functions, classes, modules) is LIVE in the existing `nodes` table
+via the v1 LSP scanner — no seeding needed for code nodes.
+Bootstrap agents query code topology and generic topology through the same `NodeStore` methods.
+No separate BootstrapGraphStore class.
 
 ## schema.yaml vs manifest.yaml
 Both exist in parallel. Bootstrap agents use schema.yaml + TurnExecutor.
