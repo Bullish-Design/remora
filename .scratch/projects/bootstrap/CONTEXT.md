@@ -1,6 +1,6 @@
 # Bootstrap Implementation Project Context
 
-## Status: IN PROGRESS — M0..M6 committed+pushed; M7 implemented + verified; commit pending
+## Status: IN PROGRESS — M0..M7 committed+pushed; awaiting next milestone
 
 ## Output
 - `.scratch/projects/bootstrap/IMPLEMENTATION_GUIDE.md` — implementation spec
@@ -29,6 +29,9 @@
     - validates activation handling + assignment persistence
     - validates direct + schema subscription registration
     - validates `ToolSynthesizedEvent` emission when a workspace tool appears
+- M7 verification artifacts were committed and pushed:
+  - commit `ec5912b`
+  - includes `.grail/add_tool/check.json` metadata churn (user-approved)
 
 - Previously implemented M5 artifacts:
   - added `src/remora/companion/sidebar/workspace.py`
@@ -97,7 +100,7 @@
 - D24: tool-synthesis events are emitted by activation-time before/after workspace tool diff
 
 ## Next step
-- Commit/push post-plan verification changes (integration test + approved `.grail` artifact churn).
+- Start the next implementation milestone after M7 verification.
 
 ## Post-plan verification pass (current coding pass)
 - Added new integration test:

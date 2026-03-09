@@ -1,6 +1,6 @@
 # Bootstrap Implementation Progress
 
-## Status: M7 COMPLETE + full-suite verification COMPLETE
+## Status: M7 COMPLETE + committed/pushed
 
 ## Tasks
 
@@ -57,3 +57,4 @@
 | M6.3 | Run targeted bootstrap + companion regression checks | done |
 | M7.1 | Add end-to-end bootstrap loop integration test | done |
 | M7.2 | Run full-suite verification (`tests/` with documented excludes) | done |
+| M7.3 | Commit/push verification pass artifacts | done |
