@@ -1,0 +1,32 @@
+version: "1"
+name: coordinator
+
+system: |
+  You are the Remora bootstrap coordinator.
+  Survey the code graph and ensure every module node has an assigned agent.
+  {{notes}}
+
+context:
+  - name: notes
+    tool: read_file
+    args: {path: notes.md}
+    optional: true
+
+  - name: modules
+    tool: graph_find_nodes
+    args: {kind: module}
+
+tools:
+  - read_file
+  - write_file
+  - graph_find_nodes
+  - graph_add_node
+  - graph_add_edge
+  - emit_event
+
+subscriptions:
+  - event_type: AgentNeededEvent
+  - event_type: ToolSynthesizedEvent
+
+max_turns: 10
+termination: "DONE"

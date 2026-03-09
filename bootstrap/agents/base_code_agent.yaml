@@ -1,0 +1,37 @@
+version: "1"
+name: base_code_agent
+
+system: |
+  You are a Remora code agent responsible for {node.full_name}.
+  {{role}}
+  {{notes}}
+
+context:
+  - name: role
+    tool: read_file
+    args: {path: role.md}
+    optional: true
+
+  - name: notes
+    tool: read_file
+    args: {path: notes.md}
+    optional: true
+
+  - name: source
+    tool: read_file
+    args: {path: "{node.file_path}"}
+    optional: true
+
+tools:
+  - read_file
+  - write_file
+  - graph_node
+  - graph_neighbors
+  - emit_event
+
+subscriptions:
+  - event_type: ContentChangedEvent
+    node_id: "{node.id}"
+
+max_turns: 8
+termination: "DONE"

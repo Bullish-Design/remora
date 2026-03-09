@@ -1,45 +1,47 @@
 # Bootstrap Implementation Project Context
 
-## Status: IN PROGRESS — M0, M1, and M2 implemented; ready for M3
+## Status: IN PROGRESS — M3 implemented locally; ready to commit/push, then start M4
 
 ## Output
 - `.scratch/projects/bootstrap/IMPLEMENTATION_GUIDE.md` — implementation spec
 - `.scratch/projects/bootstrap/IMPLEMENTATION_LOG.md` — concrete code/test change log
 
 ## What was done in this coding pass
-- Committed and pushed M0+M1 work to `main`:
-  - commit `f0920ef`
-  - pushed to `origin/main`
-- Implemented M2 schema loading layer:
-  - added `src/remora/bootstrap/schema_loader.py`
-  - `TurnSchema`, `ContextStep`, `SubscriptionSpec`
-  - embedded `DEFAULT_SCHEMA_YAML` fallback
-  - one-level `extends` merge from `system_agents_dir`
-  - `resolve_context_vars()` for `{{name}}` placeholders
-- Implemented M2 turn executor:
-  - added `src/remora/bootstrap/turn_executor.py`
-  - `TurnExecutor.run()` flow: load schema → context pipeline → prompt render → kernel run
-  - `{node.*}` substitution in args/system prompt
-  - active-tool filtering from schema tool list
-  - client reuse support + safe response extraction
-- Updated package exports in `src/remora/bootstrap/__init__.py`
-- Added M2 tests:
-  - `tests/unit/bootstrap/test_schema_loader.py`
-  - `tests/unit/bootstrap/test_turn_executor.py`
+- M0+M1 previously committed/pushed in `f0920ef`.
+- M2 previously committed/pushed in `18007eb`.
+- Implemented M3 self-bootstrap loop scaffolding:
+  - added `src/remora/bootstrap/activation.py`
+    - `ActivationResult`, `default_agent_id()`, `handle_agent_needed()`
+    - direct-subscription ensure + schema-subscription registration
+    - bedrock/tool discovery + turn execution orchestration
+    - agent node/edge persistence in graph store (`assigned_to`)
+  - added `src/remora/bootstrap/coordinator.py`
+    - `find_unassigned_modules()`
+    - `emit_agent_needed_events()`
+  - added bootstrap schemas:
+    - `bootstrap/agents/DEFAULT_SCHEMA.yaml`
+    - `bootstrap/agents/base_code_agent.yaml`
+    - `bootstrap/agents/coordinator.yaml`
+  - updated `src/remora/bootstrap/__init__.py` exports
+  - added M3 tests:
+    - `tests/unit/bootstrap/test_agent_schemas.py`
+    - `tests/unit/bootstrap/test_coordinator.py`
+    - `tests/unit/bootstrap/test_activation.py`
 
 ## Validation completed
-- `devenv shell -- pytest tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py -q`
-- `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/schema_loader.py src/remora/bootstrap/turn_executor.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py`
-- `devenv shell -- pytest tests/unit/test_grail_discovery.py tests/unit/bootstrap/test_system_tools.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_execution.py tests/unit/test_event_store_schema.py tests/unit/test_node_store_graph.py tests/unit/bootstrap/test_bedrock.py tests/unit/test_subscriptions.py -q`
+- `devenv shell -- uv sync --extra dev`
+- `devenv shell -- pytest tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py -q`
+- `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/activation.py src/remora/bootstrap/coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py`
 - All passing.
 
 ## Key decisions captured (see DECISIONS.md)
-- D15/D16: Grail-safe external names + bedrock alias keys
-- D17: schema.yaml loaded from Cairn workspace with one-level extends
-- D18: context pipeline stays sequential and fail-soft
+- D19: coordinator assignment source is `agent.attrs.assigned_node_id`
+- D20: schema subscription `node_id` is currently informational (ignored in v1 matcher)
+- D21: default agent IDs are deterministic and node-derived (`default_agent_id`)
 
 ## Next step
-- Start M3: self-bootstrap loop scaffolding (`bootstrap/agents/*.yaml` + coordinator wiring).
+- Commit/push current M3 changes.
+- Implement M4 graph seeding module (`src/remora/bootstrap/seed_graph.py`) + tests.
 
 ## 2026-03-08 decision lock (implementation kickoff)
 The following decisions were reconfirmed with the user before coding:

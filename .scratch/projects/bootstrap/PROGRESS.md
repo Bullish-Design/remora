@@ -1,6 +1,6 @@
 # Bootstrap Implementation Progress
 
-## Status: M2 COMPLETE (awaiting review)
+## Status: M3 COMPLETE; M4 NEXT
 
 ## Tasks
 
@@ -40,4 +40,9 @@
 | M2.2 | Add turn executor (`turn_executor.py`) with context pipeline + kernel dispatch | done |
 | M2.3 | Add M2 tests (`test_schema_loader.py`, `test_turn_executor.py`) | done |
 | M2.4 | Run targeted M0+M1+M2 regression suites and ruff checks | done |
-| M3 | Self-bootstrap loop | pending |
+| M3.1 | Add bootstrap agent schema assets (`bootstrap/agents/*.yaml`) | done |
+| M3.2 | Add coordinator helpers (`find_unassigned_modules`, `emit_agent_needed_events`) | done |
+| M3.3 | Add activation handler (`handle_agent_needed`) for AgentNeeded flow | done |
+| M3.4 | Add M3 tests (`test_agent_schemas.py`, `test_coordinator.py`, `test_activation.py`) | done |
+| M3.5 | Run targeted M3 tests + lint checks | done |
+| M4 | Graph seeding module + tests | pending |

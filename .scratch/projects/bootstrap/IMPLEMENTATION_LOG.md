@@ -140,3 +140,49 @@
 - `devenv shell -- pytest tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py -q`
 - `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/schema_loader.py src/remora/bootstrap/turn_executor.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py`
 - `devenv shell -- pytest tests/unit/test_grail_discovery.py tests/unit/bootstrap/test_system_tools.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_execution.py tests/unit/test_event_store_schema.py tests/unit/test_node_store_graph.py tests/unit/bootstrap/test_bedrock.py tests/unit/test_subscriptions.py -q`
+
+## 2026-03-08 — M3 implementation (completed, pending commit)
+
+### bootstrap files added
+- `src/remora/bootstrap/activation.py`
+  - Added `ActivationResult`
+  - Added deterministic `default_agent_id(node_id)`
+  - Added `handle_agent_needed(...)` orchestration:
+    - workspace initialization (`SyncMode.NONE`)
+    - `CairnExternals` creation
+    - bedrock + tool discovery (system + extracted workspace tools)
+    - node attribute load from graph
+    - `TurnExecutor` execution
+    - schema reload and subscription registration
+    - graph writes for `kind=agent` node + `assigned_to` edge
+  - Added helpers for direct subscription and schema subscription registration.
+- `src/remora/bootstrap/coordinator.py`
+  - Added `AgentNeededPlan`
+  - Added `find_unassigned_modules(event_store)`
+  - Added `emit_agent_needed_events(event_store, swarm_id, coordinator_id=...)`
+- `src/remora/bootstrap/__init__.py`
+  - Exported activation/coordinator symbols.
+
+### bootstrap schema assets added
+- `bootstrap/agents/DEFAULT_SCHEMA.yaml`
+- `bootstrap/agents/base_code_agent.yaml`
+- `bootstrap/agents/coordinator.yaml`
+
+### tests added
+- `tests/unit/bootstrap/test_agent_schemas.py`
+  - schema file existence + `TurnSchema` validation + coordinator subscriptions
+- `tests/unit/bootstrap/test_coordinator.py`
+  - unassigned-module detection + `AgentNeededEvent` emission verification
+- `tests/unit/bootstrap/test_activation.py`
+  - activation orchestration, subscription behavior, graph writes, deterministic id fallback
+
+### notable implementation notes
+- `subscriptions[].node_id` in schema is currently informational only; v1
+  `SubscriptionPattern` has no node-id filter support.
+- Coordinator assignment detection currently uses `agent.attrs.assigned_node_id`
+  as the source of truth.
+
+### validation commands run
+- `devenv shell -- uv sync --extra dev`
+- `devenv shell -- pytest tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py -q`
+- `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/activation.py src/remora/bootstrap/coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py`

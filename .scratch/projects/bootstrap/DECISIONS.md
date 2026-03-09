@@ -161,3 +161,28 @@ values (with warning for non-optional steps) instead of aborting the turn.
 
 **Rationale**: Preserves forward progress for bootstrap turns when a context
 tool is unavailable or transiently fails, while still surfacing actionable logs.
+
+## D19: Coordinator assignment source is agent node attrs, not edges
+**Decision**: `find_unassigned_modules()` treats a module as assigned when at
+least one `kind=agent` graph node has `attrs.assigned_node_id == module_id`.
+It does not currently infer assignment from `assigned_to` edges.
+
+**Rationale**: This aligns with how `handle_agent_needed()` persists assignment
+state today and avoids edge-join complexity for initial M3 bootstrap logic.
+
+## D20: Schema `subscriptions[].node_id` is informational in v1
+**Decision**: Activation registers schema subscriptions by `event_type` only.
+If `node_id` is present in schema, it is resolved for logging but ignored in
+`SubscriptionPattern` registration.
+
+**Rationale**: v1 `SubscriptionPattern` does not support node-id filtering.
+Keeping this field informational preserves schema compatibility for future
+matcher enhancements without blocking M3.
+
+## D21: Agent IDs default to deterministic node-derived IDs
+**Decision**: When `AgentNeededEvent.payload.agent_id` is absent, activation
+derives a stable ID with `default_agent_id(node_id)`, including sanitized node
+tail + short hash suffix.
+
+**Rationale**: Deterministic IDs prevent accidental agent duplication across
+repeated coordinator emissions and keep workspace identity stable.
