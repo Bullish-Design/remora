@@ -186,3 +186,37 @@
 - `devenv shell -- uv sync --extra dev`
 - `devenv shell -- pytest tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py -q`
 - `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/activation.py src/remora/bootstrap/coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py`
+
+## 2026-03-08 — M4 implementation (completed, pending commit)
+
+### bootstrap files added
+- `src/remora/bootstrap/seed_graph.py`
+  - Added `seed_module_nodes_from_filesystem(event_store, project_root, swarm_id=...)`
+  - Added `seed_coordinator_node(event_store, coordinator_id=...)`
+  - Added `seed_modules_if_empty(event_store, project_root, swarm_id=...)`
+  - Added module entrypoint (`python -m remora.bootstrap.seed_graph`) that:
+    - uses existing DB path `.remora/events/events.db`
+    - initializes `EventStore(..., projection=NodeProjection())`
+    - seeds coordinator node + conditional module fallback seed
+
+### bootstrap package exports updated
+- `src/remora/bootstrap/__init__.py`
+  - exported `seed_module_nodes_from_filesystem`
+  - exported `seed_coordinator_node`
+  - exported `seed_modules_if_empty`
+
+### tests added
+- `tests/unit/bootstrap/test_seed_graph.py`
+  - verifies filesystem fallback creates module nodes and skips ignored dirs
+  - verifies conditional skip when module nodes already exist
+  - verifies coordinator graph node creation
+
+### notable implementation notes
+- Module fallback seeding is implemented via `NodeDiscoveredEvent` projection
+  writes into the `nodes` table, not direct `graph_nodes` inserts for `module`.
+  This keeps code-node seeding aligned with existing `NodeStore` write guards.
+
+### validation commands run
+- `devenv shell -- pytest tests/unit/bootstrap/test_seed_graph.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py -q`
+- `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/seed_graph.py tests/unit/bootstrap/test_seed_graph.py`
+- `devenv shell -- pytest tests/unit/bootstrap/test_seed_graph.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_grail_discovery.py tests/unit/bootstrap/test_system_tools.py tests/unit/bootstrap/test_bedrock.py tests/unit/test_event_store_schema.py tests/unit/test_node_store_graph.py tests/unit/test_subscriptions.py -q`

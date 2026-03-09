@@ -1,6 +1,6 @@
 # Bootstrap Implementation Project Context
 
-## Status: IN PROGRESS — M3 implemented locally; ready to commit/push, then start M4
+## Status: IN PROGRESS — M3 committed/pushed; M4 implemented locally and validated
 
 ## Output
 - `.scratch/projects/bootstrap/IMPLEMENTATION_GUIDE.md` — implementation spec
@@ -9,7 +9,21 @@
 ## What was done in this coding pass
 - M0+M1 previously committed/pushed in `f0920ef`.
 - M2 previously committed/pushed in `18007eb`.
-- Implemented M3 self-bootstrap loop scaffolding:
+- M3 self-bootstrap loop scaffolding was committed and pushed:
+  - commit `7953623`
+- Implemented M4 graph seeding support:
+  - added `src/remora/bootstrap/seed_graph.py`
+    - `seed_module_nodes_from_filesystem()`
+    - `seed_coordinator_node()`
+    - `seed_modules_if_empty()`
+    - module entrypoint uses existing DB path: `.remora/events/events.db`
+  - updated `src/remora/bootstrap/__init__.py` exports for seeding APIs
+  - added `tests/unit/bootstrap/test_seed_graph.py`
+    - filesystem seeding creates module nodes via `NodeDiscoveredEvent` projection
+    - skip path when module nodes already exist
+    - coordinator graph-node creation
+
+- Previously implemented M3 artifacts (now pushed):
   - added `src/remora/bootstrap/activation.py`
     - `ActivationResult`, `default_agent_id()`, `handle_agent_needed()`
     - direct-subscription ensure + schema-subscription registration
@@ -32,16 +46,20 @@
 - `devenv shell -- uv sync --extra dev`
 - `devenv shell -- pytest tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py -q`
 - `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/activation.py src/remora/bootstrap/coordinator.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py`
+- `devenv shell -- pytest tests/unit/bootstrap/test_seed_graph.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py -q`
+- `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/seed_graph.py tests/unit/bootstrap/test_seed_graph.py`
+- `devenv shell -- pytest tests/unit/bootstrap/test_seed_graph.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_grail_discovery.py tests/unit/bootstrap/test_system_tools.py tests/unit/bootstrap/test_bedrock.py tests/unit/test_event_store_schema.py tests/unit/test_node_store_graph.py tests/unit/test_subscriptions.py -q`
 - All passing.
 
 ## Key decisions captured (see DECISIONS.md)
 - D19: coordinator assignment source is `agent.attrs.assigned_node_id`
 - D20: schema subscription `node_id` is currently informational (ignored in v1 matcher)
 - D21: default agent IDs are deterministic and node-derived (`default_agent_id`)
+- D22: filesystem fallback seeds modules through `NodeDiscoveredEvent` + `NodeProjection`, not `graph_nodes` writes
 
 ## Next step
-- Commit/push current M3 changes.
-- Implement M4 graph seeding module (`src/remora/bootstrap/seed_graph.py`) + tests.
+- Commit/push current M4 changes.
+- Start M5 companion workspace visibility surfaces.
 
 ## 2026-03-08 decision lock (implementation kickoff)
 The following decisions were reconfirmed with the user before coding:

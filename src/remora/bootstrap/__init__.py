@@ -15,6 +15,7 @@ from remora.bootstrap.schema_loader import (
     load_schema,
     resolve_context_vars,
 )
+from remora.bootstrap.seed_graph import seed_coordinator_node, seed_module_nodes_from_filesystem, seed_modules_if_empty
 from remora.bootstrap.turn_executor import TurnExecutor, TurnResult
 
 __all__ = [
@@ -33,6 +34,9 @@ __all__ = [
     "TurnSchema",
     "load_schema",
     "resolve_context_vars",
+    "seed_module_nodes_from_filesystem",
+    "seed_coordinator_node",
+    "seed_modules_if_empty",
     "TurnExecutor",
     "TurnResult",
 ]

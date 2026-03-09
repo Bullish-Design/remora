@@ -186,3 +186,13 @@ tail + short hash suffix.
 
 **Rationale**: Deterministic IDs prevent accidental agent duplication across
 repeated coordinator emissions and keep workspace identity stable.
+
+## D22: Filesystem module seeding writes through projection events
+**Decision**: `seed_module_nodes_from_filesystem()` seeds module/file nodes by
+appending `NodeDiscoveredEvent` (with `NodeProjection`) into the `nodes` table,
+instead of writing `kind=module` rows into `graph_nodes`.
+
+**Rationale**: The graph API intentionally rejects code-kind writes through
+`write_graph("add_node", ...)`. Projection events keep seeded module nodes in
+the same read model as scanner-discovered nodes and avoid adding new write-path
+exceptions to `NodeStore`.

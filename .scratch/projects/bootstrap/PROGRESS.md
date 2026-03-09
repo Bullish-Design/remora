@@ -1,6 +1,6 @@
 # Bootstrap Implementation Progress
 
-## Status: M3 COMPLETE; M4 NEXT
+## Status: M4 COMPLETE; M5 NEXT
 
 ## Tasks
 
@@ -45,4 +45,7 @@
 | M3.3 | Add activation handler (`handle_agent_needed`) for AgentNeeded flow | done |
 | M3.4 | Add M3 tests (`test_agent_schemas.py`, `test_coordinator.py`, `test_activation.py`) | done |
 | M3.5 | Run targeted M3 tests + lint checks | done |
-| M4 | Graph seeding module + tests | pending |
+| M4.1 | Add `seed_graph.py` module seeding helpers | done |
+| M4.2 | Add M4 tests (`test_seed_graph.py`) | done |
+| M4.3 | Run targeted M4 + focused bootstrap regression suites | done |
+| M5 | Companion workspace visibility | pending |
