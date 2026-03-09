@@ -102,3 +102,41 @@
 - `devenv shell -- pytest tests/unit/bootstrap/test_system_tools.py -q` (fail first, then pass after tool runtime fixes)
 - `devenv shell -- ruff check src/remora/core/tools/grail.py src/remora/bootstrap/bedrock.py tests/unit/test_grail_discovery.py tests/unit/bootstrap/test_system_tools.py tests/unit/bootstrap/test_bedrock.py`
 - `devenv shell -- pytest tests/unit/test_grail_discovery.py tests/unit/bootstrap/test_system_tools.py tests/unit/test_execution.py tests/unit/test_event_store_schema.py tests/unit/test_node_store_graph.py tests/unit/bootstrap/test_bedrock.py tests/unit/test_subscriptions.py -q`
+
+## 2026-03-08 — M2 implementation (completed)
+
+### bootstrap files added
+- `src/remora/bootstrap/schema_loader.py`
+  - Added `TurnSchema`, `ContextStep`, `SubscriptionSpec`
+  - Added embedded `DEFAULT_SCHEMA_YAML` fallback
+  - Added `load_schema(cairn_externals, system_agents_dir=...)`
+  - Added one-level `extends` support with list-append merge for
+    `context` / `tools` / `subscriptions`
+  - Added `resolve_context_vars()` for `{{name}}` substitutions
+- `src/remora/bootstrap/turn_executor.py`
+  - Added `TurnResult` dataclass
+  - Added `TurnExecutor` with:
+    - schema load from Cairn workspace
+    - sequential context pipeline
+    - `{node.*}` + `{{name}}` prompt resolution
+    - schema-based tool activation and kernel dispatch
+    - response extraction + kernel close safety
+
+### bootstrap package exports updated
+- `src/remora/bootstrap/__init__.py`
+  - Exported schema loader models/functions and turn executor types.
+
+### tests added
+- `tests/unit/bootstrap/test_schema_loader.py`
+  - default schema fallback
+  - workspace schema load
+  - `extends` merge behavior
+  - context variable substitution
+- `tests/unit/bootstrap/test_turn_executor.py`
+  - context pipeline + prompt resolution + kernel dispatch
+  - client reuse path + optional missing context step behavior
+
+### validation commands run
+- `devenv shell -- pytest tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py -q`
+- `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/schema_loader.py src/remora/bootstrap/turn_executor.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py`
+- `devenv shell -- pytest tests/unit/test_grail_discovery.py tests/unit/bootstrap/test_system_tools.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_execution.py tests/unit/test_event_store_schema.py tests/unit/test_node_store_graph.py tests/unit/bootstrap/test_bedrock.py tests/unit/test_subscriptions.py -q`

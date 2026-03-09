@@ -1,6 +1,6 @@
 # Bootstrap Implementation Progress
 
-## Status: M1 COMPLETE (awaiting review)
+## Status: M2 COMPLETE (awaiting review)
 
 ## Tasks
 
@@ -36,4 +36,8 @@
 | M1.2 | Add nine bootstrap system tools (`bootstrap/tools/*.pym`) | done |
 | M1.3 | Add M1 tests (tool compilation, externals, discovery behavior) | done |
 | M1.4 | Run targeted M0+M1 regression suites and ruff checks | done |
-| M2 | Turn schema loader and turn executor | pending |
+| M2.1 | Add schema loader (`schema_loader.py`) with default fallback + extends merge | done |
+| M2.2 | Add turn executor (`turn_executor.py`) with context pipeline + kernel dispatch | done |
+| M2.3 | Add M2 tests (`test_schema_loader.py`, `test_turn_executor.py`) | done |
+| M2.4 | Run targeted M0+M1+M2 regression suites and ruff checks | done |
+| M3 | Self-bootstrap loop | pending |

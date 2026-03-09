@@ -145,3 +145,19 @@ underscore-free names keeps scripts executable.
 **Rationale**: Preserves the original bedrock naming contract while enabling
 Grail scripts to bind to resolvable external names. This is additive and
 keeps v1/M0 behavior intact.
+
+## D17: schema.yaml source of truth is Cairn workspace, with one-level extends
+**Decision**: `load_schema()` reads `schema.yaml` from `CairnExternals` (agent
+workspace), falls back to embedded `DEFAULT_SCHEMA_YAML`, and resolves one
+optional `extends` reference from `system_agents_dir/<name>.yaml`.
+
+**Rationale**: Agent-authored schema files are written via workspace tools and
+live in Cairn, not real filesystem paths. One-level extends gives practical
+reuse without introducing recursive merge complexity in v1 bootstrap.
+
+## D18: TurnExecutor context steps fail-soft and remain sequential
+**Decision**: Context steps execute in order; missing/failed steps produce empty
+values (with warning for non-optional steps) instead of aborting the turn.
+
+**Rationale**: Preserves forward progress for bootstrap turns when a context
+tool is unavailable or transiently fails, while still surfacing actionable logs.
