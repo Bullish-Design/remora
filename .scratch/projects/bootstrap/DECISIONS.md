@@ -196,3 +196,11 @@ instead of writing `kind=module` rows into `graph_nodes`.
 `write_graph("add_node", ...)`. Projection events keep seeded module nodes in
 the same read model as scanner-discovered nodes and avoid adding new write-path
 exceptions to `NodeStore`.
+
+## D23: Workspace sidebar panels are shown only when content exists
+**Decision**: Companion sidebar renders a dedicated `## Workspace` section only
+when at least one workspace panel (`role`, `schema`, `notes`, `todo`, `log`,
+`tools`) is non-empty.
+
+**Rationale**: Keeps non-bootstrap node sidebars uncluttered while still
+surfacing bootstrap identity artifacts immediately once present.

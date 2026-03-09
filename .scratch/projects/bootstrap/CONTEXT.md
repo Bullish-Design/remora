@@ -1,6 +1,6 @@
 # Bootstrap Implementation Project Context
 
-## Status: IN PROGRESS — M3 committed/pushed; M4 implemented locally and validated
+## Status: IN PROGRESS — M3/M4 committed+pushed; M5 implemented locally and validated
 
 ## Output
 - `.scratch/projects/bootstrap/IMPLEMENTATION_GUIDE.md` — implementation spec
@@ -11,7 +11,22 @@
 - M2 previously committed/pushed in `18007eb`.
 - M3 self-bootstrap loop scaffolding was committed and pushed:
   - commit `7953623`
-- Implemented M4 graph seeding support:
+- M4 graph seeding support was committed and pushed:
+  - commit `20f01a9`
+- Implemented M5 companion workspace visibility:
+  - added `src/remora/companion/sidebar/workspace.py`
+    - `WorkspacePanel` dataclass
+    - `build_workspace_panels(workspace)` for `role.md`, `schema.yaml`,
+      `notes.md`, `todo.md`, `log.jsonl`, and workspace `tools/*.pym`
+  - updated `src/remora/companion/sidebar/composer.py`
+    - adds `## Workspace` section when workspace identity content exists
+    - renders each panel with `### <Title>` and content/empty marker
+  - added `tests/unit/companion/test_workspace_panels.py`
+    - panel construction and log truncation behavior
+    - empty-state behavior
+    - compose-sidebar integration assertion
+
+- Previously implemented M4 artifacts:
   - added `src/remora/bootstrap/seed_graph.py`
     - `seed_module_nodes_from_filesystem()`
     - `seed_coordinator_node()`
@@ -49,6 +64,8 @@
 - `devenv shell -- pytest tests/unit/bootstrap/test_seed_graph.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py -q`
 - `devenv shell -- ruff check src/remora/bootstrap/__init__.py src/remora/bootstrap/seed_graph.py tests/unit/bootstrap/test_seed_graph.py`
 - `devenv shell -- pytest tests/unit/bootstrap/test_seed_graph.py tests/unit/bootstrap/test_agent_schemas.py tests/unit/bootstrap/test_coordinator.py tests/unit/bootstrap/test_activation.py tests/unit/bootstrap/test_schema_loader.py tests/unit/bootstrap/test_turn_executor.py tests/unit/test_grail_discovery.py tests/unit/bootstrap/test_system_tools.py tests/unit/bootstrap/test_bedrock.py tests/unit/test_event_store_schema.py tests/unit/test_node_store_graph.py tests/unit/test_subscriptions.py -q`
+- `devenv shell -- ruff check src/remora/companion/sidebar/composer.py src/remora/companion/sidebar/workspace.py tests/unit/companion/test_workspace_panels.py`
+- `devenv shell -- pytest tests/unit/companion/test_workspace_panels.py tests/unit/companion/test_node_agent.py tests/unit/companion/test_node_workspace.py tests/unit/companion/test_registry.py tests/unit/companion/test_router.py tests/unit/companion/test_startup.py tests/unit/companion/test_swarms.py -q`
 - All passing.
 
 ## Key decisions captured (see DECISIONS.md)
@@ -56,10 +73,11 @@
 - D20: schema subscription `node_id` is currently informational (ignored in v1 matcher)
 - D21: default agent IDs are deterministic and node-derived (`default_agent_id`)
 - D22: filesystem fallback seeds modules through `NodeDiscoveredEvent` + `NodeProjection`, not `graph_nodes` writes
+- D23: workspace sidebar section renders only when at least one bootstrap panel has content
 
 ## Next step
-- Commit/push current M4 changes.
-- Start M5 companion workspace visibility surfaces.
+- Commit/push current M5 changes.
+- Start M6 tool synthesis flow hardening.
 
 ## 2026-03-08 decision lock (implementation kickoff)
 The following decisions were reconfirmed with the user before coding:

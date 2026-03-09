@@ -1,6 +1,6 @@
 # Bootstrap Implementation Progress
 
-## Status: M4 COMPLETE; M5 NEXT
+## Status: M5 COMPLETE; M6 NEXT
 
 ## Tasks
 
@@ -48,4 +48,8 @@
 | M4.1 | Add `seed_graph.py` module seeding helpers | done |
 | M4.2 | Add M4 tests (`test_seed_graph.py`) | done |
 | M4.3 | Run targeted M4 + focused bootstrap regression suites | done |
-| M5 | Companion workspace visibility | pending |
+| M5.1 | Add companion workspace panel builder | done |
+| M5.2 | Integrate workspace panels into sidebar composer output | done |
+| M5.3 | Add companion tests for workspace panel rendering | done |
+| M5.4 | Run targeted companion tests + lint | done |
+| M6 | Tool synthesis flow hardening | pending |

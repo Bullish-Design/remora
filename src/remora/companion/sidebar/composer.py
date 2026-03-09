@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from remora.companion.links.resolver import LinksResolver
 from remora.companion.node_workspace import AGENT_NOTES, USER_NOTES, load_chat_index, read_text
+from remora.companion.sidebar.workspace import build_workspace_panels
 
 if TYPE_CHECKING:
     from remora.core.agents.agent_node import AgentNode
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 _resolver = LinksResolver()
 
 
-async def compose_sidebar(node: "AgentNode", workspace: "AgentWorkspace") -> str:
+async def compose_sidebar(node: AgentNode, workspace: AgentWorkspace) -> str:
     """Compose the full sidebar markdown for a node agent."""
     lines: list[str] = []
     lines.append(f"# {node.name}")
@@ -32,6 +33,17 @@ async def compose_sidebar(node: "AgentNode", workspace: "AgentWorkspace") -> str
         lines.append("## Agent Observations")
         lines.append(agent_notes.strip())
         lines.append("")
+
+    workspace_panels = await build_workspace_panels(workspace)
+    if any(not panel.is_empty for panel in workspace_panels):
+        lines.append("## Workspace")
+        for panel in workspace_panels:
+            lines.append(f"### {panel.title}")
+            if panel.is_empty:
+                lines.append("_empty_")
+            else:
+                lines.append(panel.content.strip())
+            lines.append("")
 
     index = await load_chat_index(workspace)
     if index:
