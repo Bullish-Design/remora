@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+import inspect
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import TYPE_CHECKING, Any
 
 from remora.core.config import Config, load_config
 from remora.core.events.event_bus import EventBus
@@ -27,6 +29,11 @@ from remora.service.handlers import (
 from remora.ui.projector import UiStateProjector
 from remora.utils import PathLike
 
+if TYPE_CHECKING:
+    from remora.companion.registry import NodeAgentRegistry
+    from remora.core.agents.cairn_bridge import CairnWorkspaceService
+    from remora.core.events.subscriptions import SubscriptionRegistry
+
 
 def _resolve_project_root(project_root: PathLike | None) -> Path:
     if project_root is None:
@@ -45,7 +52,9 @@ class RemoraService:
         config_path: PathLike | None = None,
         project_root: PathLike | None = None,
         enable_event_store: bool = True,
-    ) -> "RemoraService":
+        enable_companion: bool = False,
+        companion_auto_index: bool = False,
+    ) -> RemoraService:
         resolved_config = config or load_config(config_path)
         resolved_root = _resolve_project_root(project_root)
         event_bus = EventBus()
@@ -63,6 +72,8 @@ class RemoraService:
             event_store=event_store,
             subscriptions=subscriptions,
             workspace_service=workspace_service,
+            enable_companion=enable_companion,
+            companion_auto_index=companion_auto_index,
         )
 
     def __init__(
@@ -75,6 +86,9 @@ class RemoraService:
         projector: UiStateProjector | None = None,
         subscriptions: SubscriptionRegistry | None = None,
         workspace_service: CairnWorkspaceService | None = None,
+        companion_registry: NodeAgentRegistry | None = None,
+        enable_companion: bool = False,
+        companion_auto_index: bool = False,
     ) -> None:
         self._config = config
         self._project_root = project_root
@@ -83,6 +97,9 @@ class RemoraService:
         self._projector = projector or UiStateProjector()
         self._subscriptions = subscriptions
         self._workspace_service = workspace_service
+        self._companion_registry = companion_registry
+        self._enable_companion = enable_companion
+        self._companion_auto_index = companion_auto_index
         self._bundle_default = resolve_bundle_default(self._config)
         self._event_bus.subscribe_all(self._projector.record)
 
@@ -149,6 +166,15 @@ class RemoraService:
         """Return the raw SubscriptionRegistry instance."""
         return self._subscriptions
 
+    @property
+    def companion_registry(self) -> NodeAgentRegistry | None:
+        """Return the optional NodeAgentRegistry instance."""
+        return self._companion_registry
+
+    def set_companion_registry(self, registry: NodeAgentRegistry) -> None:
+        """Wire in the companion registry after construction."""
+        self._companion_registry = registry
+
     def get_workspace_service(self) -> CairnWorkspaceService | None:
         return self._workspace_service
 
@@ -168,5 +194,53 @@ class RemoraService:
     async def get_agent_subscriptions(self, agent_id: str) -> list[dict[str, Any]]:
         """Get subscriptions for an agent."""
         return await handle_swarm_get_subscriptions(agent_id, self._deps)
+
+    async def _call_optional_lifecycle(self, target: Any, method_name: str) -> None:
+        """Invoke a lifecycle method when present, awaiting async results."""
+        if target is None:
+            return
+        method = getattr(target, method_name, None)
+        if not callable(method):
+            return
+        result = method()
+        if inspect.isawaitable(result):
+            await result
+
+    async def initialize_runtime(self) -> None:
+        """Initialize runtime dependencies required by HTTP handlers."""
+        await self._call_optional_lifecycle(self._event_store, "initialize")
+        await self._call_optional_lifecycle(self._subscriptions, "initialize")
+        if self._enable_companion and self._companion_registry is None:
+            if self._event_store is None:
+                raise RuntimeError("companion startup requires event_store")
+            if self._workspace_service is None:
+                raise RuntimeError("companion startup requires workspace_service")
+
+            from remora.companion.config import CompanionConfig
+            from remora.companion.startup import start_companion
+            from remora.core.agents.cairn_bridge import SyncMode
+
+            # Companion does not require a full workspace ingest at HTTP startup.
+            await self._workspace_service.initialize(sync_mode=SyncMode.NONE)
+            companion_config = CompanionConfig(
+                workspace_path=self._project_root,
+                auto_index=self._companion_auto_index,
+                model_name=self._config.model_default,
+                model_base_url=self._config.model_base_url,
+                model_api_key=self._config.model_api_key,
+            )
+            registry = await start_companion(
+                event_store=self._event_store,
+                event_bus=self._event_bus,
+                cairn_service=self._workspace_service,
+                config=companion_config,
+            )
+            self.set_companion_registry(registry)
+
+    async def close_runtime(self) -> None:
+        """Close runtime dependencies owned by the service."""
+        await self._call_optional_lifecycle(self._workspace_service, "close")
+        await self._call_optional_lifecycle(self._event_store, "close")
+        await self._call_optional_lifecycle(self._subscriptions, "close")
 
 __all__ = ["RemoraService"]

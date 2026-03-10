@@ -6,15 +6,14 @@ name collision bug (S1), and datastar rendering.
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from remora.core.config import Config
-from remora.core.events.event_bus import EventBus
 from remora.core.events import HumanInputResponseEvent
+from remora.core.events.event_bus import EventBus
 from remora.models import ConfigSnapshot, InputResponse
 from remora.service.handlers import (
     ServiceDeps,
@@ -28,7 +27,6 @@ from remora.service.handlers import (
     handle_ui_snapshot,
 )
 from remora.ui.projector import UiStateProjector
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -374,6 +372,29 @@ class TestRemoraService:
         )
         result = svc.ui_snapshot()
         assert isinstance(result, dict)
+
+    def test_companion_registry_defaults_to_none(self):
+        from remora.service.api import RemoraService
+
+        svc = RemoraService(
+            config=Config(),
+            project_root=Path("/tmp"),
+            event_bus=EventBus(),
+        )
+        assert svc.companion_registry is None
+
+    def test_companion_registry_setter_wires_registry(self):
+        from remora.service.api import RemoraService
+
+        registry = MagicMock()
+        svc = RemoraService(
+            config=Config(),
+            project_root=Path("/tmp"),
+            event_bus=EventBus(),
+        )
+
+        svc.set_companion_registry(registry)
+        assert svc.companion_registry is registry
 
 
 # ── datastar ───────────────────────────────────────────────────────────────

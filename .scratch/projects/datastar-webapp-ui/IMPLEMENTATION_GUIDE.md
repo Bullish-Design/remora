@@ -1696,8 +1696,8 @@ The companion system requires a running LLM backend. Set these environment varia
 update `CompanionConfig` defaults) before starting the web server:
 
 ```bash
-export REMORA_MODEL_BASE_URL="http://localhost:8000/v1"   # your local LLM API
-export REMORA_MODEL_NAME="Qwen/Qwen3-4B"                  # or whatever model
+export REMORA_MODEL_BASE_URL="http://remora-server:8000/v1"   # your local LLM API
+export REMORA_MODEL_NAME="Qwen/Qwen3-4B-Instruct-2507-FP8"    # or whatever model
 ```
 
 Alternatively, you can load the sidebar without an LLM by reading the workspace files

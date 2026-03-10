@@ -3,20 +3,32 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 import json
 from typing import Any
 
-from starlette.applications import Starlette
-from starlette.requests import Request
 from datastar_py.starlette import DatastarResponse
+from starlette.applications import Starlette
+from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.routing import Route
 
+from remora.companion.sidebar.composer import compose_sidebar
 from remora.service.api import RemoraService
 
 
 def create_app(service: RemoraService | None = None) -> Starlette:
     service = service or RemoraService.create_default()
+
+    @asynccontextmanager
+    async def lifespan(_app: Starlette) -> AsyncIterator[None]:
+        await service.initialize_runtime()
+        try:
+            yield
+        finally:
+            await service.close_runtime()
 
     async def index(_request: Request) -> HTMLResponse:
         return HTMLResponse(service.index_html())
@@ -104,6 +116,137 @@ def create_app(service: RemoraService | None = None) -> Starlette:
             return _error(str(exc), status_code=404)
         return JSONResponse(result)
 
+    async def graph_data(_request: Request) -> JSONResponse:
+        if not service.has_event_store:
+            return _error("event store not configured", status_code=400)
+
+        agents = await service.list_agents()
+        cy_nodes: list[dict[str, Any]] = []
+        cy_edges: list[dict[str, Any]] = []
+        seen_edges: set[tuple[str, str, str]] = set()
+
+        for agent in agents:
+            node_id = str(agent.get("node_id", "")).strip()
+            if not node_id:
+                continue
+            parent_id = agent.get("parent_id")
+
+            cy_nodes.append(
+                {
+                    "data": {
+                        "id": node_id,
+                        "label": agent.get("name", node_id),
+                        "type": agent.get("node_type", "function"),
+                        "status": agent.get("status", "idle"),
+                        "file_path": agent.get("file_path", ""),
+                        "full_name": agent.get("full_name", ""),
+                        **({"parent": parent_id} if parent_id else {}),
+                    }
+                }
+            )
+
+            for callee_id in (agent.get("callee_ids") or []):
+                callee_id = str(callee_id).strip()
+                if not callee_id:
+                    continue
+                key = (node_id, callee_id, "calls")
+                if key in seen_edges:
+                    continue
+                seen_edges.add(key)
+                cy_edges.append(
+                    {
+                        "data": {
+                            "id": f"{node_id}--calls--{callee_id}",
+                            "source": node_id,
+                            "target": callee_id,
+                            "type": "calls",
+                        }
+                    }
+                )
+
+        return JSONResponse({"nodes": cy_nodes, "edges": cy_edges})
+
+    async def companion_sidebar(request: Request) -> JSONResponse:
+        registry = service.companion_registry
+        if registry is None:
+            return _error("companion not configured — start companion first", status_code=503)
+        event_store = service._event_store
+        if event_store is None:
+            return _error("event store not configured", status_code=400)
+
+        node_id = request.path_params["node_id"]
+        node = await event_store.nodes.get_node(node_id)
+        if node is None:
+            return _error(f"node {node_id!r} not found", status_code=404)
+
+        ws_service = service.get_workspace_service()
+        if ws_service is None:
+            return _error("workspace service not configured", status_code=503)
+
+        workspace = await ws_service.get_agent_workspace(node_id)
+        markdown = await compose_sidebar(node, workspace)
+        return JSONResponse({"node_id": node_id, "markdown": markdown})
+
+    async def companion_chat(request: Request) -> JSONResponse:
+        registry = service.companion_registry
+        if registry is None:
+            return _error("companion not configured", status_code=503)
+        event_store = service._event_store
+        if event_store is None:
+            return _error("event store not configured", status_code=400)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return _error("invalid JSON body", status_code=400)
+
+        node_id = str(body.get("node_id", "")).strip()
+        message = str(body.get("message", "")).strip()
+        if not node_id or not message:
+            return _error("node_id and message are required", status_code=400)
+
+        node = await event_store.nodes.get_node(node_id)
+        if node is None:
+            return _error(f"node {node_id!r} not found", status_code=404)
+
+        agent = await registry.get_or_create(node)
+        response = await agent.send(message)
+
+        reply_text = getattr(response, "text", None)
+        if reply_text is None:
+            response_message = getattr(response, "message", None)
+            reply_text = getattr(response_message, "content", None)
+        if reply_text is None:
+            reply_text = str(response)
+
+        return JSONResponse({"node_id": node_id, "reply": reply_text})
+
+    async def companion_workspace(request: Request) -> JSONResponse:
+        ws_service = service.get_workspace_service()
+        if ws_service is None:
+            return _error("workspace service not configured", status_code=503)
+        event_store = service._event_store
+        if event_store is None:
+            return _error("event store not configured", status_code=400)
+
+        node_id = request.path_params["node_id"]
+        node = await event_store.nodes.get_node(node_id)
+        if node is None:
+            return _error(f"node {node_id!r} not found", status_code=404)
+
+        workspace = await ws_service.get_agent_workspace(node_id)
+
+        try:
+            list_keys = getattr(workspace, "list_keys", None)
+            if callable(list_keys):
+                keys = await list_keys()
+            else:
+                keys = await workspace.list_dir(".")
+        except Exception:
+            keys = []
+
+        return JSONResponse({"node_id": node_id, "files": list(keys)})
+
     routes = [
         Route("/", index),
         Route("/subscribe", subscribe),
@@ -116,9 +259,20 @@ def create_app(service: RemoraService | None = None) -> Starlette:
         Route("/swarm/agents/{id}", swarm_agent),
         Route("/swarm/events", swarm_events, methods=["POST"]),
         Route("/swarm/subscriptions/{id}", swarm_subscriptions),
+        Route("/graph/data", graph_data),
+        Route("/companion/sidebar/{node_id}", companion_sidebar),
+        Route("/companion/chat", companion_chat, methods=["POST"]),
+        Route("/companion/workspace/{node_id}", companion_workspace),
     ]
 
-    return Starlette(routes=routes)
+    app = Starlette(routes=routes, lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:8766", "http://127.0.0.1:8766"],
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
+    return app
 
 
 def _sse_response(generator: Any) -> StreamingResponse:

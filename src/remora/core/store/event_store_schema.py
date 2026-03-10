@@ -58,11 +58,10 @@ def create_tables(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_events_timestamp
         ON events(timestamp);
 
-        CREATE INDEX IF NOT EXISTS idx_events_agent_id
-        ON events(agent_id);
-
-        CREATE INDEX IF NOT EXISTS idx_events_to_agent
-        ON events(to_agent);
+        -- NOTE:
+        -- Do not create indexes for routing columns here. Existing databases
+        -- may have older events schemas without these columns yet, and CREATE
+        -- INDEX would fail before migrate() can add them.
         """
     )
 
@@ -140,6 +139,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     if "agent_id" not in columns:
         conn.execute("ALTER TABLE events ADD COLUMN agent_id TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_agent_id ON events(agent_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_to_agent ON events(to_agent)")
 
     node_columns = _get_columns("nodes")
     if "start_byte" not in node_columns:

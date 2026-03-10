@@ -322,14 +322,38 @@ def swarm_emit(event_type: str, data: str | None, project_root: str | None) -> N
 @click.option("--port", default=8420, show_default=True)
 @click.option("--project-root", type=click.Path(file_okay=False, resolve_path=True))
 @click.option("--config", "config_path", type=click.Path(dir_okay=False, resolve_path=True))
-def serve(host: str, port: int, project_root: str | None, config_path: str | None) -> None:
+@click.option(
+    "--with-companion/--no-companion",
+    default=False,
+    show_default=True,
+    help="Start companion registry in the HTTP server process for /companion/* routes.",
+)
+@click.option(
+    "--companion-auto-index/--no-companion-auto-index",
+    default=False,
+    show_default=True,
+    help="Enable background vector indexing when companion is enabled.",
+)
+def serve(
+    host: str,
+    port: int,
+    project_root: str | None,
+    config_path: str | None,
+    with_companion: bool,
+    companion_auto_index: bool,
+) -> None:
     """Start the Remora service server."""
     try:
         config = load_config(config_path)
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
     root = Path(project_root) if project_root else Path.cwd()
-    service = RemoraService.create_default(config=config, project_root=root)
+    service = RemoraService.create_default(
+        config=config,
+        project_root=root,
+        enable_companion=with_companion,
+        companion_auto_index=companion_auto_index,
+    )
     app = create_app(service)
 
     import uvicorn
