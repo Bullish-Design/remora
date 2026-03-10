@@ -17,6 +17,9 @@ M._input_buf = nil   -- buffer id for the input line
 M._agent = nil       -- current agent dict {id, name, node_type, status, ...}
 M._tools = {}        -- list of {name, description}
 M._events = {}       -- list of event dicts (chronological)
+M._event_cache = {}  -- per-agent cache: { [agent_id] = { events = {...}, seen = {...} } }
+M._event_cache_limit = 200
+M._pending_human_echo = {} -- pending local echoes to de-dup server HumanChatEvent
 M._pending_request = nil -- pending human input request metadata
 M._show_tools = false -- tools section collapsed by default
 M._ns = vim.api.nvim_create_namespace("remora_panel")
@@ -125,6 +128,136 @@ local function clear_request_timeout_timer()
         M._request_timeout_timer:close()
         M._request_timeout_timer = nil
     end
+end
+
+local function event_message(event)
+    local payload = event and event.payload or {}
+    return payload.message or payload.content or payload.response or event.message or ""
+end
+
+local function event_key(agent_id, event)
+    if not event then
+        return ""
+    end
+    local event_id = event.id or event.event_id
+    if event_id then
+        return ("id:%s@%s"):format(tostring(event_id), tostring(agent_id))
+    end
+    local payload = event.payload or {}
+    local req_id = payload.request_id or ""
+    local etype = tostring(event.event_type or "")
+    local corr = tostring(event.correlation_id or "")
+    local msg = sanitize(event_message(event)):sub(1, 200)
+    local summary = sanitize(event.summary or ""):sub(1, 120)
+    local ts = tostring(event.timestamp or "")
+    return table.concat({
+        tostring(agent_id or ""),
+        etype,
+        corr,
+        tostring(req_id),
+        msg,
+        summary,
+        ts,
+    }, "|")
+end
+
+local function ensure_agent_bucket(agent_id)
+    if not agent_id or agent_id == "" then
+        return nil
+    end
+    local bucket = M._event_cache[agent_id]
+    if not bucket then
+        bucket = { events = {}, seen = {} }
+        M._event_cache[agent_id] = bucket
+    end
+    return bucket
+end
+
+local function sync_active_events()
+    local agent_id = M._agent and M._agent.id or nil
+    local bucket = agent_id and M._event_cache[agent_id] or nil
+    if bucket then
+        M._events = bucket.events
+    else
+        M._events = {}
+    end
+end
+
+local function append_event_for_agent(agent_id, event)
+    local bucket = ensure_agent_bucket(agent_id)
+    if not bucket then
+        return false
+    end
+    local key = event_key(agent_id, event)
+    if key == "" or bucket.seen[key] then
+        return false
+    end
+    bucket.seen[key] = true
+    table.insert(bucket.events, event)
+
+    while #bucket.events > M._event_cache_limit do
+        local dropped = table.remove(bucket.events, 1)
+        local dropped_key = event_key(agent_id, dropped)
+        if dropped_key ~= "" then
+            bucket.seen[dropped_key] = nil
+        end
+    end
+    return true
+end
+
+local function event_agent_ids(event)
+    local payload = event and event.payload or {}
+    local ids = {}
+    local seen = {}
+    local function add(id)
+        if type(id) ~= "string" or id == "" or seen[id] then
+            return
+        end
+        seen[id] = true
+        table.insert(ids, id)
+    end
+    add(event and event.agent_id or nil)
+    add(payload.agent_id)
+    add(event and event.to_agent or nil)
+    add(payload.to_agent)
+    add(event and event.from_agent or nil)
+    add(payload.from_agent)
+    return ids
+end
+
+local function push_pending_human_echo(agent_id, message)
+    if not agent_id or agent_id == "" or not message or message == "" then
+        return
+    end
+    local bucket = M._pending_human_echo[agent_id]
+    if not bucket then
+        bucket = {}
+        M._pending_human_echo[agent_id] = bucket
+    end
+    bucket[message] = (bucket[message] or 0) + 1
+end
+
+local function consume_pending_human_echo(agent_id, message)
+    if not agent_id or agent_id == "" or not message or message == "" then
+        return false
+    end
+    local bucket = M._pending_human_echo[agent_id]
+    if not bucket then
+        return false
+    end
+    local count = bucket[message] or 0
+    if count <= 0 then
+        return false
+    end
+    if count == 1 then
+        bucket[message] = nil
+    else
+        bucket[message] = count - 1
+    end
+    if next(bucket) == nil then
+        M._pending_human_echo[agent_id] = nil
+    end
+    return true
 end
 
 local function refresh_pending_request()
@@ -556,7 +689,7 @@ local function do_fetch_agent_data(client)
                 M._pending_request = nil
                 M._last_fetch_error = nil
                 if changed then
-                    M._events = {}
+                    sync_active_events()
                 end
                 render()
             end)
@@ -572,33 +705,24 @@ local function do_fetch_agent_data(client)
                 -- Agent changed — replace everything
                 M._agent = new_agent
                 M._tools = result.tools or {}
-                M._events = result.events or {}
+                for _, ev in ipairs(result.events or {}) do
+                    append_event_for_agent(new_id, ev)
+                end
+                sync_active_events()
                 refresh_pending_request()
                 M._last_fetch_error = nil
                 log.info("panel.do_fetch_agent_data: agent changed to %s (%s), %d tools, %d events",
                     tostring(new_id), tostring(new_agent and new_agent.name),
                     #M._tools, #M._events)
             else
-                -- Same agent — update metadata but keep accumulated live events
+                -- Same agent — update metadata and hydrate cache with server events
                 M._agent = new_agent
                 M._tools = result.tools or {}
                 M._last_fetch_error = nil
-                -- Merge server events with live events we already have
-                local server_ids = {}
                 for _, ev in ipairs(result.events or {}) do
-                    server_ids[ev.id or ev.event_id] = true
+                    append_event_for_agent(new_id, ev)
                 end
-                -- Keep only live events that server doesn't already have
-                local new_events = {}
-                for _, ev in ipairs(result.events or {}) do
-                    table.insert(new_events, ev)
-                end
-                for _, ev in ipairs(M._events) do
-                    if not server_ids[ev.id or ev.event_id] then
-                        table.insert(new_events, ev)
-                    end
-                end
-                M._events = new_events
+                sync_active_events()
                 refresh_pending_request()
                 log.debug("panel.do_fetch_agent_data: same agent %s, merged to %d events",
                     tostring(new_id), #M._events)
@@ -671,7 +795,7 @@ local function send_message()
     local params = nil
     if M._pending_request then
         local pending = M._pending_request
-        table.insert(M._events, {
+        local local_event = {
             event_type = "HumanInputResponseEvent",
             agent_id = pending.agent_id or (M._agent and M._agent.id),
             timestamp = os.time(),
@@ -682,7 +806,10 @@ local function send_message()
                 node_id = pending.node_id,
                 question = pending.question,
             },
-        })
+        }
+        local response_agent_id = local_event.agent_id
+        append_event_for_agent(response_agent_id, local_event)
+        sync_active_events()
         params = {
             request_id = pending.request_id,
             input = text,
@@ -693,13 +820,16 @@ local function send_message()
         M._pending_request = nil
     else
         -- Immediately append to local events for instant feedback
-        table.insert(M._events, {
+        local local_event = {
             event_type = "HumanChatEvent",
             agent_id = M._agent.id,
             timestamp = os.time(),
             summary = text:sub(1, 200),
             payload = { message = text, to_agent = M._agent.id },
-        })
+        }
+        append_event_for_agent(M._agent.id, local_event)
+        push_pending_human_echo(M._agent.id, text)
+        sync_active_events()
         params = {
             agent_id = M._agent.id,
             input = text,
@@ -904,39 +1034,48 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Handle a live event from $/remora/event.
---- Only appends if the event matches the current agent.
+--- Events are always cached per-agent, regardless of panel visibility.
 function M.on_event(event)
     if not event then return end
     log.info("panel.on_event: type=%s agent=%s",
         tostring(event.event_type), tostring(event.agent_id))
 
-    -- Only show events for the current agent (as sender or receiver)
-    if not M._agent then
-        log.debug("panel.on_event: ignoring (no agent)")
-        return
+    local agent_ids = event_agent_ids(event)
+    if #agent_ids == 0 and M._agent and M._agent.id then
+        -- Fallback for events missing explicit routing metadata.
+        table.insert(agent_ids, M._agent.id)
     end
-    local agent_id = M._agent.id
-    local payload = event.payload or {}
-    local to_agent = event.to_agent or payload.to_agent
-    local from_agent = event.from_agent or payload.from_agent
-    if event.agent_id ~= agent_id and to_agent ~= agent_id and from_agent ~= agent_id then
-        log.debug("panel.on_event: ignoring (agent mismatch: event.agent_id=%s from_agent=%s to_agent=%s current=%s)",
-            tostring(event.agent_id), tostring(from_agent), tostring(to_agent), agent_id)
+    if #agent_ids == 0 then
+        log.debug("panel.on_event: no agent ids resolvable for event type=%s", tostring(event.event_type))
         return
     end
 
-    -- Avoid duplicate HumanChatEvent (we already appended locally on send)
+    -- Avoid duplicate HumanChatEvent when we already inserted a local echo.
     if event.event_type == "HumanChatEvent" then
-        log.debug("panel.on_event: skipping HumanChatEvent (already shown locally)")
-        return
+        local message = event_message(event)
+        for _, id in ipairs(agent_ids) do
+            if consume_pending_human_echo(id, message) then
+                log.debug("panel.on_event: skipping HumanChatEvent duplicate for agent=%s", tostring(id))
+                return
+            end
+        end
     end
 
-    table.insert(M._events, event)
-    refresh_pending_request()
-    render()
+    local current_id = M._agent and M._agent.id or nil
+    local touches_current = false
+    for _, id in ipairs(agent_ids) do
+        local appended = append_event_for_agent(id, event)
+        touches_current = touches_current or (current_id ~= nil and id == current_id and appended)
+    end
+
+    if touches_current then
+        sync_active_events()
+        refresh_pending_request()
+        render()
+    end
 end
 
---- Force the panel to track a specific agent, clearing events and re-rendering.
+--- Force the panel to track a specific agent and re-render from cached events.
 --- Called from init.lua when requestInput fires for an agent that doesn't match
 --- the currently displayed agent, so that live events stream to the right panel.
 --- @param agent_id string  The agent ID to switch to.
@@ -947,7 +1086,7 @@ function M.switch_agent(agent_id, agent_name)
         log.debug("panel.switch_agent: already tracking agent_id=%s", agent_id)
         return
     end
-    -- Clear state and pin to new agent so on_event() will accept its events.
+    -- Pin to new agent and hydrate from cache immediately.
     M._agent = {
         id = agent_id,
         name = agent_name or agent_id,
@@ -956,10 +1095,11 @@ function M.switch_agent(agent_id, agent_name)
         start_line = nil,
         end_line = nil,
     }
-    M._events = {}
+    sync_active_events()
     M._tools = {}
     M._pending_request = nil
     M._last_fetch_error = nil
+    refresh_pending_request()
     render()
     log.info("panel.switch_agent: panel now tracking agent_id=%s", agent_id)
 end

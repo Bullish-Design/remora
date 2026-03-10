@@ -680,11 +680,9 @@ function M.setup(opts)
             tostring(result and result.event_type or "nil"),
             tostring(result and result.agent_id or "nil"))
         log.dump("DEBUG", "$/remora/event result", result)
-        if panel.is_open() then
-            local ok, err = pcall(panel.on_event, result)
-            if not ok then
-                log.error("HANDLER $/remora/event: panel.on_event FAILED: %s", tostring(err))
-            end
+        local ok, err = pcall(panel.on_event, result)
+        if not ok then
+            log.error("HANDLER $/remora/event: panel.on_event FAILED: %s", tostring(err))
         end
     end
 
