@@ -77,7 +77,7 @@ fsdantic = { git = "https://github.com/Bullish-Design/fsdantic.git", tag = "v0.3
 cairn = { git = "https://github.com/Bullish-Design/cairn.git", tag = "v0.2.1" }
 structured-agents = { git = "https://github.com/Bullish-Design/structured-agents.git", tag = "v0.4.0" }
 grail = { git = "https://github.com/Bullish-Design/grail.git", rev = "main" }
-embeddy = { path = "../embeddy" }
+embeddy = { git = "https://github.com/Bullish-Design/embeddy.git", rev = "main" }
 
 [project.scripts]
 remora = "remora.cli:main"
